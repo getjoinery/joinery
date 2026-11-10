@@ -38,7 +38,9 @@ class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	 */
 	public static $field_specifications = array(
 	    'sev_session_analytic_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'sev_usr_user_id' => array('type'=>'int4'),
+	    // Read per person and entity (a member's visits to one event session,
+	    // every session a member has opened), so the three are indexed together.
+	    'sev_usr_user_id' => array('type'=>'int4', 'index_with'=>array('sev_entity_type', 'sev_entity_id')),
 	    // Generic entity reference: sev_entity_type ('event' | 'event_session') +
 	    // sev_entity_id. event_manager writes these; the old sev_evt_event_id /
 	    // sev_evs_event_session_id columns fold into them at plugin activation.

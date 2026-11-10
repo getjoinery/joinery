@@ -14,22 +14,17 @@ abstract class ComponentBase {
      * Load component manifest from JSON file
      */
     protected function loadManifest() {
-        if (file_exists($this->manifestPath)) {
-            $content = file_get_contents($this->manifestPath);
-            $data = json_decode($content, true);
-            
-            if (json_last_error() === JSON_ERROR_NONE && is_array($data)) {
-                $this->manifestData = $data;
-                return true;
-            } else {
-                // Invalid JSON - throw exception for mandatory manifests
-                throw new Exception("Invalid {$this->componentType} manifest at {$this->manifestPath}: " . json_last_error_msg());
-            }
-        } else {
+        $data = ManifestCache::read((string)$this->manifestPath, $error);
+        if ($data !== null) {
+            $this->manifestData = $data;
+            return true;
+        }
+        if ($error === ManifestCache::MISSING) {
             // Manifest is mandatory - throw exception
             throw new Exception("Required {$this->componentType} manifest not found at {$this->manifestPath}");
         }
-        return false;
+        // Invalid JSON - throw exception for mandatory manifests
+        throw new Exception("Invalid {$this->componentType} manifest at {$this->manifestPath}: " . $error);
     }
     
     /**

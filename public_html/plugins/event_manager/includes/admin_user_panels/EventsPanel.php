@@ -53,9 +53,23 @@ class EventsPanel implements AdminUserPanel {
 		$event_registrations->load();
 		$events_pager = new Pager(array('numrecords' => $numeventsregistrations, 'numperpage' => $list_limit ?: $numeventsregistrations));
 
-		// Session-visit rows (mirrors the old admin_user_logic derivation). Built
-		// once here and reused by the render below — the registrations×sessions
-		// fan-out (and its per-session last-visit lookup) runs a single time.
+		// Every event session this person has opened, with the last time and
+		// how many times: one read for the whole panel, looked up per session
+		// in the loop below.
+		$visits_by_session = array();
+		$visits_q = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT sev_entity_id, MAX(sev_time) AS last_time, COUNT(*) AS num_views
+			 FROM sev_session_analytics
+			 WHERE sev_usr_user_id = ? AND sev_entity_type = \'event_session\'
+			 GROUP BY sev_entity_id');
+		$visits_q->bindValue(1, $user->key, PDO::PARAM_INT);
+		$visits_q->execute();
+		foreach ($visits_q->fetchAll(PDO::FETCH_ASSOC) as $visit_row) {
+			$visits_by_session[(int)$visit_row['sev_entity_id']] = $visit_row;
+		}
+
+		// Session-visit rows. Built once here and reused by the render below,
+		// so the registrations×sessions fan-out runs a single time.
 		$visited_session_rows = array();
 		foreach ($event_registrations as $event_registration) {
 			$sv_event = new Event($event_registration->get('evr_evt_event_id'), TRUE);
@@ -64,12 +78,13 @@ class EventsPanel implements AdminUserPanel {
 				array('evs_session_number' => 'DESC', 'evs_title' => 'DESC'));
 			$event_sessions_visit->load();
 			foreach ($event_sessions_visit as $event_session_visit) {
-				if ($visit_time = $event_session_visit->get_last_visited_time_for_user($user->key)) {
+				$visit = $visits_by_session[(int)$event_session_visit->key] ?? null;
+				if ($visit !== null && ($visit_time = $visit['last_time'])) {
 					$session_num = $event_session_visit->get('evs_session_number') ? 'Session ' . $event_session_visit->get('evs_session_number') . ' - ' : '';
 					$visited_session_rows[] = array(
 						'label'      => $sv_event->get('evt_name') . ' - ' . $session_num . $event_session_visit->get('evs_title'),
 						'visit_time' => $visit_time,
-						'num_views'  => $event_session_visit->get_number_visits_for_user($user->key),
+						'num_views'  => $visit['num_views'],
 					);
 				}
 			}

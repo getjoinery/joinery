@@ -204,7 +204,21 @@ check(BackupObjectsNotice::render() === '', 'an admin below permission 10 sees n
 $_SESSION['permission'] = 10;
 check(strpos(BackupObjectsNotice::render(), '3 files (6 MB) are waiting') !== false, 'a superadmin sees it');
 unset($_SESSION['permission']);
+// The notice shows recent(): computed afresh while hooks are set, otherwise
+// the picture kept in shared memory for up to a minute.
+check(BackupObjectsStatus::recent() === $computed, 'with hooks set, recent() is compute()');
 BackupObjectsStatus::$test_hooks = array();
+if (RamStore::set(BackupObjectsStatus::RECENT_KEY, $computed, BackupObjectsStatus::RECENT_SECONDS)) {
+	check(BackupObjectsStatus::recent() === $computed, 'without hooks, recent() is the picture kept in shared memory');
+	RamStore::set(BackupObjectsStatus::RECENT_KEY, 'not a picture', BackupObjectsStatus::RECENT_SECONDS);
+	$fresh = BackupObjectsStatus::recent();
+	check(is_array($fresh) && isset($fresh['total'], $fresh['waiting']), 'a kept value that is not a picture is computed over');
+	$kept = RamStore::get(BackupObjectsStatus::RECENT_KEY, $kept_ok);
+	check($kept_ok && $kept === $fresh, 'and the computed picture is kept for the next page');
+	RamStore::delete(BackupObjectsStatus::RECENT_KEY);
+} else {
+	harness_skip('no shared memory here to keep a picture in');
+}
 
 section('Recovery Readiness: epochs only a retired key opens');
 

@@ -19,6 +19,8 @@ require_once(__DIR__ . '/SealedEgressGuard.php');
  * Cost when the process is cold, which is nearly always: one static boolean
  * check per executed statement.
  *
+ * @version 1.4 - noteSettingsChange(): a statement that writes to stg_settings, or a rollback, drops the
+ *                request's copy of the settings table (Globalvars), so a setting read after it is read again
  * @version 1.3 - a page view does not write: on a web GET, HEAD or OPTIONS a statement that writes, and
  *                is not the server's own (SystemBase::server_initiated_write), is logged as [GET_WRITE]
  *                with the place that wrote it (PAGE_VIEW_WRITES 'log'; 'refuse' throws, as a probe does)
@@ -91,6 +93,23 @@ class GuardedPdo extends PDO {
 			return (bool)preg_match('/\bANALY[SZ]E\b/i', $body) && (bool)preg_match($dml, $body);
 		}
 		return (bool)preg_match('/^(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|CREATE|DROP|GRANT|REVOKE|COPY)\b/i', $t);
+	}
+
+	/**
+	 * A statement that may change the settings table drops the request's copy
+	 * of it (Globalvars), so the next setting read sees the change. Settings
+	 * are written by raw SQL in many places as well as by the Setting model,
+	 * and every one of them crosses this layer. A rollback drops the copy
+	 * too: it may have been read inside the transaction being undone.
+	 * Nothing to do, and nothing looked at, when no copy is held.
+	 */
+	public static function noteSettingsChange(string $sql): void {
+		if (!class_exists('Globalvars', false) || !Globalvars::holds_stored_settings()) {
+			return;
+		}
+		if ((stripos($sql, 'stg_settings') !== false && self::writes($sql)) || strncasecmp(ltrim($sql), 'ROLLBACK', 8) === 0) {
+			Globalvars::forget_stored_settings();
+		}
 	}
 
 	/** A statement with its quoted literals emptied ('it''s' -> ''). */
@@ -187,6 +206,7 @@ class GuardedPdo extends PDO {
 	public function exec($statement) {
 		self::$statements++;
 		self::assertMayRun((string)$statement);
+		self::noteSettingsChange((string)$statement);
 		// The isHot() test comes first everywhere: scanning a statement for
 		// literals is only worth doing on the rare process that could leak.
 		if (SealedEgressGuard::isHot()) {
@@ -199,6 +219,7 @@ class GuardedPdo extends PDO {
 	public function query($query, $fetchMode = null, ...$fetchModeArgs) {
 		self::$statements++;
 		self::assertMayRun((string)$query);
+		self::noteSettingsChange((string)$query);
 		if (SealedEgressGuard::isHot()) {
 			SealedEgressGuard::assertStatementAllowed($query, self::literalsIn($query));
 		}
@@ -206,6 +227,14 @@ class GuardedPdo extends PDO {
 			return parent::query($query);
 		}
 		return parent::query($query, $fetchMode, ...$fetchModeArgs);
+	}
+
+	#[\ReturnTypeWillChange]
+	public function rollBack() {
+		if (class_exists('Globalvars', false)) {
+			Globalvars::forget_stored_settings();
+		}
+		return parent::rollBack();
 	}
 
 	/** Single-quoted literals in a statement, with doubled quotes unescaped. */
@@ -256,6 +285,7 @@ class GuardedPdoStatement extends PDOStatement {
 	public function execute($params = null) {
 		GuardedPdo::$statements++;
 		GuardedPdo::assertMayRun((string)$this->queryString);
+		GuardedPdo::noteSettingsChange((string)$this->queryString);
 		if (SealedEgressGuard::isHot()) {
 			SealedEgressGuard::assertStatementAllowed((string)$this->queryString, $this->boundValues($params));
 		}

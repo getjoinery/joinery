@@ -57,9 +57,8 @@ The name has to be declared in `settings.json` or a plugin's `plugin.json`, and
 refusal is the point: an undeclared name writes a row nothing reads and no page
 shows, so a misspelling becomes a setting that silently never takes effect.
 
-Reading back is immediate. `get_setting()` re-reads a blank value from the
-database rather than trusting its in-request copy, so there is no cache to
-invalidate.
+Reading back is immediate: a write forgets what was read, so the next
+`get_setting()` asks the table (see [How a setting is read](#how-a-setting-is-read)).
 
 Raw SQL against `stg_settings` remains correct in two places, both marked with a
 comment saying why: a conditional write whose `WHERE` clause is the point (an
@@ -320,9 +319,49 @@ number with a default):
 
 - returns an empty string (`''`)
 - logs `Settings: Returning empty default for missing setting 'name'`
-- does not cache the empty value, and does not throw
+- does not remember the empty value by name, and does not throw
 
 Pass the `$fail_silently` flag to suppress the log where absence is expected.
+
+### How a setting is read
+
+`Globalvars::get_setting()` answers from the site's config file when the file
+sets the name. Anything else comes from `stg_settings`:
+
+- **A web request reads the table once.** The first setting that needs the
+  database loads every row with one statement, and every later setting in the
+  request, present, blank or missing, is answered from that copy. A sealed
+  secret sits in the copy sealed and is opened when it is asked for.
+- **A command-line process reads one setting per statement.** A worker or an
+  installer runs long enough to need a value another process wrote after it
+  started, so a blank or missing setting is asked of the table every time.
+- **A value that is not blank is remembered by name** for the rest of the
+  process, in both. `forget_setting($name)` drops it.
+
+The request's copy is dropped, so the next read loads the table again, whenever
+the table may have changed under it: any statement that writes `stg_settings`
+(the `Setting` model, `SettingsWriter`, raw SQL: all of it passes `GuardedPdo`,
+which does the dropping), a rollback, `forget_setting()`, and a switch between
+the live and test databases. Code that writes a setting and reads it back needs
+to do nothing.
+
+What a web request does not see is a setting another process changes while the
+request is running: the next request does.
+
+A command-line script that stands in for a web request (the request profiler, a
+test) switches the web behaviour on with `Globalvars::read_whole_table(true)`.
+
+`Globalvars::config_file_setting($name, $default)` reads the config file alone
+and never asks the database, for code that runs while the database link is
+being opened.
+
+### The database link
+
+`DbConnector` connects to PostgreSQL over its unix socket, which is faster than
+TCP to `localhost`, and falls back to TCP on port 5432 when the socket is
+missing or refuses the link. The socket's directory is the config-file setting
+`db_socket_dir` (default `/var/run/postgresql`); set it blank to use TCP only. A
+socket that could not be used is logged once and left alone for ten minutes.
 
 ### Reserved names
 

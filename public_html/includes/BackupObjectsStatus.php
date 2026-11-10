@@ -14,8 +14,8 @@
  *   waiting        offloaded files whose local copy is still here because
  *                  some enabled backup lacks them: "M files (X GB) waiting
  *                  for the management node's backup before their local copy
- *                  is released" — one stat per cloud row on each page load;
- *                  no column, no cache, milliseconds at ten thousand rows
+ *                  is released" — one stat per cloud row each time it is
+ *                  computed; no column, milliseconds at ten thousand rows
  *   still to copy  offloaded files with no local bytes that an enabled backup
  *                  lacks: they come back down from the file store, one at a
  *                  time inside the run's budget, until this reaches zero
@@ -28,6 +28,7 @@
  * admin page can afford it. Pure over what it reads: the same facts give the
  * same figures, and the test hooks hand the facts in.
  *
+ * @version 1.2 - recent(): the picture kept for RECENT_SECONDS, for the notice on every admin page
  * @version 1.1 - the file store's key is read from its target row (specs/storage_targets.md WP6)
  * @version 1.0
  */
@@ -49,6 +50,41 @@ class BackupObjectsStatus {
 	 *   keys     ['store' => access key, 'target' => access key | null]
 	 */
 	public static $test_hooks = array();
+
+	/** How old the picture recent() hands out may be, in seconds. */
+	const RECENT_SECONDS = 60;
+
+	/** RamStore key of the picture recent() keeps. */
+	const RECENT_KEY = 'backup_objects_status';
+
+	/**
+	 * The picture as it was at most RECENT_SECONDS ago, for the notice on
+	 * every admin page: compute() reads every offloaded file's row and stats
+	 * its local path, which grows with the site. The pages that show the
+	 * figures themselves call compute() and are exact. Kept in RamStore, one
+	 * site's, shared by its web workers. With test hooks set, or no shared
+	 * memory, this is compute().
+	 */
+	public static function recent() {
+		if (self::$test_hooks) {
+			return self::compute();
+		}
+		try {
+			$kept = RamStore::get(self::RECENT_KEY, $ok);
+			if ($ok && is_array($kept) && isset($kept['total'], $kept['waiting'], $kept['last_success'])) {
+				return $kept;
+			}
+		} catch (\Throwable $e) {
+			// No shared memory to ask: computed.
+		}
+		$status = self::compute();
+		try {
+			RamStore::set(self::RECENT_KEY, $status, self::RECENT_SECONDS);
+		} catch (\Throwable $e) {
+			// Keeping it is a saving, never a condition of answering.
+		}
+		return $status;
+	}
 
 	/** The whole picture. Never throws: a fact that cannot be read counts as absent. */
 	public static function compute() {

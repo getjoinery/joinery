@@ -154,6 +154,9 @@ class RouteHelper {
         error_log($log_message);
     }
     
+    /** How long a browser may keep an asset whose URL carries its version (?v=): a year. */
+    const VERSIONED_ASSET_SECONDS = 31536000;
+
     /**
      * Serve static file with proper HTTP caching headers and MIME type detection
      * 
@@ -164,9 +167,11 @@ class RouteHelper {
      * @param string $file_path Path to file to serve
      * @param int $cache_seconds Cache time in seconds (default: 43200 = 12 hours)
      * @param array $exclude_from_cache File extensions to exclude from long caching
+     * @param bool $versioned The URL carries the file's version, so the file behind it never changes:
+     *                        served for a year and marked immutable (unless its type is excluded)
      * @return bool True if file served, false if rejected or not found
      */
-    public static function serveStaticFile($file_path, $cache_seconds = 43200, $exclude_from_cache = []) {
+    public static function serveStaticFile($file_path, $cache_seconds = 43200, $exclude_from_cache = [], $versioned = false) {
         if (!file_exists($file_path) || is_dir($file_path)) {
             return false;
         }
@@ -180,6 +185,11 @@ class RouteHelper {
         }
         
         $actual_cache_seconds = $cache_seconds;
+        $cache_control = null;
+        if ($versioned && $cache_seconds > 0) {
+            $actual_cache_seconds = self::VERSIONED_ASSET_SECONDS;
+            $cache_control = 'public, max-age=' . self::VERSIONED_ASSET_SECONDS . ', immutable';
+        }
         
         // Check if this file type should be excluded from long caching
         foreach ($exclude_from_cache as $excluded_ext) {
@@ -188,6 +198,7 @@ class RouteHelper {
             }
             if ($file_extension === strtolower($excluded_ext)) {
                 $actual_cache_seconds = 300; // 5 minutes for excluded files
+                $cache_control = null;
                 break;
             }
         }
@@ -196,7 +207,7 @@ class RouteHelper {
         $ts = gmdate("D, d M Y H:i:s", time() + $actual_cache_seconds) . " GMT";
         header("Expires: $ts");
         header("Pragma: cache");
-        header("Cache-Control: max-age=$actual_cache_seconds");
+        header("Cache-Control: " . ($cache_control ?? "max-age=$actual_cache_seconds"));
         
         // Set content type
         $content_type = self::getMimeType($file_path);
@@ -439,24 +450,17 @@ class RouteHelper {
     public static function handleStaticRoute($route, $params, $template_directory) {
         $path = $route['path'];
         
-        // For static routes, we need to handle plugin activation check without PluginHelper
-        // Since this is called BEFORE dependencies are loaded for performance
+        // An inactive plugin's assets are not served. Static routes are answered
+        // before the request's dependencies load, so the classes the check
+        // needs are loaded here, for a plugin's asset only: it costs that
+        // request a database read, which every other static file is spared.
         if (preg_match('#^/plugins/([^/]+)/#', $path, $matches)) {
             $plugin_name = $matches[1];
-            
-            // Check plugin activation manually without PluginHelper
-            // We need to check if PathHelper is available (it won't be for initial static route check)
-            if (class_exists('PluginHelper')) {
-                // Dependencies are loaded - use PluginHelper
-                if (!PluginHelper::isPluginActive($plugin_name)) {
-                    error_log("RouteHelper: BLOCKED inactive plugin access: {$path}");
-                    return false; // Always block inactive plugins - no exceptions
-                }
-            } else {
-                // Dependencies not loaded yet - check plugin activation manually
-                // For now, we'll allow it and rely on file existence check
-                // This is safe because plugin files won't exist if not properly deployed
-                error_log("RouteHelper: Plugin activation check skipped for static route (dependencies not loaded): {$path}");
+            require_once(__DIR__ . '/PathHelper.php');
+            require_once(__DIR__ . '/Globalvars.php');
+            if (!PluginHelper::isPluginActive($plugin_name)) {
+                error_log("RouteHelper: BLOCKED inactive plugin access: {$path}");
+                return false; // Always block inactive plugins - no exceptions
             }
         }
         
@@ -483,7 +487,14 @@ class RouteHelper {
         if (file_exists($file_path)) {
             $cache_seconds = $route['cache'] ?? 43200;
             $exclude_from_cache = $route['exclude_from_cache'] ?? [];
-            return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache);
+            // A theme, plugin or system asset asked for with a version (?v=)
+            // is a URL that changes when the file does, so a browser may keep
+            // it for good. Only these paths: an uploaded file can be replaced
+            // or withdrawn under the same URL.
+            $versioned = $cache_seconds > 0
+                && isset($_GET['v']) && is_string($_GET['v']) && $_GET['v'] !== ''
+                && preg_match('#^/(?:assets|plugins/[^/]+/assets|theme/[^/]+/assets)/#', $path) === 1;
+            return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache, $versioned);
         }
         
         return false;
@@ -1111,6 +1122,17 @@ class RouteHelper {
             'params_count' => count($params)
         ]);
         
+        // The one stylesheet that carries every active plugin's declared
+        // styles is built, not a file in the tree (PluginStyleBundle). A
+        // bundle already built is sent without a database read.
+        if ($full_path === '/assets/plugin-styles.css' && !self::$match_only_mode) {
+            require_once(__DIR__ . '/PathHelper.php');
+            require_once(__DIR__ . '/Globalvars.php');
+            if (PluginStyleBundle::serve((string)($_GET['v'] ?? ''))) {
+                exit();
+            }
+        }
+
         // STEP 1: Check static routes FIRST (before loading any dependencies)
         // This optimization allows static assets to be served without loading PHP dependencies
         if ($route = self::matchRoute($full_path, $routes['static'] ?? [])) {
@@ -1166,14 +1188,6 @@ class RouteHelper {
         // - PathHelper: File path resolution and loading
         // - Globalvars: Configuration and settings access
         // - SessionControl: Session management and authentication
-
-        // Note which protocol real requests arrive on, so headless code can build
-        // correct links. A scheduled task or CLI script has no request to detect
-        // from, and used to guess http — which mailed out plain-HTTP links from a
-        // TLS-only site. This is the one point every dynamic request passes, and
-        // the recording is a no-op once the answer has not changed.
-        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-        LibraryFunctions::observe_protocol();
 
         // Navigation gates (docs/account_security.md): a signed-in person who
         // owes a password change, terms, setup or a second factor is held on the
@@ -1240,6 +1254,17 @@ class RouteHelper {
             }
 
         }
+
+        // Note which protocol real requests arrive on, so headless code can build
+        // correct links. A scheduled task or CLI script has no request to detect
+        // from, and guessing http would mail out plain-HTTP links from a TLS-only
+        // site. Every request the page cache did not answer passes here; a
+        // cached page is served above without reading a setting, so that it
+        // never opens a database connection. The recording is a no-op once the
+        // answer has not changed.
+        require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+        LibraryFunctions::observe_protocol();
+
         // A handler that streams a file leaves every buffer (File::leave_output_buffers);
         // below this level the cache buffer is gone and there is nothing to cache.
         $cache_buffer_level = ob_get_level();

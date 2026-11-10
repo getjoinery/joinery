@@ -89,6 +89,29 @@ For assets only (CSS, JS, images, fonts). Never for PHP/dynamic content.
 
 Options: `cache` (seconds), `exclude_from_cache` (array of file extensions).
 
+**A versioned asset is kept for a year.** A request under `/assets/`,
+`/plugins/{plugin}/assets/` or `/theme/{theme}/assets/` that carries a `v` query
+parameter is answered with `Cache-Control: public, max-age=31536000, immutable`;
+without `v` it gets the route's `cache` time. A route with `'cache' => 0` and a
+file type in `exclude_from_cache` are never given the long lifetime.
+
+That makes one rule for every asset URL: **the `v` value must change when the
+file does.** The built-in helpers do it from the file's modification time
+(`$this->asset_mtime()` in a page class, `filemtime()` in a plugin view). A
+hand-written fixed value such as `?v=1` pins the file in every browser for a
+year.
+
+**A plugin's assets are served only while the plugin is active.** A request
+under `/plugins/{plugin}/` for an inactive plugin is a 404. Checking costs that
+request a database read, which no other static file pays.
+
+**`/assets/plugin-styles.css` is built, not a file in the tree.** It is every
+active plugin's declared stylesheets (`styles` in `plugin.json`) joined into
+one file by `PluginStyleBundle`, and its `v` is a hash of those sheets' paths,
+modification times and sizes. Built bundles live in
+`{site_root}/cache/plugin_styles/`. Each sheet's part starts with a comment
+naming its file. See the [Plugin Developer Guide](plugin_developer_guide.md#plugin-stylesheets-declarative).
+
 ### Dynamic Routes
 
 View-based routes, with optional URL placeholders captured into `$params`.
@@ -282,6 +305,7 @@ The cache is managed by `includes/StaticPageCache.php` and checked inside `Route
 **How it works:**
 - On a cache miss, PHP renders the page normally and the output is written to a `.html` file.
 - On a cache hit, the file is served directly with `readfile()` — PHP does almost no work.
+  The request starts its session and reads no setting, so it opens no database connection.
 - 1% of cache hits are randomly invalidated so pages stay fresh without a TTL.
 - Pages that cannot be cached (login-required, POST responses, error pages) are marked `nostatic`
   in the index and skipped on future checks.

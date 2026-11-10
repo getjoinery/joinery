@@ -20,8 +20,11 @@
  * "...this site's backup..." for the site profile. Silent when nothing waits.
  *
  * Reads what BackupObjectsStatus reads: the blob table, one stat per cloud
- * row, held.json, history. Never a network call.
+ * row, held.json, history. Never a network call. It shows the picture
+ * BackupObjectsStatus::recent() keeps, so it can trail a change by up to a
+ * minute; the Backups page is exact.
  *
+ * @version 1.2 - shows BackupObjectsStatus::recent(), not a fresh count on every admin page
  * @version 1.1 - WAITING_BYTES is 2 GB in the decimal units every backup size is shown in
  *                (BackupRunner::human()), so the threshold is the number the notice says
  * @version 1.0
@@ -41,7 +44,7 @@ class BackupObjectsNotice {
 		if (!Access::permits(10)) {
 			return '';
 		}
-		return self::forStatus(BackupObjectsStatus::compute(), time());
+		return self::forStatus(BackupObjectsStatus::recent(), time());
 	}
 
 	/** The notice for one picture, or ''. Public and pure so the rule can be tested. */

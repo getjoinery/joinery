@@ -36,6 +36,7 @@
  *
  * Specified in strategy/object_free_window_store.md.
  *
+ * @version 1.4 - a missing entry, or a directory already there, leaves no suppressed warning behind as the process's last error
  * @version 1.3 - sweep() removes this user's old /dev/shm/vault_window_* markers (strategy/object_free_window_store.md WP4)
  * @version 1.2 - INCLUDE_EXPIRED for keys(), so a wipe by name reaches an expired entry; info(): a live entry's identity and expiry, so a reader can keep what it read
  *                for as long as the file is the same one (VaultUnlock's request memo)
@@ -533,7 +534,7 @@ final class RamStore {
 			$type = self::mountType($dir);
 			return $type === 'tmpfs' ? null : $dir . ' is on ' . ($type ?? 'an unknown filesystem') . ', not tmpfs: a key could reach a disk';
 		}
-		if (self::mountType($dir) === 'tmpfs') {
+		if (self::mountType($dir) === 'tmpfs' && !file_exists($dir) && !is_link($dir)) {
 			@mkdir($dir, 0700);
 		}
 		$reason = self::checkDirectory($dir);
@@ -574,6 +575,12 @@ final class RamStore {
 
 	private static function live(string $path): bool {
 		clearstatcache(true, $path);
+		// Asked first without a warning: a suppressed lstat() failure still
+		// becomes the process's last error, and whatever reports a crash
+		// later (the test harness) would name it as the cause.
+		if (!file_exists($path) && !is_link($path)) {
+			return false;
+		}
 		$st = @lstat($path);
 		return $st !== false && ($st['mode'] & 0170000) === 0100000 && $st['mtime'] > time();
 	}

@@ -2204,6 +2204,10 @@ through `PathHelper::getThemeFilePath(..., 'web')`, pass that URL without its le
 `tests/integration/asset_link_versions_test.php` fails on a link to a local `.css` or `.js` file
 without a version.
 
+A URL that carries `v` is served to be kept for a year, so the value must change when the file
+does. `asset_mtime()` does that. Never write a fixed value such as `?v=1`: it pins the file in
+every browser for a year.
+
 ### CSS Dead Section Removal
 
 Large commercial theme CSS files (20,000+ lines) contain huge sections for features you'll

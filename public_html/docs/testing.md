@@ -687,6 +687,31 @@ error, an uncaught exception, an early `exit()` — the harness records a failin
 check so a crash can never be misread as a pass. Do not scatter bare `exit()`
 calls in a test body; return, or reach `harness_finish()`.
 
+## Profiling a request
+
+`maintenance_scripts/dev_tools/profile_request.php` replays one GET through
+`serve.php` and reports what it cost: wall time, how many statements ran and
+how long they took, how many of them read settings, the connection time, and
+the number of files loaded.
+
+```bash
+php maintenance_scripts/dev_tools/profile_request.php /events            # anonymous
+php maintenance_scripts/dev_tools/profile_request.php /admin/admin_users 1 10   # as user 1, level 10
+DETAIL=15 php maintenance_scripts/dev_tools/profile_request.php '/admin/admin_user?usr_user_id=1' 1 10
+```
+
+`DETAIL=n` lists the n slowest statements grouped by their text, `FILES=1` the
+files loaded, `SAMPLE=1` where the time went by sampling the call stack, and
+`FRESH=1` empties its scratch page cache first. It keeps nothing: the page
+cache is pointed at a scratch directory, and the request runs inside a
+transaction that is rolled back. It runs only where the `debug` setting is on.
+
+Statement counts and times are what a web request does. File-loading time is
+higher than in a web worker with warm opcache, the command line starts no
+session, and the connection time is reported beside the wall time, not in it.
+To prove something about a real web session, serve `serve.php` from a local web
+process as `tests/core/cached_page_no_database_test.php` does.
+
 ## Talking to the site over HTTP
 
 `tests/lib/http.php` is the one HTTP client for tests — require it instead of the

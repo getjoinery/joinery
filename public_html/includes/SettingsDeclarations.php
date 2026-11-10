@@ -430,9 +430,8 @@ class SettingsDeclarations {
 	}
 
 	private static function readManifest(string $path, string $key): array {
-		if (!file_exists($path)) return array();
-		$data = json_decode((string)file_get_contents($path), true);
-		if (!is_array($data) || !isset($data[$key]) || !is_array($data[$key])) return array();
+		$data = ManifestCache::read($path);
+		if ($data === null || !isset($data[$key]) || !is_array($data[$key])) return array();
 		return $data[$key];
 	}
 

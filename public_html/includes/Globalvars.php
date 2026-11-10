@@ -4,10 +4,26 @@ require_once('PathHelper.php');
 class Globalvars {
 	private static $instance_map = array();
 	private $settings;
+	/** What the config file set, before any value read from the database joined $settings. */
+	private $config_file_settings = array();
 	/** True while a sealed secret setting is being opened (no re-entry). */
 	private static $opening = false;
 	/** True while a declared default is being looked up (no re-entry). */
 	private static $resolving_default = false;
+	/**
+	 * Every stg_settings row as the table holds it, name => stored value (a
+	 * sealed value still sealed), or null when not read yet. Only a process
+	 * that reads the table whole fills it (see $whole_table).
+	 */
+	private static $stored = null;
+	/**
+	 * Whether the first setting asked of the database reads the whole table
+	 * in one statement. A web request does: it reads dozens of settings and
+	 * lives for milliseconds. A command-line process asks for each setting as
+	 * it needs it, because a worker or an installer runs long enough to need
+	 * a value another process wrote after it started.
+	 */
+	private static $whole_table = (PHP_SAPI !== 'cli');
 
 	private function __construct() {
 		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');
@@ -15,6 +31,7 @@ class Globalvars {
 			(str_starts_with($this->settings['webDir'], 'http://') || str_starts_with($this->settings['webDir'], 'https://'))) {
 			$this->settings['webDir'] = preg_replace('#^https?://#', '', $this->settings['webDir']);
 		}
+		$this->config_file_settings = (array)$this->settings;
 	}
 
 	public static function get_instance(){
@@ -36,6 +53,44 @@ class Globalvars {
 	 */
 	public function forget_setting(string $setting): void {
 		unset($this->settings[$setting]);
+		self::$stored = null;
+	}
+
+	/**
+	 * Drop the request's copy of the settings table, so the next setting asked
+	 * of the database reads the table again. Called wherever the table may no
+	 * longer be what was read: a statement that writes to it or a rollback
+	 * (GuardedPdo), and a switch between the live and test databases
+	 * (DbConnector). Values already handed out and remembered by name are not
+	 * touched; forget_setting() drops one of those.
+	 */
+	public static function forget_stored_settings(): void {
+		self::$stored = null;
+	}
+
+	/** Whether a copy of the settings table is held (forget_stored_settings() has something to drop). */
+	public static function holds_stored_settings(): bool {
+		return self::$stored !== null;
+	}
+
+	/**
+	 * Choose how this process reads settings from the database: the whole
+	 * table in one statement (true, what a web request does) or one statement
+	 * per setting (false, the command line). For a command-line process that
+	 * stands in for a web request: the request profiler, a test.
+	 */
+	public static function read_whole_table(bool $whole_table): void {
+		self::$whole_table = $whole_table;
+		self::$stored = null;
+	}
+
+	/**
+	 * A value from the site's config file alone, or $default when the file does
+	 * not set it. Never asks the database, so it is safe while the database
+	 * link itself is being opened.
+	 */
+	public function config_file_setting(string $setting, $default = null) {
+		return array_key_exists($setting, $this->config_file_settings) ? $this->config_file_settings[$setting] : $default;
 	}
 
 	/**
@@ -84,21 +139,35 @@ class Globalvars {
 		require_once(__DIR__ . '/DbConnector.php');
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		$sql = 'SELECT stg_value FROM stg_settings WHERE stg_name = :stg_name';
+		// What the table holds for this setting, or null when it holds nothing.
+		$stored_value = null;
 		try{
-			$q = $dblink->prepare($sql);
-			$q->bindValue(':stg_name', $setting);
-			$q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
-		} 
+			if (self::$whole_table) {
+				if (self::$stored === null) {
+					$stored = array();
+					$q = $dblink->query('SELECT stg_name, stg_value FROM stg_settings');
+					foreach ($q->fetchAll(PDO::FETCH_NUM) as $row) {
+						$stored[$row[0]] = $row[1];
+					}
+					self::$stored = $stored;
+				}
+				$stored_value = self::$stored[$setting] ?? null;
+			} else {
+				$q = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = :stg_name');
+				$q->bindValue(':stg_name', $setting);
+				$q->execute();
+				$q->setFetchMode(PDO::FETCH_OBJ);
+				$result = $q->fetch();
+				$stored_value = isset($result->stg_value) ? $result->stg_value : null;
+			}
+		}
 		catch(PDOException $e) {
 			$dbhelper->handle_query_error($e);
 		}
-		$result = $q->fetch();
-		
-		if(isset($result->stg_value)){
+
+		if($stored_value !== null){
 			$found = 1;
-			$setting_value = $result->stg_value;
+			$setting_value = $stored_value;
 			// A declared secret is stored sealed (Setting::sealForStorage()):
 			// it is read as what it holds, and one that can no longer be
 			// opened reads as no value. Only a value shaped like a SecretBox

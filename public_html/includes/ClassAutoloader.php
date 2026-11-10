@@ -16,6 +16,8 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.9.0 - theme_aware_path() takes only a name some theme or plugin also ships to the theme chain
+ *   (overridable()); every other core class resolves without a setting, so a cached page opens no database link
  * @version 1.8.0 - the map is read from APCu through ApcuStore::fetch(): a planted object is never built (unseal_daemon.md C4)
  * @version 1.7.0 - a mapped path is required only when it is a .php file whose real path lies under core
  *   includes/ or data/, or a plugin's includes/ or data/ (v1_key_retirement C1, 11-02). The map is data the
@@ -62,6 +64,9 @@ class ClassAutoloader {
 	/** Seconds a cached map is trusted before its fingerprint is rechecked. */
 	const CACHE_TTL = 600;
 
+	/** APCu key of the overridable class names (overridable()). */
+	const OVERRIDABLE_KEY = 'joinery_overridable_classes_v1';
+
 	private static $registered = false;
 	private static $map = null;
 	/** prefix => class names declaring `static $prefix` with that value. */
@@ -70,6 +75,8 @@ class ClassAutoloader {
 	private static $stamp = null;
 	/** The active plugins the current map was built for, sorted. */
 	private static $plugins = null;
+	/** Core class names a theme or plugin also ships (overridable()), per process. */
+	private static $overridable = null;
 	/** True while the cache is being read (entry()), against re-entry. */
 	private static $entering = false;
 	private static $rebuilt = false;
@@ -355,6 +362,14 @@ class ClassAutoloader {
 			return $core;
 		}
 
+		// Only a name some theme or plugin also ships can resolve anywhere but
+		// core. Every other name is answered here, without the theme chain and
+		// so without the setting it reads: a request served from the page
+		// cache loads core classes and never opens a database connection.
+		if (!isset(self::overridable()[$class])) {
+			return $core;
+		}
+
 		self::$resolving_theme_chain = true;
 		try {
 			return PathHelper::getThemeFilePath($file, 'includes');
@@ -362,6 +377,58 @@ class ClassAutoloader {
 			return $core;
 		} finally {
 			self::$resolving_theme_chain = false;
+		}
+	}
+
+	/**
+	 * The core includes/ class names that some theme or plugin also ships as
+	 * includes/{Class}.php, as name => true: the only names theme_aware_path()
+	 * takes to the theme chain. Every theme and every plugin directory counts,
+	 * active or not, so the answer needs no setting and no database.
+	 *
+	 * Kept in APCu for CACHE_TTL seconds, so a theme's first override of a
+	 * core class can go unseen that long, the same wait as a new class file.
+	 * rebuild() and flush() drop it. Without APCu it is scanned once per
+	 * process.
+	 *
+	 * @return array
+	 */
+	private static function overridable() {
+		if (self::$overridable !== null) {
+			return self::$overridable;
+		}
+		$apcu = self::apcu_available();
+		if ($apcu) {
+			$ok = false;
+			require_once(__DIR__ . '/ApcuStore.php');
+			$cached = ApcuStore::fetch(self::overridable_key(), $ok);
+			if ($ok && is_array($cached)) {
+				return self::$overridable = $cached;
+			}
+		}
+		$names = array();
+		foreach (array('theme', 'plugins') as $kind) {
+			foreach ((array)glob(PathHelper::getIncludePath($kind) . '/*/includes/*.php') as $file) {
+				$name = basename($file, '.php');
+				if (is_file(PathHelper::getIncludePath('includes/' . $name . '.php'))) {
+					$names[$name] = true;
+				}
+			}
+		}
+		if ($apcu) {
+			apcu_store(self::overridable_key(), $names, self::CACHE_TTL);
+		}
+		return self::$overridable = $names;
+	}
+
+	private static function overridable_key() {
+		return self::OVERRIDABLE_KEY . ':' . md5(PathHelper::getSiteRoot());
+	}
+
+	private static function forget_overridable() {
+		self::$overridable = null;
+		if (self::apcu_available()) {
+			apcu_delete(self::overridable_key());
 		}
 	}
 
@@ -436,6 +503,9 @@ class ClassAutoloader {
 		// built moments ago is not made stale by a miss.
 		self::$rebuilt = true;
 		self::$refused = false;
+		// The tree is being read again, so the names a theme or plugin
+		// overrides are read again too.
+		self::forget_overridable();
 
 		$plugins = array();
 		$roots = self::scan_roots($complete, $plugins);
@@ -866,6 +936,7 @@ class ClassAutoloader {
 		self::$stamp = null;
 		self::$plugins = null;
 		self::$rebuilt = false;
+		self::forget_overridable();
 		if (self::apcu_available()) {
 			apcu_delete(self::cache_key());
 		}

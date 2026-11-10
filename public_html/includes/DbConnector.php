@@ -1,5 +1,7 @@
 <?php
 /**
+ * @version 1.6 - connect(): over PostgreSQL's unix socket (config file db_socket_dir), TCP when it is
+ *                missing or refuses the link
  * @version 1.5 - end_abandoned_transaction(): a transaction still open when the process ends, or
  *                when an uncaught error is about to be recorded, is logged and rolled back
  * @version 1.4 - transaction(): run work in one transaction that rolls back on any throw, Error
@@ -31,6 +33,16 @@ class DbConnector {
 	}
 
 	/**
+	 * The class a link is built from. Always GuardedPdo in production code; the
+	 * request profiler (maintenance_scripts/dev_tools/profile_request.php) sets
+	 * a GuardedPdo subclass that times each statement.
+	 */
+	private static $link_class = 'GuardedPdo';
+
+	/** How long a socket that could not be used is left alone before it is tried again. */
+	const SOCKET_RETRY_SECONDS = 600;
+
+	/**
 	 * Open a link to the live database ($suffix '') or the test one ('_test').
 	 *
 	 * GuardedPdo is a PDO — everything downstream is unchanged — that runs the
@@ -38,13 +50,82 @@ class DbConnector {
 	 * Credentials go in as constructor arguments, never in the DSN: PDO quotes
 	 * them for libpq, whereas a password pasted into the DSN has to avoid
 	 * spaces, quotes and backslashes to survive the parse.
+	 *
+	 * The database runs beside the web server, so the link goes over
+	 * PostgreSQL's unix socket, which connects faster than TCP to localhost.
+	 * Where the socket is missing or refuses the link, TCP is used.
 	 */
 	private static function connect($suffix) {
 		$settings = Globalvars::get_instance();
-		$link = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname' . $suffix),
-			$settings->get_setting('dbusername' . $suffix), $settings->get_setting('dbpassword' . $suffix));
+		$class = self::$link_class;
+		$database = ' port=5432 dbname=' . $settings->get_setting('dbname' . $suffix);
+		$username = $settings->get_setting('dbusername' . $suffix);
+		$password = $settings->get_setting('dbpassword' . $suffix);
+		$link = null;
+		$socket_dir = self::socket_dir();
+		if ($socket_dir !== '') {
+			try {
+				$link = new $class('pgsql:host=' . $socket_dir . $database, $username, $password);
+			} catch (PDOException $e) {
+				self::socket_unusable($socket_dir, $e->getMessage());
+			}
+		}
+		if ($link === null) {
+			$link = new $class('pgsql:host=localhost' . $database, $username, $password);
+		}
 		$link->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 		return $link;
+	}
+
+	/**
+	 * The directory holding PostgreSQL's socket, or '' to connect over TCP.
+	 *
+	 * From the config file's db_socket_dir (default /var/run/postgresql; blank
+	 * means TCP only). Read from the config file alone: this runs while the
+	 * first link is being opened, so it cannot ask the database. '' as well
+	 * when the socket file is not there, or was found unusable within the last
+	 * SOCKET_RETRY_SECONDS.
+	 */
+	private static function socket_dir(): string {
+		$dir = Globalvars::get_instance()->config_file_setting('db_socket_dir', '/var/run/postgresql');
+		$dir = rtrim(trim((string)$dir), '/');
+		if ($dir === '' || !preg_match('#^/[A-Za-z0-9_./-]+$#', $dir)) {
+			return '';
+		}
+		try {
+			if (RamStore::exists(self::socket_flag($dir))) {
+				return '';
+			}
+		} catch (Throwable $e) {
+			// No shared memory to ask: the socket is tried.
+		}
+		if (!@file_exists($dir . '/.s.PGSQL.5432')) {
+			self::socket_unusable($dir, 'no socket file there');
+			return '';
+		}
+		return $dir;
+	}
+
+	private static function socket_flag(string $dir): string {
+		return 'db_socket_unusable:' . md5($dir);
+	}
+
+	/**
+	 * Remember, for every process of this site, that the socket cannot be
+	 * used, so the following requests go straight to TCP. Logged when first
+	 * noticed, not on every request; where there is no shared memory to
+	 * remember it in, the fallback is silent.
+	 */
+	private static function socket_unusable(string $dir, string $why): void {
+		try {
+			$flag = self::socket_flag($dir);
+			if (!RamStore::exists($flag) && RamStore::set($flag, 1, self::SOCKET_RETRY_SECONDS)) {
+				error_log('[DbConnector] PostgreSQL socket in ' . $dir . ' is not usable (' . $why
+					. '); connecting over TCP and trying the socket again in ' . self::SOCKET_RETRY_SECONDS . ' seconds');
+			}
+		} catch (Throwable $e) {
+			// Remembering is a saving, never a condition of connecting.
+		}
 	}
 
 	/**
@@ -237,6 +318,8 @@ class DbConnector {
 	public function set_test_mode() {
 		$this->dblink_test = self::connect('_test');
 		$this->test_mode = true;
+		// The next setting read is the test database's, not a copy of the live table.
+		Globalvars::forget_stored_settings();
 		$this->test_mode_was_used = true;
 		return true;
 	}
@@ -261,6 +344,7 @@ class DbConnector {
 
 	public function close_test_mode() {
 		$this->test_mode = false;
+		Globalvars::forget_stored_settings();
 		// Release the connection set_test_mode() opened. Dropping the last
 		// reference is what actually closes a PDO handle; leaving it set meant
 		// every open/close cycle held a server connection until the process

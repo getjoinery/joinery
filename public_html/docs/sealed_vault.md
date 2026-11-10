@@ -701,7 +701,8 @@ daemon, a process that is not the pool user, the five-minute fallback):
   user, and mode 0700 (otherwise the store refuses and no window opens), and
   the web server is PHP-FPM with OPcache readable, which is what ties a window
   to the master's lifetime.
-- APCu, which holds only the class map, backed by anonymous shared memory
+- APCu, which holds only the class autoloader's two entries (the class map and
+  the names of the core classes a theme or plugin overrides), backed by anonymous shared memory
   (`apc.mmap_file_mask` unset).
 - The PHP worker's core dumps disabled. `rlimit_core = 0` in the pool is the
   whole answer only when `kernel.core_pattern` names a file. When it pipes to
