@@ -12,7 +12,7 @@
 #      (someone edited dev), when main is not a fast-forward of HEAD, or while a
 #      publish is building (it reads this tree).
 #   3. Fast-forwards to origin/main.
-#   4. Runs update_database when the commits touched what it applies: a data class,
+#   4. Runs update_database --upgrade when the commits touched what it applies: a data class,
 #      a migration, or a declaration it seeds (settings.json, admin_menus.json,
 #      permissions.json, a plugin.json).
 #
@@ -26,6 +26,9 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.4 - update_database runs with --upgrade, the way a release's upgrade runs it. Run plain,
+#               it created no declared index and fixed no column type, so dev's schema drifted
+#               from every node that upgrades.
 # @version 1.3 - psql -w: the publish check never waits at a password prompt. Follows the agent source too (/home/user1/joinery-agent, the checkout a publish builds the
 #               agent from), under the same rules. Only the main repo was pulled, so every release from
 #               1.96.0 on bundled agent 1.96.0: 1.97.0 to 1.100.0 never shipped.
@@ -130,7 +133,9 @@ say "at $(git log -1 --format='%h %s' "$new") (was $(git rev-parse --short "$old
 
 if git diff --name-only "$old" "$new" | grep -q -E '^public_html/((plugins/[^/]+/)?data/.*_class\.php|migrations/|settings\.json$|admin_menus\.json$|permissions\.json$|plugins/[^/]+/plugin\.json$)'; then
     # It reports a failed step as '#Failed: N' and may still exit 0.
-    if php "$REPO/public_html/utils/update_database.php" > "${HOME}/.cache/follow_main.update_database.log" 2>&1 \
+    # --upgrade, as a release's upgrade runs it: without it declared indexes are
+    # never created and column type changes are only warned about.
+    if php "$REPO/public_html/utils/update_database.php" --upgrade > "${HOME}/.cache/follow_main.update_database.log" 2>&1 \
        && ! grep -q -E '#Failed: [1-9]' "${HOME}/.cache/follow_main.update_database.log"; then
         say "update_database ran (log: ~/.cache/follow_main.update_database.log)"
     else
