@@ -5,7 +5,7 @@
 	require_once(PathHelper::getThemeFilePath('contact_preferences_logic.php', 'logic'));
 
 	$page_vars = process_logic(contact_preferences_logic(array_merge($_GET, $_POST, $params ?? [])));
-	$messages = $page_vars['messages'];
+	$messages = $page_vars['messages'] ?? array();
 
 	$page = new PublicPage();
 	$page->public_header([
@@ -46,12 +46,13 @@
                 ]);
                 $formwriter->begin_form();
 
-                if(empty($page_vars['optionvals'])){
-                    echo '<p>You are currently not subscribed to any newsletters.</p>';
+                if(empty($page_vars['has_sections'])){
+                    echo '<p>There is nothing to change here. To choose which notifications you get, see <a href="/profile/notification_preferences">notification preferences</a>.</p>';
                 }
                 else{
                     // Shared form definition — also serves GET /api/v1/form/contact_preferences
-                    contact_preferences_logic_form($formwriter, $page_vars['user'], array_merge($_GET, $_POST));
+                    contact_preferences_logic_form($formwriter, $page_vars['user'],
+                        $page_vars['via_link'] ? array('hash' => $page_vars['link_hash']) : array());
                     echo '<a class="btn btn-ghost" href="/profile/account_edit">Cancel</a>';
                 }
                 $formwriter->end_form();

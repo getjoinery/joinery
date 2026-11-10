@@ -6,27 +6,28 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
 require_once(PathHelper::getIncludePath('data/group_members_class.php'));
 
+/**
+ * The group's members page. Removing a member is the user page's
+ * remove_from_group action; panels plugins register for 'group'
+ * (AdminEntityPanelRegistry) handle their own POSTs here.
+ *
+ * @version 1.1
+ */
 function admin_group_members_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->set_return();
 
-	if(($input['action'] ?? null) == 'add_to_group'){
-		//ADD THE USER TO A GROUP
-		$group = new Group($input['grp_group_id'], TRUE);
-		$group->assert_found();
-		$group->add_member($user->key);
-		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$group->key);
-	}
-	else if(($input['action'] ?? null) == 'remove_from_group'){
-		$groupmember = new GroupMember($input['grm_group_member_id'], TRUE);
-		$groupmember->assert_found();
-		$groupmember->remove();
-		return LogicResult::redirect("/admin/admin_group_members?grp_group_id=".$groupmember->get('grm_grp_group_id'));
-	}
-
 	$grp_group_id = LibraryFunctions::fetch_variable('grp_group_id', 0, 0, '');
 	$group = new Group($grp_group_id, TRUE);
 	$group->assert_found();
+
+	// Panels plugins add to this page handle their own POST actions.
+	if (LibraryFunctions::isFormSubmission()) {
+		$panel_result = AdminEntityPanelRegistry::handlePost('group', $group, $input);
+		if ($panel_result !== null) {
+			return $panel_result;
+		}
+	}
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');

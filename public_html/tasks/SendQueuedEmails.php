@@ -2,36 +2,27 @@
 /**
  * SendQueuedEmails - Scheduled Task
  *
- * Sends bulk emails that are queued and past their scheduled date,
- * retries failed transactional emails with retry count tracking, and
- * sends intentionally-queued emails (e.g. notification emails queued by Notify).
+ * Sends waiting direct messages (DirectMessage), retries failed
+ * transactional emails with retry count tracking, and sends
+ * intentionally-queued emails (e.g. notification emails queued by Notify).
+ * Campaigns are the email_lists plugin's SendCampaigns task.
  *
+ * @version 2.4 - campaigns moved to the email_lists plugin's SendCampaigns task
+ * @version 2.3 - sends waiting direct messages first
  * @version 2.2
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
-require_once(PathHelper::getIncludePath('data/emails_class.php'));
-require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 
 class SendQueuedEmails implements ScheduledTaskInterface {
 
 	public function run(array $config) {
 		$parts = [];
 
-		// --- Pass 1: Send scheduled campaign/bulk emails (existing logic) ---
-		$campaign_queued = new MultiEmail(array('scheduleddate' => MultiEmail::SCHEDULED_PAST, 'status' => Email::EMAIL_QUEUED));
-		$campaign_count = $campaign_queued->count_all();
-
-		if ($campaign_count > 0) {
-			if (!defined('SCHEDULED_TASK_CONTEXT')) {
-				define('SCHEDULED_TASK_CONTEXT', true);
-			}
-
-			ob_start();
-			require(PathHelper::getIncludePath('adm/admin_emails_send.php'));
-			$output = ob_get_clean();
-
-			$parts[] = 'Processed ' . $campaign_count . ' queued email(s). ' . trim(strip_tags($output));
+		// --- Direct messages: an admin's message to a member, a group or an event's people ---
+		$direct = DirectMessage::send_pending();
+		if ($direct['sent'] + $direct['failed'] > 0) {
+			$parts[] = 'Direct messages: ' . $direct['sent'] . ' sent, ' . $direct['failed'] . ' not sent';
 		}
 
 		// --- Pass 2: Retry failed transactional emails ---

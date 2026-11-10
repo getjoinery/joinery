@@ -79,9 +79,13 @@ if (class_exists('StripeHelper')) {
 
 section('Mailing-list provider sync');
 
-$list = new MailingList(NULL);
-check($list->sync_subscribe($user->key) === true && $list->sync_unsubscribe($user->key) === true,
-	'subscribe and unsubscribe sync have nothing to do for an account with no email');
+if (class_exists('MailingList')) {
+	$list = new MailingList(NULL);
+	check($list->sync_subscribe($user->key) === true && $list->sync_unsubscribe($user->key) === true,
+		'subscribe and unsubscribe sync have nothing to do for an account with no email');
+} else {
+	harness_skip('subscribe and unsubscribe sync have nothing to do for an account with no email', 'the email_lists plugin is not active here');
+}
 
 section('Names on the person\'s devices');
 

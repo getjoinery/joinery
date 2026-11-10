@@ -21,7 +21,7 @@ See also: [Questions & Surveys](questions_surveys.md) — the underlying questio
 | `DOBRequirement` | Date of Birth | Date of birth |
 | `AddressRequirement` | Address | Street / city / state / zip / country |
 | `UserPriceRequirement` | User Chooses Price | An amount the buyer types, which prices the line (and adds the optional donation product) |
-| `NewsletterSignupRequirement` | Newsletter Signup | Optional email opt-in checkbox |
+| `NewsletterSignupRequirement` | Newsletter Signup | Optional email opt-in checkbox; registered by the email_lists plugin while it is active |
 | `QuestionRequirement` | Question | Any single `Question` (all types supported) |
 | `SurveyRequirement` | Survey | All questions in a `Survey`, saves `SurveyAnswer` records on purchase |
 | `ManagedSiteRequirement` | Managed site | One hidden answer: the id of the site the buyer configured on Server Manager's configure page before paying. Renders no fields; refuses anything but the signed-in buyer's own frozen draft; adds the one-year domain line from the quote frozen on that draft. Contributed by the `customer_cloud` fulfillment provider, never attached as a `pri_` row — see [Server Manager](../../server_manager/docs/overview.md#the-buyer-configures-first-then-pays-payment-activates) |

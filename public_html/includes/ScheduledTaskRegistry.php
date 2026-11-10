@@ -13,6 +13,7 @@
  *  - retentionRules()    collect $retention_policy declarations from data classes
  *  - reconcileMissing()  retire rows whose code file is gone
  *
+ * @version 1.2 - missingRequiredPlugins(): a task JSON's requires_plugins, checked when it runs
  * @version 1.1 - retentionRules() accepts a list of policies per class; the key it returns is a rule id, and each rule carries its own table
  */
 
@@ -342,6 +343,28 @@ class ScheduledTaskRegistry {
 	public static function metadataFor(string $class_name): ?array {
 		$all = self::discover();
 		return isset($all[$class_name]) ? ($all[$class_name]['json'] ?? null) : null;
+	}
+
+	/**
+	 * The plugins a task's JSON names under `requires_plugins` that are not
+	 * active here. The runner skips such a task with the reason, and the
+	 * reconcile leaves its row alone, so it runs again once they are back
+	 * (spec email_lists_plugin G9).
+	 *
+	 * @return string[] inactive plugin names, empty when it may run
+	 */
+	public static function missingRequiredPlugins(?array $metadata): array {
+		$required = is_array($metadata) ? ($metadata['requires_plugins'] ?? array()) : array();
+		if (!is_array($required)) {
+			return array();
+		}
+		$missing = array();
+		foreach ($required as $plugin) {
+			if (is_string($plugin) && $plugin !== '' && !PluginHelper::isPluginActive($plugin)) {
+				$missing[] = $plugin;
+			}
+		}
+		return $missing;
 	}
 
 	/**

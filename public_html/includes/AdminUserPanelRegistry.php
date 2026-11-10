@@ -8,6 +8,10 @@
  * handles its own POST actions. Core keeps the identity/tier/groups panels
  * inline; store and event_manager register the rest from their serve.php.
  *
+ * The user page is the 'user' case of AdminEntityPanelRegistry, which holds
+ * the panels.
+ *
+ * @version 1.1.0 - panels are held by AdminEntityPanelRegistry under 'user'
  * @version 1.0.0
  */
 
@@ -31,17 +35,14 @@ interface AdminUserPanel {
 
 class AdminUserPanelRegistry {
 
-    /** @var array<string,AdminUserPanel> keyed by id() */
-    private static $panels = [];
-
     /** Register a panel. Idempotent (last-wins by id). */
     public static function register(AdminUserPanel $panel): void {
-        self::$panels[$panel->id()] = $panel;
+        AdminEntityPanelRegistry::register('user', $panel);
     }
 
     /** All registered panels, registration order. */
     public static function panels(): array {
-        return array_values(self::$panels);
+        return AdminEntityPanelRegistry::panels('user');
     }
 
     /**
@@ -49,20 +50,11 @@ class AdminUserPanelRegistry {
      * Returns the panel's LogicResult, or null if no panel claims the action.
      */
     public static function handlePost(User $user, array $input): ?LogicResult {
-        $action = $input['action'] ?? null;
-        if ($action === null) {
-            return null;
-        }
-        foreach (self::$panels as $panel) {
-            if (in_array($action, $panel->actions(), true)) {
-                return $panel->handle($action, $user, $input);
-            }
-        }
-        return null;
+        return AdminEntityPanelRegistry::handlePost('user', $user, $input);
     }
 
     /** Clear the registry (tests only). */
     public static function resetCache(): void {
-        self::$panels = [];
+        AdminEntityPanelRegistry::resetCache('user');
     }
 }

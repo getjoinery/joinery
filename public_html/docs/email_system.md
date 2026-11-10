@@ -376,9 +376,9 @@ in priority order:
    The blank templates' subject is `*subject*`, which renders the `subject`
    value the caller passes.
 
-## Bulk Email Recipient Targeting (Recipient-Group Providers)
+## Recipient-Group Providers
 
-Admin bulk emails target **recipient groups**: each targeting row (`erg_email_recipient_groups`) stores a provider key (`erg_provider`) plus a reference id (`erg_reference_id`), with an add/remove direction. The final recipient list is (union of all *add* groups) minus (union of all *remove* groups), deduplicated at queue time.
+An audience is a **recipient-group provider** and a reference. Direct messages (below) name one; campaigns (the email_lists plugin's) name several, as **recipient groups**: each targeting row (`erg_email_recipient_groups`) stores a provider key (`erg_provider`) plus a reference id (`erg_reference_id`), with an add/remove direction. The final recipient list is (union of all *add* groups) minus (union of all *remove* groups), deduplicated at queue time.
 
 Providers are the pluggable half — `includes/RecipientGroupProviderRegistry.php` defines the `RecipientGroupProvider` interface:
 
@@ -390,27 +390,28 @@ Providers are the pluggable half — `includes/RecipientGroupProviderRegistry.ph
 | `resolve(int $reference_id)` | The reference expanded to a user-id list (`[]` if unresolvable) |
 | `reference_label(int $reference_id)` | Display label for a saved targeting row |
 
-Core ships three providers (`includes/recipient_group_providers/`): `group` (a Group's members), `mailing_list` (a list's subscribers) and `user` (one person — `resolve()` is the id itself, `options()` is empty so the campaign picker does not offer it). event_manager registers `event` and `event_waiting_list` from its `serve.php`. A row whose provider is unregistered (e.g. its plugin is inactive) resolves to an empty group — the email simply targets no one from that row, never errors.
+Core ships two providers (`includes/recipient_group_providers/`): `group` (a Group's members) and `user` (one person — `resolve()` is the id itself, `options()` is empty so the campaign picker does not offer it). event_manager registers `event` and `event_waiting_list`, and the email_lists plugin `mailing_list` (a list's subscribers), from their `serve.php`. A row whose provider is unregistered (e.g. its plugin is inactive) resolves to an empty group — the email simply targets no one from that row, never errors.
 
 To add a targeting source, implement the interface and call `RecipientGroupProviderRegistry::register(new YourProvider())` — from `registerCoreDefaults()` for core, or from your plugin's `serve.php`.
 
-### Queueing: `Email::queue()`
+Campaign queueing and sending (`Email::queue()`, `CampaignSender`) are the email_lists plugin's; see [Email Lists](../plugins/email_lists/docs/overview.md).
 
-Expansion is a model operation, so every path that sends to an audience does the same thing:
+## Direct Messages
+
+A direct message is an admin writing to the people who belong to something, about it: one member ("Send email to user"), a group's members ("Email group"), an event's registrants or its waiting list ("Email registrants", "Email waiting list"). All four open `/admin/admin_users_message`. It is not a campaign: no list, no unsubscribe list, no scheduling.
 
 ```php
-$email->add_recipient_group('event', $event->key);
-$email->add_recipient_group('user', $sender->key);   // the sender's own copy
-$queued = $email->queue();                            // int: recipients on the email
+$message = DirectMessage::queue_to($sender, 'group', $group->key, $subject, $html,
+    $settings->get_setting('group_email_inner_template'), array($sender->key));
 ```
 
-`queue()` resolves every `add` group through its provider, subtracts every `remove` group and de-duplicates by user id (a mailing-list email — `eml_mlt_mailing_list_id` — resolves to its subscribers instead). It writes one `erc_email_recipients` row per user not already on the email, skipping a user with no address. With at least one recipient it stamps `eml_scheduled_time = now()` and `eml_status = EMAIL_QUEUED`; with none it leaves the email untouched and returns 0. It never marks anything sent — the `SendQueuedEmails` task records delivery per recipient as it sends, and resumes from the unsent rows after a failure.
+`queue_to()` resolves the audience through its recipient-group provider (`user`, `group`, `event`, `event_waiting_list`, or any a plugin registers), adds the extra people named (the sender's copy; an event's leader), and writes one `dmg_direct_messages` row and one `dmr_direct_message_recipients` row per address, once per account and once per address. Nothing is sent in the request. The `SendQueuedEmails` task calls `DirectMessage::send_pending()`, which claims each waiting recipient, renders the message with the inner template, sends it through `EmailSender`, and records it sent or not sent; a message whose recipients have all been tried is marked sent. A pass that stops part way resumes at the next waiting recipient.
 
-`/admin/admin_emails_queue` calls it for a campaign. `/admin/admin_users_message` — reached from "Email registrants", "Email waiting list", "Email group" and "Send email to user" — creates one Email, attaches the audience plus `('user', sender)` (and `('user', leader)` for an event with a leader), queues it, and reports the count with a link to `/admin/admin_email` where per-person delivery state lives. Nothing is sent inside the request.
+`/admin/admin_direct_message?dmg_direct_message_id=` shows one message: what it said, its audience, and each recipient's outcome.
 
-### Listing the emails sent to an audience
+### Listing the messages sent to an audience
 
-`MultiEmail` takes a `recipient_group` option — `['provider' => 'event', 'reference_id' => 12]` — matching every email that named that audience on its `add` side. `AdminPage::email_audience_table()` renders such a collection as a box (subject, sender, status, sent-of-total, time); the event admin page ("Emails to Registrants", "Emails to Waiting List") and the group members page use it.
+`AdminPage::direct_messages_to($provider, $reference_id, $per_page, $offset)` returns an audience's messages, newest first, and `AdminPage::email_audience_table()` renders them as a box (subject, sender, status, sent of total, time). The group members page and the event admin page ("Emails to Registrants", "Emails to Waiting List") use them. The admin user page lists the messages a member received (`dmr_usr_user_id`) and sent (`dmg_usr_user_id_sender`).
 
 ## Service Configuration
 
@@ -507,6 +508,14 @@ email_fallback_service = "smtp"  // or "mailgun"
 // Default template for HTML emails
 default_email_template = "default_outer_template"
 ```
+
+### Included email
+
+A site can send through the included Joinery email: the getjoinery services account (`email_service` = `joinery_services`), or, on a Managed site, an SMTP credential the management node minted on the operator's account. Its monthly allowance is meant for the site's everyday mail (resets, receipts, notifications). `EmailSender::usesIncludedMail()` answers whether the site is on it; a feature that would send in bulk asks before it sends.
+
+Where the allowance runs out, the provider refuses every send until the month rolls over. The plan banner's email row (`HostedPlanNotice`) leads with **Connect your own email provider**, linking `/admin/admin_settings_email`, from 95%; the direct-message page shows the month's use and, from 95%, the same prompt (`HostedPlanNotice::emailUsePrompt()`); a direct message with copies the provider refused says how many went and how many did not, with the prompt.
+
+For plain SMTP the answer comes from `included_mail_identity`, the `host|username` that `HostedMailSettingsMap::apply()` records when it writes the credential. It is compared with the current `smtp_host` and `smtp_username`, so an owner who points the SMTP settings at their own account is not on included email, with nothing to clear.
 
 ### Configuring a provider is the first task on a new deployment
 

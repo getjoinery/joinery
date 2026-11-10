@@ -71,17 +71,16 @@
 	}
 	$page->endtable($pager);
 
-	//EMAILS TO THE GROUP
-	$group_emails = new MultiEmail(
-		array('recipient_group' => array('provider' => 'group', 'reference_id' => $group->key), 'deleted' => false),
-		array('email_id' => 'DESC'),
-		20,
-		(int)LibraryFunctions::fetch_variable('eoffset', 0, 0, ''));
+	//MESSAGES TO THE GROUP
+	$group_emails = AdminPage::direct_messages_to('group', (int)$group->key, 20, (int)LibraryFunctions::fetch_variable('eoffset', 0, 0, ''));
 	$epager = new Pager(array('numrecords'=>$group_emails->count_all(), 'numperpage'=> 20), 'e');
 	$page->email_audience_table($group_emails, array(
 		'altlinks' => $altlinks,
 		'title' => 'Emails to '. $group->get('grp_name'),
 	), $epager);
+
+	// Panels plugins add for a group (AdminEntityPanelRegistry, 'group').
+	echo AdminEntityPanelRegistry::renderAll('group', $group, $page);
 
 	$page->admin_footer();
 ?>

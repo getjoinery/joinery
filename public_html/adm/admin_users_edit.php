@@ -41,12 +41,6 @@ if($nickname_display){
 	$formwriter->textinput('usr_nickname', $nickname_display);
 }
 
-$optionvals = $mailing_lists->get_dropdown_array();
-$formwriter->checkboxList('new_list_subscribes', 'Mailing list subscriptions', [
-	'options' => $optionvals,
-	'checked' => $user_subscribed_list
-]);
-
 $optionvals = array(0=>'On', 1=>'Off');
 $formwriter->dropinput('usr_password_recovery_disabled', 'Password recovery', [
 	'options' => $optionvals

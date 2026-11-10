@@ -158,10 +158,10 @@ $pw_code = pr_code($passwordless);
 Activation::deleteTempCode($pw_code);
 
 $_SESSION = array();
-$res = harness_call_logic('logic/login_logic.php', 'login_logic',
+$res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic',
 	array('act_code' => $pw_code), 'POST');
 check(empty($_SESSION['loggedin']) && empty($_SESSION['usr_user_id']),
-	'a consumed activation code replayed at /login does not sign anyone in',
+	'a consumed activation code replayed at the Verify button does not sign anyone in',
 	'session user: ' . var_export($_SESSION['usr_user_id'] ?? null, true));
 check($res->redirect !== '/password-set',
 	'a consumed activation code does not reach the set-a-password screen',

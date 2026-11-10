@@ -3,17 +3,15 @@
  * WeeklyEventsDigest
  *
  * Scheduled task that queries upcoming events for the next 7 days,
- * builds an HTML email, and queues it through the existing bulk email pipeline.
+ * builds an HTML email, and queues it to a mailing list as an email_lists
+ * campaign (CampaignSender::queue_to_list).
  *
+ * @version 1.8 - queued through the email_lists plugin, which the task requires
  * @version 1.7
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
-require_once(PathHelper::getIncludePath('data/emails_class.php'));
-require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
-require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
@@ -48,41 +46,20 @@ class WeeklyEventsDigest implements ScheduledTaskInterface, ScheduledTaskDryRunn
 		$html = $build['html'];
 		$event_count = $build['event_count'];
 
-		// Create Email record
-		$email = new Email(null);
-		$email->set('eml_subject', 'Upcoming Events This Week');
-		$email->set('eml_message_html', $html);
-		$email->set('eml_message_template_html', 'blank_template');
-		$email->set('eml_status', Email::EMAIL_QUEUED);
-		$email->set('eml_type', Email::TYPE_MARKETING);
-		$email->set('eml_mlt_mailing_list_id', $mailing_list_id);
-		$email->set('eml_scheduled_time', 'now()');
-		$email->save();
-
-		// Populate EmailRecipient records from mailing list subscribers
-		$subscribers = $mailing_list->get_subscribed_users('object');
-		$recipient_count = 0;
-
-		foreach ($subscribers as $user) {
-			$user_email = $user->get('usr_email');
-			if (!$user_email) {
-				continue;
-			}
-
-			$recipient = new EmailRecipient(null);
-			$recipient->set('erc_eml_email_id', $email->key);
-			$recipient->set('erc_usr_user_id', $user->key);
-			$recipient->set('erc_email', $user_email);
-			$recipient->set('erc_name', $user->get('usr_first_name') . ' ' . $user->get('usr_last_name'));
-			$recipient->save();
-			$recipient_count++;
+		// Queued as a campaign by the email_lists plugin, so every campaign
+		// rule applies (spec email_lists_plugin G9a). The task declares
+		// requires_plugins, so it does not run while that plugin is off.
+		try {
+			$email = CampaignSender::queue_to_list((int)$mailing_list_id, 'Upcoming Events This Week', $html, 'blank_template');
+		} catch (CampaignRefusedException $e) {
+			// On the included email: skipped with the reason, not stacked up as
+			// a held campaign each week.
+			return array('status' => 'skipped', 'message' => $e->getMessage());
 		}
-
-		if ($recipient_count === 0) {
-			// No recipients - clean up the email record
-			$email->permanent_delete();
+		if ($email === null) {
 			return array('status' => 'skipped', 'message' => 'Mailing list has no subscribers with email addresses');
 		}
+		$recipient_count = count(new MultiEmailRecipient(array('email_id' => $email->key)));
 
 		return array('status' => 'success', 'message' => 'Queued digest with ' . $event_count . ' event(s) to ' . $recipient_count . ' recipient(s)');
 	}

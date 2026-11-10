@@ -39,11 +39,10 @@ class EntityPhotoRegistry {
     /** Register the core-owned entity types. */
     public static function registerCoreDefaults(): void {
         self::register('user', 'User', 'data/users_class.php');
-        self::register('mailing_list', 'MailingList', 'data/mailing_lists_class.php');
         self::register('post', 'Post', 'data/posts_class.php');
         self::register('page', 'Page', 'data/pages_class.php');
         // event + location register from event_manager's serve.php; product
-        // from the store's.
+        // from the store's; mailing_list from email_lists'.
     }
 
     /** Clear the registry (tests only). */

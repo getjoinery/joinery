@@ -27,6 +27,7 @@
  *
  * Run: php tests/run.php --only=tests/services/services_site_test.php
  *
+ * @version 1.4 - the enrol records the included-mail identity
  * @version 1.3 - HostedMailSettingsMap::defaultFrom gives a blank site hello@ its domain, once (B166)
  * @version 1.2 - the operator fakes name the host itself as the sending domain
  * @version 1.1 - disconnect releases both services
@@ -116,7 +117,7 @@ $touched = array('services_url', 'services_api_public_key', 'services_api_secret
 	'services_mail_state', 'email_service', 'smtp_host', 'smtp_port', 'smtp_username', 'smtp_password',
 	'smtp_sender', 'smtp_helo', 'smtp_hostname', 'smtp_auth', 'hosted_plan_state', 'hosted_plan_until_time',
 	'hosted_plan_notice', 'hosted_plan_allowances', 'hosted_plan_manage_url', 'email_test_send_last_success',
-	'defaultemail', 'defaultreplyto');
+	'defaultemail', 'defaultreplyto', 'included_mail_identity');
 $before = array();
 foreach ($touched as $name) { $before[$name] = (string)get_setting_raw($name); }
 harness_defer(function () use ($touched, $before) {
@@ -251,6 +252,8 @@ check((string)get_setting_raw('smtp_host') === 'mail.smtp2go.com' && (string)get
 	&& (string)get_setting_raw('smtp_hostname') === $site_host && (string)get_setting_raw('smtp_auth') === '1',
 	'the SMTP values land through the shared map, the password untrimmed');
 check(ServicesClient::mailEnrolled(), 'the site sends through getjoinery');
+check((string)get_setting_raw('included_mail_identity') === 'mail.smtp2go.com|t9-abc123' && EmailSender::usesIncludedMail(),
+	'the credential is recorded as included mail', (string)get_setting_raw('included_mail_identity'));
 $ms = ServicesClient::mailState();
 check($ms['domain'] === $site_host && $ms['domain_state'] === 'domain_added' && count($ms['records']) === 2
 	&& $ms['paid_until'] === '2030-01-01 23:59:59', 'the operator\'s answer is kept, without the password', json_encode($ms));

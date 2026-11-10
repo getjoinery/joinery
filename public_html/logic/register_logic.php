@@ -159,6 +159,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$_SESSION['terms_accepted'] = true;
 		}
 
+		// Fields plugins added to the form act on the new account. Its writes
+		// are the sign-up's, admitted by the rules above.
+		SystemBase::rule_checked_write(function () use ($user, $input) {
+			SignupFieldRegistry::handle($user, $input, SignupFieldRegistry::CONTEXT_REGISTER);
+		});
+
 		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
 		SignalBus::dispatch('account.signup', array(
 			'user_id'        => $user->key,
@@ -270,12 +276,7 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 	$privacy_url = trim((string)$settings->get_setting('privacy_url'));
 	$formwriter->checkboxinput('privacy', 'I have read and agree to the privacy policy'
 		. ($privacy_url !== '' ? ' (' . $privacy_url . ')' : ''), ['value' => 'yes']);
-	// The box only means something when there is a list to add the member to.
-	if ($settings->get_setting('default_mailing_list')) {
-		$formwriter->checkboxinput('newsletter', 'Please add me to the mailing list', [
-			'value' => 'yes',
-		]);
-	}
+	SignupFieldRegistry::render($formwriter, SignupFieldRegistry::CONTEXT_REGISTER, $input);
 	$formwriter->checkboxinput('setcookie', 'Keep me logged in', [
 		'value' => 'yes',
 		'checked' => true,

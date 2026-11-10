@@ -6,6 +6,7 @@ require_once(PathHelper::getIncludePath('data/themes_class.php'));
 /**
  * ThemeManager - Manages theme installation, activation, and configuration
  *
+ * @version 1.3 - component sync also scans each plugin's views/components/; a plugin component requires its plugin
  * @version 1.2 - writeManifestReceivesUpgrades() moves to the base class so a
  *                plugin's fork mark is written the same way (specs/package_replace_on_upload.md WP3)
  * @version 1.1 - style themes (specs/style_themes.md): the kind is recorded
@@ -531,8 +532,9 @@ class ThemeManager extends AbstractExtensionManager {
     /**
      * Sync component types from theme JSON files
      *
-     * Scans base /views/components/ and active theme's views/components/
-     * for JSON definition files with matching PHP templates.
+     * Scans base /views/components/, each plugin's views/components/ and the
+     * active theme's views/components/ for JSON definition files with
+     * matching PHP templates. A plugin's component requires its plugin.
      *
      * @return array Summary: ['created' => n, 'updated' => n, 'unchanged' => n, 'deactivated' => n]
      */
@@ -560,7 +562,21 @@ class ThemeManager extends AbstractExtensionManager {
         $base_path = PathHelper::getIncludePath('views/components');
         $discovered = $this->scanComponentDirectory($base_path, $discovered, $theme_framework, 'views/components');
 
-        // Then scan active theme (overrides base)
+        // Then every plugin's views/components/ (spec email_lists_plugin G10).
+        // Every installed plugin, active or not: a plugin component names its
+        // plugin in requires_plugin, so the renderer shows it only while the
+        // plugin is active, and its row is not deactivated and recreated each
+        // time the plugin is switched off and on.
+        foreach (glob(PathHelper::getIncludePath('plugins') . '/*/views/components', GLOB_ONLYDIR) ?: array() as $plugin_components) {
+            $plugin_name = basename(dirname(dirname($plugin_components)));
+            if (preg_match('/^[A-Za-z0-9_-]+\z/', $plugin_name) !== 1) {
+                continue;
+            }
+            $discovered = $this->scanComponentDirectory($plugin_components, $discovered, $theme_framework,
+                "plugins/{$plugin_name}/views/components", $plugin_name);
+        }
+
+        // Then scan active theme (overrides base and plugins)
         if ($active_theme) {
             $theme_path = PathHelper::getIncludePath("theme/{$active_theme}/views/components");
             $discovered = $this->scanComponentDirectory($theme_path, $discovered, $theme_framework, "theme/{$active_theme}/views/components");
@@ -692,7 +708,7 @@ class ThemeManager extends AbstractExtensionManager {
      * @param string $relative_path Relative path prefix for template_file (e.g., 'views/components' or 'theme/linka/views/components')
      * @return array Updated discovered components array
      */
-    protected function scanComponentDirectory($directory, $discovered, $theme_framework = null, $relative_path = 'views/components') {
+    protected function scanComponentDirectory($directory, $discovered, $theme_framework = null, $relative_path = 'views/components', $owning_plugin = null) {
         if (!is_dir($directory)) {
             return $discovered;
         }
@@ -730,7 +746,17 @@ class ThemeManager extends AbstractExtensionManager {
             // Build the relative template path (e.g., 'theme/linka-reference/views/components/linka_featured_grid.php')
             $relative_template_file = $relative_path . '/' . $type_key . '.php';
 
-            // Theme definitions override base (since we process base first)
+            // A plugin never takes over a core type key: an inactive plugin's
+            // entry would replace the core component and then hide it.
+            if ($owning_plugin !== null && isset($discovered[$type_key])) {
+                error_log("Component sync: {$owning_plugin} declares {$type_key}, which core already has; ignored");
+                continue;
+            }
+
+            // Theme definitions override base and plugins (scanned last). An
+            // override keeps the plugin the component it replaces belongs to.
+            $requires_plugin = $metadata['requires_plugin'] ?? $owning_plugin
+                ?? ($discovered[$type_key]['requires_plugin'] ?? null);
             $discovered[$type_key] = array(
                 'type_key' => $type_key,
                 'title' => $metadata['title'],
@@ -739,7 +765,7 @@ class ThemeManager extends AbstractExtensionManager {
                 'template_file' => $relative_template_file,
                 'config_schema' => $metadata['config_schema'],
                 'logic_function' => $metadata['logic_function'] ?? null,
-                'requires_plugin' => $metadata['requires_plugin'] ?? null,
+                'requires_plugin' => $requires_plugin,
                 'css_framework' => $component_framework,
                 'layout_defaults' => $metadata['layout_defaults'] ?? null,
             );

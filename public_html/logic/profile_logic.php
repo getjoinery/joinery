@@ -6,7 +6,9 @@
  * (the ReconcileSubscriptions task), never inline here — a page render is
  * read-only.
  *
- * @version 2.1
+ * An act_code goes to /verify-email: a page view verifies nothing.
+ *
+ * @version 2.2
  */
 
 function profile_logic(array $input): LogicResult{
@@ -28,17 +30,14 @@ function profile_logic(array $input): LogicResult{
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
+
+	// An activation code verifies nothing on a page view; the Verify button does.
+	if (!empty($input['act_code'])) {
+		return LogicResult::redirect('/verify-email?act_code=' . rawurlencode((string)$input['act_code']) . '&then=profile');
+	}
+
 	$session->check_permission(0);
 	$session->set_return();
-
-	// Activation code handling
-	if (isset($input['act_code']) && $input['act_code']) {
-		if ($user_id = $session->get_user_id()) {
-			$activated_user = Activation::ActivateUser($input['act_code'], $user_id);
-		} else {
-			$activated_user = Activation::ActivateUser($input['act_code']);
-		}
-	}
 
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
@@ -130,19 +129,6 @@ function profile_logic(array $input): LogicResult{
 		$address = new Address(NULL);
 	}
 	$page_vars['address'] = $address;
-
-	// ---------------------------------------------------------------
-	// MAILING LISTS
-	// ---------------------------------------------------------------
-	$user_subscribed_list = array();
-	$user_lists = new MultiMailingListRegistrant(
-		array('deleted' => false, 'user_id' => $user->key));
-	$user_lists->load();
-	foreach ($user_lists as $user_list) {
-		$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
-		$user_subscribed_list[] = $mailing_list->get('mlt_name');
-	}
-	$page_vars['user_subscribed_list'] = $user_subscribed_list;
 
 	// ---------------------------------------------------------------
 	// DISPLAY MESSAGES (session flash)

@@ -62,7 +62,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		// Attempt to activiate the user if they aren't already activated and get the user
-		$user = Activation::ActivateUser($act_code);
+		$user = Activation::ActivateUser($act_code, NULL, 'password_reset');
 
 		if (!$user) {
 			return LogicResult::error('Sorry, this form has expired.  Please <a href="/password-reset-1">click here</a> to send another password reset email.');

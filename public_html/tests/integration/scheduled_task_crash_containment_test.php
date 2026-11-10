@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/scheduled_task_crash_containment_test.php
  *
+ * @version 1.3 - F: a task whose requires_plugins names an inactive plugin is skipped, not run or retired
  * @version 1.2 - E: a daily task another pass ran after this pass began is not run again
  * @version 1.1 - D: a 'retry' result is recorded but not counted as a run
  * @version 1.0
@@ -45,16 +46,16 @@ $db = DbConnector::get_instance()->get_db_link();
 $tasks_dir = PathHelper::getIncludePath('tasks');
 $runner = PathHelper::getIncludePath('utils/process_scheduled_tasks.php');
 
-$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry', 'CrashTestOtherPass');
+$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry', 'CrashTestOtherPass', 'CrashTestNeedsPlugin');
 
 // ---- fixture lifecycle ----------------------------------------------------
-$write_task = function ($class, $body) use ($tasks_dir) {
+$write_task = function ($class, $body, array $extra_json = array()) use ($tasks_dir) {
 	file_put_contents("$tasks_dir/$class.php", $body);
 	file_put_contents("$tasks_dir/$class.json", json_encode(array(
 		'name' => $class,
 		'description' => 'crash containment fixture',
 		'default_frequency' => 'every_run',
-	)) . "\n");
+	) + $extra_json) . "\n");
 	@chmod("$tasks_dir/$class.php", 0666);
 	@chmod("$tasks_dir/$class.json", 0666);
 };
@@ -274,6 +275,36 @@ PHP
 		'the daily task did not run a second time', json_encode($daily));
 	check(strpos($log, 'skipped: another pass ran it since this one began') !== false,
 		'the log says why it was skipped', $log);
+
+	// -----------------------------------------------------------------------
+	section('F. A task that needs an inactive plugin is skipped with the reason, not retired');
+
+	$db->exec("DELETE FROM sct_scheduled_tasks WHERE sct_task_class LIKE 'CrashTest%'");
+	@unlink("$tasks_dir/CrashTestOtherPass.php");
+	@unlink("$tasks_dir/CrashTestOtherPass.json");
+	@unlink("$tasks_dir/CrashTestCanary.php");
+	@unlink("$tasks_dir/CrashTestCanary.json");
+	$write_task('CrashTestNeedsPlugin', <<<'PHP'
+<?php
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+class CrashTestNeedsPlugin implements ScheduledTaskInterface {
+	public function run(array $config) {
+		return array('status' => 'success', 'message' => 'ran without its plugin');
+	}
+}
+PHP
+	, array('requires_plugins' => array('hts_no_such_plugin')));
+	$needs_id = $activate('CrashTestNeedsPlugin');
+
+	$output = array();
+	exec('php ' . escapeshellarg($runner) . ' 2>&1', $output, $exit_code);
+	$needs = $status_of('CrashTestNeedsPlugin');
+	check($needs['sct_last_run_status'] === 'skipped' && $needs['sct_last_run_message'] === 'skipped: needs hts_no_such_plugin',
+		'the row says skipped and names the plugin', json_encode($needs));
+	check((bool)(new ScheduledTask($needs_id, TRUE))->get('sct_is_active'), 'and stays active, so it runs once the plugin is back');
+	require_once(PathHelper::getIncludePath('adm/logic/admin_scheduled_tasks_logic.php'));
+	$run_now = _handle_run_now($needs_id);
+	check(strpos((string)($run_now['error'] ?? ''), 'hts_no_such_plugin') !== false, 'Run Now refuses it too, naming the plugin', json_encode($run_now));
 
 } finally {
 	$remove_fixtures();

@@ -41,7 +41,7 @@ $page->public_header([
                 ['title' => 'Member Management',     'desc' => 'Manage member profiles, subscriptions, and communications all in one place.'],
                 ['title' => 'Event Management',       'desc' => 'Create and manage events with registration, ticketing, and attendance tracking.'],
                 ['title' => 'Payment Processing',     'desc' => 'Accept payments securely with Stripe and PayPal integration.'],
-                ['title' => 'Email Communications',   'desc' => 'Send newsletters, announcements, and automated notifications to members.'],
+                ['title' => 'Email Communications',   'desc' => 'Message members, groups and event attendees, with automated notifications.'],
                 ['title' => 'E-Commerce',             'desc' => 'Sell products, memberships, and digital goods with built-in shopping cart.'],
                 ['title' => 'Reports &amp; Analytics','desc' => 'Track membership growth, revenue, and engagement with detailed reports.'],
             ];

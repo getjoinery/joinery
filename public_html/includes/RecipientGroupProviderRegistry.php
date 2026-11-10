@@ -64,9 +64,9 @@ class RecipientGroupProviderRegistry {
 
     /** Name the core-owned providers; they resolve by class name when first needed. */
     public static function registerCoreDefaults(): void {
-        self::$pending_core = ['GroupRecipientProvider', 'MailingListRecipientProvider', 'UserRecipientProvider'];
+        self::$pending_core = ['GroupRecipientProvider', 'UserRecipientProvider'];
         // The event + event_waiting_list providers register from event_manager's
-        // serve.php when that plugin is active.
+        // serve.php, and mailing_list from email_lists', when those plugins are active.
     }
 
     /** Instantiate the named core providers. An explicit register() for the same key wins. */

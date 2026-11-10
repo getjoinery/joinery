@@ -15,6 +15,7 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.7 - a task whose requires_plugins names an inactive plugin is skipped with the reason, not run
  * @version 2.6 - each pass sweeps the RAM store: expired entries nobody read and the generations of
  *   processes that have ended (includes/RamStore.php); a store not made yet is left alone
  * @version 2.5 - a task's row is read again once its lock is held, and a task another pass ran
@@ -195,6 +196,20 @@ foreach ($tasks as $task) {
 			// The reconcile at the top of this pass has already stamped or
 			// retired this row. Absent code is a normal upgrade event, not a
 			// task that ran and failed, so it is counted as neither.
+			continue;
+		}
+
+		// A task that needs another plugin waits, unretired, while it is off.
+		$missing_plugins = ScheduledTaskRegistry::missingRequiredPlugins(ScheduledTaskRegistry::metadataFor($task_class));
+		if ($missing_plugins) {
+			$skip_message = 'skipped: needs ' . implode(', ', $missing_plugins);
+			if ($task->get('sct_last_run_status') !== 'skipped' || $task->get('sct_last_run_message') !== $skip_message) {
+				$task->set('sct_last_run_status', 'skipped');
+				$task->set('sct_last_run_message', $skip_message);
+				$task->save();
+			}
+			echo "[" . cron_stamp() . "]   $skip_message\n";
+			$tasks_skipped++;
 			continue;
 		}
 

@@ -6,6 +6,7 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 1.7 - /verify-email is an excluded path: its page shows the activation code it was opened with
  * @version 1.6 - /copy-key is an excluded path: it shows what this machine's agent is waiting for, so a
  *                copy saved a moment before the agent asked said "not waiting" for the whole wait
  * @version 1.5 - the sign-in and password-reset steps are excluded paths: a visitor halfway through
@@ -335,6 +336,7 @@ class StaticPageCache {
             '/password-reset-totp',
             '/password-set',
             '/recovery-verify',
+            '/verify-email',
             // A copy's key page shows the request this machine's agent has
             // staged, which comes and goes with no edit to the site. One
             // saved a moment before the agent asked says "not waiting" to

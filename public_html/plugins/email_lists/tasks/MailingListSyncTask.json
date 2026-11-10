@@ -1,0 +1,6 @@
+{
+  "name": "Sync mailing lists with the provider",
+  "description": "Reconciles each mailing list's subscribers with the configured provider (MailChimp): whichever side changed last wins, bounces mark the account bouncing. Lists without a provider list id are skipped.",
+  "default_frequency": "daily",
+  "default_time": "04:00:00"
+}

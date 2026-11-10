@@ -57,7 +57,10 @@ try {
 	section('a plugin that is not active loses its entries');
 	$messages = $prune->invoke($manager, $active);
 	check($slugs_present($bookings) === array(), 'all four bookings entries are gone, the profile one included');
-	check(count($messages) === 1 && strpos($messages[0], 'bookings: removed 4 menu entries') === 0,
+	// Another plugin that is off in this database may have entries of its own
+	// left; the bookings line is the one this case made.
+	$bookings_said = array_values(array_filter($messages, function ($m) { return strpos($m, 'bookings:') === 0; }));
+	check(count($bookings_said) === 1 && strpos($bookings_said[0], 'bookings: removed 4 menu entries') === 0,
 		'the sync says which plugin and how many', implode(' | ', $messages));
 
 	section('what core or an active plugin declares stays');

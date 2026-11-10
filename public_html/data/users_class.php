@@ -15,7 +15,6 @@ require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 require_once(PathHelper::getIncludePath('data/activation_codes_class.php'));
 require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
 require_once(PathHelper::getIncludePath('data/contact_types_class.php'));
-require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 
 class UserException extends SystemBaseException {}
 class DisplayableUserException extends UserException implements DisplayableErrorMessage {}
@@ -75,7 +74,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $ai_excluded_fields = [
 		'usr_totp_last_used_step', 'usr_signup_ip', 'usr_allowed_ips',
 		'usr_force_password_change', 'usr_password_recovery_disabled',
-		'usr_mailing_list_provider_id', 'usr_session_generation',
+		'usr_session_generation',
 	];
 	public static $ai_untrusted_fields = [
 		'usr_bio', 'usr_first_name', 'usr_last_name',
@@ -189,7 +188,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_disabled_time' => array('type'=>'timestamp(6)'),
 	    'usr_nickname' => array('type'=>'varchar(32)'),
 	    'usr_authhash' => array('access_class' => 'restricted', 'type'=>'varchar(32)'),
-	    'usr_mailing_list_provider_id' => array('type'=>'varchar(64)'),
 	    'usr_signup_ip' => array('type'=>'varchar(64)'),
 	    'usr_contact_preference_last_changed' => array('type'=>'timestamp(6)'),
 	    'usr_organization_name' => array('type'=>'varchar(32)'),
@@ -249,129 +247,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		return preg_replace_callback("~(?<=[-'])\\p{Ll}~u", function ($m) {
 			return mb_strtoupper($m[0], 'UTF-8');
 		}, $string);
-	}
-
-	/**
-	 * Subscribe this user to $mailing_list_ids and unsubscribe them from the
-	 * other lists. $scope limits both to the lists a page offered (null: every
-	 * list, for staff); a list outside it is left as it is.
-	 */
-	public function add_user_to_mailing_lists($mailing_list_ids, ?array $scope = null){
-		if(empty($mailing_list_ids)){
-			$mailing_list_ids = array();
-		}
-		else if($mailing_list_ids == 'all'){
-			$mailing_list_ids = 'all';
-		}	
-		else if(!is_array($mailing_list_ids)){
-			$mailing_list_ids = array($mailing_list_ids);
-		}
-
-		$search_criteria = array();
-		$mailing_lists = new MultiMailingList(
-			$search_criteria,
-			array('name'=>'ASC'));	
-		$mailing_lists->load();		
-
-		$messages = array();
-		$thismessage = array();
-		foreach ($mailing_lists as $mailing_list){
-			if ($scope !== null && !in_array((int)$mailing_list->key, array_map('intval', $scope), true)) {
-				continue;
-			}
-					
-			if($mailing_list_ids == 'all'){
-				// "All lists" means every list that can be joined: a deleted list
-				// is gone, and add_registrant() refuses an inactive one.
-				if(!$mailing_list->get('mlt_is_active') || $mailing_list->get('mlt_delete_time')){
-					continue;
-				}
-				if($mailing_list->is_user_in_list($this->key)){
-					//IF USER IS ALREADY SUBSCRIBED
-					$thismessage['message_type'] = 'warn';
-					$thismessage['message_title'] = 'Notice';
-					$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-				else{
-					//IF USER IS NOT SUBSCRIBED
-					$status = $mailing_list->add_registrant($this->key);
-					if($status){
-						$thismessage['message_type'] = 'success';
-						$thismessage['message_title'] = 'Success';
-						$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-						$messages[] = $thismessage;
-
-						// Record LIST_SIGNUP conversion event — one event per fresh subscription.
-						// Idempotent re-subscribes are skipped above (is_user_in_list branch).
-						require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
-						$_session_ctrl = SessionControl::get_instance();
-						$_session_ctrl->save_visitor_event(VisitorEvent::TYPE_LIST_SIGNUP, FALSE, 'mailing_list', $mailing_list->key);
-					}
-					else{
-						$thismessage['message_type'] = 'error';
-						$thismessage['message_title'] = 'Error';
-						$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
-						$messages[] = $thismessage;
-					}
-				}				
-			}
-			else if(in_array($mailing_list->key, $mailing_list_ids)){
-				//IF IT IS A CHOICE AND SELECTED
-				if($mailing_list->is_user_in_list($this->key)){
-					//IF USER IS ALREADY SUBSCRIBED
-					$thismessage['message_type'] = 'warn';
-					$thismessage['message_title'] = 'Notice';
-					$thismessage['message'] = 'You are already SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-					$messages[] = $thismessage;
-				}
-				else{
-					//IF USER IS NOT SUBSCRIBED
-					$status = $mailing_list->add_registrant($this->key);
-					if($status){
-						$thismessage['message_type'] = 'success';
-						$thismessage['message_title'] = 'Success';
-						$thismessage['message'] = 'You are SUBSCRIBED to the following lists: ' . $mailing_list->get('mlt_name');
-						$messages[] = $thismessage;
-
-						// Record LIST_SIGNUP conversion event — one event per fresh subscription.
-						// Idempotent re-subscribes are skipped above (is_user_in_list branch).
-						require_once(PathHelper::getIncludePath('data/visitor_events_class.php'));
-						$_session_ctrl = SessionControl::get_instance();
-						$_session_ctrl->save_visitor_event(VisitorEvent::TYPE_LIST_SIGNUP, FALSE, 'mailing_list', $mailing_list->key);
-					}
-					else{
-						$thismessage['message_type'] = 'error';
-						$thismessage['message_title'] = 'Error';
-						$thismessage['message'] = 'There was an error adding you to the following lists: ' . $mailing_list->get('mlt_name');
-						$messages[] = $thismessage;
-					}
-				}
-			}
-			else{
-
-				//IF IT IS A CHOICE AND NOT SELECTED
-				if($mailing_list->is_user_in_list($this->key)){
-					//IF USER IS SUBSCRIBED
-					$status = $mailing_list->remove_registrant($this->key);
-					if($status){
-						$thismessage['message_type'] = 'success';
-						$thismessage['message_title'] = 'Success';
-						$thismessage['message'] = 'You are UNSUBSCRIBED from the following lists: ' . $mailing_list->get('mlt_name');
-						$messages[] = $thismessage;
-					}
-					else{
-						$thismessage['message_type'] = 'error';
-						$thismessage['message_title'] = 'Error';
-						$thismessage['message'] = 'There was an error removing you from the following lists: ' . $mailing_list->get('mlt_name');
-						$messages[] = $thismessage;
-					}
-				}	
-			}				
-		}		
-		
-		return $messages;
-
 	}
 
 	//RETURNS AN ARRAY OF CONTACT TYPES THE USER HAS UNSUBSCRIBED FROM
@@ -629,13 +504,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			$session->save_visitor_event(VisitorEvent::TYPE_SIGNUP, FALSE, 'user', $user->key);
 		}
 
-		//ADD TO THE MAILING LIST IF CHOSEN
-		if(isset($data['newsletter']) && $data['newsletter']){
-			if($settings->get_setting('default_mailing_list')){
-				$messages = $user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
-				//$status = $user->subscribe_to_contact_type($settings->get_setting('default_mailing_list'));		
-			}
-		}		
 
 		//IF THE USER ENTERED A PHONE NUMBER, SAVE THAT
 		if(!$user->phone() && !empty($data['phn_phone_number'])){
@@ -1230,7 +1098,18 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		return false;
 	}
 
-	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
+	/**
+	 * Mark the account's address verified. $method names how it was proved
+	 * (activation, password_reset, email_change, admin); with one, and a save,
+	 * account.email_verified fires after the save so a plugin can act on the
+	 * proof (spec email_lists_plugin G16). $source_user_id is who acted: the
+	 * member by default, the admin for method admin.
+	 *
+	 * The signal fires when this returns. With $use_transaction FALSE inside a
+	 * caller's own transaction that is before the commit, so such a caller
+	 * passes no $method and dispatches the signal itself after committing.
+	 */
+	function email_verify_user($use_transaction=TRUE, $and_save=TRUE, $method=NULL, $source_user_id=NULL) {
 		$verify = function () use ($and_save) {
 			$this->set('usr_is_activated', TRUE);
 			$this->set('usr_email_is_verified', TRUE);
@@ -1241,6 +1120,15 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			}
 		};
 		$use_transaction ? DbConnector::transaction($verify) : $verify();
+
+		if ($method !== NULL && $and_save) {
+			SignalBus::dispatch('account.email_verified', array(
+				'user_id'        => (int)$this->key,
+				'email'          => (string)$this->get('usr_email'),
+				'method'         => (string)$method,
+				'source_user_id' => (int)($source_user_id !== NULL ? $source_user_id : $this->key),
+			));
+		}
 	}
 
 	function email_unverify_bouncing_user($use_transaction=TRUE) {
@@ -1553,8 +1441,8 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		}
 
 		$this->refuse_while_scoped_key_is_live();
-		// Asked before the mailing-list unsubscribes and the cascade below, which
-		// the parent's delete would ask only after they ran.
+		// Asked before the group removals and the cascade below, which the
+		// parent's delete would ask only after they ran.
 		$this->guard_raw_write('permanent_delete');
 		
 		$this_transaction = false;
@@ -1569,22 +1457,6 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		// with the transaction still open — so every later statement in the
 		// request ran inside a doomed transaction and quietly did nothing.
 		try {
-			//REMOVE FROM ANY MAILING LISTS
-			if(!$debug){
-				//GET LIST OF CONTACT TYPES
-				$mailing_lists = new MultiMailingList(
-					array(),
-					NULL,		//SORT BY => DIRECTION
-					NULL,  //NUM PER PAGE
-					NULL);  //OFFSET
-				$mailing_lists->load();
-				foreach($mailing_lists as $mailing_list){
-					if($mailing_list->is_user_in_list($this->key, false)){
-						$mailing_list->remove_registrant($this->key);
-					}
-				}
-			}
-
 			//DELETE ANY GROUP MEMBERSHIPS
 			$groups = Group::get_groups_in_category('user', false, 'objects');
 			foreach($groups as $group){

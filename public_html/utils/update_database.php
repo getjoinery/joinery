@@ -987,6 +987,17 @@
 		// Step: Sync plugins and themes
 		// Runs after core DB is fully up to date so plugin tables are created against current schema
 		echo "<br>\n<strong>Plugin &amp; Theme Sync</strong><br>\n";
+		// Whether the store was already a registered plugin before this sync:
+		// the store/event auto-activation below is for the upgrade on which it
+		// first appears. Read before anything here can throw; if the read
+		// itself fails, null skips that step for this run.
+		try {
+			$store_registered_before_sync = (bool)DbConnector::get_instance()->get_db_link()->query(
+				"SELECT EXISTS (SELECT 1 FROM plg_plugins WHERE plg_name = 'store')"
+			)->fetchColumn();
+		} catch (Throwable $e) {
+			$store_registered_before_sync = null;
+		}
 		try {
 			require_once(PathHelper::getIncludePath('includes/ThemeManager.php'));
 			require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
@@ -1117,6 +1128,10 @@
 			// Non-fatal — tasks reconcile again on the next cron tick.
 		}
 
+		// The markers below are declared settings, so the core seed above writes
+		// each as an empty row before this runs: "evaluated" is the value 1, not
+		// the row being there.
+		//
 		// Step: One-time conditional store / event_manager activation (upgrade path).
 		// Existing installs carrying orders/events data would silently lose checkout,
 		// webhooks and event pages when the new plugins register inactive on upgrade.
@@ -1128,10 +1143,24 @@
 		try {
 			$dblink = DbConnector::get_instance()->get_db_link();
 			$marker_present = $dblink->query(
-				"SELECT 1 FROM stg_settings WHERE stg_name = '_store_event_autoactivate_v1' LIMIT 1"
+				"SELECT 1 FROM stg_settings WHERE stg_name = '_store_event_autoactivate_v1' AND stg_value = '1' LIMIT 1"
 			)->fetchColumn();
 
-			if (!$marker_present) {
+			if (!$marker_present && $store_registered_before_sync === null) {
+				echo "⚠️  Store/event auto-activation skipped this run: could not tell whether the store was already a plugin<br>\n";
+			} elseif (!$marker_present && $store_registered_before_sync) {
+				// The store was a plugin before this upgrade, so whether it is
+				// on is the operator's choice: record the step as done, change
+				// nothing. (A site installed with the store as a plugin carries
+				// the marker empty from its first seed.) Limit: an upgrade that
+				// first registered the store but died before this step leaves
+				// it off for good; only a site from before 2026-07-10 can be one.
+				$dblink->prepare(
+					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
+					 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
+				)->execute();
+				echo "✓ Store/event auto-activation not needed (the store was already a plugin)<br>\n";
+			} elseif (!$marker_present) {
 				$count_rows = function($table) use ($dblink) {
 					if (!$dblink->query("SELECT to_regclass('public.$table')")->fetchColumn()) return 0;
 					return (int)$dblink->query("SELECT count(*) FROM $table")->fetchColumn();
@@ -1165,7 +1194,7 @@
 
 				$dblink->prepare(
 					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
-					 ON CONFLICT (stg_name) DO NOTHING"
+					 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
 				)->execute();
 				echo "✓ Store/event auto-activation evaluated (store=" . ($activate_store ? 'yes' : 'no')
 					. ", events=" . ($activate_events ? 'yes' : 'no') . ")<br>\n";
@@ -1175,6 +1204,50 @@
 		} catch (\Throwable $e) {
 			echo "⚠️  Store/event auto-activation failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 			// Non-fatal, like the surrounding steps.
+		}
+
+		// Step: One-time conditional email_lists activation (upgrade path; spec
+		// email_lists_plugin §6). Lists and campaigns moved out of core into the
+		// email_lists plugin; a site that already has a mailing list, or a
+		// campaign aimed at one, keeps them. A campaign row alone is not enough:
+		// every message to a member, group or event used to write one. Same
+		// one-time marker rule as the store/event step above.
+		echo "<br>\n<strong>Email Lists Auto-Activation</strong><br>\n";
+		try {
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$marker_present = $dblink->query(
+				"SELECT 1 FROM stg_settings WHERE stg_name = '_email_lists_autoactivate_v1' AND stg_value = '1' LIMIT 1"
+			)->fetchColumn();
+
+			if (!$marker_present) {
+				$has_rows = function ($sql, $table) use ($dblink) {
+					if (!$dblink->query("SELECT to_regclass('public.$table')")->fetchColumn()) return false;
+					return (bool)$dblink->query($sql)->fetchColumn();
+				};
+				$activate_lists = $has_rows('SELECT EXISTS (SELECT 1 FROM mlt_mailing_lists)', 'mlt_mailing_lists')
+					|| $has_rows("SELECT EXISTS (SELECT 1 FROM erg_email_recipient_groups WHERE erg_provider = 'mailing_list')", 'erg_email_recipient_groups');
+
+				if ($activate_lists) {
+					require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+					$q = $dblink->prepare("SELECT plg_active FROM plg_plugins WHERE plg_name = ?");
+					$q->execute(['email_lists']);
+					$active = $q->fetchColumn();
+					if ($active !== false && (int)$active === 0) {
+						PluginManager::getInstance()->activate('email_lists');
+						echo "✓ Activated plugin 'email_lists'<br>\n";
+					}
+				}
+
+				$dblink->prepare(
+					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_email_lists_autoactivate_v1', '1')
+					 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
+				)->execute();
+				echo "✓ Email lists auto-activation evaluated (activate=" . ($activate_lists ? 'yes' : 'no') . ")<br>\n";
+			} else {
+				echo "✓ Email lists auto-activation already ran (marker present)<br>\n";
+			}
+		} catch (\Throwable $e) {
+			echo "⚠️  Email lists auto-activation failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 		}
 
 		// ===== DEFERRED COLUMN CLEANUP (--cleanup mode only) =====

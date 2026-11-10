@@ -1,0 +1,6 @@
+{
+  "name": "Send queued campaigns",
+  "description": "Sends campaign emails whose scheduled time has passed, re-checking each recipient's subscription at send time.",
+  "activate_on_install": true,
+  "default_frequency": "every_run"
+}

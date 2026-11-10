@@ -199,7 +199,6 @@ Built-in component types available in `/views/components/`:
 | `hero_static` | hero | Hero section with heading, subheading, background, CTA | Bootstrap |
 | `feature_grid` | features | Grid of icon + title + description items | Bootstrap |
 | `cta_banner` | conversion | Full-width call-to-action banner | Bootstrap |
-| `list_signup` | conversion | Newsletter/mailing list signup with logic function | Bootstrap |
 | `custom_html` | custom | Raw HTML for advanced users | None |
 | `page_title` | layout | Page title with optional breadcrumbs | Bootstrap |
 | `image_gallery` | media | Image gallery (programmatic rendering) | Bootstrap |
@@ -334,10 +333,13 @@ Templates are PHP files in `views/components/` that render component output.
 
 ```
 /views/components/hero_static.php       # Base template
+/plugins/{plugin}/views/components/list_signup.php  # A plugin's component
 /theme/{theme}/views/components/hero_static.php  # Theme override
 ```
 
 Templates follow the standard theme override chain via `PathHelper::getThemeFilePath()`.
+
+A plugin ships components in its own `views/components/` (a `.json` and a `.php` per type, as in core). Sync reads every plugin's folder; a plugin component's `requires_plugin` defaults to its plugin, so it renders only while that plugin is active. Its `logic_function` file lives in the plugin's `logic/components/`. A theme's file of the same type key overrides it.
 
 ### Templates carry no content
 
@@ -556,7 +558,6 @@ function newsletter_signup_logic($config) {
     }
 
     // Load mailing list(s) based on config
-    require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
     $list_mode = $config['list_mode'] ?? 'default';
 
     // ... resolve lists, check subscriptions, build form action ...

@@ -29,7 +29,6 @@ $logins = $page_vars['logins'];
 $num_logins = $page_vars['num_logins'];
 $dropdown_button = $page_vars['dropdown_button'];
 $show_all_url = $page_vars['show_all_url'];
-$user_subscribed_list = $page_vars['user_subscribed_list'];
 $user_tier = $page_vars['user_tier'];
 $tier_changes = $page_vars['tier_changes'];
 $groups = $page_vars['groups'];
@@ -178,18 +177,6 @@ array(
 				</table>
 			</div>
 		</div>
-
-		<!-- Mailing Lists Card -->
-		<?php if(!empty($user_subscribed_list)): ?>
-		<div class="card mt-3">
-			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-envelope-open me-2"></span>Mailing List Subscriptions</h6>
-			</div>
-			<div class="card-body">
-				<p class="mb-0">This user is subscribed to: <strong><?php echo implode(', ', $user_subscribed_list); ?></strong></p>
-			</div>
-		</div>
-		<?php endif; ?>
 
 		<!-- Groups Card -->
 		<div class="card mt-3">
@@ -448,7 +435,7 @@ array(
 </div>
 
 <?php
-// ---- Plugin-contributed panels: Orders, Subscriptions (store), Events (event_manager) ----
+// ---- Plugin-contributed panels: Orders, Subscriptions (store), Events (event_manager), Mailing Lists (email_lists) ----
 // Each panel renders its own section and loads its own data; absent when the
 // owning plugin is inactive.
 foreach (AdminUserPanelRegistry::panels() as $panel) {
@@ -466,7 +453,7 @@ foreach (AdminUserPanelRegistry::panels() as $panel) {
 	<div class="col-lg-6">
 		<div class="card">
 			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-inbox me-2"></span>Received Emails</h6>
+				<h6 class="mb-0"><span class="fas fa-inbox me-2"></span>Messages Received</h6>
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
@@ -480,26 +467,23 @@ foreach (AdminUserPanelRegistry::panels() as $panel) {
 						</thead>
 						<tbody>
 							<?php
-								require_once(PathHelper::getIncludePath('data/emails_class.php'));
-								require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
-								$received_emails = new MultiEmailRecipient(
-									array('user_id' => $user->key, 'sent' => TRUE),
-									NULL,
+								$received_emails = new MultiDirectMessageRecipient(
+									array('dmr_usr_user_id' => $user->key, 'live_messages' => true),
+									array('dmr_direct_message_recipient_id' => 'DESC'),
 									$list_limit,
 									0);
-								$received_emails->load();
 
 								foreach ($received_emails as $received_email):
-									$email = new Email($received_email->get('erc_eml_email_id'), TRUE);
+									$email = new DirectMessage($received_email->get('dmr_dmg_direct_message_id'), TRUE);
 							?>
 								<tr>
 									<td>
-										<a href="/admin/admin_email_view?eml_email_id=<?php echo $email->key; ?>">
-											<?php echo htmlspecialchars($email->get('eml_subject')); ?>
+										<a href="/admin/admin_direct_message?dmg_direct_message_id=<?php echo (int)$email->key; ?>">
+											<?php echo htmlspecialchars((string)$email->get('dmg_subject')); ?>
 										</a>
 									</td>
-									<td class="text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
-									<td class="text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
+									<td class="text-center fs-11"><?php echo htmlspecialchars($received_email->get_status_text()); ?></td>
+									<td class="text-center fs-11"><?php echo $received_email->get('dmr_sent_time') ? LibraryFunctions::convert_time($received_email->get('dmr_sent_time'), "UTC", $session->get_timezone(), 'M j') : ''; ?></td>
 								</tr>
 							<?php endforeach; ?>
 						</tbody>
@@ -513,7 +497,7 @@ foreach (AdminUserPanelRegistry::panels() as $panel) {
 		<!-- Sent Emails -->
 		<div class="card mt-3">
 			<div class="card-header bg-body-tertiary">
-				<h6 class="mb-0"><span class="fas fa-paper-plane me-2"></span>Sent Emails</h6>
+				<h6 class="mb-0"><span class="fas fa-paper-plane me-2"></span>Messages Sent</h6>
 			</div>
 			<div class="card-body p-0">
 				<div class="table-responsive">
@@ -527,19 +511,18 @@ foreach (AdminUserPanelRegistry::panels() as $panel) {
 						</thead>
 						<tbody>
 							<?php
-								$emails = new MultiEmail(
-									array('user_id' => $user->key),
-									NULL,
+								$emails = new MultiDirectMessage(
+									array('dmg_usr_user_id_sender' => $user->key, 'deleted' => false),
+									array('dmg_direct_message_id' => 'DESC'),
 									$list_limit,
 									0);
-								$emails->load();
 
 								foreach ($emails as $email):
 							?>
 								<tr>
-									<td><?php echo htmlspecialchars($email->get('eml_subject')); ?></td>
+									<td><a href="/admin/admin_direct_message?dmg_direct_message_id=<?php echo (int)$email->key; ?>"><?php echo htmlspecialchars((string)$email->get('dmg_subject')); ?></a></td>
 									<td class="text-center fs-11"><?php echo htmlspecialchars($email->get_status_text()); ?></td>
-									<td class="text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
+									<td class="text-center fs-11"><?php echo LibraryFunctions::convert_time($email->get('dmg_sent_time') ?: $email->get('dmg_create_time'), "UTC", $session->get_timezone(), 'M j'); ?></td>
 								</tr>
 							<?php endforeach; ?>
 						</tbody>

@@ -7,8 +7,6 @@ function admin_event_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
-	require_once(PathHelper::getIncludePath('data/emails_class.php'));
-	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
 	require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
 	require_once(PathHelper::getIncludePath('data/messages_class.php'));
@@ -27,6 +25,15 @@ function admin_event_logic(array $input): LogicResult {
 	$evt_event_id = !empty($input['evt_event_id']) ? $input['evt_event_id'] : (!empty($input['evt_event_id']) ? $input['evt_event_id'] : null);
 	$event = new Event($evt_event_id, TRUE);
 	$event->assert_found();
+
+	// Panels plugins add to this page (AdminEntityPanelRegistry, 'event')
+	// handle their own POST actions, before the page's own.
+	if (LibraryFunctions::isFormSubmission()) {
+		$panel_result = AdminEntityPanelRegistry::handlePost('event', $event, $input);
+		if ($panel_result !== null) {
+			return $panel_result;
+		}
+	}
 
 	// Handle actions
 	if(($input['action'] ?? null) == 'delete'){
@@ -203,25 +210,17 @@ function admin_event_logic(array $input): LogicResult {
 	$event_image = $event->get('evt_fil_file_id') ? new File($event->get('evt_fil_file_id'), TRUE) : null;
 	$event_photos = $event->get_photos();
 
-	// EMAILS TO REGISTRANTS AND TO THE WAITING LIST: every email whose
-	// audience named this event, newest first.
+	// MESSAGES TO REGISTRANTS AND TO THE WAITING LIST: every direct message
+	// whose audience named this event, newest first.
 	$mnumperpage = 20;
 	$moffset = LibraryFunctions::fetch_variable('moffset', 0, 0, '');
-	$registrant_emails = new MultiEmail(
-		array('recipient_group' => array('provider' => 'event', 'reference_id' => $event->key), 'deleted' => false),
-		array('email_id' => 'DESC'),
-		$mnumperpage,
-		$moffset);
+	$registrant_emails = AdminPage::direct_messages_to('event', (int)$event->key, $mnumperpage, (int)$moffset);
 	$numregistrantemails = $registrant_emails->count_all();
 	$mpager = new Pager(array('numrecords'=>$numregistrantemails, 'numperpage'=> $mnumperpage), 'm');
 
 	$lnumperpage = 20;
 	$loffset = LibraryFunctions::fetch_variable('loffset', 0, 0, '');
-	$waiting_list_emails = new MultiEmail(
-		array('recipient_group' => array('provider' => 'event_waiting_list', 'reference_id' => $event->key), 'deleted' => false),
-		array('email_id' => 'DESC'),
-		$lnumperpage,
-		$loffset);
+	$waiting_list_emails = AdminPage::direct_messages_to('event_waiting_list', (int)$event->key, $lnumperpage, (int)$loffset);
 	$numwaitinglistemails = $waiting_list_emails->count_all();
 	$lpager = new Pager(array('numrecords'=>$numwaitinglistemails, 'numperpage'=> $lnumperpage), 'l');
 

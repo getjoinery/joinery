@@ -17,7 +17,6 @@ $page->admin_header(
 array(
 	'menu-id'=> 'contact-types',
 	'breadcrumbs' => array(
-		'Emails'=>'/admin/admin_emails',
 		'Contact Types' => '',
 	),
 	'session' => $session,

@@ -13,6 +13,7 @@ function admin_user_add_logic(array $input): LogicResult {
 	if (LibraryFunctions::isFormSubmission()){
 
 		$user = User::CreateCompleteNew($input, !empty($input['send_activation_email']), false, false);
+		SignupFieldRegistry::handle($user, $input, SignupFieldRegistry::CONTEXT_ADMIN_ADD);
 
 		//NOW REDIRECT
 		$session = SessionControl::get_instance();

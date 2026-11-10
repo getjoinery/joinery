@@ -142,7 +142,10 @@ $routes = [
         '/event/{slug}'        => ['view' => 'views/event', 'plugin' => 'event_manager', 'check_setting' => 'events_active'],
         '/location/{slug}'     => ['view' => 'views/location', 'plugin' => 'event_manager', 'check_setting' => 'events_active'],
         '/product/{slug}'      => ['view' => 'views/product', 'plugin' => 'store', 'check_setting' => 'products_active'],
-        '/list/{slug}'         => ['view' => 'views/list'],
+        '/list/{slug}'         => ['view' => 'views/list', 'plugin' => 'email_lists'],
+        '/lists'               => ['view' => 'views/lists', 'plugin' => 'email_lists'],
+        // One person's confirmation link: never cached, and it names the lists.
+        '/email_lists/confirm' => ['view' => 'views/confirm', 'plugin' => 'email_lists', 'static_cache' => false],
         '/video/{slug}'        => ['view' => 'views/video', 'check_setting' => 'videos_active'],
         '/book/{slug}'         => ['view' => 'plugins/bookings/views/book', 'check_setting' => 'bookings_active'],
         '/booking/manage'      => ['view' => 'plugins/bookings/views/booking_manage', 'check_setting' => 'bookings_active'],
@@ -290,6 +293,11 @@ $routes = [
             $plugin = $params[2] ?? '';
             $test_page = $params[4] ?? 'run';
             $test_file = "plugins/{$plugin}/tests/{$test_page}.php";
+
+            // As with its admin pages: an inactive plugin's classes do not resolve.
+            if (!PluginHelper::isPluginActive($plugin)) {
+                return false;
+            }
 
             if (file_exists($test_file)) {
                 $is_valid_page = true;

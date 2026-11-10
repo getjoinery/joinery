@@ -286,19 +286,6 @@ function dashboard_render_section($section) {
                     </div>
                 </div>
 
-                <div class="card">
-                    <div class="card-header">
-                        <h6 class="jy-tight">Mailing Lists</h6>
-                    </div>
-                    <div class="card-body text-sm">
-                        <?php if (empty($page_vars['user_subscribed_list'])): ?>
-                            <p class="muted jy-tight">Not subscribed to any lists.</p>
-                        <?php else: ?>
-                            <p class="muted jy-tight"><?php echo htmlspecialchars(implode(', ', $page_vars['user_subscribed_list'])); ?></p>
-                        <?php endif; ?>
-                    </div>
-                </div>
-
             </div>
         </div>
 

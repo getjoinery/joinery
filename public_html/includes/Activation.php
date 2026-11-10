@@ -24,7 +24,13 @@ class Activation {
 	const EMAIL_CHANGE = 4;
 	const RECOVERY_VERIFY = 5;
 
-	static function ActivateUser($act_code, $user_id_confirm=NULL) {
+	/**
+	 * Verify the address an EMAIL_VERIFY code was mailed for (the code is not spent here).
+	 * $method is how the person proved it (activation: the Verify button;
+	 * password_reset; admin), carried on account.email_verified. Every caller
+	 * is a POST: opening the mailed link only shows the button (verify_email_logic).
+	 */
+	static function ActivateUser($act_code, $user_id_confirm=NULL, $method='activation', $source_user_id=NULL) {
 		$user_id = self::getIdFromTempCode(strtolower($act_code), Activation::EMAIL_VERIFY);
 		if ($user_id) {
 			$user = new User($user_id, TRUE);
@@ -38,10 +44,14 @@ class Activation {
 			return FALSE;
 		}
 
-		// Attempt to activate a user. The mailed link's secret authorizes this,
-		// not the session cookie, so no other site can make it; the link is a GET.
+		// The mailed code authorizes this, not the session cookie, and nobody
+		// need be signed in, so it is written past the model's write check.
+		// The page-view guard stays armed: every caller is a POST, and a GET
+		// that reached here would be refused, not verify silently.
 		if (!$user->get('usr_email_is_verified')) {
-			SystemBase::server_initiated_write(function () use ($user) { $user->email_verify_user(TRUE, TRUE); });
+			SystemBase::rule_checked_write(function () use ($user, $method, $source_user_id) {
+				$user->email_verify_user(TRUE, TRUE, $method, $source_user_id);
+			});
 		}
 
 		return $user;
@@ -79,11 +89,9 @@ class Activation {
 		$user->prepare();
 		$user->save();
 
-		// Attempt to activate a user
-		if (!$user->get('usr_email_is_verified')) {
-			// The user is valid
-			$user->email_verify_user(TRUE, TRUE);
-		}
+		// The code proved the new inbox: verified, and account.email_verified
+		// fires even for an account verified before, since the address changed.
+		$user->email_verify_user(TRUE, TRUE, 'email_change');
 
 		Activation::deleteTempCode($act_code);
 		return $user;

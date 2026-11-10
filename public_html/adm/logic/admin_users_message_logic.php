@@ -1,13 +1,15 @@
 <?php
 /**
- * Group send: an email to an audience — an event's registrants, its waiting
- * list, a group's members, or one person — queued as an email campaign.
+ * Direct message: an email to an audience (an event's registrants, its
+ * waiting list, a group's members, or one person) about the thing they
+ * belong to (spec email_lists_plugin §3).
  *
- * The page creates one Email row, attaches the audience and the copies as
- * recipient groups, and queues it. The scheduled sender expands the audience
- * and delivers in the background, resuming after a failure instead of
- * repeating. Nothing is sent inside this request.
+ * The page queues a DirectMessage: one row for the message and one per
+ * recipient. The SendQueuedEmails task sends them in the background,
+ * resuming after a failure instead of repeating. Nothing is sent inside this
+ * request. The sender always gets a copy; an event's leader gets one too.
  *
+ * @version 3.0.0 - a DirectMessage, not a campaign Email row
  * @version 2.0.0
  */
 function admin_users_message_logic(array $input): LogicResult {
@@ -34,9 +36,11 @@ function admin_users_message_logic(array $input): LogicResult {
 	$group = NULL;
 	$recipient = NULL;
 
-	// Each entry names its audience as recipient groups, and the inner
-	// template the email is rendered with. The sender always gets a copy.
-	$recipient_groups = array();
+	// The audience: a provider and its reference, plus anyone else who gets a
+	// copy. The sender always does.
+	$provider = NULL;
+	$reference_id = 0;
+	$also_user_ids = array();
 
 	if ($evt_event_id) {
 		if (!PluginHelper::isPluginActive('event_manager')) {
@@ -47,12 +51,13 @@ function admin_users_message_logic(array $input): LogicResult {
 			return LogicResult::error('No such event.');
 		}
 		$inner_template = $settings->get_setting('event_email_inner_template');
+		$reference_id = (int)$event->key;
 		if ($waiting_list) {
-			$recipient_groups[] = array('event_waiting_list', $event->key);
+			$provider = 'event_waiting_list';
 		} else {
-			$recipient_groups[] = array('event', $event->key);
+			$provider = 'event';
 			if ($event->get('evt_usr_user_id_leader')) {
-				$recipient_groups[] = array('user', (int)$event->get('evt_usr_user_id_leader'));
+				$also_user_ids[] = (int)$event->get('evt_usr_user_id_leader');
 			}
 		}
 	}
@@ -62,7 +67,8 @@ function admin_users_message_logic(array $input): LogicResult {
 			return LogicResult::error('No such group.');
 		}
 		$inner_template = $settings->get_setting('group_email_inner_template');
-		$recipient_groups[] = array('group', $group->key);
+		$provider = 'group';
+		$reference_id = (int)$group->key;
 	}
 	else {
 		$recipient = new User($usr_user_id, TRUE);
@@ -70,9 +76,10 @@ function admin_users_message_logic(array $input): LogicResult {
 			return LogicResult::error('No such user.');
 		}
 		$inner_template = $settings->get_setting('individual_email_inner_template');
-		$recipient_groups[] = array('user', $recipient->key);
+		$provider = 'user';
+		$reference_id = (int)$recipient->key;
 	}
-	$recipient_groups[] = array('user', $sender->key);
+	$also_user_ids[] = (int)$sender->key;
 
 	if (LibraryFunctions::isFormSubmission()) {
 		// Sending is mail to other people about themselves: personal work.
@@ -83,29 +90,13 @@ function admin_users_message_logic(array $input): LogicResult {
 			return LogicResult::error('A subject and a message are required.');
 		}
 
-		$email = new Email(NULL);
-		$email->set('eml_usr_user_id', $sender->key);
-		$email->set('eml_from_address', $settings->get_setting('defaultemail'));
-		$email->set('eml_from_name', $settings->get_setting('defaultemailname'));
-		$email->set('eml_reply_to', $settings->get_setting('defaultemail'));
-		$email->set('eml_subject', $subject);
-		$email->set('eml_message_html', $body);
-		$email->set('eml_message_plain', LibraryFunctions::htmlToText($body));
-		$email->set('eml_message_template_html', $inner_template);
-		$email->set('eml_status', Email::EMAIL_CREATED);
-		$email->save();
-		$email->load();
-
-		foreach ($recipient_groups as $rg) {
-			$email->add_recipient_group($rg[0], $rg[1]);
-		}
-
-		$numrecipients = $email->queue();
+		$message = DirectMessage::queue_to($sender, $provider, $reference_id, $subject, $body, $inner_template, $also_user_ids);
+		$numrecipients = (int)$message->get('dmg_recipient_count');
 
 		return LogicResult::render(array(
 			'show_success' => true,
 			'numrecipients' => $numrecipients,
-			'email' => $email,
+			'message' => $message,
 			'event' => $event,
 			'group' => $group,
 			'recipient' => $recipient,

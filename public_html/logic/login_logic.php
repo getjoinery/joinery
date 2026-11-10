@@ -10,62 +10,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/logins_class.php'));
 
-	//HANDLE ACTIVATION FIRST IF PRESENT
+	// The activation link (activation_content) opens /login?act_code=. Opening
+	// it verifies nothing: the Verify button on /verify-email does, by POST.
 	if (!empty($input['act_code'])) {
-		$act_code = $input['act_code'];
-		$activated_user = NULL;
-		$activated = FALSE;
-
-		$session = SessionControl::get_instance();
-		$page_vars['session'] = $session;
-		$settings = Globalvars::get_instance();
-		$page_vars['settings'] = $settings;
-
-		if(!$settings->get_setting('register_active')){
-			return LogicResult::error('This feature is turned off');
-		}
-
-		if ($session->get_user_id()) {
-			$user = new User($session->get_user_id(), TRUE);
-		} else {
-			$user = NULL;
-		}
-
-		// If we have an activate code and a logged in user, make sure the code matches the user
-		// and then activate them.  If we don't have a logged in user, just activate them!
-		if ($activated_user = Activation::ActivateUser($act_code, $user ? $user->key : NULL)) {
-			$activated = TRUE;
-
-			// IF LOGGED IN, REDIRECT
-			if ($user) {
-				if (!$activated_user->get('usr_password')) {
-					return LogicResult::redirect('/password-set');
-				}
-				else{
-					return LogicResult::redirect('/page/verify-email-confirm');
-				}
-
-			} else {
-				// Does this user need to create a password?
-				if (!$activated_user->get('usr_password')) {
-
-					// Login the user and let them create a password
-					$session->store_session_variables($activated_user);
-
-					if ($session->get_initial_user_id() == $session->get_user_id()) {
-						Login::record($activated_user->key, Login::LOGIN_FORM);
-					}
-
-					return LogicResult::redirect('/password-set');
-				}
-				else {
-					return LogicResult::redirect('/page/verify-email-confirm');
-				}
-			}
-		}
-		else {
-			return LogicResult::redirect('/login?msgtext=activate_other_user');
-		}
+		return LogicResult::redirect('/verify-email?act_code=' . rawurlencode((string)$input['act_code']));
 	}
 
 	//NOW PROCESS REGULAR LOGIN

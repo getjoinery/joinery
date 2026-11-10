@@ -17,6 +17,7 @@
  * that boundary matters: a site whose outbound mail can be pointed elsewhere
  * is a site whose password resets can be.
  *
+ * @version 1.3 - apply() records included_mail_identity (host|username), blank when no service or host
  * @version 1.2 - testTrap(): a test site sends all its mail to one address of its plane's
  * @version 1.1 - defaultFrom(): a site that has no From address yet gets hello@ its sending
  *   domain, replies to its owner (B166)
@@ -69,6 +70,16 @@ class HostedMailSettingsMap {
 		Setting::put('smtp_auth', trim((string)($values['username'] ?? '')) !== '' ? '1' : '0');
 		Globalvars::get_instance()->forget_setting('smtp_auth');
 		$written[] = 'smtp_auth';
+
+		// Which credential is the included one (EmailSender::usesIncludedMail()):
+		// blank when this push gave no service or no host.
+		$host = strtolower(trim((string)($values['host'] ?? '')));
+		$identity = (trim((string)($values['service'] ?? '')) !== '' && $host !== '')
+			? $host . '|' . trim((string)($values['username'] ?? ''))
+			: '';
+		Setting::put('included_mail_identity', $identity);
+		Globalvars::get_instance()->forget_setting('included_mail_identity');
+		$written[] = 'included_mail_identity';
 		return $written;
 	}
 

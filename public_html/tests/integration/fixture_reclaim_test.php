@@ -135,32 +135,37 @@ try {
 	// ------------------------------------------------------------------
 	section('A table with no birth column goes only while no other run is alive');
 
-	// An email has no creation time to age by, so its row cannot be judged
-	// stale by the floor; a live run might still be using it.
-	$stranded_email = new Email(NULL);
-	$stranded_email->set('eml_subject', 'HarnessTest ReclaimTimeless');
-	$stranded_email->set('eml_message_plain', 'body');
-	$stranded_email->set('eml_status', Email::EMAIL_CREATED);
-	$stranded_email->save();
-	$stranded_email->load();
-	$email_exists = function () use ($db, $stranded_email) {
-		$q = $db->prepare('SELECT count(*) FROM eml_emails WHERE eml_email_id = ?');
-		$q->execute(array($stranded_email->key));
-		return (int)$q->fetchColumn() === 1;
-	};
-	$other = $other_token();
-	$lock_files[] = $live_dir . '/' . $other;
-	$fh = fopen($live_dir . '/' . $other, 'c');
-	check($fh && flock($fh, LOCK_EX | LOCK_NB), 'this suite holds a lock standing in for another live run');
-	$held[] = $fh;
-	harness_cleanup_stale_fixtures();
-	check($email_exists(), 'while another run is alive, the email is left alone');
-	flock($fh, LOCK_UN);
-	if (harness_other_run_live()) {
-		harness_skip('with no other run alive, the email is reclaimed', 'a real run is alive on this box right now');
-	} else {
+	// The example is the email_lists plugin's campaign table.
+	if (class_exists('Email')) {
+		// An email has no creation time to age by, so its row cannot be judged
+		// stale by the floor; a live run might still be using it.
+		$stranded_email = new Email(NULL);
+		$stranded_email->set('eml_subject', 'HarnessTest ReclaimTimeless');
+		$stranded_email->set('eml_message_plain', 'body');
+		$stranded_email->set('eml_status', Email::EMAIL_CREATED);
+		$stranded_email->save();
+		$stranded_email->load();
+		$email_exists = function () use ($db, $stranded_email) {
+			$q = $db->prepare('SELECT count(*) FROM eml_emails WHERE eml_email_id = ?');
+			$q->execute(array($stranded_email->key));
+			return (int)$q->fetchColumn() === 1;
+		};
+		$other = $other_token();
+		$lock_files[] = $live_dir . '/' . $other;
+		$fh = fopen($live_dir . '/' . $other, 'c');
+		check($fh && flock($fh, LOCK_EX | LOCK_NB), 'this suite holds a lock standing in for another live run');
+		$held[] = $fh;
 		harness_cleanup_stale_fixtures();
-		check(!$email_exists(), 'with no other run alive, the email is reclaimed', 'email ' . $stranded_email->key . ' survived');
+		check($email_exists(), 'while another run is alive, the email is left alone');
+		flock($fh, LOCK_UN);
+		if (harness_other_run_live()) {
+			harness_skip('with no other run alive, the email is reclaimed', 'a real run is alive on this box right now');
+		} else {
+			harness_cleanup_stale_fixtures();
+			check(!$email_exists(), 'with no other run alive, the email is reclaimed', 'email ' . $stranded_email->key . ' survived');
+		}
+	} else {
+		harness_skip('a table with no birth column goes only while no other run is alive', 'the email_lists plugin is not active here');
 	}
 
 	// ------------------------------------------------------------------

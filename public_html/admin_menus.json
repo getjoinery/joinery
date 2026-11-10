@@ -43,8 +43,7 @@
             "title": "Emails",
             "url": "",
             "order": 2,
-            "icon": "envelope",
-            "settingActivate": "emails_active"
+            "icon": "envelope"
         },
         {
             "slug": "statistics",
@@ -75,14 +74,6 @@
             "parent": "users"
         },
         {
-            "slug": "emails-list",
-            "title": "Emails list",
-            "url": "admin_emails",
-            "order": 1,
-            "settingActivate": "emails_active",
-            "parent": "emails"
-        },
-        {
             "slug": "pages",
             "title": "Pages",
             "url": "",
@@ -111,7 +102,6 @@
             "title": "Email Templates",
             "url": "admin_email_templates",
             "order": 5,
-            "settingActivate": "emails_active",
             "parent": "emails"
         },
         {
@@ -174,13 +164,6 @@
             "order": 1,
             "settingActivate": "surveys_active",
             "parent": "surveys-parent"
-        },
-        {
-            "slug": "mailing-lists",
-            "title": "Mailing Lists",
-            "url": "admin_mailing_lists",
-            "order": 7,
-            "parent": "emails"
         },
         {
             "slug": "email-statistics",

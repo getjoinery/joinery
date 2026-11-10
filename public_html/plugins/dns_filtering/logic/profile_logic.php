@@ -21,18 +21,19 @@ function profile_logic(array $input): LogicResult{
 
 	$session = SessionControl::get_instance();
 	$page_vars['session'] = $session;
+
+	// An activation code verifies nothing on a page view; the Verify button does.
+	$act_code = LibraryFunctions::fetch_variable('act_code', NULL);
+	if ($act_code) {
+		return LogicResult::redirect('/verify-email?act_code=' . rawurlencode((string)$act_code) . '&then=profile');
+	}
+
 	$session->check_permission(0);
 	$session->set_return();
 
 
 	$user = new User($session->get_user_id(), TRUE);
 	$page_vars['user'] = $user;
-
-	//VERIFY THE EMAIL IF THE ACTIVATION CODE IS PRESENT
-	$act_code = LibraryFunctions::fetch_variable('act_code', NULL);
-	if ($act_code) {
-		Activation::ActivateUser($act_code);
-	}
 
 
 	$tier = SubscriptionTier::GetUserTier($user->key);
@@ -98,21 +99,9 @@ function profile_logic(array $input): LogicResult{
 		$page_vars['active_subscription'] = NULL;
 	}
 
-	$user_subscribed_list = array();
-	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
-	$user_lists = new MultiMailingListRegistrant(
-		$search_criteria);
-	$user_lists->load();
-
-	foreach ($user_lists as $user_list){
-		$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
-		$user_subscribed_list[] = $mailing_list->get('mlt_name');
-	}
-
-
-
-	$page_vars['user_subscribed_list'] = $user_subscribed_list;
-
+	// Sections plugins add to the member's profile (the email_lists plugin's
+	// mailing lists, for one), shown as rows of the About box.
+	$page_vars['dashboard_sections'] = ProfileDashboardRegistry::sections($user);
 
 	return LogicResult::render($page_vars);
 }

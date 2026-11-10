@@ -7,7 +7,6 @@
 
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_settings_email_logic.php'));
@@ -81,62 +80,6 @@
 				. 'and logged until this is fixed. The mailbox Setup tab\'s Automated mail identity card '
 				. 'walks the fix.</div>';
 		}
-
-		// Mailing list provider, with its connection status beside it. Which
-		// provider's credentials are on screen follows the declared show_when,
-		// so adding a provider is a manifest change, not a page change.
-		require_once(PathHelper::getIncludePath('includes/MailingListService.php'));
-		$current_mailing_list_provider = $settings->get_setting('mailing_list_provider');
-
-		echo '<div class="row">';
-		echo '<div class="col-md-6">';
-		SettingsFieldRenderer::renderGroups($formwriter, array('mailing_list'), array(
-			'heading_level' => 'h5',
-		));
-		echo '</div>';
-
-		echo '<div class="col-md-6">';
-		echo '<h5>Connection Status</h5>';
-		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
-
-		if ($run_validation) {
-			$provider_instance = $current_mailing_list_provider
-				? MailingListService::getProvider($current_mailing_list_provider)
-				: null;
-			if (!$provider_instance) {
-				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">No mailing list provider selected</div>';
-			} elseif (!$provider_instance::validateConfiguration()['valid']) {
-				echo '<div style="color: #666; text-align: center; padding: 40px 10px;">Credentials not configured &mdash; validation skipped</div>';
-			} else {
-				$result = $provider_instance->validateApiConnection();
-				if (!empty($result['success'])) {
-					echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>&#10003; ' . htmlspecialchars($result['label']) . '</strong></div>';
-					if (!empty($result['details']) && is_array($result['details'])) {
-						echo '<div style="font-size: 11px; color: #666; margin-bottom: 8px;"><strong>Details:</strong></div>';
-						foreach ($result['details'] as $key => $value) {
-							echo '<div style="font-size: 10px; color: #007bff; margin-bottom: 1px; padding: 1px 3px; background: white; border-radius: 2px;">';
-							echo htmlspecialchars((string)$key) . ': <span style="color: #666;">' . htmlspecialchars((string)$value) . '</span>';
-							echo '</div>';
-						}
-					}
-				} else {
-					echo '<div style="color: #dc3545;"><strong>&#10007; ' . htmlspecialchars($result['label'] ?? 'Connection Failed') . '</strong></div>';
-					if (!empty($result['error'])) {
-						echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">' . htmlspecialchars($result['error']) . '</div>';
-					}
-				}
-			}
-		} else {
-			echo '<div style="text-align: center; padding: 40px;">';
-			echo '<p style="color: #666; margin-bottom: 15px;">API validation not run yet</p>';
-			echo '<a href="?run_validation=1" class="btn btn-primary btn-sm">Run All Validations</a>';
-			echo '</div>';
-		}
-
-		echo '</div>';
-		echo '</div>';
-		echo '</div>';
-		echo '<div style="margin: 50px 0;"></div>';
 
 		// Which services send, with the status of each beside them.
 		echo '<div class="row">';

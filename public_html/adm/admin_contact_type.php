@@ -18,7 +18,6 @@
 	array(
 		'menu-id'=> 'contact-types',
 		'breadcrumbs' => array(
-			'Emails'=>'/admin/admin_emails',
 			'Contact Types'=>'/admin/admin_contact_types',
 			'Contact Type: '.$contact_type->get('ctt_name') => '',
 		),

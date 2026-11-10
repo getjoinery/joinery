@@ -5,6 +5,14 @@
     "default_day_of_week": 1,
     "default_time": "09:00:00",
     "config_fields": {
-        "mailing_list_id": {"type": "mailing_list", "label": "Mailing List", "required": true}
-    }
+        "mailing_list_id": {
+            "type": "select",
+            "options_from": "MailingList::select_options",
+            "label": "Mailing List",
+            "required": true
+        }
+    },
+    "requires_plugins": [
+        "email_lists"
+    ]
 }

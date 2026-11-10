@@ -9,7 +9,6 @@ function admin_settings_email_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
 	require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	$session = SessionControl::get_instance();

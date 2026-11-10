@@ -714,7 +714,9 @@
 	// ========== Rename mlt_mailchimp_list_id → mlt_provider_list_id (v122) ==========
 	$migration = array();
 	$migration['database_version'] = '122';
-	$migration['test'] = "SELECT count(1) as count FROM information_schema.columns WHERE table_name = 'mlt_mailing_lists' AND column_name = 'mlt_provider_list_id'";
+	// Done, or nothing to rename: mlt_mailing_lists is the email_lists plugin's
+	// table and is not there on a site that never turned the plugin on.
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'mlt_mailing_lists' AND column_name = 'mlt_mailchimp_list_id') THEN 0 ELSE 1 END AS count";
 	$migration['migration_sql'] = "ALTER TABLE mlt_mailing_lists RENAME COLUMN mlt_mailchimp_list_id TO mlt_provider_list_id";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
@@ -730,7 +732,9 @@
 	// ========== Rename usr_mailchimp_user_id → usr_mailing_list_provider_id (v124) ==========
 	$migration = array();
 	$migration['database_version'] = '124';
-	$migration['test'] = "SELECT count(1) as count FROM information_schema.columns WHERE table_name = 'usr_users' AND column_name = 'usr_mailing_list_provider_id'";
+	// Done, or nothing to rename: the column left User (spec email_lists_plugin
+	// §4), so a database with neither name has nothing to do.
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'usr_users' AND column_name = 'usr_mailchimp_user_id') THEN 0 ELSE 1 END AS count";
 	$migration['migration_sql'] = "ALTER TABLE usr_users RENAME COLUMN usr_mailchimp_user_id TO usr_mailing_list_provider_id";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
@@ -1938,4 +1942,14 @@
 	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'backup_output_dir') THEN 0 ELSE 1 END AS count";
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'backup_output_dir';";
+	$migrations[] = $migration;
+
+	// Direct messages (a message to one member, a group or an event's people)
+	// have their own history, which the group, event and user pages read. Past
+	// ones were campaign Email rows; each is copied once (dmg_eml_email_id).
+	$migration = array();
+	$migration['database_version'] = '233';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'copy_direct_messages_to_history.php';
+	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;

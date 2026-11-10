@@ -150,8 +150,8 @@ foreach ($manifests as $name => $manifest) {
 }
 
 sort($entitled);
-check($entitled === array('boards', 'forum', 'store'),
-	'exactly boards, forum and store require entitlement', implode(',', $entitled));
+check($entitled === array('boards', 'email_lists', 'forum', 'store'),
+	'exactly boards, email_lists, forum and store require entitlement', implode(',', $entitled));
 
 // Every plugin states its maturity outright. The catalog reads an absent
 // status as stable, so silence is the one answer a plugin can give by

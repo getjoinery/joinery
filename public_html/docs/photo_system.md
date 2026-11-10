@@ -405,4 +405,4 @@ Create a migration that copies existing FK references into `eph_entity_photos` r
 | Admin Event | `grid` | `event` | `plugins/event_manager/admin/admin_event.php` |
 | Account Edit (public) | `grid` | `user` | `views/profile/account_edit.php` |
 
-Future candidates: `plugins/event_manager/admin/admin_location.php` (single), `admin_mailing_list.php` (single), dating profile edit (grid).
+Future candidates: `plugins/event_manager/admin/admin_location.php` (single), `plugins/email_lists/admin/admin_mailing_list.php` (single), dating profile edit (grid).

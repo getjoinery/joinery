@@ -13,6 +13,7 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.5 - email_audience_table() lists direct messages; direct_messages_to()
  * @version 1.4 - the root request panel polls /api/v1/action/root_request_status; the bare /api/v1/ path is the
  *                model API, so every panel answered 400 and sat at Queued whatever the request did
  * @version 1.3 - readable_title is optional (BeginPage's own default)
@@ -285,36 +286,43 @@ HTML;
 	}
 
 	/**
-	 * A box listing the emails sent to one audience — an event's registrants,
-	 * a group's members — each linking to the email's delivery page.
+	 * A box listing the direct messages sent to one audience — an event's
+	 * registrants, a group's members, one member — each linking to the
+	 * message's delivery page.
 	 *
-	 * @param MultiEmail $emails  Already filtered (recipient_group) and paged
-	 * @param array      $options tableheader() options: title, altlinks, card
-	 * @param Pager|null $pager
+	 * @param MultiDirectMessage $messages Already filtered (provider, reference) and paged
+	 * @param array              $options  tableheader() options: title, altlinks, card
+	 * @param Pager|null         $pager
 	 */
-	public function email_audience_table($emails, $options = array(), $pager = NULL) {
+	public function email_audience_table($messages, $options = array(), $pager = NULL) {
 		$session = SessionControl::get_instance();
 		$this->tableheader(array('Subject', 'Sent by', 'Status', 'Recipients', 'Time'), $options, $pager);
-		foreach ($emails as $email) {
-			$author = $email->get('eml_usr_user_id') ? $email->get_user() : NULL;
-			$sent = count(new MultiEmailRecipient(array('email_id' => $email->key, 'sent' => true)));
-			$total = count(new MultiEmailRecipient(array('email_id' => $email->key)));
-			if ($email->get('eml_status') == Email::EMAIL_SENT && $email->get('eml_sent_time')) {
-				$time = 'Sent ' . LibraryFunctions::convert_time($email->get('eml_sent_time'), 'UTC', $session->get_timezone());
-			} else if ($email->get('eml_status') == Email::EMAIL_QUEUED && $email->get('eml_scheduled_time')) {
-				$time = 'Queued ' . LibraryFunctions::convert_time($email->get('eml_scheduled_time'), 'UTC', $session->get_timezone());
-			} else {
-				$time = '';
+		foreach ($messages as $message) {
+			$author = $message->get('dmg_usr_user_id_sender') ? new User($message->get('dmg_usr_user_id_sender'), TRUE) : NULL;
+			$counts = $message->delivery_counts();
+			$delivery = $counts['sent'] . ' of ' . (int)$message->get('dmg_recipient_count') . ' sent';
+			if ($counts['failed'] > 0) {
+				$delivery .= ', ' . $counts['failed'] . ' not sent';
 			}
+			$when = $message->get('dmg_sent_time') ?: $message->get('dmg_create_time');
 			$this->disprow(array(
-				'<a href="/admin/admin_email?eml_email_id=' . $email->key . '">' . htmlspecialchars((string)$email->get('eml_subject')) . '</a>',
+				'<a href="/admin/admin_direct_message?dmg_direct_message_id=' . $message->key . '">' . htmlspecialchars((string)$message->get('dmg_subject')) . '</a>',
 				$author && $author->key ? htmlspecialchars($author->display_name()) : '(System)',
-				$email->get_status_text(),
-				$sent . ' of ' . $total . ' sent',
-				$time,
+				$message->get_status_text(),
+				$delivery,
+				$when ? LibraryFunctions::convert_time($when, 'UTC', $session->get_timezone()) : '',
 			));
 		}
 		$this->endtable($pager);
+	}
+
+	/** The direct messages to one audience, newest first, a page at a time. */
+	public static function direct_messages_to(string $provider, int $reference_id, int $per_page, int $offset): MultiDirectMessage {
+		return new MultiDirectMessage(
+			array('dmg_provider' => $provider, 'dmg_reference_id' => $reference_id, 'deleted' => false),
+			array('dmg_direct_message_id' => 'DESC'),
+			$per_page,
+			$offset);
 	}
 
 	public function admin_footer($options=array()) {

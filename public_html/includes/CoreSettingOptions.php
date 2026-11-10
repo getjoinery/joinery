@@ -11,6 +11,7 @@
  * returns an empty array rather than throwing when the thing it reads is
  * absent — a settings page has to render even on a half-configured install.
  *
+ * @version 1.1 - the mailing-list option sources moved to the email_lists plugin (EmailListOptions)
  * @version 1.0
  */
 class CoreSettingOptions {
@@ -151,22 +152,6 @@ class CoreSettingOptions {
 	public static function emailServices(): array {
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		return EmailSender::getAvailableServices();
-	}
-
-	/** Mailing list services, discovered from the provider classes. */
-	public static function mailingListServices(): array {
-		require_once(PathHelper::getIncludePath('includes/MailingListService.php'));
-		return MailingListService::getAvailableServices();
-	}
-
-	/** Mailing lists, with the everyone option the sending paths understand. */
-	public static function mailingLists(): array {
-		require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
-
-		$lists = new MultiMailingList(array('deleted' => false), NULL, NULL, NULL);
-		$lists->load();
-
-		return array('all' => 'All Lists') + $lists->get_dropdown_array();
 	}
 
 	public static function outerTemplates(): array {

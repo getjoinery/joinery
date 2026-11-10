@@ -29,14 +29,11 @@ function admin_user_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/log_form_errors_class.php'));
-	require_once(PathHelper::getIncludePath('data/emails_class.php'));
-	require_once(PathHelper::getIncludePath('data/email_recipients_class.php'));
 	// Orders, subscriptions and event registrations are rendered by plugin-owned
 	// panels (AdminUserPanelRegistry) that load their own data — this page needs
 	// no store/event class here and renders on a store-less, event-less install.
 	require_once(PathHelper::getIncludePath('data/groups_class.php'));
 	require_once(PathHelper::getIncludePath('data/group_members_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 	require_once(PathHelper::getIncludePath('data/change_tracking_class.php'));
 
@@ -99,7 +96,7 @@ function admin_user_logic(array $input): LogicResult {
 			Access::demand('restricted:write', $session);
 			$user->assert_can_write($session);
 			$act_code = Activation::getTempCode($user->key, '30 day', 2, NULL, NULL);
-			if (Activation::ActivateUser($act_code)) {
+			if (Activation::ActivateUser($act_code, NULL, 'admin', $session->get_user_id())) {
 				admin_user_say($session, 'User activated.', true);
 			} else {
 				admin_user_say($session, 'Unable to activate user.', false);
@@ -280,16 +277,6 @@ function admin_user_logic(array $input): LogicResult {
 		$dropdown_button .= '</div>';
 	}
 
-	// Get mailing list subscriptions
-	$user_subscribed_list = array();
-	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
-	$user_lists = new MultiMailingListRegistrant($search_criteria);
-	$user_lists->load();
-	foreach ($user_lists as $user_list){
-		$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
-		$user_subscribed_list[] = $mailing_list->get('mlt_name');
-	}
-
 	// Get tier info
 	$user_tier = SubscriptionTier::GetUserTier($user->key);
 
@@ -307,21 +294,9 @@ function admin_user_logic(array $input): LogicResult {
 	$num_groups = count($groups);
 	$group_member_ids = Group::get_member_ids_for_member($user->key);
 
-	// Count received emails
-	$received_emails_count = new MultiEmailRecipient(
-		array('user_id' => $user->key, 'sent' => TRUE),
-		NULL,
-		$list_limit,
-		0);
-	$num_received_emails = $received_emails_count->count_all();
-
-	// Count sent emails
-	$sent_emails_count = new MultiEmail(
-		array('user_id' => $user->key),
-		NULL,
-		$list_limit,
-		0);
-	$num_sent_emails = $sent_emails_count->count_all();
+	// Direct messages this member was sent, and ones they sent.
+	$num_received_emails = (new MultiDirectMessageRecipient(array('dmr_usr_user_id' => $user->key, 'live_messages' => true)))->count_all();
+	$num_sent_emails = (new MultiDirectMessage(array('dmg_usr_user_id_sender' => $user->key, 'deleted' => false)))->count_all();
 
 	// ---- Security posture card (superadmin only) ----
 	// specs/admin_second_factor_management.md § step 5. Left unset for anyone
@@ -342,7 +317,6 @@ function admin_user_logic(array $input): LogicResult {
 	$page_vars['num_logins'] = $num_logins;
 	$page_vars['dropdown_button'] = $dropdown_button;
 	$page_vars['show_all_url'] = $show_all_url;
-	$page_vars['user_subscribed_list'] = $user_subscribed_list;
 	$page_vars['user_tier'] = $user_tier;
 	$page_vars['tier_changes'] = $tier_changes;
 	$page_vars['groups'] = $groups;

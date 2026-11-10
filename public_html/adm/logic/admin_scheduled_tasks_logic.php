@@ -5,6 +5,8 @@
  * Handles task discovery, activation, deactivation, configuration,
  * and run-now functionality.
  *
+ * @version 1.6 - Run Now and Dry Run refuse a task whose requires_plugins names an inactive plugin; the list says so live
+ * @version 1.5 - no mailing lists loaded: select config fields resolve their own options
  * @version 1.4 - Run Now does not count a retry result as a run
  * @version 1.3
  */
@@ -148,11 +150,6 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	// drives which cron setup instructions the warning shows.
 	$is_docker = $settings->get_setting('deployment_environment', true, true) === 'docker';
 
-	// Load mailing lists for config field dropdowns
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
-	$mailing_lists = new MultiMailingList(array('deleted' => false), array('mlt_name' => 'ASC'));
-	$mailing_lists->load();
-
 	// Load recipes for the "run on success" chooser. Only when joinery_ai is
 	// present (Recipe autoloads by name); otherwise the chooser simply doesn't
 	// appear. Disabled recipes are listed too so an operator can pre-wire one
@@ -179,9 +176,16 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
 	$dry_run_supported = array();
 	$retired_tasks = array();
+	$waiting_for_plugins = array();
 	foreach ($active_tasks as $task) {
 		$task_class = $task->get('sct_task_class');
 		$task_file = $task->resolve_task_file();
+		// A task that needs a plugin that is off says so now, not only after
+		// the runner's next skip has stamped the row.
+		$missing_plugins = ScheduledTaskRegistry::missingRequiredPlugins(ScheduledTaskRegistry::metadataFor((string)$task_class));
+		if ($missing_plugins) {
+			$waiting_for_plugins[$task->key] = 'skipped: needs ' . implode(', ', $missing_plugins);
+		}
 		if ($task_file && file_exists($task_file)) {
 			require_once($task_file);
 			if (class_exists($task_class)) {
@@ -214,11 +218,11 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		'cron_is_active' => $cron_is_active,
 		'last_cron_run' => $last_cron_run,
 		'is_docker' => $is_docker,
-		'mailing_lists' => $mailing_lists,
 		'chain_recipes' => $chain_recipes,
 		'site_timezone' => $site_timezone,
 		'dry_run_supported' => $dry_run_supported,
 		'retired_tasks' => $retired_tasks,
+		'waiting_for_plugins' => $waiting_for_plugins,
 		'dry_run_preview_html' => $dry_run_preview_html,
 	));
 }
@@ -312,6 +316,11 @@ function _handle_run_now($task_id) {
 	$task_class = $task->get('sct_task_class');
 	$task_file = $task->resolve_task_file();
 
+	$missing_plugins = ScheduledTaskRegistry::missingRequiredPlugins(ScheduledTaskRegistry::metadataFor((string)$task_class));
+	if ($missing_plugins) {
+		return array('error' => $task->get('sct_name') . ' needs ' . implode(', ', $missing_plugins) . ', which is not active.');
+	}
+
 	if (!$task_file) {
 		return array('error' => 'Could not resolve class file for ' . $task_class);
 	}
@@ -373,6 +382,11 @@ function _handle_dry_run($task_id) {
 	$task->assert_found();
 	$task_class = $task->get('sct_task_class');
 	$task_file = $task->resolve_task_file();
+
+	$missing_plugins = ScheduledTaskRegistry::missingRequiredPlugins(ScheduledTaskRegistry::metadataFor((string)$task_class));
+	if ($missing_plugins) {
+		return array('error' => $task->get('sct_name') . ' needs ' . implode(', ', $missing_plugins) . ', which is not active.');
+	}
 
 	if (!$task_file) {
 		return array('error' => 'Could not resolve class file for ' . $task_class);

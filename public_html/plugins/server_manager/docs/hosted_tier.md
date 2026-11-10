@@ -141,7 +141,10 @@ than pretending otherwise.
    owner's everyday email from their own address (`hello@<domain>`, which the
    setup wizard suggests), on a small allowance; bulk mail, or automated mail on
    a separate `mail.<domain>` identity, is for the customer's own provider
-   account. The site's domain is also routable, which the provider requires of
+   account. The site enforces this: on hosted mail the email_lists plugin
+   refuses to queue a campaign, and the admin banner's email row prompts the
+   owner to connect their own provider from 95% of the allowance (see the
+   plugin's overview). The site's domain is also routable, which the provider requires of
    an envelope sender: it always has the address record the site answers on.
    The provider's records are two uniquely named CNAMEs (`s<id>._domainkey`,
    `em<id>`) that sit beside the domain's own SPF and DKIM.

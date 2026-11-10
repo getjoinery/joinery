@@ -1,0 +1,7 @@
+{
+  "name": "Prune expired mailing list requests",
+  "description": "Deletes requests to join a mailing list whose confirmation link has expired (30 days) without being used.",
+  "activate_on_install": true,
+  "default_frequency": "daily",
+  "default_time": "03:30:00"
+}

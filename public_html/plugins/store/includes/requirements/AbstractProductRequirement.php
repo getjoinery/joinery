@@ -218,5 +218,4 @@ AbstractProductRequirement::register('PhoneNumberRequirement', $req_dir . 'Phone
 AbstractProductRequirement::register('DOBRequirement', $req_dir . 'DOBRequirement.php');
 AbstractProductRequirement::register('AddressRequirement', $req_dir . 'AddressRequirement.php');
 AbstractProductRequirement::register('UserPriceRequirement', $req_dir . 'UserPriceRequirement.php');
-AbstractProductRequirement::register('NewsletterSignupRequirement', $req_dir . 'NewsletterSignupRequirement.php');
 AbstractProductRequirement::register('QuestionRequirement', $req_dir . 'QuestionRequirement.php');

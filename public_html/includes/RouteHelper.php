@@ -1269,8 +1269,13 @@ class RouteHelper {
         // below this level the cache buffer is gone and there is nothing to cache.
         $cache_buffer_level = ob_get_level();
 
-        // Detect current plugin based on route (now that PathHelper is available)
+        // Detect current plugin based on route (now that PathHelper is available).
+        // An inactive plugin owns no route: its serve.php is not run and its
+        // views are not looked up, so its URLs fall through to a 404.
         self::$current_plugin = self::detectPluginByRoute($request_path);
+        if (self::$current_plugin && !PluginHelper::isPluginActive(self::$current_plugin)) {
+            self::$current_plugin = null;
+        }
         
         // Now use PathHelper for other dependencies
         try {

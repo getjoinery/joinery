@@ -20,6 +20,7 @@
  *   echo ComponentRenderer::render_component($component_instance);
  *
  * @see /specs/page_component_system.md
+ * @version 1.7.0 - a plugin component's logic function is found in its plugin's logic/components/
  * @version 1.6.1 - a component type's template path and logic function are bounded at the sink (unseal_daemon.md C3)
  * @version 1.6.0
  */
@@ -182,7 +183,14 @@ class ComponentRenderer {
 		$logic_function = $component_type->get('com_logic_function');
 		if ($logic_function) {
 			try {
-				$data = self::load_component_data($logic_function, $config, $debug_label);
+				// A plugin's component, or a theme's override of one, names its
+				// plugin; its logic lives there.
+				$owning_plugin = $component_type->get('com_requires_plugin') ?: null;
+				if ($owning_plugin === null
+					&& preg_match('#^plugins/([A-Za-z0-9_-]+)/views/components/#', (string)$component_type->get('com_template_file'), $pm)) {
+					$owning_plugin = $pm[1];
+				}
+				$data = self::load_component_data($logic_function, $config, $debug_label, $owning_plugin);
 			} catch (Exception $e) {
 				return self::debug_output("Logic function '{$logic_function}' threw exception: " . $e->getMessage(), $debug_label);
 			}
@@ -377,7 +385,7 @@ class ComponentRenderer {
 		return preg_match('#^(?:(?:theme|plugins)/[A-Za-z0-9_-]+/)?views/components/[A-Za-z0-9_-]+\.php\z#', $path) === 1;
 	}
 
-	protected static function load_component_data($logic_function, $config, $slug = '') {
+	protected static function load_component_data($logic_function, $config, $slug = '', $plugin = null) {
 		// A function name and nothing else: the row's value becomes a require
 		// path and a call (unseal_daemon.md C3).
 		if (!is_string($logic_function) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*\z/', $logic_function) !== 1) {
@@ -385,6 +393,11 @@ class ComponentRenderer {
 			return array();
 		}
 		$logic_file = 'logic/components/' . $logic_function . '.php';
+		// A plugin's component keeps its logic in the plugin.
+		if ($plugin !== null && preg_match('/^[A-Za-z0-9_-]+\z/', $plugin) === 1
+			&& file_exists(PathHelper::getIncludePath('plugins/' . $plugin . '/' . $logic_file))) {
+			$logic_file = 'plugins/' . $plugin . '/' . $logic_file;
+		}
 		$full_path = PathHelper::getIncludePath($logic_file);
 
 		if (!file_exists($full_path)) {

@@ -20,8 +20,6 @@ function profile_dashboard_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_list_registrants_class.php'));
 
 	$session = SessionControl::get_instance();
 	if (!$session->get_user_id()) {
@@ -91,6 +89,7 @@ function profile_dashboard_logic(array $input): LogicResult {
 	// PLUGIN-CONTRIBUTED SECTIONS
 	//   store:         recent_orders + subscriptions
 	//   event_manager: upcoming_events + pending_surveys
+	//   email_lists:   mailing_lists
 	// Each active plugin registers its providers from serve.php; with a plugin
 	// inactive nothing is contributed and its keys are simply absent — a client
 	// renders strictly from present keys. Each section's items are serialized to
@@ -103,18 +102,6 @@ function profile_dashboard_logic(array $input): LogicResult {
 			$out[$section->stat->key] = $section->stat->count;
 		}
 	}
-
-	// ---------------------------------------------------------------
-	// MAILING LISTS
-	// ---------------------------------------------------------------
-	$user_subscribed_list = array();
-	$user_lists = new MultiMailingListRegistrant(array('deleted' => false, 'user_id' => $user->key));
-	$user_lists->load();
-	foreach ($user_lists as $user_list) {
-		$mailing_list = new MailingList($user_list->get('mlr_mlt_mailing_list_id'), TRUE);
-		$user_subscribed_list[] = $mailing_list->get('mlt_name');
-	}
-	$out['mailing_lists'] = $user_subscribed_list;
 
 	return LogicResult::render($out);
 }

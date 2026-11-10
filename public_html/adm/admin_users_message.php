@@ -22,12 +22,12 @@
 		);
 		$page->begin_box();
 		$n = (int)$page_vars['numrecipients'];
-		$email_link = '<a href="/admin/admin_email?eml_email_id='.$page_vars['email']->key.'">Email '.$page_vars['email']->key.'</a>';
+		$message_link = '<a href="/admin/admin_direct_message?dmg_direct_message_id='.$page_vars['message']->key.'">the message\'s page</a>';
 		if($n > 0){
-			echo '<p>Queued to '.$n.' recipient'.($n === 1 ? '' : 's').'. It goes out in the background; delivery per person is on '.$email_link.'.</p>';
+			echo '<p>Queued to '.$n.' recipient'.($n === 1 ? '' : 's').'. It goes out in the background; delivery per person is on '.$message_link.'.</p>';
 		}
 		else{
-			echo '<p>Not queued: nobody is in this audience. '.$email_link.' was saved with no recipients.</p>';
+			echo '<p>Not sent: nobody in this audience has an email address.</p>';
 		}
 		if($page_vars['event']){
 			echo '<p><a href="/plugins/event_manager/admin/admin_event?evt_event_id='.$page_vars['event']->key.'">Return to the event page</a></p>';
@@ -55,6 +55,9 @@
 	);
 
 	$page->begin_box();
+
+	// On included email: how much of the month is used, and from 95% the way out.
+	echo HostedPlanNotice::emailUsePrompt();
 
 	$formwriter = $page->getFormWriter('form1');
 	$formwriter->begin_form();

@@ -101,10 +101,9 @@
                                             <?php endif; ?>
                                         </label>
                                     </div>
-                                    <div class="form-check">
-                                        <input type="checkbox" name="newsletter" id="newsletter" class="form-check-input" value="1">
-                                        <label for="newsletter" class="form-check-label">Add me to the newsletter</label>
-                                    </div>
+                                    <?php if (class_exists('EmailListSubscriptions') && Globalvars::get_instance()->get_setting('default_mailing_list', true, true)): ?>
+                                    <?php $formwriter->checkboxinput('newsletter', 'Add me to the newsletter', array('value' => '1')); ?>
+                                    <?php endif; ?>
                                 </div>
 
                                 <div class="col-12">

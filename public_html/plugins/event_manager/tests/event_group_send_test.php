@@ -7,14 +7,16 @@
  */
 /**
  * "Email registrants" and "Email waiting list" on the event admin page queue
- * one email campaign each (specs/group_sends_one_row.md §3.3, §3.4):
+ * one direct message each (spec email_lists_plugin §3):
  *
- *  - registrants: ('event', id) + the sender's copy + the leader's copy;
- *  - waiting list: ('event_waiting_list', id) + the sender's copy, no leader;
+ *  - registrants: ('event', id), the sender's copy and the leader's copy;
+ *  - waiting list: ('event_waiting_list', id) and the sender's copy, no leader;
  *  - nothing sent in the request, no message or notification rows;
- *  - the event admin logic lists each email under the right box.
+ *  - the event admin logic lists each message under the right box.
  *
  * Run: php tests/run.php db --filter=event_group_send
+ *
+ * @version 2.0 - a DirectMessage, not a campaign Email row
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -30,7 +32,6 @@ if (!PluginHelper::isPluginActive('event_manager')) {
 	return;
 }
 
-require_once(PathHelper::getIncludePath('data/emails_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/events_class.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_registrants_class.php'));
@@ -44,10 +45,10 @@ EmailSender::registerDirectAttempt(function ($message) {
 	return array();
 });
 
-function egs_groups($email) {
+function egs_users(DirectMessage $message): array {
 	$out = array();
-	foreach ($email->get_recipient_groups('add') as $rg) {
-		$out[] = $rg->get('erg_provider') . ':' . (int)$rg->get('erg_reference_id');
+	foreach (new MultiDirectMessageRecipient(array('dmr_dmg_direct_message_id' => $message->key)) as $r) {
+		$out[] = (int)$r->get('dmr_usr_user_id');
 	}
 	sort($out);
 	return $out;
@@ -57,22 +58,18 @@ function egs_send($staff, array $fields) {
 	$_SESSION['usr_user_id'] = $staff->key;
 	$_SESSION['loggedin'] = true;
 	$_SESSION['permission'] = 10;
-	$before = (int)DbConnector::get_instance()->get_db_link()->query('SELECT COALESCE(MAX(eml_email_id),0) FROM eml_emails')->fetchColumn();
 	$result = harness_call_logic('adm/logic/admin_users_message_logic.php', 'admin_users_message_logic',
 		$fields + array('eml_subject' => 'HarnessTest event send', 'eml_message' => 'See you there'), 'POST');
-	$email = null;
-	foreach (new MultiEmail(array('user_id' => $staff->key), array('email_id' => 'DESC'), 1, 0) as $e) {
-		if ((int)$e->key > $before) {
-			$email = $e;
-			harness_register_model('Email', $e->key);
-		}
+	$message = $result->data['message'] ?? null;
+	if ($message) {
+		harness_register_row('dmg_direct_messages', 'dmg_direct_message_id', (int)$message->key);
 	}
-	return array($result, $email);
+	return array($result, $message);
 }
 
-function egs_ids($emails) {
+function egs_ids($messages) {
 	$ids = array();
-	foreach ($emails as $e) { $ids[] = (int)$e->key; }
+	foreach ($messages as $m) { $ids[] = (int)$m->key; }
 	return $ids;
 }
 
@@ -116,36 +113,33 @@ try {
 	section('Email registrants');
 	list($result, $reg_email) = egs_send($staff, array('evt_event_id' => $event->key));
 	check(!$result->error, 'the send is accepted', (string)$result->error);
-	check($reg_email !== null, 'one Email row was created');
+	check($reg_email !== null, 'one DirectMessage was written');
 	if ($reg_email) {
-		$expected = array('event:' . $event->key, 'user:' . $staff->key, 'user:' . $leader->key); sort($expected);
-		check(egs_groups($reg_email) === $expected, 'recipient groups: the event, the sender copy, the leader copy', json_encode(egs_groups($reg_email)));
-		check((int)$reg_email->get('eml_status') === Email::EMAIL_QUEUED, 'status is QUEUED');
-		check($reg_email->get('eml_message_template_html') === Globalvars::get_instance()->get_setting('event_email_inner_template'), 'the event inner template is set');
-		$n = count(new MultiEmailRecipient(array('email_id' => $reg_email->key)));
-		check($n === 4, 'recipients: two registrants, the leader, the sender', "got $n");
+		check($reg_email->get('dmg_provider') === 'event' && (int)$reg_email->get('dmg_reference_id') === (int)$event->key, 'its audience is the event');
+		check((int)$reg_email->get('dmg_status') === DirectMessage::QUEUED, 'status is queued');
+		check($reg_email->get('dmg_inner_template') === Globalvars::get_instance()->get_setting('event_email_inner_template'), 'the event inner template is set');
+		$expected = array((int)$r1->key, (int)$r2->key, (int)$leader->key, (int)$staff->key); sort($expected);
+		check(egs_users($reg_email) === $expected, 'recipients: two registrants, the leader, the sender', json_encode(egs_users($reg_email)));
 		check(($result->data['numrecipients'] ?? -1) === 4, 'the page reports the same count');
-		$w_on = count(new MultiEmailRecipient(array('email_id' => $reg_email->key, 'user_id' => $w1->key)));
-		check($w_on === 0, 'the waiting list is not on the registrants email');
+		check(!in_array((int)$w1->key, egs_users($reg_email), true), 'the waiting list is not on the registrants message');
 	}
 
 	section('Email waiting list');
 	list($result, $wl_email) = egs_send($staff, array('evt_event_id' => $event->key, 'waiting_list' => 1));
 	check(!$result->error, 'the send is accepted', (string)$result->error);
-	check($wl_email !== null, 'one Email row was created');
+	check($wl_email !== null, 'one DirectMessage was written');
 	if ($wl_email) {
-		$expected = array('event_waiting_list:' . $event->key, 'user:' . $staff->key); sort($expected);
-		check(egs_groups($wl_email) === $expected, 'recipient groups: the waiting list and the sender copy, no leader', json_encode(egs_groups($wl_email)));
-		$n = count(new MultiEmailRecipient(array('email_id' => $wl_email->key)));
-		check($n === 2, 'recipients: the one waiting and the sender', "got $n");
+		check($wl_email->get('dmg_provider') === 'event_waiting_list', 'its audience is the waiting list');
+		$expected = array((int)$w1->key, (int)$staff->key); sort($expected);
+		check(egs_users($wl_email) === $expected, 'recipients: the one waiting and the sender, no leader', json_encode(egs_users($wl_email)));
 	}
 
 	section('Where the record shows');
-	$to_registrants = egs_ids(new MultiEmail(array('recipient_group' => array('provider' => 'event', 'reference_id' => $event->key))));
-	$to_waiting = egs_ids(new MultiEmail(array('recipient_group' => array('provider' => 'event_waiting_list', 'reference_id' => $event->key))));
-	check($reg_email && in_array((int)$reg_email->key, $to_registrants, true), 'the registrants email lists under Emails to Registrants');
+	$to_registrants = egs_ids(AdminPage::direct_messages_to('event', (int)$event->key, 50, 0));
+	$to_waiting = egs_ids(AdminPage::direct_messages_to('event_waiting_list', (int)$event->key, 50, 0));
+	check($reg_email && in_array((int)$reg_email->key, $to_registrants, true), 'the registrants message lists under Emails to Registrants');
 	check($reg_email && !in_array((int)$reg_email->key, $to_waiting, true), 'and not under Emails to Waiting List');
-	check($wl_email && in_array((int)$wl_email->key, $to_waiting, true), 'the waiting-list email lists under Emails to Waiting List');
+	check($wl_email && in_array((int)$wl_email->key, $to_waiting, true), 'the waiting-list message lists under Emails to Waiting List');
 	check($wl_email && !in_array((int)$wl_email->key, $to_registrants, true), 'and not under Emails to Registrants');
 
 	$_SESSION['usr_user_id'] = $staff->key; $_SESSION['loggedin'] = true; $_SESSION['permission'] = 10;

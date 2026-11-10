@@ -88,11 +88,7 @@ $session = SessionControl::get_instance();
 		'value' => $default_timezone
 	]);
 
-	if ($settings->get_setting('default_mailing_list')) {
-		$formwriter->checkboxinput('newsletter', 'Add to the mailing list', [
-			'checked' => false
-		]);
-	}
+	SignupFieldRegistry::render($formwriter, SignupFieldRegistry::CONTEXT_ADMIN_ADD, array());
 	$formwriter->checkboxinput('send_activation_email', 'Send an activation email', [
 		'checked' => true
 	]);

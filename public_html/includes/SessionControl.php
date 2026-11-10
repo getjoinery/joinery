@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.31 - save_visitor_event() takes a visitor id, for a conversion that completes in another browser
  * @version 1.30 - reviewer2 F1-2..F1-5: a password-started pending factor is never replaced by the cookie's; the
  *                stash records no return (the divert says where to come back to, or nothing, so /profile);
  *                check_permission's return is the page asked for, read before the session's is set, and only
@@ -543,7 +544,12 @@ class SessionControl{
 		return (string)Globalvars::get_instance()->get_setting('visitor_statistics') !== '0';
 	}
 
-	public function save_visitor_event($type=1, $is_404=FALSE, $ref_type=NULL, $ref_id=NULL, $meta=NULL){
+	/**
+	 * Record a visitor event for this session's visitor, or for $visitor_id
+	 * when given: a conversion that completes in another browser (a mailing
+	 * list's confirmation link) is credited to the visitor who asked.
+	 */
+	public function save_visitor_event($type=1, $is_404=FALSE, $ref_type=NULL, $ref_id=NULL, $meta=NULL, $visitor_id=NULL){
 		// A session signed out earlier in this request has no uniqid left.
 		$this->get_uniqid();
 		
@@ -645,10 +651,10 @@ class SessionControl{
 
 		// Observation: what was viewed, recorded on whatever request it was,
 		// views included. So are the A/B counters below.
-		SystemBase::server_initiated_write(function () use ($dbhelper, $dblink, $sql, $type, $referer, $source, $campaign, $medium, $content, $is_404, $ref_type, $ref_id, $meta) {
+		SystemBase::server_initiated_write(function () use ($dbhelper, $dblink, $sql, $type, $referer, $source, $campaign, $medium, $content, $is_404, $ref_type, $ref_id, $meta, $visitor_id) {
 		try{
 			$q = $dblink->prepare($sql);
-			$q->bindValue(':vse_visitor_id', $_SESSION['uniqid'], PDO::PARAM_STR);
+			$q->bindValue(':vse_visitor_id', ($visitor_id !== NULL && $visitor_id !== '') ? (string)$visitor_id : $_SESSION['uniqid'], PDO::PARAM_STR);
 			$q->bindValue(':vse_usr_user_id', $this->get_user_id(), PDO::PARAM_INT);
 			$q->bindValue(':vse_type', $type, PDO::PARAM_INT);
 			$q->bindValue(':vse_page', strtok($_SERVER["REQUEST_URI"],'?'), PDO::PARAM_STR);

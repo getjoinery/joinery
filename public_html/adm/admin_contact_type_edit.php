@@ -12,7 +12,6 @@
 	array(
 		'menu-id'=> 'contact-types',
 		'breadcrumbs' => array(
-			'Emails'=>'/admin/admin_emails',
 			'Contact Types'=>'/admin/admin_contact_types',
 			'Contact Type: '.$contact_type->get('ctt_name')=>'/admin/admin_contact_type?ctt_contact_type_id='.$contact_type->key,
 			'Edit Contact Type' => '',

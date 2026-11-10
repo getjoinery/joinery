@@ -12,7 +12,6 @@ require_once(__DIR__ . '/../lib/harness.php');
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
-require_once(PathHelper::getIncludePath('data/emails_class.php'));
 require_once(PathHelper::getIncludePath('includes/Activation.php'));
 
 class EmailPatternTest {
@@ -102,7 +101,7 @@ class EmailPatternTest {
         ];
         
         // Pattern 5: Mailing list subscribe template  
-        // Copied from: data/mailing_lists_class.php:190 (mailing_list_subscribe)
+        // Copied from: plugins/email_lists/data/mailing_lists_class.php:190 (mailing_list_subscribe)
         // Create mock mailing list object to match production code exactly
         $mockMailingList = new stdClass();
         $mockMailingList->key = 1;
@@ -110,7 +109,7 @@ class EmailPatternTest {
         
         $this->patterns[] = [
             'name' => 'mailing_list_subscribe_pattern',
-            'source' => 'data/mailing_lists_class.php:190',
+            'source' => 'plugins/email_lists/data/mailing_lists_class.php:190',
             'method' => 'sendTemplate',
             'template' => 'mailing_list_subscribe', 
             'variables' => [
@@ -210,10 +209,10 @@ class EmailPatternTest {
         ];
         
         // Pattern 10: Dynamic template from email record (eml_message_template_html field)
-        // Copied from: adm/admin_emails_send.php:62 (template from email record)
+        // Copied from: plugins/email_lists/includes/CampaignSender.php (template from email record)
         $this->patterns[] = [
             'name' => 'email_record_template_pattern',
-            'source' => 'adm/admin_emails_send.php:62',
+            'source' => 'plugins/email_lists/includes/CampaignSender.php',
             'method' => 'fromTemplate',
             'template' => 'blank_template', // Fallback since we don't have actual email record
             'variables' => [

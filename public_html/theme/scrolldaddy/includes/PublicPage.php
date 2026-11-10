@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.5 - the footer newsletter form and link show only with the email_lists plugin active
  * @version 1.2.4 - links scrolldaddy-kit.css, ScrollDaddy's look for the shared .jy-ui pages
  * @version 1.2.3 - its stylesheet and joinery-validate.js carry their file times, so a change reaches visitors past a cache at once
  * @version 1.2.2 - BeginPage escapes the title, as every theme does
@@ -453,7 +454,8 @@ Career Area
 	   <footer class="footer-wrapper footer-layout1">
         <div class="container">
 			<?php
-			if(!$session->get_user_id() && $settings->get_setting('emails_active')){
+			// The newsletter form posts to the email_lists plugin's /lists page.
+			if(!$session->get_user_id() && class_exists('MailingList') && $settings->get_setting('emails_active')){
 			?>
             <div class="footer-top">
                 <div class="row gx-0 align-items-center">
@@ -512,7 +514,7 @@ Career Area
                                     <li><a href="https://scrolldaddy.app/page/privacy">Privacy Policy</a></li>
 									<li><a href="https://scrolldaddy.app/page/terms">Terms of Service</a></li>
                                     <li><a href="https://scrolldaddy.app/page/faq">FAQ</a></li>
-                                    <li><a href="https://scrolldaddy.app/lists">Newsletter</a></li>
+                                    <?php if (class_exists('MailingList')): ?><li><a href="https://scrolldaddy.app/lists">Newsletter</a></li><?php endif; ?>
                                 </ul>
                             </div>
                         </div>

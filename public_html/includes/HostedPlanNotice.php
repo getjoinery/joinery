@@ -34,6 +34,8 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.5 - an email allowance at 95% or over leads with "Connect your own email provider", linking the
+ *               site's own email settings (spec email_lists_plugin §5); emailAllowance()
  * @version 1.4 - a services site's rows may be due (the paid period, from the notice window out) and urgent
  *               (past the date), and carry a second door after the first: the offer on sale
  *               (specs/services_phase3_selling_nudge.md §2.1)
@@ -83,6 +85,10 @@ class HostedPlanNotice {
 	const ALLOWANCE_WARN_PERCENT = 80;
 	/** Percentage at which the notice urges: near enough that the next upload may be refused. */
 	const ALLOWANCE_URGE_PERCENT = 95;
+
+	/** Where a site connects its own email provider, and what the door says. */
+	const OWN_EMAIL_PROVIDER_URL = '/admin/admin_settings_email';
+	const OWN_EMAIL_PROVIDER_LABEL = 'Connect your own email provider';
 
 	/** Days left in a trial or grace period before the notice sharpens. */
 	const URGENT_DAYS = 7;
@@ -198,6 +204,7 @@ class HostedPlanNotice {
 				// whatever the percent, and an urgent one sharpens the notice.
 				'due'          => !empty($entry['due']),
 				'urgent'       => !empty($entry['urgent']),
+				'service'      => (string)($entry['service'] ?? ''),
 				'action_label' => (string)($entry['action_label'] ?? ''),
 				'action_url'   => (string)($entry['action_url'] ?? ''),
 				'second_label' => (string)($entry['second_label'] ?? ''),
@@ -205,6 +212,53 @@ class HostedPlanNotice {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * Is this allowance row the outbound email one? The management node and
+	 * the services poll both send it labelled exactly "Email sent this month";
+	 * a row that names its service as mail counts too.
+	 */
+	public static function isEmailAllowance(array $a): bool {
+		return ($a['service'] ?? '') === 'mail' || trim((string)($a['label'] ?? '')) === self::EMAIL_ALLOWANCE_LABEL;
+	}
+
+	/** The label both writers give the outbound email allowance row. */
+	const EMAIL_ALLOWANCE_LABEL = 'Email sent this month';
+
+	/** The outbound email allowance row, or null when the site has none. */
+	public static function emailAllowance(): ?array {
+		if (!self::applies()) {
+			return null;
+		}
+		foreach (self::allowances() as $a) {
+			if (self::isEmailAllowance($a)) {
+				return $a;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * For the pages that send to many people at once (the direct message):
+	 * how much of the month's included email is used, and from 95% the
+	 * prompt to connect the site's own provider. '' on a site whose mail is
+	 * not the included allowance.
+	 */
+	public static function emailUsePrompt(): string {
+		$a = self::emailAllowance();
+		if ($a === null || !EmailSender::usesIncludedMail()) {
+			return '';
+		}
+		$usage = trim($a['used'] . ($a['allowance'] !== '' ? ' of ' . $a['allowance'] : ''));
+		$line = 'Included email this month: ' . htmlspecialchars($usage, ENT_QUOTES, 'UTF-8') . ' sent.';
+		if ($a['percent'] < self::ALLOWANCE_URGE_PERCENT) {
+			return '<p class="text-muted">' . $line . '</p>';
+		}
+		return '<div class="alert alert-danger"><strong>' . $line . '</strong> '
+			. 'When the allowance runs out, the provider refuses every email this site sends, password resets included, '
+			. 'until the month rolls over. A message to many people can use the rest of it. '
+			. '<a href="' . self::OWN_EMAIL_PROVIDER_URL . '">' . self::OWN_EMAIL_PROVIDER_LABEL . '</a> to send without that limit.</div>';
 	}
 
 	/** Whole days until a stored UTC timestamp, or null when unreadable. */
@@ -331,6 +385,14 @@ class HostedPlanNotice {
 			// only when needed — a quiet allowance is not a sales opportunity.
 			if ($near) {
 				$doors = array();
+				// Mail out of allowance stops everything the site sends, password
+				// resets included, until the month rolls. The fix is the site's own
+				// provider, on its own settings page, so that door comes first and
+				// does not depend on the operator having sent a link.
+				if (self::isEmailAllowance($a) && $a['percent'] >= self::ALLOWANCE_URGE_PERCENT) {
+					$doors[] = '<a class="jy-hosted-plan__allowance-action" href="' . self::OWN_EMAIL_PROVIDER_URL . '">'
+						. self::OWN_EMAIL_PROVIDER_LABEL . '</a>';
+				}
 				foreach (array('action', 'second') as $door) {
 					if ($a[$door . '_label'] !== '' && preg_match('#^https://#i', $a[$door . '_url'])) {
 						$doors[] = '<a class="jy-hosted-plan__allowance-action" href="'

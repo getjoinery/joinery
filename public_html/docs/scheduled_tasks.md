@@ -66,13 +66,14 @@ Place in `/tasks/` (core) or `/plugins/{plugin}/tasks/` (plugin).
 - `config_fields` — Task-specific parameters rendered in admin form
 - `activate_on_install` — Create the task's row automatically (see [Activate on install](#activate-on-install))
 - `activated_by_hand` — `false` for a task whose rows the feature that owns it makes (one per thing it runs for, each with its own config), which the Scheduled Tasks page then never offers for activation. `SandboxScheduledRun` is one: a row per approved schedule of a sandboxed plugin
+- `requires_plugins` — Plugins the task needs besides its own, e.g. `["email_lists"]`. While one is inactive the runner skips the task and records `skipped: needs email_lists` as its last result, which the Scheduled Tasks page shows; the row is not retired, so the task runs again once the plugin is back
 - `replaces` — Class names this task absorbed, for retirement messages (see [Supersession](#supersession--say-what-replaced-it))
 
 **Config field types:**
 - `text` — Text input
 - `number` — Numeric input
 - `boolean` — Checkbox
-- `mailing_list` — Mailing list dropdown (populated from database)
+- `select` — Dropdown. Its choices come from `options` (value => label) or `options_from` (`"Class::method"` returning value => label, with optional `options_include`), as a [setting](settings.md) declares them: `{"type": "select", "options_from": "MailingList::select_options", "label": "Mailing List"}`
 
 ### Running an AI recipe when a task succeeds (`run_on_success`)
 

@@ -6,29 +6,35 @@
  * needs: []
  */
 /**
- * /admin/admin_users_message — a group send is a queued email campaign
- * (specs/group_sends_one_row.md §3.3). The group and single-user entries;
- * the event entries live in plugins/event_manager/tests/event_group_send_test.php.
+ * /admin/admin_users_message — a direct message to a group or one member
+ * (spec email_lists_plugin §3). The event entries live in
+ * plugins/event_manager/tests/event_group_send_test.php.
  *
- * For each entry: one Email row, the right recipient groups, status QUEUED,
- * no msg_messages row, no ntf_notifications row, and no transport touched
- * during the request — a tripwire registered on EmailSender fails the test
- * if any send() runs. A zero-recipient audience reports zero and queues nothing.
+ * What is pinned here:
+ *  - each send writes one DirectMessage (no campaign Email row) with its
+ *    audience, template and one recipient per address, the sender's copy
+ *    included, and nothing is sent during the request;
+ *  - the background pass sends each recipient once, records who it went to
+ *    and who it did not, marks the message sent, and a second pass sends
+ *    nothing again;
+ *  - a refused send is tried again later, and not sent after its last try;
+ *    a pass that died mid-send leaves nothing marked sending; a provider
+ *    refusing every send stops the pass with the rest untried;
+ *  - the group page's history lists the message;
+ *  - no target, two targets, and an empty subject or body are refused.
+ *
+ * Sends run with email_dry_run on (in memory), so nothing leaves the box.
  *
  * Run: php tests/run.php db --filter=admin_users_message
+ *
+ * @version 2.0 - a DirectMessage and its background send, not a campaign row
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
 require_once(__DIR__ . '/../lib/logic.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/emails_class.php'));
-require_once(PathHelper::getIncludePath('data/groups_class.php'));
-require_once(PathHelper::getIncludePath('data/group_members_class.php'));
-require_once(PathHelper::getIncludePath('data/messages_class.php'));
-require_once(PathHelper::getIncludePath('data/notifications_class.php'));
-require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
-
+harness_set_setting_mem('email_dry_run', '1');
 $db = DbConnector::get_instance()->get_db_link();
 
 $GLOBALS['aum_sends'] = 0;
@@ -43,32 +49,27 @@ function aum_count($sql, array $params) {
 	return (int)$q->fetchColumn();
 }
 
-function aum_groups($email) {
-	$out = array();
-	foreach ($email->get_recipient_groups('add') as $rg) {
-		$out[] = $rg->get('erg_provider') . ':' . (int)$rg->get('erg_reference_id');
-	}
-	sort($out);
-	return $out;
-}
-
-/** Post the form as $staff and return [LogicResult, Email|null]. */
+/** Post the form as $staff and return [LogicResult, DirectMessage|null]. */
 function aum_send($staff, array $fields) {
 	$_SESSION['usr_user_id'] = $staff->key;
 	$_SESSION['loggedin'] = true;
 	$_SESSION['permission'] = 10;
-	$before = (int)DbConnector::get_instance()->get_db_link()->query('SELECT COALESCE(MAX(eml_email_id),0) FROM eml_emails')->fetchColumn();
 	$result = harness_call_logic('adm/logic/admin_users_message_logic.php', 'admin_users_message_logic',
-		$fields + array('eml_subject' => 'HarnessTest group send', 'eml_message' => "Hello\neveryone"), 'POST');
-	$email = null;
-	$emails = new MultiEmail(array('user_id' => $staff->key), array('email_id' => 'DESC'), 1, 0);
-	foreach ($emails as $e) {
-		if ((int)$e->key > $before) {
-			$email = $e;
-			harness_register_model('Email', $e->key);
-		}
+		$fields + array('eml_subject' => 'HarnessTest direct message', 'eml_message' => "Hello\neveryone"), 'POST');
+	$message = $result->data['message'] ?? null;
+	if ($message) {
+		harness_register_row('dmg_direct_messages', 'dmg_direct_message_id', (int)$message->key);
 	}
-	return array($result, $email);
+	return array($result, $message);
+}
+
+function aum_addresses(DirectMessage $message): array {
+	$out = array();
+	foreach (new MultiDirectMessageRecipient(array('dmr_dmg_direct_message_id' => $message->key)) as $r) {
+		$out[] = (int)$r->get('dmr_usr_user_id');
+	}
+	sort($out);
+	return $out;
 }
 
 try {
@@ -77,8 +78,7 @@ try {
 	$m2 = make_user('AumM2');
 	$someone = make_user('AumOne');
 
-	$msg_before = aum_count('SELECT COUNT(*) FROM msg_messages WHERE msg_usr_user_id_sender = ?', array($staff->key));
-	$ntf_before = aum_count('SELECT COUNT(*) FROM ntf_notifications WHERE ntf_source_usr_user_id = ?', array($staff->key));
+	$eml_before = aum_count('SELECT COUNT(*) FROM eml_emails WHERE eml_usr_user_id = ?', array($staff->key));
 
 	$group = new Group(NULL);
 	$group->set('grp_name', 'HarnessTest send group ' . bin2hex(random_bytes(3)));
@@ -96,34 +96,99 @@ try {
 	}
 
 	section('Email group');
-	list($result, $email) = aum_send($staff, array('grp_group_id' => $group->key));
+	list($result, $message) = aum_send($staff, array('grp_group_id' => $group->key));
 	check(!$result->error, 'the send is accepted', (string)$result->error);
-	check($email !== null, 'one Email row was created');
-	if ($email) {
-		$expected = array('group:' . $group->key, 'user:' . $staff->key); sort($expected);
-		check(aum_groups($email) === $expected, 'recipient groups: the group and the sender copy', json_encode(aum_groups($email)));
-		check((int)$email->get('eml_status') === Email::EMAIL_QUEUED, 'status is QUEUED');
-		check((int)$email->get('eml_usr_user_id') === (int)$staff->key, 'the sender owns the email');
-		check($email->get('eml_message_template_html') === Globalvars::get_instance()->get_setting('group_email_inner_template'), 'the group inner template is set');
-		check(strpos((string)$email->get('eml_message_html'), '<br') !== false, 'newlines became breaks in the HTML body');
-		$n = count(new MultiEmailRecipient(array('email_id' => $email->key)));
-		check($n === 3, 'recipients: two members and the sender', "got $n");
-		check(($result->data['numrecipients'] ?? -1) === 3, 'the page reports the same count', json_encode($result->data['numrecipients'] ?? null));
-		$sent = count(new MultiEmailRecipient(array('email_id' => $email->key, 'sent' => true)));
-		check($sent === 0, 'nobody is marked sent during the request');
+	check($message !== null, 'one DirectMessage was written');
+	if ($message) {
+		check($message->get('dmg_provider') === 'group' && (int)$message->get('dmg_reference_id') === (int)$group->key, 'its audience is the group');
+		check((int)$message->get('dmg_status') === DirectMessage::QUEUED, 'status is queued');
+		check((int)$message->get('dmg_usr_user_id_sender') === (int)$staff->key, 'the sender is recorded');
+		check($message->get('dmg_inner_template') === Globalvars::get_instance()->get_setting('group_email_inner_template'), 'the group inner template is set');
+		check(strpos((string)$message->get('dmg_message_html'), '<br') !== false, 'newlines became breaks in the HTML body');
+		$expected = array((int)$m1->key, (int)$m2->key, (int)$staff->key); sort($expected);
+		check(aum_addresses($message) === $expected, 'recipients: two members and the sender', json_encode(aum_addresses($message)));
+		check(($result->data['numrecipients'] ?? -1) === 3 && (int)$message->get('dmg_recipient_count') === 3, 'the page and the row report the same count');
+		check($message->delivery_counts() === array('sent' => 0, 'failed' => 0, 'waiting' => 3), 'nobody is sent during the request');
+
+		section('The background send');
+		$done = DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key);
+		check($done === array('sent' => 3, 'failed' => 0), 'the pass sends each recipient', json_encode($done));
+		$message->load();
+		check((int)$message->get('dmg_status') === DirectMessage::SENT && $message->get('dmg_sent_time'), 'and marks the message sent');
+		check(DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key) === array('sent' => 0, 'failed' => 0), 'a second pass sends nothing again');
+
+		section('The group page lists it');
+		$history = AdminPage::direct_messages_to('group', (int)$group->key, 20, 0);
+		$ids = array();
+		foreach ($history as $h) { $ids[] = (int)$h->key; }
+		check(in_array((int)$message->key, $ids, true), 'the group\'s history has the message');
 	}
 
 	section('Send email to user');
-	list($result, $email) = aum_send($staff, array('usr_user_id' => $someone->key));
+	list($result, $message) = aum_send($staff, array('usr_user_id' => $someone->key));
 	check(!$result->error, 'the send is accepted', (string)$result->error);
-	check($email !== null, 'one Email row was created');
-	if ($email) {
-		$expected = array('user:' . $someone->key, 'user:' . $staff->key); sort($expected);
-		check(aum_groups($email) === $expected, 'recipient groups: the person and the sender copy', json_encode(aum_groups($email)));
-		check((int)$email->get('eml_status') === Email::EMAIL_QUEUED, 'status is QUEUED: a single person goes through the queue too');
-		check($email->get('eml_message_template_html') === Globalvars::get_instance()->get_setting('individual_email_inner_template'), 'the individual inner template is set');
-		$n = count(new MultiEmailRecipient(array('email_id' => $email->key)));
-		check($n === 2, 'recipients: the person and the sender', "got $n");
+	if ($message) {
+		check($message->get('dmg_provider') === 'user' && (int)$message->get('dmg_reference_id') === (int)$someone->key, 'its audience is the person');
+		check($message->get('dmg_inner_template') === Globalvars::get_instance()->get_setting('individual_email_inner_template'), 'the individual inner template is set');
+		$expected = array((int)$someone->key, (int)$staff->key); sort($expected);
+		check(aum_addresses($message) === $expected, 'recipients: the person and the sender');
+	}
+
+	section('A recipient the provider refuses');
+	list($result, $message) = aum_send($staff, array('usr_user_id' => $someone->key));
+	if ($message) {
+		$db->prepare("UPDATE dmr_direct_message_recipients SET dmr_email = 'not an address' WHERE dmr_dmg_direct_message_id = ? AND dmr_usr_user_id = ?")
+			->execute(array($message->key, $someone->key));
+		$done = DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key);
+		check($done === array('sent' => 1, 'failed' => 0), 'the refused one is not given up on the first try', json_encode($done));
+		check($message->delivery_counts() === array('sent' => 1, 'failed' => 0, 'waiting' => 1), 'it waits for a later try');
+		check(DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key) === array('sent' => 0, 'failed' => 0),
+			'and is not tried again before its retry time');
+		$db->prepare("UPDATE dmr_direct_message_recipients SET dmr_next_try_time = NULL, dmr_attempts = ? WHERE dmr_dmg_direct_message_id = ? AND dmr_usr_user_id = ?")
+			->execute(array(DirectMessage::MAX_ATTEMPTS - 1, $message->key, $someone->key));
+		$done = DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key);
+		check($done === array('sent' => 0, 'failed' => 1), 'its last try fails it for good', json_encode($done));
+		check($message->delivery_counts() === array('sent' => 1, 'failed' => 1, 'waiting' => 0), 'and the message says one sent, one not');
+		$message->load();
+		check((int)$message->get('dmg_status') === DirectMessage::SENT, 'with nothing waiting, the message is done');
+	}
+
+	section('A pass that died mid-send');
+	list($result, $message) = aum_send($staff, array('usr_user_id' => $someone->key));
+	if ($message) {
+		$db->prepare("UPDATE dmr_direct_message_recipients SET dmr_status = ?, dmr_claim_time = now() - interval '1 hour' WHERE dmr_dmg_direct_message_id = ?")
+			->execute(array(DirectMessageRecipient::SENDING, $message->key));
+		DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key);
+		check($message->delivery_counts() === array('sent' => 0, 'failed' => 2, 'waiting' => 0), 'its stale claims are not sent, never sent twice', json_encode($message->delivery_counts()));
+		$message->load();
+		check((int)$message->get('dmg_status') === DirectMessage::SENT, 'and the message no longer reads as sending');
+	}
+
+	section('A provider refusing every send stops the pass');
+	$many = new Group(NULL);
+	$many->set('grp_name', 'HarnessTest refused group ' . bin2hex(random_bytes(3)));
+	$many->set('grp_category', 'user');
+	$many->save();
+	$many->load();
+	harness_register_model('Group', $many->key);
+	for ($i = 0; $i < DirectMessage::STOP_AFTER_FAILURES + 2; $i++) {
+		$u = make_user('AumMany' . $i);
+		$gm = new GroupMember(NULL);
+		$gm->set('grm_grp_group_id', $many->key);
+		$gm->set('grm_foreign_key_id', $u->key);
+		$gm->save();
+		$gm->load();
+		harness_register_model('GroupMember', $gm->key);
+	}
+	list($result, $message) = aum_send($staff, array('grp_group_id' => $many->key));
+	if ($message) {
+		$db->prepare("UPDATE dmr_direct_message_recipients SET dmr_email = 'not an address' WHERE dmr_dmg_direct_message_id = ?")
+			->execute(array($message->key));
+		DirectMessage::send_pending(DirectMessage::SEND_BATCH, (int)$message->key);
+		$q = $db->prepare('SELECT COUNT(*) FROM dmr_direct_message_recipients WHERE dmr_dmg_direct_message_id = ? AND COALESCE(dmr_attempts, 0) = 0');
+		$q->execute(array($message->key));
+		check((int)$q->fetchColumn() === (int)$message->get('dmg_recipient_count') - DirectMessage::STOP_AFTER_FAILURES,
+			'after ' . DirectMessage::STOP_AFTER_FAILURES . ' refusals in a row the rest are left untried');
 	}
 
 	section('Empty audience');
@@ -133,24 +198,8 @@ try {
 	$empty_group->save();
 	$empty_group->load();
 	harness_register_model('Group', $empty_group->key);
-	// The sender's copy would make the audience one; test the model's answer
-	// for a truly empty audience separately from the page's.
-	list($result, $email) = aum_send($staff, array('grp_group_id' => $empty_group->key));
-	check(!$result->error, 'the send is accepted', (string)$result->error);
-	if ($email) {
-		$n = count(new MultiEmailRecipient(array('email_id' => $email->key)));
-		check($n === 1, 'an empty group still delivers the sender their copy', "got $n");
-	}
-	$bare = new Email(NULL);
-	$bare->set('eml_subject', 'HarnessTest bare');
-	$bare->set('eml_status', Email::EMAIL_CREATED);
-	$bare->save();
-	$bare->load();
-	harness_register_model('Email', $bare->key);
-	$bare->add_recipient_group('group', $empty_group->key);
-	check($bare->queue() === 0, 'an audience of nobody queues nothing');
-	$bare->load();
-	check((int)$bare->get('eml_status') === Email::EMAIL_CREATED, 'and is not reported as sent or queued');
+	list($result, $message) = aum_send($staff, array('grp_group_id' => $empty_group->key));
+	check($message && (int)$message->get('dmg_recipient_count') === 1, 'an empty group still delivers the sender their copy');
 
 	section('Refusals');
 	$r = harness_call_logic('adm/logic/admin_users_message_logic.php', 'admin_users_message_logic', array(), 'GET');
@@ -163,11 +212,7 @@ try {
 	check((bool)$r->error, 'an empty subject and body are refused');
 
 	section('Nothing else happened');
-	$msg_after = aum_count('SELECT COUNT(*) FROM msg_messages WHERE msg_usr_user_id_sender = ?', array($staff->key));
-	$ntf_after = aum_count('SELECT COUNT(*) FROM ntf_notifications WHERE ntf_source_usr_user_id = ?', array($staff->key));
-	check($msg_after === $msg_before, 'no msg_messages row was written', "$msg_before -> $msg_after");
-	check($ntf_after === $ntf_before, 'no notification was written', "$ntf_before -> $ntf_after");
-	check($GLOBALS['aum_sends'] === 0, 'no EmailSender::send() ran during any request', 'sends=' . $GLOBALS['aum_sends']);
+	check(aum_count('SELECT COUNT(*) FROM eml_emails WHERE eml_usr_user_id = ?', array($staff->key)) === $eml_before, 'no campaign Email row was written');
 
 } catch (\Throwable $e) {
 	check(false, 'no exception', get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());

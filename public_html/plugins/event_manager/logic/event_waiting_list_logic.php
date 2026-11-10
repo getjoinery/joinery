@@ -90,8 +90,9 @@ function event_waiting_list_logic(array $input): LogicResult {
 				$user->prepare();
 				$user->save();
 
-				if(!empty($_POST['newsletter']) && $settings->get_setting('default_mailing_list')){
-					$user->add_user_to_mailing_lists($settings->get_setting('default_mailing_list'));
+				// The newsletter box is the email_lists plugin's, shown only while it is active.
+				if(!empty($_POST['newsletter']) && class_exists('EmailListSubscriptions') && $settings->get_setting('default_mailing_list')){
+					EmailListSubscriptions::subscribe($user, $settings->get_setting('default_mailing_list'), EmailListSubscriptions::FROM_WAITING_LIST);
 				}
 				return $user;
 			});

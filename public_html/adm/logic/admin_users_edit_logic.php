@@ -6,8 +6,6 @@ function admin_users_edit_logic(array $input): LogicResult {
 
 	require_once(PathHelper::getIncludePath('/includes/Activation.php'));
 	require_once(PathHelper::getIncludePath('/data/users_class.php'));
-	require_once(PathHelper::getIncludePath('/data/mailing_lists_class.php'));
-	require_once(PathHelper::getIncludePath('/data/mailing_list_registrants_class.php'));
 
 	$settings = Globalvars::get_instance();
 	$session = SessionControl::get_instance();
@@ -33,13 +31,6 @@ function admin_users_edit_logic(array $input): LogicResult {
 	if ($user->key) {
 		$user->assert_can_write($session);
 	}
-
-	// Load mailing lists (needed for both display and processing)
-	$search_criteria = array('deleted' => false, 'active' => true);
-	$mailing_lists = new MultiMailingList(
-		$search_criteria,
-		array('name'=>'ASC'));
-	$mailing_lists->load();
 
 	// Process POST actions
 	if (LibraryFunctions::isFormSubmission()) {
@@ -157,29 +148,13 @@ function admin_users_edit_logic(array $input): LogicResult {
 			return LogicResult::error($e->getMessage() . ' Nothing was saved.');
 		}
 
-		//HANDLE THE USERS'S MAILING LISTS
-		// No box ticked sends no field at all: subscribed to none.
-		$messages = $user->add_user_to_mailing_lists($input['new_list_subscribes'] ?? array());
-
 		//NOW REDIRECT
 		return LogicResult::redirect("/admin/admin_user?usr_user_id=$user->key");
-	}
-
-	// Load user subscribed lists for display
-	$user_subscribed_list = array();
-	$search_criteria = array('deleted' => false, 'user_id' => $user->key);
-	$user_lists = new MultiMailingListRegistrant($search_criteria);
-	$user_lists->load();
-
-	foreach ($user_lists as $user_list){
-		$user_subscribed_list[] = $user_list->get('mlr_mlt_mailing_list_id');
 	}
 
 	// Return page variables for rendering
 	return LogicResult::render(array(
 		'user' => $user,
-		'mailing_lists' => $mailing_lists,
-		'user_subscribed_list' => $user_subscribed_list,
 		'session' => $session,
 		'settings' => $settings,
 	));

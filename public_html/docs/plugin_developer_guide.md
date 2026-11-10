@@ -810,6 +810,10 @@ The `?v={filemtime}` query changes whenever the file changes, so browsers refetc
 and otherwise cache. Always reference your assets by their namespaced `/plugins/{plugin}/assets/…`
 URL — never a relative path.
 
+An asset URL that carries `v` is kept by browsers for a year, so **the `v` value must change when
+the file does**. `filemtime()` does that. Never write a fixed value such as `?v=1`: it pins the
+file in every browser for a year.
+
 The inline closure above is for assets that belong to **one page** (a page-specific reader script,
 say). For a plugin's **stylesheet** — the sheet that styles its UI wherever it appears — declare it
 instead (next section); don't echo a `<link>` per page.
@@ -818,9 +822,18 @@ instead (next section); don't echo a `<link>` per page.
 
 Declare a plugin's stylesheets under the `styles` key in `plugin.json` — an array of paths relative
 to the plugin root. Every declared sheet loads on **every page while the plugin is active**,
-cache-busted by file mtime, emitted **after the `.jy-ui` kit and before the active theme's
-stylesheet**. That position is deliberate: your rules resolve the kit's `--jy-*` design tokens, and
-a theme can still override them.
+emitted **after the `.jy-ui` kit and before the active theme's stylesheet**. That position is
+deliberate: your rules resolve the kit's `--jy-*` design tokens, and a theme can still override
+them.
+
+The declared sheets of every active plugin are sent as **one file**,
+`/assets/plugin-styles.css?v={hash}`, joined in declared order. The hash changes when any sheet
+does, so an edit shows on the next page load. In the browser's developer tools a rule's source is
+that one file; each sheet's part of it starts with a comment naming the sheet
+(`/* plugins/my-plugin/assets/css/my-plugin.css */`). A sheet is linked on its own instead, as
+`/plugins/{plugin}/assets/…?v={filemtime}`, when joining it would change what it means: one that
+holds a relative `url()` (write `url(/plugins/my-plugin/assets/…)`), an `@import` or an
+`@charset`.
 
 ```json
 {
@@ -1179,6 +1192,47 @@ Four rules make declared rows safe to ship, all of them learned the hard way:
 Anything that only makes sense on the instance that authored the row — an owner id, a foreign key into another install's data, a model or provider name — must be fixed at seed time rather than declared. If a row can't arrive inert, it shouldn't ship.
 
 Joinery AI is the worked example: `plugins/joinery_ai/recipes.json` declares a few curated recipes and its seeder is documented in [the plugin's overview](../plugins/joinery_ai/docs/overview.md#shipped-recipes).
+
+### Adding to Core Pages
+
+A plugin adds to core pages through registries, called from its `serve.php` (loaded on every request while the plugin is active). Core keeps the page, who may open it, and the form; the plugin supplies its part.
+
+**Admin detail pages: `AdminEntityPanelRegistry`.** A panel is registered for an entity type: `user` (`/admin/admin_user`), `group` (`/admin/admin_group_members`), `event` (event_manager's event page), or any type a plugin's own page hosts. It implements `AdminEntityPanel`: `id()`, `render($entity, AdminPage $page, array $context): string`, `actions()` naming its POST actions, and `handle($action, $entity, $input): LogicResult`. The page renders every panel for its entity and hands a POST whose `action` a panel names to that panel before its own actions.
+
+```php
+AdminEntityPanelRegistry::register('group', new MyGroupCampaignsPanel());
+```
+
+`AdminUserPanelRegistry::register()` registers an `AdminUserPanel` (typed for `User`) as a `user` panel.
+
+**Account creation: `SignupFieldRegistry`.** A field on the registration form (`register`) and the admin add-user form (`admin_add`), and what to do with it once the account exists. `account.signup` carries no form input, which is why this is a registry and not a signal.
+
+```php
+SignupFieldRegistry::register('my_optin', array(
+    'contexts' => array('register'),   // default: both
+    'render'   => function ($formwriter, string $context, array $input) { /* add inputs */ },
+    'handle'   => function (User $user, array $input, string $context) { /* act on them */ },
+));
+```
+
+A `handle` that throws is logged; the account is kept and the other contributors still run.
+
+**Email preferences: `ContactPreferencesRegistry`.** Sections of `/profile/contact_preferences`, the page every email footer links to. The page is for the signed-in member, or for the person a footer link names (its `user` and `hash`), and the form carries the link's user and hash so saving works signed out. A section gets `$context['via_link']`; through a link, offer only what is safe for anyone holding a forwarded email to do. With no sections the page points to notification preferences.
+
+```php
+ContactPreferencesRegistry::register('my_lists', array(
+    'render' => function ($formwriter, User $user, array $context) { /* inputs */ },
+    'save'   => function (User $user, array $input, array $context): array { return $messages; },
+));
+```
+
+**Member dashboard: `ProfileDashboardRegistry`.** A section of `/profile` and the app dashboard: `register($id, function (User $user): ?ProfileDashboardSection)`.
+
+**Address proved: the `account.email_verified` signal.** Fired when a member proves their address (the activation button, a password reset, a confirmed address change) or an admin marks it verified; `method` says which. Subscribe to it to act on a proof (see [Plugin Signals & Subscribers](#plugin-signals--subscribers-declarative)).
+
+### Page Components
+
+A plugin can ship blocks for the page builder: put `{type}.json` and `{type}.php` in the plugin's `views/components/`, and the logic file a definition's `logic_function` names in `logic/components/`. Sync picks them up beside core's, and each requires its plugin, so a placed block disappears while the plugin is off. See [Component System](component_system.md#5-creating-templates).
 
 ### Content Packs
 
@@ -1783,7 +1837,7 @@ change. See the driver contract in
 
 ## Provider Abstractions
 
-The system has two pluggable provider abstractions for external services. Each follows the same shape: an interface, a service manager that auto-discovers concrete classes, and one provider class per third-party service. Adding a new provider is a single-file change — drop a class into the providers directory and the rest of the system picks it up.
+The system has pluggable provider abstractions for external services. Each follows the same shape: an interface, a service manager that auto-discovers concrete classes, and one provider class per third-party service. Adding a new provider is a single-file change — drop a class into the providers directory and the rest of the system picks it up.
 
 ### Email providers (`EmailServiceProvider`)
 
@@ -1793,60 +1847,7 @@ The system has two pluggable provider abstractions for external services. Each f
 
 ### Mailing list providers (`MailingListProvider`)
 
-- Interface: `includes/mailing_list_providers/MailingListProvider.php`
-- Abstract base: `includes/mailing_list_providers/AbstractMailingListProvider.php` — concrete providers extend this rather than implementing the interface directly
-- Typed exception: `includes/mailing_list_providers/MailingListProviderException.php` — `isRetryable()` distinguishes transient (rate limit, 5xx, network) from permanent (list missing, credentials revoked) failures
-- Manager: `MailingListService` (`includes/MailingListService.php`) — `MailingListService::getProvider()`, `getAvailableServices()`, `getProviderSettings($key)`
-- Implementations: `includes/mailing_list_providers/*Provider.php` (MailChimp, …)
-
-**Required methods on the interface:**
-| Method | Purpose |
-|---|---|
-| `getKey()` / `getLabel()` | Identity for the `mailing_list_provider` setting and admin dropdown |
-| `getSettingsFields()` | Setting field definitions rendered dynamically by the admin UI |
-| `validateConfiguration()` | Cheap, no-network check that required settings are non-empty |
-| `validateApiConnection()` | Live API ping for the admin "Connection OK?" panel |
-| `subscribe()` / `unsubscribe()` | Idempotent operations on a remote list. Email is normalized to lowercase; throw `MailingListProviderException` on provider-side failures, `\InvalidArgumentException` on bad input |
-| `getSubscribers()` | Opaque-cursor pagination — caller passes `null` first, then echoes back `next_cursor` until it is `null`. Returns the canonical four-value `status` enum (`subscribed`, `unsubscribed`, `bounced`, `pending`) |
-
-**Non-universal methods** (e.g. `getLists()`) live on `AbstractMailingListProvider` with a default body that throws `\BadMethodCallException`. Providers override them when their API supports the operation; consumers wrap calls in `try/catch \BadMethodCallException`. Future non-universal additions (sequences, broadcasts, list stats) follow the same pattern, keeping additions non-breaking for existing provider classes.
-
-**Adding a new provider:**
-
-1. Create `includes/mailing_list_providers/MyServiceProvider.php`:
-   ```php
-   require_once(PathHelper::getComposerAutoloadPath());
-   require_once(PathHelper::getIncludePath('includes/mailing_list_providers/AbstractMailingListProvider.php'));
-
-   class MyServiceProvider extends AbstractMailingListProvider {
-       public static function getKey(): string { return 'myservice'; }
-       public static function getLabel(): string { return 'My Service'; }
-       // … implement the remaining required methods
-   }
-   ```
-2. Add any provider-specific settings to `settings.json` (factory defaults seed automatically).
-3. Pick the provider in admin settings (`/admin/admin_settings_email` → Mailing List Provider section) — the dropdown auto-populates from your new class.
-
-No other files need to change. The model layer (`MailingList::sync_subscribe()` / `sync_unsubscribe()`) and the sync utility (`utils/mailing_list_synchronize.php`) call the configured provider through `MailingListService::getProvider()`.
-
-**Canonical subscriber status enum.** `getSubscribers()` returns one of four `status` values regardless of provider. Each provider class maps its native vocabulary into this set:
-
-| Canonical | Meaning | MailChimp | ConvertKit | Listmonk |
-|---|---|---|---|---|
-| `subscribed` | Actively receives mail | `subscribed` | `active` | `enabled` |
-| `unsubscribed` | Opted out (incl. spam-complained) | `unsubscribed` | `cancelled`, `inactive`, `complained` | `disabled` |
-| `bounced` | Email invalid; provider stopped sending | `cleaned` | `bounced` | `blocklisted` |
-| `pending` | Double opt-in not yet confirmed | `pending` | (n/a) | (n/a) |
-
-`complained` (spam-marked) collapses into `unsubscribed` — for the platform's purposes the action taken on the local row is the same. Mapping is typically ~5 lines of `switch` per provider.
-
-**Out of scope (deliberate deferrals).** Three categories of methods are intentionally NOT on the interface today; they will be added when a concrete second provider needs them:
-
-- **Webhooks.** Real-time event notifications (`registerWebhook`, `verifyWebhookSignature`) are not part of the contract. When added they go on the required interface — every modern provider supports them.
-- **OAuth flows.** Some providers (HubSpot, Klaviyo) use OAuth2 instead of API keys. The current `getSettingsFields()` shape can't express an OAuth flow. When a provider needing OAuth is added, that provider class implements an additional method (e.g. `getOAuthAuthorizationUrl()`) outside the formal interface; the admin UI checks for its presence via `method_exists`.
-- **Programmatic list creation.** `createList()` is not on the interface. Current workflow: admins create lists in the provider's UI and enter the ID locally. Add programmatically only when a concrete use case appears.
-
-Non-universal future methods (sequences, broadcasts, list stats) get default throwing bodies on `AbstractMailingListProvider` so additions stay non-breaking for existing provider classes.
+The email_lists plugin's provider abstraction (MailChimp, …). See [Email Lists § Mailing list providers](../plugins/email_lists/docs/overview.md#mailing-list-providers).
 
 ## Theme Development
 
@@ -2014,7 +2015,7 @@ Theme assets are served through the theme asset route with automatic caching:
 <img src="/theme/mytheme/assets/images/logo.png" alt="Logo">
 ```
 
-The `?v=` query changes whenever the file does, so a cache in front of the site (Cloudflare keeps an unversioned stylesheet for up to 12 hours) never serves the old copy. `tests/integration/asset_link_versions_test.php` fails on a link to a local `.css` or `.js` file without one.
+The `?v=` query changes whenever the file does, so a cache in front of the site (Cloudflare keeps an unversioned stylesheet for up to 12 hours) never serves the old copy. `tests/integration/asset_link_versions_test.php` fails on a link to a local `.css` or `.js` file without one. A URL that carries `v` is kept by browsers for a year, so the value must be the file's time: a fixed one such as `?v=1` pins the file for a year.
 
 **Base Assets:**
 

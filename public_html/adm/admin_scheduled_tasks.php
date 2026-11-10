@@ -6,6 +6,8 @@
  * Shows active tasks and available (discovered) tasks.
  * Supports activate, deactivate, configure, and run-now actions.
  *
+ * @version 1.7 - a task waiting for an inactive plugin shows as skipped with the reason
+ * @version 1.6 - a config field of type select takes options or options_from, as a setting does
  * @version 1.5 - a 'retry' result shows as Waiting
  * @version 1.4 - every_run reads every minute, and the suggested cron line fires every minute, as the installers write it
  */
@@ -178,6 +180,10 @@ if (empty($active_tasks)) {
 		// Status badge
 		$status = $task->get('sct_last_run_status');
 		$run_message = $task->get('sct_last_run_message');
+		if (!empty($waiting_for_plugins[$task->key])) {
+			$status = 'skipped';
+			$run_message = $waiting_for_plugins[$task->key];
+		}
 		// Retired = the task's code file is no longer on disk, because an
 		// upgrade removed or consolidated it. Detected live (file resolution
 		// in the logic) so it reflects the current deploy rather than the
@@ -344,13 +350,10 @@ if (isset($_GET['edit'])) {
 			$field_label = $field_def['label'] ?? $field_name;
 			$field_value = $task_config[$field_name] ?? '';
 
-			if ($field_type === 'mailing_list') {
-				$ml_options = array();
-				foreach ($mailing_lists as $ml) {
-					$ml_options[$ml->key] = $ml->get('mlt_name');
-				}
+			if ($field_type === 'select') {
+				// options, or options_from 'Class::method', as a setting declares them.
 				$formwriter->dropinput('config_' . $field_name, $field_label, array(
-					'options' => $ml_options,
+					'options' => SettingsDeclarations::resolveOptions($field_def),
 					'value' => $field_value,
 					'empty_option' => '-- Select --',
 				));
@@ -440,12 +443,12 @@ if (empty($available_tasks)) {
 					$field_type = $field_def['type'] ?? 'text';
 					$field_label = $field_def['label'] ?? $field_name;
 
-					if ($field_type === 'mailing_list') {
+					if ($field_type === 'select') {
 						echo '<label style="font-size: 0.85em; display: block; margin-bottom: 4px;">' . htmlspecialchars($field_label) . ':</label>';
 						echo '<select name="config_' . htmlspecialchars($field_name) . '" class="form-control form-control-sm" style="margin-bottom: 8px;">';
 						echo '<option value="">-- Select --</option>';
-						foreach ($mailing_lists as $ml) {
-							echo '<option value="' . $ml->key . '">' . htmlspecialchars($ml->get('mlt_name')) . '</option>';
+						foreach (SettingsDeclarations::resolveOptions($field_def) as $opt_value => $opt_label) {
+							echo '<option value="' . htmlspecialchars((string)$opt_value) . '">' . htmlspecialchars((string)$opt_label) . '</option>';
 						}
 						echo '</select>';
 					} else {

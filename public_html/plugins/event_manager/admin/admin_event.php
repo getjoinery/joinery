@@ -685,6 +685,9 @@
 	), $lpager);
 	}
 
+	// Panels plugins add for an event (AdminEntityPanelRegistry, 'event').
+	echo AdminEntityPanelRegistry::renderAll('event', $event, $page);
+
 	?>
 	<?php if($photo_editable): ?>
 	<?php PhotoHelper::render_photo_scripts('grid', 'event', $event->key, [

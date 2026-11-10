@@ -1,0 +1,194 @@
+{
+    "name": "Email Lists & Campaigns",
+    "version": "1.0.0",
+    "description": "Mailing lists, newsletter signup forms and email campaigns, with MailChimp sync. Campaigns send through the site's own email provider.",
+    "author": "Joinery",
+    "license": "Joinery-Commercial",
+    "status": "beta",
+    "requires_entitlement": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "tags": [
+        "email",
+        "newsletter",
+        "mailing lists",
+        "campaigns"
+    ],
+    "publicPaths": [
+        "/lists"
+    ],
+    "adminMenu": [
+        {
+            "slug": "emails-list",
+            "title": "Emails list",
+            "url": "/plugins/email_lists/admin/admin_emails",
+            "parent": "emails",
+            "order": 1,
+            "settingActivate": "emails_active"
+        },
+        {
+            "slug": "mailing-lists",
+            "title": "Mailing Lists",
+            "url": "/plugins/email_lists/admin/admin_mailing_lists",
+            "parent": "emails",
+            "order": 7,
+            "settingActivate": "mailing_lists_active"
+        }
+    ],
+    "settingsGroups": {
+        "email_module": "Campaigns",
+        "mailing_list": "Mailing list provider",
+        "email_lists_consent": "Double opt-in"
+    },
+    "settings": [
+        {
+            "name": "emails_active",
+            "default": "1",
+            "legacy_core": true,
+            "group": "email_module",
+            "label": "Email campaigns active",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            }
+        },
+        {
+            "name": "default_mailing_list",
+            "default": "1",
+            "legacy_core": true,
+            "group": "email_module",
+            "label": "Default mailing list",
+            "type": "select",
+            "options_from": "EmailListOptions::mailingLists",
+            "options_include": "plugins/email_lists/includes/EmailListOptions.php",
+            "empty_option": true
+        },
+        {
+            "name": "mailing_lists_active",
+            "default": "1",
+            "legacy_core": true,
+            "group": "mailing_list",
+            "label": "Mailing list module active",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            }
+        },
+        {
+            "name": "mailing_list_provider",
+            "default": "mailchimp",
+            "legacy_core": true,
+            "group": "mailing_list",
+            "label": "Provider",
+            "type": "select",
+            "options_from": "EmailListOptions::mailingListServices",
+            "options_include": "plugins/email_lists/includes/EmailListOptions.php",
+            "empty_option": true,
+            "helptext": "Service subscriptions are synced to."
+        },
+        {
+            "name": "mailchimp_api_key",
+            "default": "",
+            "legacy_core": true,
+            "secret": true,
+            "group": "mailing_list",
+            "label": "MailChimp API key",
+            "show_when": {
+                "mailing_list_provider": "mailchimp"
+            },
+            "helptext": "Ends with a datacentre suffix, e.g. -us21."
+        },
+        {
+            "name": "mailchimp_default_merge_fields",
+            "default": "",
+            "legacy_core": true,
+            "group": "mailing_list",
+            "label": "Default merge fields (JSON)",
+            "type": "textarea",
+            "rows": 4,
+            "show_when": {
+                "mailing_list_provider": "mailchimp"
+            },
+            "helptext": "Merge tags applied to every subscribe call. Example: {\"MMERGE3\":\"Yes\"}. Blank or {} for none."
+        },
+        {
+            "name": "email_lists_double_opt_in",
+            "default": "1",
+            "group": "email_lists_consent",
+            "label": "Double opt-in",
+            "type": "select",
+            "options": {
+                "1": "On: subscribe only after the address confirms",
+                "0": "Off: subscribe at once"
+            },
+            "helptext": "On, nobody gets list mail until they press Confirm on a link sent to the address: proof they own it and asked. Off, every signup subscribes at once, and the site has no proof that subscribers own their addresses."
+        },
+        {
+            "name": "email_lists_confirm_limit_per_ip",
+            "default": "10",
+            "group": "email_lists_consent",
+            "label": "Confirmation emails per requester per day",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 1
+            },
+            "helptext": "Signups from one network address (an IPv6 /64) past this get the usual \"check your email\", and the request is kept without its email. One address is sent at most one confirmation a day."
+        },
+        {
+            "name": "email_lists_confirm_limit_per_site",
+            "default": "200",
+            "group": "email_lists_consent",
+            "label": "Confirmation emails per day, site-wide",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 1
+            },
+            "helptext": "Each one is a send on the site's email allowance. Past this, a signup is kept without its email: the list's page shows it, with a Resend, and asking again tomorrow sends it."
+        },
+        {
+            "name": "email_lists_confirmations_held",
+            "default": "",
+            "managed": true,
+            "helptext": "Today's count of confirmation emails the limits held back, as JSON {date, count}. Written by EmailListSubscriptions; read by the mailing lists admin page."
+        }
+    ],
+    "signals": {
+        "newsletter.signup": {
+            "label": "Newsletter signup",
+            "description": "Someone subscribed to a mailing list / newsletter.",
+            "personal_data": "Which member joined which mailing list.",
+            "category": "Members",
+            "payload": {
+                "mailing_list_id": "Mailing list id",
+                "mailing_list_name": "Mailing list display name",
+                "user_id": "Subscribing user id (nullable)",
+                "source_user_id": "Acting user id (the subscriber)"
+            },
+            "notify": {
+                "ntf_type": "account",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Newsletter signup: {mailing_list_name}",
+                "body_template": "A user subscribed to the \"{mailing_list_name}\" mailing list.",
+                "link_template": "/plugins/email_lists/admin/admin_mailing_lists"
+            }
+        }
+    },
+    "signalSubscribers": {
+        "email_lists_address_verified": {
+            "file": "includes/EmailListSubscriptions.php",
+            "class": "EmailListSubscriptions",
+            "method": "on_email_verified",
+            "signals": [
+                "account.email_verified"
+            ]
+        }
+    }
+}

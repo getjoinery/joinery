@@ -7,7 +7,6 @@
 
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
-	require_once(PathHelper::getIncludePath('data/mailing_lists_class.php'));
 	require_once(PathHelper::getIncludePath('data/pages_class.php'));
 
 	require_once(PathHelper::getIncludePath('adm/logic/admin_settings_logic.php'));

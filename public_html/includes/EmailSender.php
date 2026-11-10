@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.5 - usesIncludedMail(): whether the site sends through the included Joinery email
  * @version 1.4 - quickSend() puts an HTML body in the blank inner template inside the default
  *   outer template; it had rendered the outer template as the inner one, which dropped the body
  * @version 1.3 - the retry queue, the refused-send event and the debug log save as the server's own writes (no person owns them);
@@ -49,6 +50,35 @@ class EmailSender {
     const EGRESS_CONTENT_FREE = 'content-free';
     const EGRESS_USER_COMPOSE = 'user-compose';
     const EGRESS_ACKNOWLEDGED_FORWARD = 'acknowledged-forward';
+
+    /**
+     * Whether this site sends through the included Joinery email: the
+     * getjoinery services account, or a Managed site's operator-minted SMTP
+     * credential (HostedMailSettingsMap::apply() records it as
+     * included_mail_identity). Included email has a small monthly allowance
+     * meant for everyday mail; a feature that would send in bulk asks this
+     * first (spec email_lists_plugin §5).
+     *
+     * An owner who points the SMTP settings at their own account changes the
+     * host or username, so the match ends with nothing to clear.
+     */
+    public static function usesIncludedMail(): bool {
+        $settings = Globalvars::get_instance();
+        $service = trim((string)$settings->get_setting('email_service', true, true));
+        if ($service === ServicesClient::MAIL_SERVICE_KEY) {
+            return true;
+        }
+        if ($service !== 'smtp') {
+            return false;
+        }
+        $identity = trim((string)$settings->get_setting('included_mail_identity', true, true));
+        if ($identity === '') {
+            return false;
+        }
+        $current = strtolower(trim((string)$settings->get_setting('smtp_host', true, true)))
+            . '|' . trim((string)$settings->get_setting('smtp_username', true, true));
+        return hash_equals($identity, $current);
+    }
 
     private $settings;
     private $defaultFrom;

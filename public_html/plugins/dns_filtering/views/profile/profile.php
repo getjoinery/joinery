@@ -78,21 +78,25 @@ Team Area
 										</h6>
                                     </div>
                                 </div>
+                                <?php foreach ($page_vars['dashboard_sections'] as $dnsf_section): ?>
+                                <?php if (empty($dnsf_section->items) && $dnsf_section->empty_message === null) continue; ?>
                                 <div class="about-info">
-                                    <div class="about-info_icon"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 13a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.6 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
+                                    <div class="about-info_icon"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><path d="M4 4h16v16H4z"/><path d="M4 9h16"/></svg></div>
                                     <div class="about-info_content">
-                                        <p class="about-info_subtitle">Lists</p>
-                                        <h6 class="about-info_title">        <?php 
-			
-			if(empty($page_vars['user_subscribed_list'])){
-				echo '<a href="/profile/contact_preferences">Not subscribed</a>';
-			}
-			else{
-				echo implode(', ', $page_vars['user_subscribed_list']);
-			}
-			?></h6>
+                                        <p class="about-info_subtitle"><?php echo htmlspecialchars($dnsf_section->title); ?></p>
+                                        <h6 class="about-info_title"><?php
+                                        if (empty($dnsf_section->items)) {
+                                            $dnsf_empty = $dnsf_section->empty_message;
+                                            echo $dnsf_section->view_all_url
+                                                ? '<a href="' . htmlspecialchars($dnsf_section->view_all_url) . '">' . htmlspecialchars($dnsf_empty) . '</a>'
+                                                : htmlspecialchars($dnsf_empty);
+                                        } else {
+                                            echo htmlspecialchars(implode(', ', array_map(function ($i) { return $i->title; }, $dnsf_section->items)));
+                                        }
+                                        ?></h6>
                                     </div>
                                 </div>
+                                <?php endforeach; ?>
                                 <div class="about-info">
                                     <div class="about-info_icon"><svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon"><polyline points="22,7 22,20 2,20 2,7"/><path d="M2 7l10-5 10 5"/><line x1="12" y1="2" x2="12" y2="20"/></svg></div>
                                     <div class="about-info_content">

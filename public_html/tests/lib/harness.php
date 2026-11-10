@@ -1019,6 +1019,7 @@ function harness_named_fixture_families() {
 		array('BookingType', 'bty_booking_types', 'bty_name', 'bty_create_time', 'HarnessTest %'),
 		array('Email', 'eml_emails', 'eml_subject', null, 'HarnessTest %'),
 		array('MailingList', 'mlt_mailing_lists', 'mlt_name', 'mlt_create_time', 'HarnessTest %'),
+		array('DirectMessage', 'dmg_direct_messages', 'dmg_subject', 'dmg_create_time', 'HarnessTest %'),
 		array('SignalReceiver', 'sgr_signal_receivers', 'sgr_name', 'sgr_create_time', 'HarnessTest %'),
 		array('Post', 'pst_posts', 'pst_title', 'pst_create_time', 'HarnessTest %'),
 		array('ApiKey', 'apk_api_keys', 'apk_name', 'apk_create_time', 'HarnessTest %'),

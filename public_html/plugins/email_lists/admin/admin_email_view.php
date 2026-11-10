@@ -1,0 +1,34 @@
+<?php
+/** @joinery-admin class=personal */
+
+require_once(PathHelper::getIncludePath('plugins/email_lists/admin/logic/admin_email_view_logic.php'));
+require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+
+$page_vars = process_logic(admin_email_view_logic(array_merge($_GET, $_POST)));
+
+$session = $page_vars['session'];
+$email = $page_vars['email'];
+
+$page = new AdminPage();
+$page->admin_header(array(
+	'menu-id' => 'emails-list',
+	'page_title' => 'Email',
+	'readable_title' => 'Email',
+	'session' => SessionControl::get_instance(),
+));
+
+echo '<h2>Email</h2>';
+echo '<a href="/admin/admin_user?usr_user_id='.$email->get('eml_usr_user_id').'">back to user</a><br /><br />';
+
+if($email->get('eml_delete_time')){
+	echo 'Status: Deleted<br>';
+}
+echo '<p>Sent: '.($email->get('eml_sent_time') ? LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone(), 'M j, Y') : 'Not sent').'</p>';
+echo '<p>Subject: '.$email->get('eml_subject').'</p>';
+
+echo '<p>'.$email->get('eml_message_html').'</p>';
+
+$page->admin_footer();
+
+?>

@@ -44,7 +44,6 @@
     "email_module": "Email module",
     "email_templates": "Email templates",
     "email_testing": "Email testing and debug",
-    "mailing_list": "Mailing list provider",
     "email_provider_brevo": "Brevo",
     "email_provider_connected_account": "Connected email account",
     "email_provider_mailgun": "Mailgun",
@@ -181,6 +180,12 @@
       "label": "Name this site files backups under",
       "type": "text",
       "helptext": "The folder inside the bucket that holds this site's backups. Blank uses the project directory name, which is also what a fleet management node would call this site — so leaving it blank keeps one pile rather than starting a second beside the first. Letters, numbers, hyphens and underscores only."
+    },
+    {
+      "name": "included_mail_identity",
+      "default": "",
+      "managed": true,
+      "helptext": "The SMTP host and username (host|username) of the included email this site was last given, by a Managed site's mail push or the getjoinery services enrol. Blank when none. Written by HostedMailSettingsMap::apply(); EmailSender::usesIncludedMail() compares it to the current SMTP settings, so pointing the site at its own account ends the match with nothing to clear."
     },
     {
       "name": "backup_service_folder",
@@ -325,17 +330,6 @@
       "type": "text"
     },
     {
-      "name": "emails_active",
-      "default": "1",
-      "group": "email_module",
-      "label": "Email module active",
-      "type": "select",
-      "options": {
-        "1": "Yes",
-        "0": "No"
-      }
-    },
-    {
       "name": "enable_hsts",
       "default": "1",
       "group": "protocol",
@@ -348,17 +342,6 @@
       "default": "1",
       "group": "files",
       "label": "File hosting module active",
-      "type": "select",
-      "options": {
-        "1": "Yes",
-        "0": "No"
-      }
-    },
-    {
-      "name": "mailing_lists_active",
-      "default": "1",
-      "group": "mailing_list",
-      "label": "Mailing list module active",
       "type": "select",
       "options": {
         "1": "Yes",
@@ -1238,29 +1221,6 @@
       "empty_option": true
     },
     {
-      "name": "mailing_list_provider",
-      "default": "mailchimp",
-      "group": "mailing_list",
-      "label": "Provider",
-      "type": "select",
-      "options_from": "CoreSettingOptions::mailingListServices",
-      "options_include": "includes/CoreSettingOptions.php",
-      "empty_option": true,
-      "helptext": "Service subscriptions are synced to."
-    },
-    {
-      "name": "mailchimp_default_merge_fields",
-      "default": "",
-      "group": "mailing_list",
-      "label": "Default merge fields (JSON)",
-      "type": "textarea",
-      "rows": 4,
-      "show_when": {
-        "mailing_list_provider": "mailchimp"
-      },
-      "helptext": "Merge tags applied to every subscribe call. Example: {\"MMERGE3\":\"Yes\"}. Blank or {} for none."
-    },
-    {
       "name": "form_style",
       "default": "Default (UIKit)",
       "managed": true,
@@ -1357,16 +1317,6 @@
       "label": "Upload web directory",
       "type": "text",
       "helptext": "Web-visible path uploads are served from, relative to the site root. Usually just uploads."
-    },
-    {
-      "name": "default_mailing_list",
-      "default": "1",
-      "group": "email_module",
-      "label": "Default mailing list",
-      "type": "select",
-      "options_from": "CoreSettingOptions::mailingLists",
-      "options_include": "includes/CoreSettingOptions.php",
-      "empty_option": true
     },
     {
       "name": "bulk_footer",
@@ -1702,17 +1652,6 @@
           "message": "Must start with / and the file must exist"
         }
       }
-    },
-    {
-      "name": "mailchimp_api_key",
-      "default": "",
-      "secret": true,
-      "group": "mailing_list",
-      "label": "MailChimp API key",
-      "show_when": {
-        "mailing_list_provider": "mailchimp"
-      },
-      "helptext": "Ends with a datacentre suffix, e.g. -us21."
     },
     {
       "name": "mailchimp_list_id",
@@ -2918,6 +2857,12 @@
       "managed": true,
       "secret": true,
       "helptext": "This site's browser-push key pair (VAPID), minted by update_database through WebPushDriver::provisionKeys(). Never entered by hand; a new pair retires every browser that turned push on."
+    },
+    {
+      "name": "_email_lists_autoactivate_v1",
+      "default": "",
+      "managed": true,
+      "helptext": "One-shot marker: update_database evaluated whether to auto-activate the email_lists plugin on this deployment (a site that already had mailing lists keeps them). Presence is the whole meaning."
     },
     {
       "name": "_store_event_autoactivate_v1",
