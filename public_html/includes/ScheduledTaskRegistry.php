@@ -13,6 +13,7 @@
  *  - retentionRules()    collect $retention_policy declarations from data classes
  *  - reconcileMissing()  retire rows whose code file is gone
  *
+ * @version 1.3 - reconcileMissing() puts a retired row back when its code file returns
  * @version 1.2 - missingRequiredPlugins(): a task JSON's requires_plugins, checked when it runs
  * @version 1.1 - retentionRules() accepts a list of policies per class; the key it returns is a rule id, and each rule carries its own table
  */
@@ -247,6 +248,7 @@ class ScheduledTaskRegistry {
 	 *  - first miss              stamp sct_missing_since, change nothing else
 	 *  - file returns            clear the stamp, no trace
 	 *  - missing past the grace  deactivate, status 'retired', row PRESERVED
+	 *  - file of a retired row returns  active again (not a superseded one)
 	 *
 	 * Retirement never soft-deletes. The schedule and sct_task_config survive, so
 	 * restoring the file and reactivating restores the operator's configuration
@@ -254,7 +256,7 @@ class ScheduledTaskRegistry {
 	 *
 	 * @param bool $skip_grace  True from update_database, where the filesystem is
 	 *                          authoritative the moment the deploy finishes.
-	 * @return array  retired, pending (names), for the caller to report
+	 * @return array  retired, pending, restored (names), for the caller to report
 	 */
 	public static function reconcileMissing($skip_grace = false) {
 		$successors = self::_supersessionMap();
@@ -308,7 +310,27 @@ class ScheduledTaskRegistry {
 			$retired[] = $task->get('sct_name');
 		}
 
-		return array('retired' => $retired, 'pending' => $pending);
+		// A retired row whose code file is back runs again. The guard is the
+		// status: only retirement writes 'retired', and a pause, resume or
+		// plugin deactivation does not (pause and resume clear it), so this
+		// puts back nobody's choice. A rolled-back upgrade that retired a task
+		// brings it back with the upgrade that restores the file. A superseded
+		// task stays retired.
+		$restored = array();
+		$off = new MultiScheduledTask(array('active' => false, 'deleted' => false), array('sct_scheduled_task_id' => 'ASC'));
+		foreach ($off as $task) {
+			if ($task->get('sct_last_run_status') !== 'retired' || isset($successors[$task->get('sct_task_class')])
+					|| !$task->resolve_task_file()) {
+				continue;
+			}
+			$task->set('sct_is_active', true);
+			$task->set('sct_last_run_status', null);
+			$task->set('sct_last_run_message', 'Task code file is back; the task runs again');
+			$task->save();
+			$restored[] = $task->get('sct_name');
+		}
+
+		return array('retired' => $retired, 'pending' => $pending, 'restored' => $restored);
 	}
 
 	/**

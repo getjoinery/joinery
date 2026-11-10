@@ -15,6 +15,7 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.8 - a retired task whose code file is back is restored and said so
  * @version 2.7 - a task whose requires_plugins names an inactive plugin is skipped with the reason, not run
  * @version 2.6 - each pass sweeps the RAM store: expired entries nobody read and the generations of
  *   processes that have ended (includes/RamStore.php); a store not made yet is left alone
@@ -131,6 +132,9 @@ try {
 	$reconciled = ScheduledTaskRegistry::reconcileMissing();
 	foreach ($reconciled['retired'] as $retired_name) {
 		echo "[$timestamp] Retired: $retired_name\n";
+	}
+	foreach ($reconciled['restored'] as $restored_name) {
+		echo "[$timestamp] Restored: $restored_name\n";
 	}
 } catch (Throwable $e) {
 	echo "[$timestamp] Warning: reconcile failed: " . $e->getMessage() . "\n";

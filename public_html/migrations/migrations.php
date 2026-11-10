@@ -734,8 +734,17 @@
 	// ========== Rename ctt_mailchimp_list_id → ctt_provider_list_id (v123) ==========
 	$migration = array();
 	$migration['database_version'] = '123';
-	$migration['test'] = "SELECT count(1) as count FROM information_schema.columns WHERE table_name = 'ctt_contact_types' AND column_name = 'ctt_provider_list_id'";
-	$migration['migration_sql'] = "ALTER TABLE ctt_contact_types RENAME COLUMN ctt_mailchimp_list_id TO ctt_provider_list_id";
+	// As 122: the schema step may already have made ctt_provider_list_id, and
+	// then the list ids are copied across instead of renamed.
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ctt_contact_types' AND column_name = 'ctt_mailchimp_list_id') THEN 0 ELSE 1 END AS count";
+	$migration['migration_sql'] = "DO \$\$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ctt_contact_types' AND column_name = 'ctt_provider_list_id') THEN
+			UPDATE ctt_contact_types SET ctt_provider_list_id = ctt_mailchimp_list_id
+			WHERE COALESCE(ctt_provider_list_id::text, '') = '' AND COALESCE(ctt_mailchimp_list_id::text, '') <> '';
+		ELSE
+			ALTER TABLE ctt_contact_types RENAME COLUMN ctt_mailchimp_list_id TO ctt_provider_list_id;
+		END IF;
+	END \$\$";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
 

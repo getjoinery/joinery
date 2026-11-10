@@ -5,6 +5,7 @@
  * Handles task discovery, activation, deactivation, configuration,
  * and run-now functionality.
  *
+ * @version 1.7 - pause and resume clear a status left by an earlier retirement
  * @version 1.6 - Run Now and Dry Run refuse a task whose requires_plugins names an inactive plugin; the list says so live
  * @version 1.5 - no mailing lists loaded: select config fields resolve their own options
  * @version 1.4 - Run Now does not count a retry result as a run
@@ -36,6 +37,12 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
 			$task->assert_found();
 			$task->set('sct_is_active', false);
+			// A pause or resume is the operator's word: a status left by an
+			// earlier retirement no longer applies (the reconcile restores
+			// only rows still retired).
+			if ($task->get('sct_last_run_status') === 'retired') {
+				$task->set('sct_last_run_status', null);
+			}
 			$task->save();
 			$message = 'Task "' . $task->get('sct_name') . '" paused.';
 		}
@@ -43,6 +50,12 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 			$task = new ScheduledTask($input['sct_scheduled_task_id'], true);
 			$task->assert_found();
 			$task->set('sct_is_active', true);
+			// A pause or resume is the operator's word: a status left by an
+			// earlier retirement no longer applies (the reconcile restores
+			// only rows still retired).
+			if ($task->get('sct_last_run_status') === 'retired') {
+				$task->set('sct_last_run_status', null);
+			}
 			$task->save();
 			$message = 'Task "' . $task->get('sct_name') . '" resumed.';
 		}

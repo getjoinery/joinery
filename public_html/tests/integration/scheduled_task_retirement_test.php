@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/scheduled_task_retirement_test.php
  *
+ * @version 1.1 - G: a retired row whose file is back runs again
  * @version 1.0
  */
 
@@ -152,6 +153,24 @@ check($sup['sct_last_run_status'] === 'retired', 'a superseded task retires');
 check(strpos((string)$sup['sct_last_run_message'], 'Superseded by Retention Sweep') === 0,
 	'and says what replaced it rather than implying a fault',
 	(string)$sup['sct_last_run_message']);
+
+// ---------------------------------------------------------------------------
+section('G. A retired row whose file is back runs again');
+
+// A rolled-back upgrade retires a task its code no longer has; the upgrade
+// that restores the file must bring it back, or it stays off for good.
+$make_ghost();
+ScheduledTaskRegistry::reconcileMissing(true);
+$db->prepare("UPDATE sct_scheduled_tasks SET sct_task_class = 'RetentionSweep' WHERE sct_task_class = ?")
+	->execute(array($ghost_class));
+$restored = ScheduledTaskRegistry::reconcileMissing(true);
+$q = $db->prepare("SELECT sct_is_active, sct_last_run_status, sct_task_config FROM sct_scheduled_tasks WHERE sct_name = 'Retirement Test Ghost'");
+$q->execute();
+$back = $q->fetch(PDO::FETCH_ASSOC);
+check(in_array('Retirement Test Ghost', $restored['restored'], true), 'the reconcile reports it restored', json_encode($restored));
+check((bool)$back['sct_is_active'] === true && $back['sct_last_run_status'] === null, 'it is active again, no longer retired');
+check(strpos((string)$back['sct_task_config'], 'do not lose me') !== false, 'with the operator config it had');
+$db->prepare("DELETE FROM sct_scheduled_tasks WHERE sct_name = 'Retirement Test Ghost'")->execute();
 
 // ---------------------------------------------------------------------------
 section('F. Retirement is not an error');

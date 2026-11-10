@@ -1122,6 +1122,10 @@
 				echo "✓ Retired " . count($retired['retired']) . " task(s): "
 					. htmlspecialchars(implode(', ', $retired['retired'])) . "<br>\n";
 			}
+			if (!empty($retired['restored'])) {
+				echo "✓ Restored " . count($retired['restored']) . " retired task(s) whose code is back: "
+					. htmlspecialchars(implode(', ', $retired['restored'])) . "<br>\n";
+			}
 
 			$activated = ScheduledTaskRegistry::activateDeclared('core');
 			if (empty($activated)) {
@@ -1145,7 +1149,9 @@
 		// A numbered migration can't fix this (migrations run before plugin sync above),
 		// so it's inline here, right after the sync. One-time via a marker setting;
 		// deliberately NOT state-idempotent — an admin who later deactivates the store
-		// must not have it re-activated by the next deploy.
+		// must not have it re-activated by the next deploy. The marker is written
+		// only by a run without errors, so until one run succeeds each deploy
+		// evaluates the step again (the email_lists step below likewise).
 		echo "<br>\n<strong>Store / Event Manager Auto-Activation</strong><br>\n";
 		try {
 			$dblink = DbConnector::get_instance()->get_db_link();
@@ -1162,10 +1168,14 @@
 				// the marker empty from its first seed.) Limit: an upgrade that
 				// first registered the store but died before this step leaves
 				// it off for good; only a site from before 2026-07-10 can be one.
-				$dblink->prepare(
-					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
-					 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
-				)->execute();
+				// Done only when the run is: a run with errors (an upgrade that
+				// rolls its code back) evaluates this again on the retry.
+				if ($overall_success) {
+					$dblink->prepare(
+						"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
+						 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
+					)->execute();
+				}
 				echo "✓ Store/event auto-activation not needed (the store was already a plugin)<br>\n";
 			} elseif (!$marker_present) {
 				$count_rows = function($table) use ($dblink) {
@@ -1200,10 +1210,14 @@
 				if ($activate_store)  { $activate_if_present_inactive('store'); }
 				if ($activate_events) { $activate_if_present_inactive('event_manager'); }
 
-				$dblink->prepare(
-					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
-					 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
-				)->execute();
+				// Done only when the run is: a run with errors (an upgrade that
+				// rolls its code back) evaluates this again on the retry.
+				if ($overall_success) {
+					$dblink->prepare(
+						"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_store_event_autoactivate_v1', '1')
+						 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
+					)->execute();
+				}
 				echo "✓ Store/event auto-activation evaluated (store=" . ($activate_store ? 'yes' : 'no')
 					. ", events=" . ($activate_events ? 'yes' : 'no') . ")<br>\n";
 			} else {
@@ -1247,10 +1261,14 @@
 					}
 				}
 
-				$dblink->prepare(
-					"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_email_lists_autoactivate_v1', '1')
-					 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
-				)->execute();
+				// Done only when the run is: a run with errors (an upgrade that
+				// rolls its code back) evaluates this again on the retry.
+				if ($overall_success) {
+					$dblink->prepare(
+						"INSERT INTO stg_settings (stg_name, stg_value) VALUES ('_email_lists_autoactivate_v1', '1')
+						 ON CONFLICT (stg_name) DO UPDATE SET stg_value = '1'"
+					)->execute();
+				}
 				echo "✓ Email lists auto-activation evaluated (activate=" . ($activate_lists ? 'yes' : 'no') . ")<br>\n";
 			} else {
 				echo "✓ Email lists auto-activation already ran (marker present)<br>\n";

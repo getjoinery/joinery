@@ -6,10 +6,10 @@
  * needs: []
  */
 /**
- * Migrations 122 and 124 rename the MailChimp columns to provider-neutral
+ * Migrations 122, 123 and 124 rename the MailChimp columns to provider-neutral
  * names. The schema step runs before migrations and may already have made the
- * new column from the model, so a database can hold both: then 122 copies the
- * list ids across and 124 has nothing to do. Neither may fail with a duplicate
+ * new column from the model, so a database can hold both: then 122 and 123 copy
+ * the list ids across and 124 has nothing to do. Neither may fail with a duplicate
  * column (an upgrade of getjoinery to 0.8.600 did, and rolled back).
  *
  * Each case runs inside a transaction that is rolled back.
@@ -69,6 +69,23 @@ if (!$has_column('mlt_mailing_lists', 'mlt_provider_list_id')) {
 			'the column is renamed');
 	});
 }
+
+section('123 with both columns copies the list ids, with the old one only renames');
+$in_rollback(function () use ($db, $by, $one, $has_column) {
+	$db->exec('ALTER TABLE ctt_contact_types ADD COLUMN ctt_mailchimp_list_id varchar(64)');
+	$id = (int)$one('SELECT min(ctt_contact_type_id) FROM ctt_contact_types');
+	if (!$id) {
+		$db->exec("INSERT INTO ctt_contact_types (ctt_name) VALUES ('HarnessTest provider column')");
+		$id = (int)$one('SELECT max(ctt_contact_type_id) FROM ctt_contact_types');
+	}
+	$db->exec("UPDATE ctt_contact_types SET ctt_provider_list_id = NULL, ctt_mailchimp_list_id = 'mc-456' WHERE ctt_contact_type_id = $id");
+	check((int)$one($by['123']['test']) === 0, 'the test says run');
+	$db->exec($by['123']['migration_sql']);
+	check($one("SELECT ctt_provider_list_id FROM ctt_contact_types WHERE ctt_contact_type_id = $id") === 'mc-456', 'the list id is copied');
+	$db->exec('ALTER TABLE ctt_contact_types DROP COLUMN ctt_provider_list_id');
+	$db->exec($by['123']['migration_sql']);
+	check($has_column('ctt_contact_types', 'ctt_provider_list_id') && !$has_column('ctt_contact_types', 'ctt_mailchimp_list_id'), 'old column only: it is renamed');
+});
 
 section('124 with both columns does nothing, with the old one only renames');
 $in_rollback(function () use ($db, $by, $one, $has_column) {
