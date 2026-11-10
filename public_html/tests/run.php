@@ -959,11 +959,31 @@ function run_one_finish_raw(array $h, $exit = null) {
 	return array(
 		'name' => $d['meta']['name'], 'path' => harness_rel($path, $root),
 		'tier' => $d['meta']['tier'], 'env' => $d['meta']['env'],
-		'status' => $status, 'stats' => array('total' => 0, 'passed' => 0, 'failed' => $status === 'fail' ? 1 : 0, 'skipped' => 0),
+		'status' => $status, 'stats' => $is_sh ? shell_gate_stats($stdout, $status)
+			: array('total' => 0, 'passed' => 0, 'failed' => $status === 'fail' ? 1 : 0, 'skipped' => 0),
 		'sections' => array(), 'duration_ms' => $ms, 'exit' => $exit,
 		'note' => $note, 'output_tail' => $tail, 'fail_lines' => $fail_lines,
 		'files' => array(), 'covers' => $d['meta']['covers'] ?? array(),
 	);
+}
+
+/**
+ * A shell gate's check counts, read from the "PASS:", "FAIL:" and "SKIP:" lines
+ * its checks print. The exit code alone still decides pass or fail; the counts
+ * are for the summary, where a gate of twenty checks once showed as none, and a
+ * gate whose checks had stopped running looked the same as one that passed. A
+ * gate that fails without naming a check counts as one failed check.
+ */
+function shell_gate_stats($stdout, $status) {
+	$n = array('PASS' => 0, 'FAIL' => 0, 'SKIP' => 0);
+	if (preg_match_all('/^\s*(PASS|FAIL|SKIP):/m', (string)$stdout, $m)) {
+		foreach ($m[1] as $word) $n[$word]++;
+	}
+	if ($status === 'fail' && $n['FAIL'] === 0) $n['FAIL'] = 1;
+	// A passing gate may print another script's FAIL line while proving it refuses.
+	if ($status === 'pass') $n['FAIL'] = 0;
+	return array('total' => $n['PASS'] + $n['FAIL'] + $n['SKIP'],
+		'passed' => $n['PASS'], 'failed' => $n['FAIL'], 'skipped' => $n['SKIP']);
 }
 
 /** Pull the JSON contract from a subprocess's stdout via the sentinel. */

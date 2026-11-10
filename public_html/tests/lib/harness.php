@@ -694,6 +694,53 @@ function harness_hold_run_lock() {
 }
 
 /**
+ * Hold the box's own scheduled-task passes off for the rest of this test.
+ *
+ * The site's cron runs utils/process_scheduled_tasks.php against this same
+ * database every minute, and a pass treats a fixture as real work: it ran one
+ * suite's fixture tasks and advanced another's fixture site copy, each a
+ * failure seen only in a wide gate. A suite whose fixtures a scheduled task
+ * would act on calls this before it makes them.
+ *
+ * The runner holds the 'pass' lock, shared, for a whole pass, and does nothing
+ * when it finds the 'test_hold' lock held. So this takes the hold (shared:
+ * several suites hold at once), then waits for a pass already under way to
+ * end. Both locks end with this process's connection; nothing is released by
+ * hand, so a killed test leaves no hold behind. The suite's own runner
+ * subprocesses are marked through the environment and are not held.
+ *
+ * Returns false, having noted why, when the hold could not be taken; the suite
+ * then runs as it did before the hold existed.
+ */
+function harness_hold_task_passes(): bool {
+	$h = &$GLOBALS['__harness'];
+	if (!empty($h['task_pass_hold'])) return true;
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->query("SELECT pg_advisory_lock_shared(hashtext('scheduled_tasks'), hashtext('test_hold'))");
+		putenv('JOINERY_TASK_PASS_HOLDER=1');
+		$clear = false;
+		for ($i = 0; $i < 900 && !$clear; $i++) {
+			$clear = (bool)$db->query("SELECT pg_try_advisory_lock(hashtext('scheduled_tasks'), hashtext('pass'))")->fetchColumn();
+			if ($clear) {
+				$db->query("SELECT pg_advisory_unlock(hashtext('scheduled_tasks'), hashtext('pass'))");
+			} else {
+				usleep(100000);
+			}
+		}
+		if (!$clear) {
+			harness_boot_note("  WARNING: a scheduled-task pass was still running after 90 seconds; this test runs beside it\n");
+			return false;
+		}
+		$h['task_pass_hold'] = true;
+		return true;
+	} catch (\Throwable $e) {
+		harness_boot_note('  WARNING: scheduled-task passes are not held: ' . $e->getMessage() . "\n");
+		return false;
+	}
+}
+
+/**
  * Whether the run that minted $token is alive: 'live' (its lock is held, or
  * it is this run), 'dead' (its lock file is there and nobody holds it), or
  * 'unknown' (no lock file — a run from before the lock existed, or one whose

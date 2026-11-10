@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/scheduled_task_crash_containment_test.php
  *
+ * @version 1.4 - real passes are held off while the fixtures exist: the box's cron pass ran them and broke E
  * @version 1.3 - F: a task whose requires_plugins names an inactive plugin is skipped, not run or retired
  * @version 1.2 - E: a daily task another pass ran after this pass began is not run again
  * @version 1.1 - D: a 'retry' result is recorded but not counted as a run
@@ -86,6 +87,11 @@ $status_of = function ($class) use ($db) {
 };
 
 $remove_fixtures();
+
+// The box's own cron runs the same runner against this database every minute,
+// and would run the fixtures too. Real passes are held off while they exist;
+// the test's own passes are marked as the holder's.
+check(harness_hold_task_passes(), 'real passes are held off while the fixtures exist');
 
 // Pause every other active task so the subprocess runs only the fixtures.
 // Record exactly which ids were paused, so the restore puts back those and only

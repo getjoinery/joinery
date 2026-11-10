@@ -424,7 +424,13 @@ harness_set_setting_mem('mailbox_trash_retention_days', '30');
 $res = InboundEmailMessage::purgeExpiredTrash(30);
 check(isset($res['removed']) && isset($res['message']),
 	'the purge method returns the removed/message contract', json_encode($res));
-check((int)$res['removed'] === 2, 'both past-window messages were counted', json_encode($res));
+// The purge is site-wide and other suites share this database, so the count is
+// read from this test's own ids, never from the total.
+$went = array_map('intval', $res['ids'] ?? array());
+check(in_array($old_one, $went, true) && in_array($old_two, $went, true) && !in_array($recent, $went, true),
+	'both past-window messages were counted, and the recent one was not', json_encode($res));
+check((int)$res['removed'] === count($went) && (int)$res['removed'] >= 2,
+	'the count is the number of ids that went', json_encode($res));
 check(!$row_exists($old_one) && !$row_exists($old_two), 'both past-window messages are gone');
 check($row_exists($recent), 'a message trashed today is untouched');
 
@@ -472,7 +478,9 @@ harness_set_setting_mem('mailbox_unmatched_retention_days', '90');
 $res_u = InboundEmailMessage::purgeExpiredUnmatched(90);
 check(isset($res_u['removed']) && isset($res_u['message']),
 	'the unmatched purge returns the removed/message contract', json_encode($res_u));
-check((int)$res_u['removed'] === 1, 'exactly the one past-window unmatched row went', json_encode($res_u));
+$went_u = array_map('intval', $res_u['ids'] ?? array());
+check(array_values(array_intersect($went_u, array($unm_old, $unm_recent, $claimed, $unm_outbound, $unm_pending))) === array($unm_old),
+	'of this test\'s rows, exactly the one past-window unmatched row went', json_encode($res_u));
 check(!$row_exists($unm_old), 'unmatched mail past the window is gone');
 check($row_exists($unm_recent), 'unmatched mail inside the window is untouched');
 check($row_exists($claimed),

@@ -671,6 +671,12 @@ the OOM killer can strand fixtures.
 Settings and databases:
 
 - `get_setting_raw($name)` / `set_setting_raw($name, $value)` — persisted DB settings.
+- `harness_hold_task_passes()` — hold the box's own scheduled-task passes off
+  for the rest of the test. The site's cron runs against the same database
+  every minute and treats a fixture as real work (it runs a fixture task,
+  advances a fixture site copy). A suite whose fixtures a scheduled task would
+  act on calls this before it makes them; see
+  [Scheduled Tasks](scheduled_tasks.md) § *A test holding passes off*.
 - `harness_set_setting_mem($key, $value)` — override a setting in the Globalvars
   in-memory cache only, restored at teardown. Never persisted. **A blank value
   does not override.** `Globalvars::get_setting()` treats an empty in-memory
@@ -805,7 +811,10 @@ service that is not a model; and a visitor's flow is checked only through
 A declared `.php` test **must** emit this contract. If it doesn't — it crashed,
 or was never converted to the harness — the runner marks it failed regardless of
 its exit code (a script that prints "Failed" but exits 0 must never read as
-green). Only `.sh` gates are exit-code-only; that is their contract.
+green). Only `.sh` gates are exit-code-only; that is their contract. A gate
+prints one `PASS:`, `FAIL:` or `SKIP:` line per check, and the runner counts
+those lines into the summary's check totals; the exit code alone decides
+whether the gate passed.
 
 Every test emits the same JSON contract on a `--json` run (prefixed on the CLI
 by the sentinel `@@JOINERY_TEST_RESULT@@` so the runner can locate it even after

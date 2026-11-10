@@ -15,6 +15,8 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.9 - a pass holds the pass lock for its length and does nothing while a test holds the hold
+ *   lock: the box's own cron pass ran one test's fixture tasks and advanced another's fixture site copy
  * @version 2.8 - a retired task whose code file is back is restored and said so
  * @version 2.7 - a task whose requires_plugins names an inactive plugin is skipped with the reason, not run
  * @version 2.6 - each pass sweeps the RAM store: expired entries nobody read and the generations of
@@ -102,6 +104,7 @@ register_shutdown_function(function () use (&$current_task_id) {
 // never becomes the prediction.
 $dbconnector = DbConnector::get_instance();
 $dblink = $dbconnector->get_db_link();
+
 try {
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
 	$previous_run = (string)Globalvars::get_instance()->get_setting('scheduled_tasks_last_cron_run');
@@ -114,6 +117,35 @@ try {
 	Setting::put('scheduled_tasks_last_cron_run', $timestamp);
 } catch (Throwable $e) {
 	echo "[$timestamp] Warning: Could not update heartbeat setting: " . $e->getMessage() . "\n";
+}
+
+// A test whose fixtures a scheduled task would act on holds the box's own
+// passes off while it runs (tests/lib/harness.php, harness_hold_task_passes()).
+// Two locks make that exact. Every pass holds the pass lock, shared, for its
+// whole length, so a test can wait out a pass already under way; a test holds
+// the hold lock, shared, so several tests can hold at once. The pass lock is
+// taken BEFORE the hold is read: a pass either started first, and the test
+// waits for it, or sees the hold and does nothing. Both locks end with their
+// connection, so a hold never outlives the test that took it. The holder's own
+// passes say so in their environment and are not held. A pass that cannot ask
+// runs as before. The heartbeat above is written either way: a held pass is
+// still the cron working.
+if (getenv('JOINERY_TASK_PASS_HOLDER') !== '1') {
+	$pass_held = false;
+	try {
+		$hold_q = $dblink->query("SELECT pg_try_advisory_lock_shared(hashtext('scheduled_tasks'), hashtext('pass')) AS got,
+			EXISTS (SELECT 1 FROM pg_locks l JOIN pg_database d ON d.oid = l.database AND d.datname = current_database()
+				WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 2
+				  AND l.classid = hashtext('scheduled_tasks')::oid AND l.objid = hashtext('test_hold')::oid) AS held");
+		$hold_row = $hold_q->fetch(PDO::FETCH_ASSOC);
+		$pass_held = empty($hold_row['got']) || !empty($hold_row['held']);
+	} catch (PDOException $e) {
+		echo "[$timestamp] Warning: could not ask for the pass lock: " . $e->getMessage() . "\n";
+	}
+	if ($pass_held) {
+		echo "[$timestamp] Held: a test is using scheduled tasks, so this pass does nothing\n";
+		exit(0);
+	}
 }
 
 // The RAM store's entries expire by time and its lifetime-bound ones end with

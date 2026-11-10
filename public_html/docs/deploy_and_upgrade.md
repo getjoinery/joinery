@@ -441,7 +441,10 @@ stages. It never commits.
 **Landing.** `work NAME --status` shows what is prepared, laid out like
 `git status`; `work NAME --diff [PATH...]` shows the changes; `work NAME
 --commit` shows the commit, asks, commits, and offers to push. With nothing
-prepared, `--commit` exits at once and says how to prepare.
+prepared, `--commit` exits at once and says how to prepare. `work NAME --drop`
+discards a prepared commit that is not wanted (its work landed another way, or
+was abandoned): it shows the commit, asks, and removes the prepared copy,
+leaving the files in the tree as they are.
 
 **What blocks a release.** `work --held` lists the uncommitted files a publish
 would refuse (the held paths above), grouped by the session behind each, with

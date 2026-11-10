@@ -18,6 +18,7 @@
  * machine, management nodes last), and writes what became of it onto the
  * publish job.
  *
+ * @version 1.7 - the box's own scheduled-task passes are held off while the fixtures exist
  * @version 1.6 - stages: a stage's nodes at once, one per machine; the next stage only when all passed; a miss halts
  *                once the applies under way are judged; deploy to all managed nodes tests on the marked nodes first
  * @version 1.5 - the page_probe gate: the pages parsed, the verdict's rules, and a rollout that checks pages before and after
@@ -30,6 +31,11 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+
+// The box's cron advances site copies and rollouts in this database every
+// minute, and treated this suite's fixture copy as real: it advanced the copy,
+// which lifted the hold the suite was about to assert.
+harness_hold_task_passes();
 
 /** A stand-in finished job: only what the gate reads. */
 class SrlJob {

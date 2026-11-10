@@ -538,6 +538,19 @@ in parallel across ticks would be serialized. The cron tick is every
 minute, so the lock is what keeps a task slower than the tick from
 piling up: later ticks skip it rather than stack behind it.
 
+### A test holding passes off
+
+A test suite whose fixtures a scheduled task would act on runs against the
+same database the cron does, so it holds real passes off while it runs
+(`harness_hold_task_passes()`, [Testing](testing.md)). Every pass holds the
+`pass` advisory lock, shared, for its whole length; a test holds the
+`test_hold` lock, shared, and waits for a pass already under way to end. A pass
+takes its lock first and then looks for a hold; finding one, it writes the
+heartbeat, logs `Held: a test is using scheduled tasks`, and does nothing. Both
+locks end with their connection, so a hold never outlives the test. A pass a
+test starts itself carries `JOINERY_TASK_PASS_HOLDER=1` in its environment and
+is not held.
+
 ### Setup
 
 The runner is driven by exactly one cron entry per site: `/etc/cron.d/joinery-{sitename}`, firing every minute.

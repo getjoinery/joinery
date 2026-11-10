@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.53 - the retention purges return the ids that went, so a caller can tell its own rows from the site's
  * @version 1.52 - PROMOTED_RESEAL_OWED_SQL and an index of exactly those rows by owner (PromotedRowRepair);
  *                live rows waiting to be parsed, by owner (DeferredIngest)
  * @version 1.51 - indexes for the Fortress raise backlog (rows by mailbox and domain not yet on the mail key)
@@ -2357,7 +2358,7 @@ class InboundEmailMessage extends SystemBase {
 		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 		if (!count($rows)) {
-			return array('removed' => 0, 'message' => 'no mail past the ' . (int)$days . '-day window');
+			return array('removed' => 0, 'ids' => array(), 'message' => 'no mail past the ' . (int)$days . '-day window');
 		}
 
 		return self::purgeSelected($rows, 'purgeExpiredTrash');
@@ -2410,7 +2411,7 @@ class InboundEmailMessage extends SystemBase {
 		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 		if (!count($rows)) {
-			return array('removed' => 0, 'message' => 'no unmatched mail past the ' . (int)$days . '-day window');
+			return array('removed' => 0, 'ids' => array(), 'message' => 'no unmatched mail past the ' . (int)$days . '-day window');
 		}
 
 		return self::purgeSelected($rows, 'purgeExpiredUnmatched');
@@ -2428,12 +2429,13 @@ class InboundEmailMessage extends SystemBase {
 	 *
 	 * @param array  $rows    id + alias_id, already filtered by the caller
 	 * @param string $context the calling window, for the error log
-	 * @return array          removed, message
+	 * @return array          removed, ids (the message ids that went), message
 	 */
 	private static function purgeSelected(array $rows, string $context) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
 
 		$purged = 0;
+		$purged_ids = array();
 		$failed = 0;
 		foreach ($rows as $row) {
 			$id = (int)$row['id'];
@@ -2452,6 +2454,7 @@ class InboundEmailMessage extends SystemBase {
 				}
 				$message->permanent_delete();
 				$purged++;
+				$purged_ids[] = $id;
 			} catch (Throwable $e) {
 				// One unreclaimable message must not strand the rest of the backlog.
 				$failed++;
@@ -2466,7 +2469,7 @@ class InboundEmailMessage extends SystemBase {
 		if ($failed) {
 			$message .= '; ' . $failed . ' failed (see the error log)';
 		}
-		return array('removed' => $purged, 'message' => $message);
+		return array('removed' => $purged, 'ids' => $purged_ids, 'message' => $message);
 	}
 
 	/**
