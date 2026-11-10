@@ -379,6 +379,15 @@ check(strpos($bare_cmd, "--node-name='relayshard' --keep-root-login") !== false,
 check(strpos($bare_cmd, 'install.sh -y -q site') === false, 'and no site');
 $bare_target->load();
 check((string)$bare_target->get('mgn_container_name') === '', 'a bare node is not given a container name');
+check(strpos($bare_cmd, '--site-engine') === false && strpos($bare_cmd, '--multi-tenant') === false,
+	'a plain bare instance is not made a multi-tenant host');
+$starter_steps = JobCommandBuilder::build_install_node(jcb_node(array()), array(
+	'mode' => 'bare', 'sitename' => 'starterhost', 'docker_mode' => 'docker', 'starter_host' => true));
+$starter_cmd = jcb_ssh_steps($starter_steps)[0]['cmd'];
+check(strpos($starter_cmd, 'install.sh -y -q docker --management-node=') !== false
+		&& strpos($starter_cmd, ' --site-engine --multi-tenant') !== false
+		&& strpos($starter_cmd, 'install.sh -y -q site') === false,
+	'a starter host installs the docker host on the site container engine, walled, with no site', $starter_cmd);
 
 // Bare metal: install.sh server (which hardens SSH — this session survives it,
 // and there is no next one), then the site whose agent is the machine\'s.

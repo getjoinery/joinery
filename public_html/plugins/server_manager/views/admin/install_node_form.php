@@ -12,6 +12,8 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.20 - Install Type 'Starter host': a bare instance made a multi-tenant host for Starter sites
+ *                 (specs/starter_tier.md); a Linode 4 GB holds eight
  * @version 1.19 - the Keep root SSH login help says a fresh install keeps an emergency root password during the beta
  * @version 1.18 - a server in one of our accounts is born with its data root encrypted where data_root_encryption_offered
  *                 is on, and the form says so (specs/hosted_data_promise_disk_encryption.md D1a)
@@ -56,6 +58,11 @@ $field_errors = [];
 if ($_POST && isset($_POST['mgn_name'])) {
 	try {
 		$mode        = $_POST['install_mode'] ?? 'fresh';
+		// A starter host is a bare instance, installed as a multi-tenant host.
+		$is_starter_host = ($mode === 'starter_host');
+		if ($is_starter_host) {
+			$mode = 'bare';
+		}
 		$sitename    = trim($_POST['sitename'] ?? '');
 		$docker_mode = $_POST['docker_mode'] ?? '';
 
@@ -165,6 +172,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
 				$provision->set('cvp_docker_mode',    $is_bare ? 'docker' : $docker_mode); // a bare instance IS a Docker host; the builder refuses any other shape for it
 				$provision->set('cvp_install_mode',   $mode);
+				$provision->set('cvp_starter_host',   $is_starter_host);
 				// A server in one of our accounts is born with its data root
 				// encrypted by us, where this management node offers it.
 				if (CustomerCloudProvision::born_encrypted_by_default($target['hosting_mode'])) {
@@ -292,6 +300,7 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 	'options'  => [
 		'fresh'       => 'Fresh install — empty Joinery site with default schema and admin user',
 		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
+		'starter_host' => 'Starter host — a bare instance made a shared host for $4.99 Starter sites (Ubuntu 26.04, g6-standard-2 = 4 GB, holds 8); its host record is made when the install finishes, with provisioning off until you turn it on',
 	],
 ]);
 

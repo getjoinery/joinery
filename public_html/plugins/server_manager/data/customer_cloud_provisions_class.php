@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.32 - cvp_starter_host: a bare instance installed as a multi-tenant starter host
  * @version 1.31 - stamp_unstamped_default() leaves container rows alone: no server of a cloud account is made for them
  * @version 1.30 - cvp_install_job_id: a container site's site_create job on its host
  * @version 1.29 - cvp_landing (instance or container) and cvp_mgh_managed_host_id: a starter site lands in a container
@@ -178,6 +179,10 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_mgh_managed_host_id'    => array('type'=>'int8'),
 		// A container site's site_create job on its host (ProvisionStarterSites).
 		'cvp_install_job_id'         => array('type'=>'int8'),
+		// A bare instance made a multi-tenant starter host (install.sh docker
+		// --site-engine --multi-tenant); its host record is made starter when
+		// the install finishes (ProvisionCustomerCloud).
+		'cvp_starter_host'           => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
 		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy', 'adopted')),
 		'cvp_source_node_id'         => array('type'=>'int8'),
@@ -381,6 +386,9 @@ class CustomerCloudProvision extends SystemBase {
 		}
 		if ($origin !== 'buyer' && $this->is_pre_payment()) {
 			throw new CustomerCloudProvisionException("Only a buyer-origin provision may be at '{$status}'.");
+		}
+		if ($this->get('cvp_starter_host') && (string)($this->get('cvp_install_mode') ?: 'fresh') !== 'bare') {
+			throw new CustomerCloudProvisionException('A starter host is a bare instance: no site of its own.');
 		}
 		$landing = (string)($this->get('cvp_landing') ?: 'instance');
 		if (!in_array($landing, array('instance', 'container'), true)) {

@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.164 - install_node in bare mode with starter_host installs the docker host with --site-engine --multi-tenant
  * @version 1.163 - build_site_create (agent 1.119.0): a new live Starter site as a container on its host, its
  *                  admin password a slot opened at hand-out, its limits required; never a dormant copy
  * @version 1.162 - hosted_mail_settings carries a test site's trap (test_recipient), only to agent 1.118.0+
@@ -6493,8 +6494,11 @@ class JobCommandBuilder {
 			// --keep-root-login: install.sh docker turns root SSH login off
 			// by default, and this plane logs in with the root password
 			// again (the keep or retire job, probes, Retry Install).
+			// A starter host: the site container engine and the walls that
+			// keep its sites off the host and off each other.
+			$starter_flags = ($mode === 'bare' && !empty($params['starter_host'])) ? ' --site-engine --multi-tenant' : '';
 			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name)
-				. self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags;
+				. self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . $starter_flags;
 			if ($mode !== 'bare') {
 				// No --no-ssl: install.sh writes the universal proxy vhost,
 				// tries for a certificate, and arms the host's retry timer when

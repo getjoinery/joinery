@@ -321,5 +321,35 @@ try {
 } catch (Exception $e) { $threw = $e->getMessage(); }
 check($threw !== null && strpos($threw, 'IPv6') !== false, 'a starter host is refused an IPv6 address, and told so', (string)$threw);
 
+// ---------------------------------------------------------------------------
+section('A starter host made from Install New Node becomes a starter host record');
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionCustomerCloud.php'));
+$sh_node = si_node('si-shnode-' . $suffix, array('mgn_host' => '192.0.2.' . random_int(2, 250), 'mgn_cloud_account' => 'test'));
+$sh_prov = new CustomerCloudProvision(NULL);
+$sh_prov->set('cvp_origin', 'admin');
+$sh_prov->set('cvp_usr_user_id', 990000 + random_int(0, 9999));
+$sh_prov->set('cvp_domain', 'si-sh-' . $suffix . '.example.com');
+$sh_prov->set('cvp_slug', 'si-sh-' . $suffix);
+$sh_prov->set('cvp_hosting_mode', 'operator');
+$sh_prov->set('cvp_install_mode', 'bare');
+$sh_prov->set('cvp_starter_host', true);
+$sh_prov->save();
+$sh = ProvisionCustomerCloud::make_starter_host($sh_prov, $sh_node);
+$sh_node->load();
+check($sh && (string)$sh->get('mgh_tier') === 'starter' && (int)$sh->get('mgh_max_sites') === 8
+		&& (string)$sh->get('mgh_host') === (string)$sh_node->get('mgn_host'),
+	'its host record is a starter host at the machine\'s IPv4, with eight places');
+check($sh && (int)$sh->get('mgh_mgn_managed_node_id') === (int)$sh_node->key && !$sh->get('mgh_provisioning_enabled'),
+	'its own node is the host\'s agent, and it takes no sites until an operator turns provisioning on');
+$threw = null;
+try {
+	$bad = new CustomerCloudProvision(NULL);
+	$bad->set('cvp_origin', 'admin'); $bad->set('cvp_usr_user_id', 990001);
+	$bad->set('cvp_domain', 'si-shbad-' . $suffix . '.example.com'); $bad->set('cvp_slug', 'si-shbad-' . $suffix);
+	$bad->set('cvp_starter_host', true); $bad->save();
+} catch (Exception $e) { $threw = $e->getMessage(); }
+check($threw !== null, 'a starter host with a site of its own is refused', (string)$threw);
+
 $db->rollBack();
 harness_finish();

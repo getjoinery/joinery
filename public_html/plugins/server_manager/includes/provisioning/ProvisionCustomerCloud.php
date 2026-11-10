@@ -58,6 +58,8 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.24 - a starter host (bare, cvp_starter_host) installs with --site-engine --multi-tenant, and its finish
+ *                makes its host record a starter host with 8 places, provisioning off (make_starter_host)
  * @version 2.23 - takes only rows that land on an instance of their own; a container site is its host's to install
  * @version 2.22 - a server whose data root we do not encrypt asks the provider's own disk encryption ON at create,
  *                 wherever the region offers it, rather than leaving it to the provider's default: the provider's
@@ -589,6 +591,9 @@ class ProvisionCustomerCloud {
 			if ($offer_root_access) {
 				$job_params['beta_root_access'] = true;
 			}
+			if ($provision->get('cvp_starter_host')) {
+				$job_params['starter_host'] = true;
+			}
 			$steps = JobCommandBuilder::build_install_node($node, $job_params);
 		} catch (Exception $e) {
 			$node->set('mgn_install_state', 'install_failed');
@@ -718,10 +723,46 @@ class ProvisionCustomerCloud {
 	 * the node's agent.
 	 */
 	private function complete($provision, $node): void {
+		if ($provision->get('cvp_starter_host')) {
+			self::make_starter_host($provision, $node);
+		}
 		$provision->set('cvp_status', 'done');
 		$provision->set('cvp_error',  null);
 		$provision->set('cvp_fleet_seed_state', $this->seeding_applies($provision) ? 'pending' : null);
 		$provision->save();
+	}
+
+	/**
+	 * A starter host's install finished: its host record is the starter
+	 * host's. Made from the machine's own address (the instance's IPv4), its
+	 * own node named as the host's agent, eight places (a Linode 4 GB at the
+	 * starter limits, specs/starter_tier.md), and provisioning left off: an
+	 * operator turns it on from the host's Edit page once the host agent is
+	 * connected and its report says its sites run on the site container engine.
+	 */
+	public static function make_starter_host($provision, $node): ?ManagedHost {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
+		$host = ManagedHost::ensure_for_node($node);
+		if ($host === null) {
+			return null;
+		}
+		// The machine is the host's own agent, saved first: until it is, the
+		// tier rule reads the machine's own node as a site placed on the host.
+		if ((int)$host->get('mgh_mgn_managed_node_id') === 0) {
+			$host->set('mgh_mgn_managed_node_id', (int)$node->key);
+			$host->save();
+		}
+		if ((string)$host->get('mgh_tier') !== 'starter') {
+			$host->set('mgh_tier', 'starter');
+		}
+		if ((int)$host->get('mgh_max_sites') < 1) {
+			$host->set('mgh_max_sites', 8);
+		}
+		$host->set('mgh_name', substr('Starter ' . (string)$node->get('mgn_name'), 0, 100));
+		$host->set('mgh_cloud_account', (string)$node->get('mgn_cloud_account') ?: $host->get('mgh_cloud_account'));
+		$host->prepare();
+		$host->save();
+		return $host;
 	}
 
 	// ── Fleet enrollment seeding (specs/mailbox_relay_shared_fleet.md § Follow-up) ──

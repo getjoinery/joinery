@@ -1267,10 +1267,16 @@ The Provisioning page reports these, and cannot do them:
    in the after-purchase message; the Connect page is deliberately in no
    member menu. To sell domains on the configure page, see **Managed domain
    registration** below.
-2. **Starter only.** Opt at least one starter host in from the dashboard
-   (Edit → Tier starter, Max Sites, Provisioning Enabled). Starter is offered
-   on the configure page only while one has room. Its IP is sent to customers
-   as the DNS A-record target, so it must be routable.
+2. **Starter only.** Make a starter host with **Install New Node → Install
+   Type: Starter host** (a cloud instance, Ubuntu 26.04, `g6-standard-2` =
+   4 GB): the install is `install.sh docker --site-engine --multi-tenant` with
+   no site (`cvp_starter_host`), and when it finishes its host record is made
+   a starter host at the instance's IPv4, its own node as the host's agent,
+   Max Sites 8, Provisioning off (`ProvisionCustomerCloud::make_starter_host`).
+   Once its agent is connected and its host report says its sites run on
+   `podman`, turn Provisioning on from the host's Edit page. Starter is offered
+   on the configure page only while a starter host has room. Its IP is sent to
+   customers as the DNS A-record target, so it must be routable.
 3. **Buyer-account fulfilment only.** Register the OAuth client in Linode
    Cloud Manager (Profile → OAuth Apps → Create OAuth App, **not** public,
    callback `https://<management-node-host>/oauth_callback`) and enter the
