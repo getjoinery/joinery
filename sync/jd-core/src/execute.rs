@@ -8123,7 +8123,21 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // its way out; this is the same rule for a move still on its way in,
         // kept across the passes until the child can be placed. Estate seed
         // 16062180, by way of a peer's abandoned park.
-        for e in env.store.every_entry()? {
+        // Read from the store again once a folder has gone back: the list is
+        // a snapshot, and its copy of the folder still stands where the user
+        // dropped it. Judged from that copy, the folder now sitting at its
+        // own home reads as something in the way, and the trash waits on a
+        // put-back already done.
+        let mut put_back_one = false;
+        for snapshot in env.store.every_entry()? {
+            let e = if put_back_one {
+                match env.store.get_entry(snapshot.id)? {
+                    Some(e) => e,
+                    None => continue,
+                }
+            } else {
+                snapshot
+            };
             if e.id == op.entity || e.id.is_provisional() || e.remote_deleted {
                 continue;
             }
@@ -8151,6 +8165,39 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             // Parked anywhere on its way up to this folder: a file inside a
             // subfolder waiting for a key is itself Synced, and it is the
             // subfolder that cannot move.
+            // Here only because the user moved it in: a folder whose directory
+            // stands in this one while the server keeps it outside, where it
+            // was. That move can never reach the server -- the folder it went
+            // into is in the trash -- and nothing will ever bring the child
+            // here either, so the wait above has no end. The move loses to the
+            // delete: the directory goes back where the server keeps it, with
+            // everything in it, and the user is told. Read from where it
+            // stands, not from the queue: a move refused as overtaken is off
+            // the queue between plans (seed 73036).
+            match put_back_a_folder_moved_in(env, &entry, op.entity.server_id, &e)? {
+                PutBack::Done => {
+                    put_back_one = true;
+                    continue;
+                }
+                PutBack::NotMovedIn => {}
+                PutBack::Blocked(name) => {
+                    env.store.raise_issue(
+                        Some(op.entity),
+                        "trash_waits",
+                        &format!(
+                            "{} was deleted on the server, but {name} was moved into it here and \
+                             cannot go back to where the server keeps it yet; the folder stays \
+                             until it can",
+                            entry.remote.name
+                        ),
+                        (env.now_ms)() as i64,
+                    )?;
+                    return Ok(OpOutcome::Retry(format!(
+                        "{name} was moved into it here and cannot go back yet ({})",
+                        e.id.server_id
+                    )));
+                }
+            }
             if local_chain_parked(env, &e, op.entity.server_id)? {
                 env.store.raise_issue(
                     Some(op.entity),
@@ -8431,6 +8478,113 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         return Ok(OpOutcome::Retry(why));
     }
     Ok(OpOutcome::Done)
+}
+
+/// What became of a folder the user moved into a folder being trashed here.
+enum PutBack {
+    /// It went back where the server keeps it.
+    Done,
+    /// Nothing on the way down to this entry was moved in by the user.
+    NotMovedIn,
+    /// One was, and it cannot go back yet: named.
+    Blocked(String),
+}
+
+/// Put back the folder the user moved into `folder`, on `child`'s way down
+/// to it: the highest folder on that chain whose directory stands away from
+/// its agreement (`Entry::standing_away`) while its agreement and the server
+/// both keep it outside `folder`. A folder the server moved IN is not one of
+/// them -- it has no `stands_at` -- and keeps the wait above.
+///
+/// The directory is renamed to its agreed path, its note of where it stood is
+/// cleared and its queued move withdrawn in the same step, so the next scan
+/// reads it as home and plans nothing. Blocked when its agreed parent is not
+/// on this disk, or something already stands at its agreed name.
+fn put_back_a_folder_moved_in(
+    env: &ExecEnv,
+    trashed: &Entry,
+    folder: i64,
+    child: &Entry,
+) -> Result<PutBack, ExecError> {
+    let agreed_outside = |e: &Entry| -> Result<bool, ExecError> {
+        let mut parent = e.agreed_placement().parent;
+        let mut guard = 0;
+        while let Some(p) = parent {
+            if p == folder {
+                return Ok(false);
+            }
+            guard += 1;
+            if guard > 512 {
+                return Err(ExecError::Contract("folder tree has a loop in it".into()));
+            }
+            parent = env.store.get_entry(EntityId::folder(p))?.and_then(|f| f.agreed_placement().parent);
+        }
+        Ok(true)
+    };
+    let mut moved_in: Option<Entry> = None;
+    let mut at = Some(child.clone());
+    let mut guard = 0;
+    while let Some(e) = at {
+        if e.id.entity_type == EntityType::Folder && e.id.server_id == folder {
+            break;
+        }
+        guard += 1;
+        if guard > 512 {
+            return Err(ExecError::Contract("folder tree has a loop in it".into()));
+        }
+        if e.id.entity_type == EntityType::Folder
+            && !e.id.is_provisional()
+            && e.standing_away().is_some()
+            && !sits_under(env, e.id, folder)?
+            && agreed_outside(&e)?
+        {
+            moved_in = Some(e.clone());
+        }
+        at = match e.local_placement().parent {
+            Some(p) => env.store.get_entry(EntityId::folder(p))?,
+            None => None,
+        };
+    }
+    let Some(mut moved) = moved_in else {
+        return Ok(PutBack::NotMovedIn);
+    };
+    let name = moved.effective_local_name().to_string();
+    let (Placed::At(from), Placed::At(home)) = (local_path(env, &moved)?, agreed_local_path(env, &moved)?) else {
+        return Ok(PutBack::Blocked(name));
+    };
+    let home_parent_here = home.parent().is_some_and(|p| env.vfs.read_dir(p).is_ok());
+    if !home_parent_here || !nothing_at(env, &home)? {
+        return Ok(PutBack::Blocked(name));
+    }
+    // A home on the other side of a second disk mounted inside the root is
+    // one no rename reaches: the folder cannot go back, so the trash waits
+    // and says why, the same as for a home that is taken.
+    if env.vfs.crosses_a_disk(&from, &home).is_some() {
+        return Ok(PutBack::Blocked(name));
+    }
+    match env.vfs.rename(&from, &home) {
+        Ok(()) => {}
+        Err(jd_vfs::VfsError::OtherVolume { .. }) => return Ok(PutBack::Blocked(name)),
+        Err(e) => return Err(e.into()),
+    }
+    moved.stands_at = None;
+    env.store.put_entry(&moved)?;
+    for queued in env.store.queued_ops()? {
+        if queued.kind == "move_remote" && queued.entity == moved.id {
+            env.store.drop_op(queued.op_id)?;
+        }
+    }
+    env.store.raise_issue(
+        Some(moved.id),
+        "move_undone",
+        &format!(
+            "{name} was moved into {} on this computer while {} was deleted on another, so the \
+             move could not be kept: {name} is back where it was, with everything in it",
+            trashed.remote.name, trashed.remote.name
+        ),
+        (env.now_ms)() as i64,
+    )?;
+    Ok(PutBack::Done)
 }
 
 /// Is this entity, as the server has it, somewhere under this folder?

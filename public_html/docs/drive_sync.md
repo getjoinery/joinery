@@ -1606,6 +1606,20 @@ scope, a name this disk cannot hold — the wait is said as a `trash_waits`
 issue naming the folder and the child, and withdrawn the moment the trash goes
 through.
 
+A folder the user moved in here is not that child. The server keeps it where it
+was, and its move can never reach the server, because the folder it went into
+is in the trash. So the move loses to the delete: the folder's directory goes
+back to where the server keeps it, with everything in it, its queued move is
+withdrawn, and the trash goes through. `move_undone` says so; it reports an
+event, so it stands until the person dismisses it. A new name the user gave the
+folder on the way is kept: the server takes the rename before it refuses the
+move. This holds wherever the folder was dropped — straight into the deleted
+folder, into one of its subfolders, or into a new folder made inside it. A file
+moved in is carried out beside the folder instead, as above. When the folder
+cannot go back — its old parent is not on this disk, its old place is across a
+second disk mounted inside the sync folder, or something stands at its old name
+— the trash waits, and `trash_waits` names the folder.
+
 A `file_trashed` refusal answers the same question one level down: the file
 this is a new version OF has gone to the trash. An operation planned before
 that delete is dropped as overtaken rather than sent, so reconcile can apply

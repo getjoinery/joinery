@@ -28403,3 +28403,137 @@ fn a_placeholder_replaced_by_a_file_lets_its_tie_go() {
     }
     assert!(!tied(guest), "the tie stayed on a folder a file has replaced");
 }
+
+/// Where the user drops a folder inside a folder another computer is deleting.
+#[derive(Clone, Copy, Debug)]
+enum DropInto {
+    /// Straight into the deleted folder.
+    It,
+    /// Into a subfolder of it the server trashed with it.
+    ItsSubfolder,
+    /// Into a new folder made inside it, which the server never had.
+    ANewFolderInIt,
+    /// Straight into it, under a new name.
+    ItUnderANewName,
+}
+
+/// A folder moved into a folder another computer deletes at the same time.
+///
+/// The move cannot reach the server: the folder it goes into is in the trash.
+/// The folder moved is live there, where it was, with its files, so this
+/// computer must not throw its directory away with the deleted one -- and it
+/// must not wait for ever either. The folder goes back where the server keeps
+/// it, the deleted folder goes, and the user is told the move was undone
+/// (jd-sim vaultplat-linux-mac 73036).
+fn a_folder_moved_into_a_folder_deleted_elsewhere(drop: DropInto) {
+    let world = World::new(9_853, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_mkdir("Doomed");
+    laptop.fs.user_mkdir("Doomed/Sub");
+    laptop.fs.user_mkdir("Home");
+    laptop.fs.user_mkdir("Home/Moved");
+    laptop.fs.user_write("Home/Moved/inner.txt", b"kept whatever happens");
+    committed.note("Home/Moved/inner.txt", b"kept whatever happens");
+    assert!(world.settle().is_some());
+
+    // The laptop goes quiet and files the folder away.
+    laptop.net.set_faults(NetFaults { drop_before: u64::MAX, ..NetFaults::none() });
+    let to = match drop {
+        DropInto::It => "Doomed/Moved",
+        DropInto::ItsSubfolder => "Doomed/Sub/Moved",
+        DropInto::ANewFolderInIt => {
+            laptop.fs.user_mkdir("Doomed/New");
+            "Doomed/New/Moved"
+        }
+        DropInto::ItUnderANewName => "Doomed/Renamed",
+    };
+    laptop.fs.user_rename("Home/Moved", to);
+    world.pass(laptop);
+
+    // Meanwhile the desktop deletes the folder it went into.
+    desktop.fs.user_remove("Doomed");
+    world.pass(desktop);
+
+    laptop.net.set_faults(NetFaults::none());
+    // The first pass back puts the folder back and lets the trash through. A
+    // wait said, or a trash op failed and retried, would be the put-back
+    // judged a second time from a stale copy of the folder.
+    world.pass(laptop);
+    let waits: Vec<_> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "trash_waits")
+        .collect();
+    assert!(waits.is_empty(), "{drop:?}: no wait is said for a folder already put back: {waits:?}");
+    let failed: Vec<_> = laptop
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|o| o.attempts > 0)
+        .map(|o| (o.kind, o.attempts, o.last_error))
+        .collect();
+    assert!(failed.is_empty(), "{drop:?}: nothing failed on the way: {failed:?}");
+    assert!(world.settle().is_some(), "{drop:?}: it has to stop, not wait for ever");
+
+    assert_invariants(&world, &committed);
+    // A new name given on the way is kept: the server takes the rename before
+    // it refuses the move into the trash.
+    let home = match drop {
+        DropInto::ItUnderANewName => "Home/Renamed/inner.txt",
+        _ => "Home/Moved/inner.txt",
+    };
+    let server = world.server.tree();
+    assert!(
+        server.contains_key(home),
+        "{drop:?}: the folder stays where the server keeps it: {:?}",
+        server.keys().collect::<Vec<_>>()
+    );
+    for d in [laptop, desktop] {
+        let tree = disk_tree(d);
+        assert!(
+            tree.contains_key(home) && !tree.keys().any(|p| p.starts_with("Doomed")),
+            "{drop:?}: {} holds the folder at home and nothing of the deleted one: {:?}",
+            d.name,
+            tree.keys().collect::<Vec<_>>()
+        );
+    }
+    let said: Vec<_> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "move_undone")
+        .collect();
+    assert_eq!(said.len(), 1, "{drop:?}: the undone move is said, once: {said:?}");
+    let named = match drop {
+        DropInto::ItUnderANewName => "Renamed",
+        _ => "Moved",
+    };
+    assert!(said[0].detail.starts_with(named), "{drop:?}: and names the folder: {}", said[0].detail);
+}
+
+#[test]
+fn a_folder_moved_into_a_folder_deleted_elsewhere_goes_back() {
+    a_folder_moved_into_a_folder_deleted_elsewhere(DropInto::It);
+}
+
+#[test]
+fn a_folder_moved_into_a_subfolder_of_one_deleted_elsewhere_goes_back() {
+    a_folder_moved_into_a_folder_deleted_elsewhere(DropInto::ItsSubfolder);
+}
+
+#[test]
+fn a_folder_moved_into_a_new_folder_inside_one_deleted_elsewhere_goes_back() {
+    a_folder_moved_into_a_folder_deleted_elsewhere(DropInto::ANewFolderInIt);
+}
+
+#[test]
+fn a_folder_moved_and_renamed_into_a_folder_deleted_elsewhere_goes_back_and_keeps_its_new_name() {
+    a_folder_moved_into_a_folder_deleted_elsewhere(DropInto::ItUnderANewName);
+}
