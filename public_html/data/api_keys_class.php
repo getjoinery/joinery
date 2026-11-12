@@ -67,7 +67,9 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	    'apk_api_key_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'apk_usr_user_id' => array('type'=>'int4'),
 	    'apk_name' => array('type'=>'varchar(32)'),
-	    'apk_public_key' => array('type'=>'varchar(32)'),
+	    // Every keyed request looks its key up by this column, and one public
+	    // key names one key.
+	    'apk_public_key' => array('type'=>'varchar(32)', 'unique'=>true),
 	    'apk_secret_key' => array('access_class' => 'keys', 'type'=>'varchar(64)'),
 	    'apk_type' => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'machine'),
 	    // 1 read, 2 write only, 3 read + write, 4 read + write + delete (the
