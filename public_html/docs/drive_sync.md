@@ -1496,9 +1496,11 @@ Work that keeps failing is a state too. Once an operation's backoff reaches its
 fifteen-minute cap it is tried every quarter of an hour for as long as it
 fails, and one `keeps_failing` issue says how many operations are stuck and why
 the first of them fails; it is withdrawn on the first pass that leaves nothing
-at the cap. It is one issue for the device, not one per operation: an outage on
-the server fails every queued operation at once, and a thousand identical
-issues would hide the one that matters.
+at the cap. Its words follow the count and the reason as they change, in place:
+it stays the same issue for as long as anything is stuck, however differently
+each try fails. It is one issue for the device, not one per operation: an
+outage on the server fails every queued operation at once, and a thousand
+identical issues would hide the one that matters.
 
 Work this computer's disk refuses is said at once, not at the cap. A full
 disk, a folder or file without permission, an immutable file and a disk

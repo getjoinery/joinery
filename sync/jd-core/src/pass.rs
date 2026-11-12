@@ -4429,9 +4429,11 @@ pub(crate) const KEEPS_FAILING: &str = "keeps_failing";
 /// for as long as it fails, and the health line said only "Syncing -- 1 to
 /// go" (B-RT). One issue, not one per op: an hour's outage on the server
 /// fails every queued op at once, and a panel of a thousand identical issues
-/// hides the one that matters. The first op stuck is the one named, so the
-/// words change only when what is stuck changes. Lifted on the pass nothing
-/// is left at the cap.
+/// hides the one that matters. The first op stuck is the one named. The
+/// issue stands for as long as anything is stuck, one issue throughout: its
+/// words follow what is stuck and why, and are changed in place, so a flaky
+/// network that fails each try in other words does not dismiss and raise it
+/// again every pass. Lifted on the pass nothing is left at the cap.
 ///
 /// Work this computer's disk refuses is said apart, from its first refusal
 /// (`say_what_the_disk_refuses`), and not again here.
@@ -4475,15 +4477,24 @@ fn say_what_keeps_failing(env: &ExecEnv) -> Result<(), ExecError> {
             })
         }
     };
-    let open = env.store.open_issues_of_kind(KEEPS_FAILING)?;
-    let current = text.as_ref().is_some_and(|t| open.iter().any(|i| &i.detail == t));
-    for issue in &open {
-        if text.as_ref() != Some(&issue.detail) {
-            env.store.dismiss_issue(issue.issue_id)?;
+    // Oldest first (`open_issues_of_kind`): the one that stands is the one
+    // raised when the work first got stuck.
+    let mut open = env.store.open_issues_of_kind(KEEPS_FAILING)?.into_iter();
+    match (text, open.next()) {
+        (Some(t), Some(standing)) => {
+            if standing.detail != t {
+                env.store.set_issue_detail(standing.issue_id, &t)?;
+            }
         }
+        (Some(t), None) => {
+            env.store.raise_issue(None, KEEPS_FAILING, &t, (env.now_ms)() as i64)?;
+        }
+        (None, Some(standing)) => env.store.dismiss_issue(standing.issue_id)?,
+        (None, None) => {}
     }
-    if let Some(t) = text.filter(|_| !current) {
-        env.store.raise_issue(None, KEEPS_FAILING, &t, (env.now_ms)() as i64)?;
+    // One issue for the device: any other is a leftover.
+    for extra in open {
+        env.store.dismiss_issue(extra.issue_id)?;
     }
     Ok(())
 }

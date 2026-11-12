@@ -24833,6 +24833,45 @@ fn a_refusal_is_no_longer_said_once_the_file_fails_for_another_reason() {
     assert!(world.settle().is_some());
 }
 
+/// Work that keeps failing for a different reason on each try is still one
+/// notice, the same one, for as long as it is stuck: its words follow the
+/// reason in place. RED before: each pass whose failure read differently
+/// dismissed the notice and raised a new one, so the panel's row was made
+/// again every pass on a flaky network (thousands of times across a sweep).
+#[test]
+fn work_that_keeps_failing_in_other_words_keeps_one_notice() {
+    let world = World::new(9_841, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("report.txt", b"quarterly");
+    let mut ids = std::collections::BTreeSet::new();
+    let mut words = std::collections::BTreeSet::new();
+    for pass in 0..40 {
+        // Every try fails, a pass apart, in turn as the server falling over
+        // and as a connection refused before it reached the server: the
+        // reason changes from try to try.
+        if pass < 30 {
+            if pass % 2 == 0 {
+                world.server.answer_next("drive_upload_init", 503);
+            } else {
+                laptop.net.set_faults(jd_sim::net::NetFaults { refuse_before: Some("drive_upload_init".into()), ..jd_sim::net::NetFaults::none() });
+            }
+        }
+        world.clock.advance_secs(16 * 60);
+        world.pass(laptop);
+        for i in laptop.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "keeps_failing") {
+            ids.insert(i.issue_id);
+            words.insert(i.detail);
+        }
+        if server_sha(&world, "report.txt").is_some() {
+            break;
+        }
+    }
+    assert!(words.len() >= 2, "the failure must be read in more than one way for this to test anything: {words:?}");
+    assert_eq!(ids.len(), 1, "one notice throughout, its words changed in place: {ids:?} {words:?}");
+    assert!(world.settle().is_some(), "never settled once the server answered");
+    assert!(issues_of(laptop, "keeps_failing").is_empty(), "{:?}", issues_of(laptop, "keeps_failing"));
+}
+
 /// A folder of sixty files and one file beside it, settled on the laptop.
 fn sixty_files_in_art(world: &World) {
     let laptop = world.device("laptop");
