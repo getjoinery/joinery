@@ -828,6 +828,32 @@ impl Custody {
         Some((di, birth))
     }
 
+    /// Can a file on this disk be followed by what the disk knows it as? By
+    /// its id and birth where the pair names one file; by its id alone where
+    /// that does (local NTFS: a name taken again hands its birth to the next
+    /// file, but a freed record comes back with its sequence raised). Else by
+    /// path alone, and a path follows no rename the engine makes: a file set
+    /// aside as a conflict copy left its path to the one that landed, and the
+    /// user's next act there was held against the file set aside.
+    fn trackable(device: &jd_sim::engine::Device) -> bool {
+        device.fs.identity_is_unique() || device.fs.ids_alone_name_files()
+    }
+
+    /// A file's identity as followed here (`trackable`): the birth dropped
+    /// where it names a slot rather than a file.
+    fn tracked(device: &jd_sim::engine::Device, id: u64, birth: u64) -> (u64, u64) {
+        if device.fs.identity_is_unique() {
+            (id, birth)
+        } else {
+            (id, 0)
+        }
+    }
+
+    fn identity(device: &jd_sim::engine::Device, path: &str) -> Option<(u64, u64)> {
+        let (id, birth) = device.fs.true_identity_of(path).filter(|_| Self::trackable(device))?;
+        Some(Self::tracked(device, id, birth))
+    }
+
     fn parent_of(path: &str) -> &str {
         path.rsplit_once('/').map(|(d, _)| d).unwrap_or("")
     }
@@ -848,7 +874,7 @@ impl Custody {
     fn key_on(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str, by_path: &str) -> usize {
         // By identity only where the disk's identity names one file; else
         // by the path map alone.
-        let id = device.fs.true_identity_of(path).filter(|_| device.fs.identity_is_unique());
+        let id = Self::identity(device, path);
         let key = match id.and_then(|(id, birth)| self.file_of_id.get(&(di, id, birth))) {
             Some(k) => *k,
             None => self.file_key(by_path),
@@ -907,7 +933,8 @@ impl Custody {
         let by_id = device
             .fs
             .true_identity_of(twin)
-            .filter(|_| device.fs.identity_is_unique())
+            .filter(|_| Self::trackable(device))
+            .map(|(id, birth)| Self::tracked(device, id, birth))
             .and_then(|(id, birth)| self.file_of_id.get(&(di, id, birth)));
         let Some(original_key) = by_id.or_else(|| self.file_of_path.get(twin.as_str())).copied() else {
             return;
@@ -1128,7 +1155,7 @@ impl Custody {
     /// file the engine laid since the last pass point is named by the record
     /// that owns it, if that record's server id is learned.
     fn learn_files(&mut self, di: usize, device: &jd_sim::engine::Device) {
-        if !device.fs.identity_is_unique() {
+        if !Self::trackable(device) {
             return;
         }
         // A record's own file, by the disk's own identity for it: the file
@@ -1142,7 +1169,7 @@ impl Custody {
             .filter(|e| e.id.entity_type == jd_core::model::EntityType::File && e.id.server_id > 0)
             .filter_map(|e| {
                 let o = e.own_file.filter(|o| o.file_id != 0)?;
-                Some(((o.file_id, *live.get(&o.file_id)?), e.id.server_id))
+                Some((Self::tracked(device, o.file_id, *live.get(&o.file_id)?), e.id.server_id))
             })
             .collect();
         // In order, so what is learned never hangs on a map's iteration.
@@ -1174,7 +1201,7 @@ impl Custody {
         let from = self.landings_read.get(&di).copied().unwrap_or(0);
         let laid = device.fs.landed_since(from);
         self.landings_read.insert(di, from + laid.len());
-        for (fid, birth) in laid {
+        for (fid, birth) in laid.into_iter().map(|(id, birth)| Self::tracked(device, id, birth)) {
             if self.file_of_id.contains_key(&(di, fid, birth)) {
                 continue;
             }
@@ -6907,6 +6934,31 @@ fn frozen_knowledge_is_dated_when_it_was_had_seed() {
         );
     });
     FAT_DISK_HERE.with(|m| m.set(None));
+}
+
+/// vaultplat-mac-pc 72214 and 72396: on the pc, the engine set the user's
+/// slot file aside as a conflict copy and landed the mac's at its name, and
+/// the user then moved the file at that name into a folder. On NTFS a name
+/// taken again hands its birth to the next file, so the oracle followed files
+/// by path there, and a path follows no rename the engine makes: the move was
+/// held against the file set aside, and the moved one read as standing in a
+/// folder its user never put it in. Followed by its id alone, which names one
+/// file over the run on such a volume, it is the file the user moved (B-VP1).
+#[test]
+fn frozen_a_file_moved_after_its_name_went_to_a_conflict_copy_on_ntfs_seed() {
+    for seed in [72_214, 72_396] {
+        never_fires(&["every_file_in_a_folder_the_user_put_it_in"], || {
+            workload_core(
+                seed,
+                40,
+                &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+                false,
+                Vault::Shared,
+                false,
+                Names::Ordinary,
+            );
+        });
+    }
 }
 
 /// kill2 75125 on a Windows stick: a sealed record's file id, recorded
