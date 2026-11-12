@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.3.2 - code typed at the command line (php -r, stdin) counts as an outside script
  * @version 1.3.1 - a page asked for a row that is not there (SystemRowNotFoundError) is a 404, not a fault, so it is never reported automatically
  * @version 1.3.0 - an error in a command-line script kept outside the site (an ad-hoc script in /tmp) is never reported automatically (fromOutsideScript())
  * @version 1.2.0 - an error a test caused is never reported automatically (fromTest())
@@ -355,8 +356,10 @@ class ProblemReport extends SystemBase {
 	 * Whether the failing process is a command-line script that lives outside
 	 * the site's directory: someone's throwaway script that loads the site's
 	 * classes. Its error is in that script, not in the site, and the person
-	 * running it sees it on their terminal. The site's own scripts (cron,
-	 * maintenance_scripts, utils) live inside the site and still report.
+	 * running it sees it on their terminal. Code typed at the command line
+	 * (php -r, or piped in) has no script file at all and counts the same way.
+	 * The site's own scripts (cron, maintenance_scripts, utils) live inside the
+	 * site and still report.
 	 */
 	public static function fromOutsideScript(string $sapi = PHP_SAPI, ?string $script = null, ?string $site_root = null): bool {
 		if ($sapi !== 'cli') {
@@ -364,10 +367,13 @@ class ProblemReport extends SystemBase {
 		}
 		$script = $script ?? (string)($_SERVER['SCRIPT_FILENAME'] ?? '');
 		$site_root = $site_root ?? dirname(__DIR__, 2);
-		$real_script = $script !== '' ? realpath($script) : false;
 		$real_root = realpath($site_root);
-		if ($real_script === false || $real_root === false) {
+		if ($real_root === false) {
 			return false;
+		}
+		$real_script = $script !== '' ? realpath($script) : false;
+		if ($real_script === false || !is_file($real_script)) {
+			return true; // php -r or stdin: typed at a terminal, not a script the site runs
 		}
 		return strpos($real_script, rtrim($real_root, '/') . '/') !== 0;
 	}

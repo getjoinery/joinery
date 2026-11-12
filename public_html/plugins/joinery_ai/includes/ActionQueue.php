@@ -26,7 +26,7 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.7
+ * @version 1.8
  * @changelog 1.7 - a declined or failed action can still be approved while it
  *   has not expired (the AI panel's Past list); the card carries labelled
  *   fields from a ProposalFieldsInterface tool, and can_approve
@@ -401,9 +401,17 @@ class ActionQueue {
         $facts = $arguments === null ? null : self::factsFrom($row, $arguments);
         $fields = $arguments === null ? null : self::fieldsFrom($row, $arguments);
         $result = null;
+        $model_note = null;
         if ($facts !== null) {
-            $raw = (string)$row->get('aqa_result');
-            $decoded = $raw !== '' ? json_decode($raw, true) : null;
+            // The window can close between the arguments and these reads (the
+            // idle cap ends it on the read itself); that is a locked card.
+            try {
+                $raw = (string)$row->get('aqa_result');
+                $model_note = (string)$row->get('aqa_model_note');
+            } catch (VaultLockedException $e) {
+                $facts = $fields = $raw = $model_note = null;
+            }
+            $decoded = ($raw !== null && $raw !== '') ? json_decode($raw, true) : null;
             if (is_array($decoded)) {
                 $result = isset($decoded['error']) ? self::failureLine((string)$decoded['error'])
                     : self::resultLine($decoded);
@@ -424,7 +432,7 @@ class ActionQueue {
             'fields'          => $fields['fields'] ?? null,
             'can_approve'     => $facts !== null && !self::isOverdue($row)
                 && ($status === AiQueuedAction::STATUS_PENDING || in_array($status, self::REAPPROVABLE, true)),
-            'model_note'      => $facts === null ? null : (string)$row->get('aqa_model_note'),
+            'model_note'      => $model_note,
             'result'          => $result,
             'source_type'     => (string)$row->get('aqa_source_type'),
             'recipe_name'     => self::recipeName((int)$row->get('aqa_rcp_recipe_id')),
@@ -490,7 +498,13 @@ class ActionQueue {
                 return null;
             }
         }
-        $raw = (string)$row->get('aqa_arguments');
+        // isOpen() can say yes while the read itself is refused (the idle cap
+        // ends the window on the content read), so the read decides.
+        try {
+            $raw = (string)$row->get('aqa_arguments');
+        } catch (VaultLockedException $e) {
+            return null;
+        }
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : [];
     }

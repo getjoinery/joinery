@@ -45,6 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.22.1 - get_by_name() answers FALSE for a name that is not UTF-8 (was a database error and a 500)
  * @version 1.22.0 - a served file is named by get_name() (a renamed file's title), inline types too
  * @version 1.21.0 - a served body leaves the router's output buffers first, so a download larger than half
  *                   of memory_limit is streamed instead of dying with the request
@@ -367,6 +368,11 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	);
 
 public static function get_by_name($name, $search_deleted = false) {
+		// Names are stored as UTF-8, so bytes that are not UTF-8 (a probe's
+		// URL) name no file; asking the database would fail the query instead.
+		if (!is_string($name) || !mb_check_encoding($name, 'UTF-8')) {
+			return FALSE;
+		}
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 

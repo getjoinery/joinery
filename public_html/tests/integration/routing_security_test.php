@@ -47,6 +47,7 @@ reject('encoded backslash %5c', 'a%5cb/c');
 section('separator / null-byte tricks rejected');
 reject('backslash path', 'config\\secrets');
 reject('null byte injection', "theme/app.css\0.php");
+reject('bytes that are not UTF-8', "uploads/\xb0.jpg");
 
 section('URL-encoded traversal rejected');
 reject('single-encoded %2e%2e%2f', '%2e%2e%2fconfig');
@@ -65,6 +66,7 @@ accept('root path (empty)', '');
 accept('single segment', 'pricing');
 // A filename that merely contains dots but no traversal must NOT be rejected.
 accept('dotted filename app.min.css', 'assets/app.min.css');
+accept('a UTF-8 name', "uploads/caf\xc3\xa9.jpg");
 
 section('a name of the wrong shape finds no view instead of throwing');
 // validatePath lets 'foo..bar' through (no traversal); routing then looks the

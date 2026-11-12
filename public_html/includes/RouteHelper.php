@@ -336,6 +336,13 @@ class RouteHelper {
         if (strpos($path, '\\') !== false) {
             return false;
         }
+
+        // Every name a path can match (a route, a view, a stored file name, a
+        // slug) is UTF-8, and the database refuses a lookup with bytes that
+        // are not, so a path that is not UTF-8 names nothing.
+        if (!mb_check_encoding($path, 'UTF-8')) {
+            return false;
+        }
         
         // A '..' segment anywhere is a traversal: leading, trailing, or between
         // separators of either kind. 'foo..bar' is a name, not a traversal.

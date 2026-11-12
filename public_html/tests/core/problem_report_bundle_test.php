@@ -264,6 +264,8 @@ $outside = tempnam(sys_get_temp_dir(), 'prr_scratch_');
 check(ProblemReport::fromOutsideScript('cli', $outside, $site_root), 'a command-line script outside the site is not reported');
 check(!ProblemReport::fromOutsideScript('cli', __FILE__, $site_root), 'a command-line script inside the site is');
 check(!ProblemReport::fromOutsideScript('fpm-fcgi', $outside, $site_root), 'a web request is, wherever its script is');
+check(ProblemReport::fromOutsideScript('cli', '', $site_root), 'code run with php -r is not reported');
+check(ProblemReport::fromOutsideScript('cli', 'Standard input code', $site_root), 'code piped into php is not reported');
 @unlink($outside);
 
 section('What an automatic report carries');
