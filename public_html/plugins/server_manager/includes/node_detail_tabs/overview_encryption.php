@@ -17,6 +17,7 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.13 - a stored report missing newer fields reads with their defaults
  * @version 1.12 - the unlock page gets the X-Wing ciphertext only: no v1 ephemeral key
  * @version 1.10 - what to do while the provider's layer is on is DataRootEncryptionOffer::provider_layer_fix(): a machine
  *                in its owner's account is told to prove its recovery key first where it has none (B114)
@@ -40,7 +41,10 @@
  */
 
 $dre_report = json_decode((string)$node->get('mgn_last_host_report'), true);
-$dre_enc = is_array($dre_report) ? ($dre_report['data_root_encryption'] ?? null) : null;
+// A report stored before a field existed lacks it, so the stored value is
+// read through the same shaping a new report gets: every field present.
+$dre_raw = is_array($dre_report) ? ($dre_report['data_root_encryption'] ?? null) : null;
+$dre_enc = $dre_raw === null ? null : JobResultProcessor::host_report_data_root_encryption($dre_raw);
 $dre_row = DataRootEscrow::for_node((int)$node->key);
 // A plain data root, where this management node offers to encrypt it (D5, D-O).
 $dre_pool = is_array($dre_report) ? ($dre_report['disk_pool'] ?? null) : null;

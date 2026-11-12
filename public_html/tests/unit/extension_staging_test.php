@@ -145,6 +145,7 @@ section('Root verifies the package before it moves it (specs/package_signing.md 
 // The copy into root's working directory is the last thing that happens before
 // the question "who built this?" is asked, and the answer decides whether the
 // bytes go anywhere at all.
+$copy_at   = strpos($installer, "exec('cp -a --no-dereference ");
 $verify_at = strpos($installer, 'install_extension_verify($dir, $tree_rel . $staged_name, true)');
 $move_at   = strpos($installer, 'install_extension_copy_tree($dir, $target)');
 check($verify_at !== false && $copy_at !== false && $copy_at < $verify_at,

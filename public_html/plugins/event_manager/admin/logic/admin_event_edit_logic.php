@@ -200,13 +200,13 @@ function admin_event_edit_logic(array $input): LogicResult {
 			}
 		}
 
-		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_survey_required','evt_loc_location_id', 'evt_custom_registration_message');
+		$editable_fields = array('evt_name', 'evt_description', 'evt_private_info', 'evt_short_description', 'evt_location', 'evt_external_register_link', 'evt_is_accepting_signups', 'evt_visibility', 'evt_timezone', 'evt_picture_link', 'evt_status', 'evt_allow_waiting_list', 'evt_session_display_type', 'evt_show_add_to_calendar_link', 'evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_loc_location_id', 'evt_custom_registration_message');
 		$integer_fields = array('evt_ety_event_type_id', 'evt_svy_survey_id', 'evt_loc_location_id');
 
 		foreach($editable_fields as $field) {
 			// A field the form did not send was not edited. evt_picture_link
-			// and evt_survey_required are not on the form, and setting them
-			// from a missing key blanked the event's picture on every save.
+			// is not on the form, and setting it from a missing key blanked
+			// the event's picture on every save.
 			if(!array_key_exists($field, $input)) {
 				continue;
 			}

@@ -48,6 +48,28 @@ An exception that escapes an API action's logic file is caught by `ApiLogicEndpo
 recorded the same way (`ErrorReference::log()`), and answered with the same user-safe
 message rules. An exception marked `NoLog` is an expected refusal and is not recorded.
 
+A fatal error (out of memory, a parse error) reaches the handler from PHP's shutdown,
+and is recorded and rendered the same way. The handler does not exit there, so shutdown
+functions registered after it still run; PHP ends the process with status 255.
+
+### Warnings and notices
+
+A PHP warning or notice does not stop the code, so `ErrorManager::handleWarning()` only
+records it and lets PHP write it to `logs/error.log` as usual. `ErrorReference::logWarning()`
+saves it as an `err_general_errors` row with `err_level` `Warning` and passes it to
+automatic problem reports like any other fault. It is never the request's error
+reference: the page went on. To keep a warning on every request from filling the table,
+a place (file and line) is saved once per process and at most once an hour. A warning
+silenced with `@`, or raised inside an open database transaction, is not saved.
+
+### Scheduled tasks
+
+`utils/process_scheduled_tasks.php` records a task that throws, returns `error`, or
+ends the process, on the task's row and as an error (`ErrorReference::log()`), so it
+reaches automatic reports. It records only when the task starts failing or fails
+differently from its last run; a task failing the same way every minute is already on
+record. A task's own failure is recorded at its file, so each task is its own report.
+
 ## Error references
 
 A recorded error has a reference: its `err_general_errors` row id and a grouping hash.

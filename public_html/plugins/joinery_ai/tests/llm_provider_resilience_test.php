@@ -298,7 +298,7 @@ check($d['effort'] === 'high', 'a model with Max but no Extra high runs Extra hi
 $d = AiModelResolver::thinkingDirectiveFor($three, $req_at('medium'));
 check($d['effort'] === 'medium', 'a level the model takes is unchanged', json_encode($d));
 
-$entry = ['id' => 'some-model', 'label' => 'Some Model', 'thinking' => 'optional', 'context' => null];
+$entry = ['id' => 'some-model', 'label' => 'Some Model', 'endpoint' => 'anthropic', 'thinking' => 'optional', 'context' => null];
 $capped = new AiModelResolution($entry, [], $req_at('max'), AiModelResolver::thinkingDirectiveFor($entry, $req_at('max')));
 $notes = implode(' | ', $capped->advisories());
 check(strpos($notes, 'tops out at High') !== false && strpos($notes, '"Max" runs it at High') !== false,

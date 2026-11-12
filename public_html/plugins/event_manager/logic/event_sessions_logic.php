@@ -59,17 +59,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $event->key);
 
+	// A visitor who may not see the materials gets the reason and nothing
+	// else: the page and the API action both return only error_message.
 	if(!$event->can_read($session) && !$event_registrant){
-		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
+		return LogicResult::render(['error_message' => '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		<p><strong>You are not registered for this event, so you cannot access the event materials.</strong></p>
-		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
+		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>']);
 	}
 
 	if(!$event->can_read($session) && $event_registrant){
 		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
+		return LogicResult::render(['error_message' => '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>
-		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
+		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>']);
 		}
 	}
 
@@ -79,7 +81,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['next_session'] = $next_session;
 
 	$searches = array();
-	if($input['offset']){
+	if(!empty($input['offset'])){
 		$offset = $input['offset'];
 	}
 	else{
@@ -87,7 +89,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	$searches['deleted'] = FALSE;
-	$searches['visibility'] = 1;
 	$searches['event_id'] = $event->key;
 	$numperpage = 5;
 	$sort = 'start_time';

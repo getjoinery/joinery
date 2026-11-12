@@ -288,12 +288,13 @@ class ErrorManager {
     public function register(): void {
         if (!$this->registered) {
             set_exception_handler([$this, 'handleException']);
+            set_error_handler([$this, 'handleWarning'], E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE);
             register_shutdown_function([$this, 'handleFatalError']);
             $this->registered = true;
         }
     }
     
-    public function handleException(\Throwable $exception): void {
+    public function handleException(\Throwable $exception, bool $exit = true): void {
         try {
             // A transaction the failing code left open would swallow the error
             // row saved below; end it first. Not loaded means never connected.
@@ -322,7 +323,22 @@ class ErrorManager {
 
         // Exit with non-zero code so callers (especially exec() in upgrade.php)
         // can detect that an error occurred. exit(0) would mask failures.
-        exit(1);
+        if ($exit) {
+            exit(1);
+        }
+    }
+
+    /**
+     * A PHP warning or notice: the code carries on, so this only records it
+     * (ErrorReference::logWarning()) and returns false, so PHP still writes
+     * it to the error log as it always does. A warning silenced with @ is
+     * not one.
+     */
+    public function handleWarning(int $errno, string $errstr, string $errfile = '', int $errline = 0): bool {
+        if (error_reporting() & $errno) {
+            ErrorReference::logWarning(new \ErrorException($errstr, 0, $errno, $errfile, $errline));
+        }
+        return false;
     }
 
     public function handleFatalError(): void {
@@ -331,7 +347,10 @@ class ErrorManager {
             $fatalException = new \ErrorException(
                 $error['message'], 0, $error['type'], $error['file'], $error['line']
             );
-            $this->handleException($fatalException);
+            // No exit: this runs as a shutdown function, and an exit here
+            // would stop the ones after it (a task runner marking its task
+            // failed). PHP already ends a fatal with a non-zero status (255).
+            $this->handleException($fatalException, false);
         }
     }
 
@@ -545,6 +564,57 @@ class ErrorReference {
 		}
 		self::recorded($exception, $context->getErrorId(), $context->getErrorHash());
 		return $context->getErrorId();
+	}
+
+	/** Places that already warned in this process: each is recorded once. */
+	private static $warned = array();
+
+	/** Set while a warning is being recorded, so one it raises is not. */
+	private static $recording_warning = false;
+
+	/**
+	 * Record a PHP warning or notice in err_general_errors and let an automatic
+	 * problem report count it, like an uncaught exception, so a bug that only
+	 * warns is seen. It never becomes the request's error reference: the page
+	 * went on and did not fail. One place is recorded once per process and at
+	 * most once an hour, so a warning on every request does not fill the table;
+	 * PHP's own error log still carries every occurrence. Inside an open
+	 * transaction it is not recorded: the row would roll back with the work,
+	 * and a refused insert would break the caller's transaction.
+	 */
+	public static function logWarning(\ErrorException $warning): ?int {
+		if (self::$recording_warning) {
+			return null;
+		}
+		$place = $warning->getFile() . ':' . $warning->getLine();
+		if (isset(self::$warned[$place])) {
+			return null;
+		}
+		self::$warned[$place] = true;
+		self::$recording_warning = true;
+		try {
+			$dblink = DbConnector::get_instance()->get_db_link();
+			if ($dblink->inTransaction()) {
+				return null;
+			}
+			$q = $dblink->prepare("SELECT 1 FROM err_general_errors
+				WHERE err_create_time > now() - interval '1 hour'
+				  AND err_level = ? AND err_file = ? AND err_line = ? LIMIT 1");
+			$q->execute(array(GeneralError::LEVEL_WARNING, $warning->getFile(), (string)$warning->getLine()));
+			if ($q->fetchColumn() !== false) {
+				return null;
+			}
+			$row = new GeneralError(NULL);
+			$id = $row->logError($warning, $_SESSION ?? array(), $_REQUEST ?? array());
+			if (class_exists('ProblemReport')) {
+				ProblemReport::noteError($warning, $id);
+			}
+			return $id;
+		} catch (\Throwable $e) {
+			return null; // recording a warning must never break the page that raised it
+		} finally {
+			self::$recording_warning = false;
+		}
 	}
 
 	/**

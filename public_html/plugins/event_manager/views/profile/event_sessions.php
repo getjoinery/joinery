@@ -7,7 +7,7 @@
 	$page_vars = process_logic(event_sessions_logic(array_merge($_GET, $_POST, $params ?? [])));
 	$pager = $page_vars['pager'];
 
-	if($page_vars['error_message']){
+	if(!empty($page_vars['error_message'])){
 		PublicPage::OutputGenericPublicPage('Not Registered', 'Not Registered', $page_vars['error_message']);
 		exit();
 	}

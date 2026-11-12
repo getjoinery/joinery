@@ -24,6 +24,8 @@
  *   C. A task calls exit(), or the process is killed mid-task. The shutdown
  *      handler writes 'error' to the in-progress row, so it can never keep a
  *      stale last-run-success.
+ *   G. A task dies of a fatal error (out of memory). The site's fatal handler
+ *      records it and must not exit before the runner's handler marks the row.
  *
  * The test drives the real runner as a subprocess, because the containment
  * lives in process-level control flow that an in-process call cannot exercise.
@@ -31,6 +33,7 @@
  *
  * Run: php tests/integration/scheduled_task_crash_containment_test.php
  *
+ * @version 1.5 - a failing task is recorded as an error once, not every run; G: a fatal (out of memory) still marks the row
  * @version 1.4 - real passes are held off while the fixtures exist: the box's cron pass ran them and broke E
  * @version 1.3 - F: a task whose requires_plugins names an inactive plugin is skipped, not run or retired
  * @version 1.2 - E: a daily task another pass ran after this pass began is not run again
@@ -47,7 +50,7 @@ $db = DbConnector::get_instance()->get_db_link();
 $tasks_dir = PathHelper::getIncludePath('tasks');
 $runner = PathHelper::getIncludePath('utils/process_scheduled_tasks.php');
 
-$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry', 'CrashTestOtherPass', 'CrashTestNeedsPlugin');
+$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry', 'CrashTestOtherPass', 'CrashTestNeedsPlugin', 'CrashTestOutOfMemory');
 
 // ---- fixture lifecycle ----------------------------------------------------
 $write_task = function ($class, $body, array $extra_json = array()) use ($tasks_dir) {
@@ -66,6 +69,14 @@ $remove_fixtures = function () use ($tasks_dir, $fixtures, $db) {
 		@unlink("$tasks_dir/$class.json");
 	}
 	$db->exec("DELETE FROM sct_scheduled_tasks WHERE sct_task_class LIKE 'CrashTest%'");
+	$q = $db->prepare("DELETE FROM err_general_errors WHERE err_file LIKE ?");
+	$q->execute(array($tasks_dir . '/CrashTest%'));
+};
+/** The error rows recorded at a fixture task's file. */
+$errors_at = function ($class) use ($db, $tasks_dir) {
+	$q = $db->prepare("SELECT err_message FROM err_general_errors WHERE err_file = ? ORDER BY err_general_error_id");
+	$q->execute(array("$tasks_dir/$class.php"));
+	return $q->fetchAll(PDO::FETCH_COLUMN);
 };
 $activate = function ($class) use ($db) {
 	$task = new ScheduledTask(null);
@@ -156,6 +167,13 @@ PHP
 		'THE NEXT TASK STILL RAN', json_encode($canary));
 	check(strpos($log, 'Completed:') !== false,
 		'the pass printed its summary line rather than dying mid-loop', $log);
+	$recorded = $errors_at('CrashTestFatal');
+	check(count($recorded) === 1 && strpos($recorded[0], 'methodThatCannotExist') !== false,
+		'the failure is recorded as an error, not only on the task row', json_encode($recorded));
+
+	exec('php ' . escapeshellarg($runner) . ' 2>&1', $output, $exit_code);
+	check(count($errors_at('CrashTestFatal')) === 1,
+		'failing the same way on the next run is not recorded again', json_encode($errors_at('CrashTestFatal')));
 
 	// -----------------------------------------------------------------------
 	section('B. A parse error in a task file is contained the same way');
@@ -214,6 +232,39 @@ PHP
 	check(strpos((string)$exited['sct_last_run_message'], 'STALE') === false,
 		'it does NOT still read as the previous successful run',
 		(string)$exited['sct_last_run_message']);
+	$recorded = $errors_at('CrashTestExit');
+	check(count($recorded) === 1 && strpos($recorded[0], 'CrashTestExit failed: Task ended the process') !== false,
+		'and it is recorded as an error at the task\'s own file', json_encode($recorded));
+
+	// -----------------------------------------------------------------------
+	section('G. A task that dies of a fatal error leaves an honest row too');
+
+	// Running out of memory cannot be caught. The site's own fatal handler
+	// records the error; it must not end the process before the runner's
+	// shutdown handler marks the row.
+	$db->exec("DELETE FROM sct_scheduled_tasks WHERE sct_task_class LIKE 'CrashTest%'");
+	$write_task('CrashTestOutOfMemory', <<<'PHP'
+<?php
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+class CrashTestOutOfMemory implements ScheduledTaskInterface {
+	public function run(array $config) {
+		ini_set('memory_limit', (memory_get_usage() + 4 * 1024 * 1024) . '');
+		$hog = array();
+		while (true) { $hog[] = str_repeat('x', 1024 * 1024); }
+	}
+}
+PHP
+	);
+	$activate('CrashTestOutOfMemory');
+	$output = array();
+	exec('php ' . escapeshellarg($runner) . ' 2>&1', $output, $exit_code);
+	$oom = $status_of('CrashTestOutOfMemory');
+	check($oom['sct_last_run_status'] === 'error' && strpos((string)$oom['sct_last_run_message'], 'memory') !== false,
+		'the row is marked error with the fatal\'s message', json_encode($oom));
+	$recorded = $errors_at('CrashTestOutOfMemory');
+	check(count($recorded) === 1 && strpos($recorded[0], 'memory') !== false,
+		'and the fatal is recorded as an error once', json_encode($recorded));
+	check($exit_code !== 0, 'the pass still exits non-zero', (string)$exit_code);
 
 	// -----------------------------------------------------------------------
 	section('D. A task that cannot run yet says retry, and is due again next tick');

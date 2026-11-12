@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.32 - set_return() and the sign-in session regenerate are safe on the command line (no REQUEST_URI, output already sent); a vault that fails to close on a network change is recorded
  * @version 1.31 - save_visitor_event() takes a visitor id, for a conversion that completes in another browser
  * @version 1.30 - reviewer2 F1-2..F1-5: a password-started pending factor is never replaced by the cookie's; the
  *                stash records no return (the divert says where to come back to, or nothing, so /profile);
@@ -1708,7 +1709,11 @@ class SessionControl{
 					try {
 						require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 						VaultUnlock::close((int)$_SESSION['usr_user_id'], 'user', VaultAudit::REASON_IP_CHANGE);
-					} catch (\Throwable $e) {}
+					} catch (\Throwable $e) {
+						// The sign-in goes on, but a vault left open after a network
+						// change is a fault someone must see.
+						ErrorReference::log($e);
+					}
 				}
 				return 0;
 			}
@@ -2150,8 +2155,12 @@ class SessionControl{
 			throw new SystemDisplayablePermanentError('This is a machine account. It has no website sign-in.');
 		}
 
-		// Regenerate session ID to prevent session fixation attacks
-		session_regenerate_id(true);
+		// Regenerate session ID to prevent session fixation attacks. On the
+		// command line there is no cookie to fix and, once anything has been
+		// printed, nothing to send it with.
+		if (PHP_SAPI !== 'cli' || !headers_sent()) {
+			session_regenerate_id(true);
+		}
 
 		// Cached per-user posture must not survive an identity switch: one
 		// session holds more than one user over its life ("log in as user", a
@@ -2188,7 +2197,7 @@ class SessionControl{
 	//SETS THE SESSION VARIABLES FOR WHERE A USER IS REDIRECTED AFTER AN ACTION
 	function set_return($returnlocation=""){
 		if(!$returnlocation){
-			$_SESSION['returnurl'] = $_SERVER['REQUEST_URI'];
+			$_SESSION['returnurl'] = $_SERVER['REQUEST_URI'] ?? ''; // none on the command line (a task, the test harness)
 		} else {
 			$_SESSION['returnurl'] = $returnlocation;
 		}

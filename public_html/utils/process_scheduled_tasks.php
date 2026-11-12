@@ -15,6 +15,7 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.10 - a task that starts failing, or fails differently, is recorded as an error (and reported where automatic reports are on)
  * @version 2.9 - a pass holds the pass lock for its length and does nothing while a test holds the hold
  *   lock: the box's own cron pass ran one test's fixture tasks and advanced another's fixture site copy
  * @version 2.8 - a retired task whose code file is back is restored and said so
@@ -61,6 +62,31 @@ function cron_stamp(): string {
 // The id of the task currently executing, read by the shutdown handler below.
 // Null whenever the runner is between tasks.
 $current_task_id = null;
+// The running task's name, file and status before this run, for the same handler.
+$current_task = null;
+
+/**
+ * Record a task that has started failing, or fails differently, as an error
+ * (err_general_errors, and an automatic problem report where they are on),
+ * so a failing task is seen without opening the Scheduled Tasks page. A task
+ * failing the same way it did last run is already on record: recording every
+ * run would write a row a minute for a broken task.
+ *
+ * A thrown error is recorded as itself. A task that returned 'error', or
+ * ended the process, is recorded at its own file, so each task's failure is
+ * its own report.
+ */
+function scheduled_task_record_failure(array $task, string $message, ?Throwable $thrown = null): void {
+	if ($task['previous_status'] === 'error' && (string)$task['previous_message'] === mb_substr($message, 0, 500)) {
+		return;
+	}
+	try {
+		ErrorReference::log($thrown ?? new ErrorException(
+			'Scheduled task ' . $task['name'] . ' failed: ' . $message, 0, E_ERROR, $task['file'], 0));
+	} catch (Throwable $e) {
+		// Recording must never stop the pass.
+	}
+}
 
 /**
  * Last-resort status recorder.
@@ -71,7 +97,7 @@ $current_task_id = null;
  * run is also the one that leaves no trace: the row would keep its previous
  * successful status and admin would show the task as healthy.
  */
-register_shutdown_function(function () use (&$current_task_id) {
+register_shutdown_function(function () use (&$current_task_id, &$current_task) {
 	if ($current_task_id === null) {
 		return;
 	}
@@ -79,7 +105,11 @@ register_shutdown_function(function () use (&$current_task_id) {
 	if (!$error || !in_array($error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) {
 		// A task that called exit() leaves no error; it still died mid-run.
 		$message = 'Task ended the process without returning a result';
+		if ($current_task !== null) {
+			scheduled_task_record_failure($current_task, $message);
+		}
 	} else {
+		// The fatal itself was recorded by ErrorManager's own handler.
 		$message = $error['message'] . ' in ' . $error['file'] . ':' . $error['line'];
 	}
 	try {
@@ -252,6 +282,12 @@ foreach ($tasks as $task) {
 		// Load and instantiate the task. The require sits inside the guard so
 		// that a parse error in a task file is contained to that task.
 		$current_task_id = $task->key;
+		$current_task = array(
+			'name' => (string)$task_name,
+			'file' => (string)$task_file,
+			'previous_status' => (string)$task->get('sct_last_run_status'),
+			'previous_message' => (string)$task->get('sct_last_run_message'),
+		);
 		try {
 			require_once($task_file);
 
@@ -326,6 +362,7 @@ foreach ($tasks as $task) {
 				$tasks_skipped++;
 			} else {
 				$tasks_errored++;
+				scheduled_task_record_failure($current_task, (string)($message ?? 'status ' . $status));
 			}
 		} catch (Throwable $e) {
 			// Throwable, not Exception: a TypeError, a call to a method that
@@ -339,8 +376,10 @@ foreach ($tasks as $task) {
 			$task->set('sct_last_run_message', mb_substr($e->getMessage(), 0, 500));
 			$task->save();
 			$tasks_errored++;
+			scheduled_task_record_failure($current_task, $e->getMessage(), $e);
 		} finally {
 			$current_task_id = null;
+			$current_task = null;
 		}
 	} finally {
 		try {

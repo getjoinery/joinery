@@ -295,7 +295,8 @@ check(count($open_now) === 1, 'Setup: an active incident again', (string)count($
 $set(array('mgn_install_state' => 'copy'));
 $c = $pass();
 $open_now = array_values(array_filter($incidents(), function ($r) { return $r->is_open(); }));
-$ev = isset($rows) && count($incidents()) ? IncidentEvent::for_incident((int)end($incidents())->key) : array();
+$all = $incidents();
+$ev = isset($rows) && count($all) ? IncidentEvent::for_incident((int)end($all)->key) : array();
 check($c['cleared'] === 1 && count($open_now) === 0 && strpos($cleared_text($ev), 'no longer watched') !== false,
 	'A node in an install state: its active incident is cleared, saying so', json_encode($c));
 $before = count($incidents());

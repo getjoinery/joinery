@@ -1112,6 +1112,11 @@ abstract class PublicPageBase {
 	 * Referrer-Policy, and the Content-Security-Policy (csp_header()).
 	 */
 	protected function send_transport_headers($settings) {
+		// A page built on the command line (a test, a task rendering a view)
+		// has no HTTP response to put headers on.
+		if (PHP_SAPI === 'cli') {
+			return;
+		}
 		//https://blog.vnaik.com/posts/web-attacks.html
 		// Check protocol_mode for HTTPS redirect
 		$protocol_mode = $settings->get_setting('protocol_mode', false, true); // fail_silently = true

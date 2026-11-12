@@ -18,9 +18,18 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 	public static $owner_column = false;
 	public static $pkey_column = 'err_general_error_id';
 
+	/** err_level of a PHP warning or notice: the code went on, but something in it is wrong. */
+	const LEVEL_WARNING = 'Warning';
+
 	protected static $foreign_key_actions = [
 		'err_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
+
+	// The warning recorder asks whether the same place warned within the hour
+	// (ErrorReference::logWarning()), and the retention sweep reads by age.
+	public static $index_specifications = array(
+		array('columns' => array('err_create_time')),
+	);
 
 	// Retention: the daily sweep deletes rows older than the window.
 	// 0 in the setting means never purge. See docs/scheduled_tasks.md.
@@ -105,6 +114,9 @@ function display_time($session) {
 			if(count($dbhelper->last_query_params)){
 				$error_context .= print_r($dbhelper->last_query_params, true);
 			}
+		} else if ($exception instanceof \ErrorException
+				&& in_array($exception->getSeverity(), array(E_WARNING, E_USER_WARNING, E_NOTICE, E_USER_NOTICE), true)) {
+			$this->set('err_level', self::LEVEL_WARNING);
 		} else {
 			$this->set('err_level', 'Exception');
 		}

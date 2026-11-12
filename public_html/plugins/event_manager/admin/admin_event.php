@@ -232,11 +232,8 @@
 								<td class="p-1" style="width: 35%;">Survey:</td>
 								<td class="p-1 text-600">
 									<a href="/admin/admin_survey?svy_survey_id=<?php echo $event_survey->key; ?>">
-										<?php echo htmlspecialchars($event_survey->get('svy_title')); ?>
+										<?php echo htmlspecialchars($event_survey->get('svy_name')); ?>
 									</a>
-									<?php if($event->get('evt_survey_required')): ?>
-										<span class="badge badge-subtle-warning ms-2">Required</span>
-									<?php endif; ?>
 								</td>
 							</tr>
 							<?php endif; ?>

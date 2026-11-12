@@ -57,7 +57,7 @@ function rlt_leaf($der, $n, $content = null) {
 $ours = rlt_p256_der();
 $other = rlt_p256_der();
 $leaves = array();
-for ($i = 0; $i < 1300; $i++) {
+for ($i = 0; $i < 1600; $i++) { // as many as the log ever claims to hold (the largest $size below)
 	$leaves[$i] = rlt_leaf($other, $i);
 }
 $leaves[600] = rlt_leaf($ours, 600);                                  // our genesis, in the ledger

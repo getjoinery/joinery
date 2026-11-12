@@ -218,6 +218,50 @@ check(ErrorStatus::of(new RuntimeException('x')) === 500
 check(!ErrorStatus::isExpected(new SystemDisplayableError('x')) && !ErrorStatus::isExpected(new RuntimeException('x')),
 	'anything not marked NoLog is still recorded');
 
+// ---------------------------------------------------------------- warnings
+
+section('A PHP warning is recorded, once per place an hour, and never becomes the reference');
+
+/** The Warning rows recorded at this file and a line, newest first. */
+function er_warning_rows($line) {
+	$q = DbConnector::get_instance()->get_db_link()->prepare(
+		"SELECT err_general_error_id FROM err_general_errors
+		  WHERE err_level = ? AND err_file = ? AND err_line = ? ORDER BY err_general_error_id DESC");
+	$q->execute(array(GeneralError::LEVEL_WARNING, __FILE__, (string)$line));
+	return $q->fetchAll(PDO::FETCH_COLUMN);
+}
+
+ErrorReference::reset();
+$undefined = array();
+$warn_line = __LINE__ + 1;
+$unused = $undefined['no_such_key'];
+$rows = er_warning_rows($warn_line);
+foreach ($rows as $id) { harness_register_row('err_general_errors', 'err_general_error_id', (int)$id); }
+check(count($rows) === 1, 'an undefined array key is saved as a Warning row', count($rows) . ' rows');
+check(ErrorReference::current() === null, 'and it is not the request\'s error reference: the page went on');
+
+$again = ErrorReference::logWarning(new ErrorException('again', 0, E_WARNING, __FILE__, $warn_line));
+check($again === null && count(er_warning_rows($warn_line)) === 1, 'the same place again in this process is not saved twice');
+
+$quiet_line = __LINE__ + 1;
+$unused = @$undefined['silenced'];
+check(count(er_warning_rows($quiet_line)) === 0, 'a warning silenced with @ is not saved');
+
+$hour_line = 900001; // a line no code warns at: stands in for a place that warned in another request
+$first = ErrorReference::logWarning(new ErrorException('first', 0, E_WARNING, __FILE__, $hour_line));
+if ($first) { harness_register_row('err_general_errors', 'err_general_error_id', $first); }
+$reflect = new ReflectionProperty('ErrorReference', 'warned');
+$reflect->setValue(null, array()); // a new process: the per-process memory is empty
+$second = ErrorReference::logWarning(new ErrorException('second', 0, E_WARNING, __FILE__, $hour_line));
+if ($second) { harness_register_row('err_general_errors', 'err_general_error_id', $second); }
+check($first && $second === null, 'a place that warned within the hour in another process is not saved again');
+
+$db = DbConnector::get_instance()->get_db_link();
+$db->beginTransaction();
+$in_tx = ErrorReference::logWarning(new ErrorException('in a transaction', 0, E_WARNING, __FILE__, 900002));
+$db->rollBack();
+check($in_tx === null, 'a warning inside an open transaction is not saved');
+
 $session->clear_api_user();
 ErrorReference::reset();
 

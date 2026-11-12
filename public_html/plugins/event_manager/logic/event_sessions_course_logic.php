@@ -23,10 +23,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	//ACCEPT EITHER VARIABLE
-	if($input['evt_event_id']){
+	if(!empty($input['evt_event_id'])){
 		$event_id = LibraryFunctions::fetch_variable_local($input, 'evt_event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
-	else if ($input['event_id']){
+	else if (!empty($input['event_id'])){
 		$event_id = LibraryFunctions::fetch_variable_local($input, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else{
@@ -89,18 +89,18 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$event_registrant = EventRegistrant::check_if_registrant_exists($user->key, $event->key);
 
+	// A visitor who may not see the materials gets the reason and nothing
+	// else: the page and the API action both return only error_message.
 	if(!$event->can_read($session) && !$event_registrant){
-		$error_message = '<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>
-		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
+		return LogicResult::render(['error_message' => '<p><strong>You are not registered for this event or your registration has expired, so you cannot access the event materials.</strong></p>
+		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>']);
 	}
-	else if(!$event->can_read($session) && $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-		$page_vars['error_message'] = '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
+	if(!$event->can_read($session) && $event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
+		return LogicResult::render(['error_message' => '		<a class="back-link" href="/profile/profile">Back to My Profile</a>
 		<p><strong>Your registration has expired, so you cannot access the event materials.</strong></p>
-		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>';
+		<p><strong><a href="'.$event->get_url().'">Register for the event here</a>.</strong></p>']);
 	}
-	else{
-		$event_session->record_analytic($session->get_user_id());
-	}
+	$event_session->record_analytic($session->get_user_id());
 
 	if($event->get('evt_loc_location_id')){
 		$location = new Location($event->get('evt_loc_location_id'), true);
