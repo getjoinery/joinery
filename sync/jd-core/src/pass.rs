@@ -4432,12 +4432,16 @@ pub(crate) const KEEPS_FAILING: &str = "keeps_failing";
 /// hides the one that matters. The first op stuck is the one named, so the
 /// words change only when what is stuck changes. Lifted on the pass nothing
 /// is left at the cap.
+///
+/// Work this computer's disk refuses is said apart, from its first refusal
+/// (`say_what_the_disk_refuses`), and not again here.
 fn say_what_keeps_failing(env: &ExecEnv) -> Result<(), ExecError> {
-    let stuck: Vec<crate::store::Op> = env
-        .store
-        .queued_ops()?
+    let queued = env.store.queued_ops()?;
+    say_what_the_disk_refuses(env, &queued)?;
+    let stuck: Vec<crate::store::Op> = queued
         .into_iter()
         .filter(|op| crate::round::retry_delay_ms(op.attempts) >= crate::round::RETRY_CAP_MS)
+        .filter(|op| op.disk_refused.is_none())
         .collect();
     let text = match stuck.iter().min_by_key(|op| op.op_id) {
         None => None,
@@ -4471,7 +4475,7 @@ fn say_what_keeps_failing(env: &ExecEnv) -> Result<(), ExecError> {
             })
         }
     };
-    let open: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == KEEPS_FAILING).collect();
+    let open = env.store.open_issues_of_kind(KEEPS_FAILING)?;
     let current = text.as_ref().is_some_and(|t| open.iter().any(|i| &i.detail == t));
     for issue in &open {
         if text.as_ref() != Some(&issue.detail) {
@@ -4482,6 +4486,107 @@ fn say_what_keeps_failing(env: &ExecEnv) -> Result<(), ExecError> {
         env.store.raise_issue(None, KEEPS_FAILING, &t, (env.now_ms)() as i64)?;
     }
     Ok(())
+}
+
+/// Work the disk here refuses, which only the person can put right, said on
+/// the pass it is first refused (B8), from what each queued op's latest
+/// failure was (`Op::disk_refused`), and lifted the pass no op is refused for
+/// it any longer: done, failing for another reason, or waiting on other
+/// work.
+///
+/// A full disk is one issue: the file first held back, and how many more. A
+/// first sync onto a full disk is refused for every file it holds, and a
+/// panel of five thousand identical issues says one thing five thousand
+/// times. A refused permission is one issue per file: each is its own file or
+/// folder to put right.
+///
+/// One read of the queue and one of each kind's open issues, whatever their
+/// number, and a write only where what is said changes.
+fn say_what_the_disk_refuses(env: &ExecEnv, queued: &[crate::store::Op]) -> Result<(), ExecError> {
+    use crate::execute::{DISK_FULL, DISK_REFUSED};
+    use crate::store::DiskRefusal;
+    let now = (env.now_ms)() as i64;
+
+    let mut no_room: Vec<&str> = Vec::new();
+    let mut no_room_entities = std::collections::HashSet::new();
+    // In queue order, so issues raised in one pass take their ids in it.
+    let mut no_permission: Vec<(EntityId, String)> = Vec::new();
+    let mut no_permission_entities = std::collections::HashSet::new();
+    for op in queued {
+        match &op.disk_refused {
+            Some(DiskRefusal::NoRoom(path)) => {
+                if no_room_entities.insert(op.entity) {
+                    no_room.push(path);
+                }
+            }
+            Some(DiskRefusal::NoPermission(path)) => {
+                if no_permission_entities.insert(op.entity) {
+                    no_permission.push((op.entity, permission_refused(path)));
+                }
+            }
+            None => {}
+        }
+    }
+
+    // Queued in op order, so the first named is the first held back, and the
+    // words change only when it lands or the count moves.
+    let full = no_room.first().map(|first| match no_room.len() {
+        1 => format!(
+            "Sync cannot save {first} on this computer: the disk is full. \
+             It is tried again until there is room."
+        ),
+        2 => format!(
+            "Sync cannot save {first} or 1 other item on this computer: the disk is full. \
+             They are tried again until there is room."
+        ),
+        n => format!(
+            "Sync cannot save {first} or {} other items on this computer: the disk is full. \
+             They are tried again until there is room.",
+            n - 1
+        ),
+    });
+    let mut open = env.store.open_issues_of_kind(DISK_FULL)?.into_iter();
+    match (open.next(), full) {
+        (Some(issue), Some(text)) => {
+            if issue.detail != text {
+                env.store.set_issue_detail(issue.issue_id, &text)?;
+            }
+        }
+        (Some(issue), None) => env.store.dismiss_issue(issue.issue_id)?,
+        (None, Some(text)) => {
+            env.store.raise_issue(None, DISK_FULL, &text, now)?;
+        }
+        (None, None) => {}
+    }
+    for extra in open {
+        env.store.dismiss_issue(extra.issue_id)?;
+    }
+
+    let wanted: std::collections::HashMap<EntityId, &String> =
+        no_permission.iter().map(|(entity, text)| (*entity, text)).collect();
+    let mut already = std::collections::HashSet::new();
+    for issue in env.store.open_issues_of_kind(DISK_REFUSED)? {
+        match issue.entity {
+            Some(entity) if wanted.get(&entity) == Some(&&issue.detail) && already.insert(entity) => {}
+            _ => env.store.dismiss_issue(issue.issue_id)?,
+        }
+    }
+    for (entity, text) in &no_permission {
+        if !already.contains(entity) {
+            env.store.raise_issue(Some(*entity), DISK_REFUSED, text, now)?;
+        }
+    }
+    Ok(())
+}
+
+/// What a refused permission says. Refused to read a file as surely as to
+/// write one (an upload's source the user cannot read either), so it names
+/// no verb.
+fn permission_refused(path: &str) -> String {
+    format!(
+        "This computer does not let Sync use {path}. Check the permissions of the file and its \
+         folder, and whether the disk is read-only. It is tried again until it can."
+    )
 }
 
 /// The one issue for deletes the mass-delete guard holds

@@ -253,22 +253,30 @@ fn not_there(e: &std::io::Error) -> bool {
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> VfsError {
+    if let Some(refused) = VfsError::refused_by_disk(path, e.kind()) {
+        return refused;
+    }
     match e.kind() {
         std::io::ErrorKind::NotFound => VfsError::NotFound(path.to_path_buf()),
-        std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied(path.to_path_buf()),
         std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists(path.to_path_buf()),
         // ENAMETOOLONG, and on Windows ERROR_INVALID_NAME and
         // ERROR_FILENAME_EXCED_RANGE. EINVAL is not read as one: it says many
         // other things too (a folder moved into itself).
         std::io::ErrorKind::InvalidFilename => VfsError::NameRefused(path.to_path_buf()),
-        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
-            VfsError::OutOfSpace(path.to_path_buf())
-        }
         _ => VfsError::Io {
             path: path.to_path_buf(),
             source: e,
         },
     }
+}
+
+/// A spool's failure, as the person meets it. The disk refusing the bytes is
+/// said of the file they are for: the spool is the engine's own scratch name,
+/// in the engine's own folder, and a notice naming it names nothing the
+/// person knows. Every other failure keeps the spool's name, where it is the
+/// spool that failed.
+fn spool_err(spool: &Path, target: &Path, e: std::io::Error) -> VfsError {
+    VfsError::refused_by_disk(target, e.kind()).unwrap_or_else(|| io_err(spool, e))
 }
 
 /// Where the other volume of a rename that crossed one starts: of the two
@@ -1226,7 +1234,14 @@ impl Vfs for OsVfs {
         let Some(folder_at_open) = directory_identity_at(folder, &self.personality)? else {
             return Err(VfsError::NoFolder(folder.to_path_buf()));
         };
-        let file = File::create(&path).map_err(|e| io_err(&path, e))?;
+        // A full disk is said of the file: it is the same disk, and the file
+        // is what the person waits for. A permission refused here is the
+        // state folder's, where the spool is made, and is said of it: named
+        // as the file, it sent the person to the wrong folder.
+        let file = File::create(&path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem => io_err(&path, e),
+            _ => spool_err(&path, target, e),
+        })?;
         Ok(Box::new(OsSpoolFile {
             file: Some(file),
             path,
@@ -1552,9 +1567,9 @@ impl OsSpoolFile {
         // otherwise move it again, and before the sync, so the time is as
         // durable as the bytes it describes.
         if let Some(mut f) = self.file.take() {
-            f.flush().map_err(|e| io_err(&self.path, e))?;
+            f.flush().map_err(|e| spool_err(&self.path, &self.target, e))?;
             stamp(&f, self.modified);
-            f.sync_all().map_err(|e| io_err(&self.path, e))?;
+            f.sync_all().map_err(|e| spool_err(&self.path, &self.target, e))?;
         }
 
         self.guard_target(target, expect)?;
@@ -1619,20 +1634,32 @@ impl OsSpoolFile {
 
         // Never over a file already standing at the name: whatever is there
         // is not this commit's, so it is not this commit's to replace.
-        let out = File::create_new(&land).map_err(|e| io_err(&land, e))?;
+        //
+        // Every refusal of the landing name is said of the target: it is the
+        // file the person is waiting for, and the landing name is the
+        // engine's own, a new one on every try. All but a file already at the
+        // landing name, which names what stands in the way (`download`).
+        let refused = |e: std::io::Error| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                io_err(&land, e)
+            } else {
+                io_err(target, e)
+            }
+        };
+        let out = File::create_new(&land).map_err(refused)?;
         let landed = (|| {
             let copied = {
                 let mut out = out;
                 let mut from = File::open(&self.path).map_err(|e| io_err(&self.path, e))?;
-                std::io::copy(&mut from, &mut out).map_err(|e| io_err(&land, e))?;
+                std::io::copy(&mut from, &mut out).map_err(refused)?;
                 // A copy is a new file with the copy's time: the spool's is
                 // put on it again.
                 stamp(&out, self.modified);
-                out.sync_all().map_err(|e| io_err(&land, e))?;
+                out.sync_all().map_err(refused)?;
                 // The copy is the file that lands, read off its own handle:
                 // the target's name may hold another file by the time the
                 // rename below is done (`try_commit`).
-                let md = out.metadata().map_err(|e| io_err(&land, e))?;
+                let md = out.metadata().map_err(refused)?;
                 fingerprint_of_handle(&out, &md)
             }; // Closed before anything renames or removes it: Windows refuses both on an open file.
             (self.after_copy)(target);
@@ -1640,7 +1667,7 @@ impl OsSpoolFile {
             if directory_identity_at(dir, &self.personality)? != folder {
                 return Err(VfsError::FolderMoved(dir.to_path_buf()));
             }
-            fs::rename(&land, as_written(target, &self.personality)).map_err(|e| io_err(&land, e))?;
+            fs::rename(&land, as_written(target, &self.personality)).map_err(refused)?;
             // The rename is durable when the directory entry is. Unix only:
             // Windows has no directory handle to flush, and its rename is
             // journaled by the volume.
@@ -1935,6 +1962,30 @@ mod tests {
         assert!(matches!(listed, Err(VfsError::NotFound(_))), "{listed:?}");
     }
 
+    /// B8 R1: the disk refusing a spool's bytes is said of the file they are
+    /// for, never of the spool, the engine's own scratch name a person has
+    /// never seen; any other spool failure keeps the spool's name.
+    #[test]
+    fn a_spool_the_disk_refuses_names_the_file_it_is_for() {
+        let spool = Path::new("/state/.jd-tmp-op7-abc");
+        let target = Path::new("/sync/report.txt");
+        let kind = |k| spool_err(spool, target, std::io::Error::from(k));
+        use std::io::ErrorKind as K;
+        assert!(matches!(kind(K::StorageFull), VfsError::OutOfSpace(p) if p == target));
+        assert!(matches!(kind(K::QuotaExceeded), VfsError::OutOfSpace(p) if p == target));
+        assert!(matches!(kind(K::PermissionDenied), VfsError::PermissionDenied(p) if p == target));
+        assert!(matches!(kind(K::ReadOnlyFilesystem), VfsError::PermissionDenied(p) if p == target));
+        assert!(matches!(kind(K::Other), VfsError::Io { path, .. } if path == spool));
+    }
+
+    /// B8: a read-only disk is a refused permission, which is said at once,
+    /// not a bare I/O error, which is said only once its retries reach the cap.
+    #[test]
+    fn a_read_only_disk_is_a_refused_permission() {
+        let e = io_err(Path::new("/x/a.txt"), std::io::Error::from(std::io::ErrorKind::ReadOnlyFilesystem));
+        assert!(matches!(e, VfsError::PermissionDenied(_)), "{e:?}");
+    }
+
     /// B8: a full disk or a used-up quota is called that, not a bare I/O error.
     #[test]
     fn a_full_disk_is_called_out_of_space() {
@@ -1961,6 +2012,59 @@ mod tests {
         fs::set_permissions(&sub, fs::Permissions::from_mode(0o555)).unwrap();
         let writable = fs::write(sub.join("probe"), b"p").is_ok();
         let landed = w.commit(&target, None);
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+        if writable {
+            return; // running as root
+        }
+        match landed {
+            Err(VfsError::PermissionDenied(p)) => assert_eq!(p, target),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// B8 N3: a spool the state folder will not let Sync make is said of that
+    /// folder, where the spool is made, not of the file it was for: named as
+    /// the file, the person was sent to check the wrong folder. Not run as
+    /// root, which no permission stops.
+    #[cfg(unix)]
+    #[test]
+    fn a_spool_the_state_folder_refuses_names_the_spool() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("no_spool");
+        let v = vfs(&dir);
+        let spool = dir.path().join("spool");
+        let target = dir.path().join("root").join("new.txt");
+        fs::set_permissions(&spool, fs::Permissions::from_mode(0o555)).unwrap();
+        let writable = fs::write(spool.join("probe"), b"p").is_ok();
+        let opened = v.spool(&target, 0).map(|_| ());
+        fs::set_permissions(&spool, fs::Permissions::from_mode(0o755)).unwrap();
+        if writable {
+            return; // running as root
+        }
+        match opened {
+            Err(VfsError::PermissionDenied(p)) => assert!(p.starts_with(&spool), "{p:?}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// B8: the same across a volume, where the bytes are copied beside the
+    /// target under a landing name first. RED with the error naming that
+    /// landing name: a new one each try, so the issue saying it was raised
+    /// again on every retry, and never named the file. Not run as root.
+    #[cfg(unix)]
+    #[test]
+    fn a_landing_across_a_volume_names_the_file_not_the_landing() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("no_landing_across");
+        let sub = dir.path().join("ro");
+        fs::create_dir(&sub).unwrap();
+        let v = vfs(&dir);
+        let target = sub.join("big.bin");
+        let mut spool = spool_across(&v, &target, |_| {});
+        spool.write_all(b"big").unwrap();
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o555)).unwrap();
+        let writable = fs::write(sub.join("probe"), b"p").is_ok();
+        let landed = spool.commit(&target, None);
         fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
         if writable {
             return; // running as root

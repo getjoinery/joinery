@@ -94,6 +94,32 @@ pub enum VfsError {
 
 pub type VfsResult<T> = Result<T, VfsError>;
 
+impl VfsError {
+    /// The disk's own refusal to take bytes, naming `path`: no room, or no
+    /// permission (a read-only disk refuses as surely as a folder's
+    /// permissions do, and the person puts it right the same way). `None`
+    /// for any other failure. Asked by the real filesystem of every error it
+    /// meets, and by the executor of a download's writes, which reach it as
+    /// bare io errors through the transport.
+    pub fn refused_by_disk(path: &std::path::Path, kind: std::io::ErrorKind) -> Option<VfsError> {
+        if !Self::disk_refuses(kind) {
+            return None;
+        }
+        use std::io::ErrorKind as K;
+        match kind {
+            K::PermissionDenied | K::ReadOnlyFilesystem => Some(VfsError::PermissionDenied(path.to_path_buf())),
+            K::StorageFull | K::QuotaExceeded => Some(VfsError::OutOfSpace(path.to_path_buf())),
+            _ => None,
+        }
+    }
+
+    /// Is a failure of this kind the disk refusing bytes (`refused_by_disk`)?
+    pub fn disk_refuses(kind: std::io::ErrorKind) -> bool {
+        use std::io::ErrorKind as K;
+        matches!(kind, K::PermissionDenied | K::ReadOnlyFilesystem | K::StorageFull | K::QuotaExceeded)
+    }
+}
+
 /// The cheap "has this changed?" filter.
 ///
 /// Every field can lie on its own — an mtime can go backwards across a clock

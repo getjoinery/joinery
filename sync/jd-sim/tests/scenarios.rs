@@ -12080,7 +12080,7 @@ fn a_landing_left_by_a_download_that_never_finished_is_cleared() {
         .unwrap();
     laptop
         .store
-        .record_op_failure(open, "held open for the test", i64::MAX / 2)
+        .record_op_failure(open, "held open for the test", i64::MAX / 2, None)
         .unwrap();
     let live = format!("Work/{}", jd_vfs::land_name(open, "a"));
     let stale = format!("Work/{}", jd_vfs::land_name(open + 1000, "b"));
@@ -24632,6 +24632,205 @@ fn work_that_keeps_failing_is_said_in_one_issue_as_it_changes() {
     assert!(seen.iter().any(|s| s.starts_with("A change") && s.contains("Empty")), "{seen:?}");
     assert!(world.settle().is_some(), "never settled once the server answered");
     assert!(issues_of(laptop, "keeps_failing").is_empty(), "{:?}", issues_of(laptop, "keeps_failing"));
+}
+
+/// The issue a disk's refusal is said in: one for the disk when it is full,
+/// one for each file it will not let Sync in.
+fn refusal_issue(kind: FailureKind) -> &'static str {
+    match kind {
+        FailureKind::OutOfSpace => "disk_full",
+        _ => "disk_refused",
+    }
+}
+
+/// A file this disk will not take is said on the first refusal, not once its
+/// backoff reaches the cap, and the issue goes when the file lands. Only the
+/// person can free the space or the permission, so a quarter of an hour of
+/// doubling retries said nothing they could act on. RED before: nothing was
+/// said for the first seventeen minutes (B8).
+#[test]
+fn a_file_this_disk_refuses_is_said_at_once() {
+    for kind in [FailureKind::PermissionDenied, FailureKind::OutOfSpace] {
+        let issue = refusal_issue(kind);
+        let world = World::new(9_841, &["laptop", "desktop"]);
+        let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+        assert!(world.settle().is_some());
+        desktop.fs.fail_next(FsOp::Commit, Some("report.txt"), kind, 1_000);
+        laptop.fs.user_write("report.txt", b"quarterly");
+        world.pass(laptop);
+        world.pass(desktop);
+        let said = issues_of(desktop, issue);
+        assert!(said.len() == 1 && said[0].contains("report.txt"), "{kind:?}: {said:?}");
+        assert!(issues_of(desktop, "keeps_failing").is_empty(), "{:?}", issues_of(desktop, "keeps_failing"));
+        world.clock.advance_secs(5);
+        world.pass(desktop);
+        assert_eq!(issues_of(desktop, issue), said, "{kind:?}: said once, in the same words");
+        // Still refused past the cap: the one issue, not a second one for the
+        // same file in the words of work that keeps failing.
+        for _ in 0..14 {
+            world.clock.advance_secs(16 * 60);
+            world.pass(desktop);
+        }
+        assert_eq!(issues_of(desktop, issue), said, "{kind:?}");
+        assert!(issues_of(desktop, "keeps_failing").is_empty(), "{kind:?}: {:?}", issues_of(desktop, "keeps_failing"));
+        desktop.fs.clear_failures();
+        assert!(world.settle().is_some(), "{kind:?}: never settled once the disk took it");
+        assert_eq!(disk_tree(desktop).get("report.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"quarterly")));
+        assert!(issues_of(desktop, issue).is_empty(), "{kind:?}: {:?}", issues_of(desktop, issue));
+    }
+}
+
+/// A download's bytes the disk will not take, as they arrive, are said as the
+/// disk refusing that file: by its own name, from the first refusal, for a
+/// plain file and a vault file alike. The bytes reach the disk through the
+/// transport, where a refused write was one more broken transfer, retried
+/// with nothing said, and for a vault file through the decryptor, where it
+/// was a file that would not open, written off for good. RED before: plain,
+/// nothing said; vault, written off as unreadable (B8 R1).
+#[test]
+fn a_download_the_disk_will_not_take_as_it_arrives_is_said_as_the_disk_refusing_it() {
+    for kind in [FailureKind::OutOfSpace, FailureKind::PermissionDenied] {
+        for sealed in [false, true] {
+            let case = format!("{kind:?}, vault {sealed}");
+            let issue = refusal_issue(kind);
+            let vault = SimVault::new(9_860);
+            let mut world = World::new(9_860, &["laptop", "desktop"]);
+            let path = if sealed {
+                world.give_vault("laptop", &vault);
+                world.give_vault("desktop", &vault);
+                world.server.set_vault_public_key(1, &vault.public_key_b64);
+                world.server.seed_encrypted_folder(None, "Private");
+                "Private/report.txt"
+            } else {
+                "report.txt"
+            };
+            assert!(world.settle().is_some(), "{case}");
+            let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+            desktop.fs.fail_next(FsOp::Write, Some(path), kind, 1_000);
+            laptop.fs.user_write(path, b"quarterly figures");
+            world.pass(laptop);
+            world.pass(desktop);
+            let said = issues_of(desktop, issue);
+            assert!(said.len() == 1 && said[0].contains(path), "{case}: {said:?}");
+            assert!(!said[0].contains(".jd-"), "{case}: names the file, not the spool: {said:?}");
+            assert!(issues_of(desktop, "withdrawn").is_empty(), "{case}: {:?}", issues_of(desktop, "withdrawn"));
+            assert!(issues_of(desktop, "keeps_failing").is_empty(), "{case}");
+            for _ in 0..14 {
+                world.clock.advance_secs(16 * 60);
+                world.pass(desktop);
+            }
+            assert_eq!(issues_of(desktop, issue), said, "{case}: still the one issue past the cap");
+            assert!(issues_of(desktop, "keeps_failing").is_empty(), "{case}");
+            desktop.fs.clear_failures();
+            assert!(world.settle().is_some(), "{case}: never settled once the disk took it");
+            assert_eq!(
+                disk_tree(desktop).get(path).cloned().flatten(),
+                Some(jd_sim::sha256_hex(b"quarterly figures")),
+                "{case}"
+            );
+            assert!(issues_of(desktop, issue).is_empty(), "{case}: {:?}", issues_of(desktop, issue));
+        }
+    }
+}
+
+/// A full disk is one issue, whatever it holds back: the first file and how
+/// many more. A first sync onto a full disk is refused for every file it
+/// brings, and an issue for each says the one thing a thousand times. RED
+/// before: one issue per file (B8 R3).
+#[test]
+fn a_full_disk_is_one_issue_for_every_file_it_holds_back() {
+    let world = World::new(9_861, &["laptop", "desktop"]);
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+    assert!(world.settle().is_some());
+    desktop.fs.fail_next(FsOp::Write, None, FailureKind::OutOfSpace, 10_000);
+    for n in 0..5 {
+        laptop.fs.user_write(&format!("f{n}.txt"), format!("file {n}").as_bytes());
+    }
+    world.pass(laptop);
+    world.pass(desktop);
+    let said = issues_of(desktop, "disk_full");
+    assert!(said.len() == 1 && said[0].contains("or 4 other items"), "{said:?}");
+    assert!(issues_of(desktop, "disk_refused").is_empty(), "{:?}", issues_of(desktop, "disk_refused"));
+    for _ in 0..14 {
+        world.clock.advance_secs(16 * 60);
+        world.pass(desktop);
+        assert_eq!(issues_of(desktop, "disk_full").len(), 1, "{:?}", issues_of(desktop, "disk_full"));
+    }
+    assert!(issues_of(desktop, "keeps_failing").is_empty(), "{:?}", issues_of(desktop, "keeps_failing"));
+    desktop.fs.clear_failures();
+    assert!(world.settle().is_some(), "never settled once there was room");
+    assert!(issues_of(desktop, "disk_full").is_empty(), "{:?}", issues_of(desktop, "disk_full"));
+}
+
+/// A vault file the disk will not take stops arriving at the refusal. Its
+/// decryptor takes the rest of a broken container in only to measure it, and
+/// with the disk's refusal already known that measure is never read: a large
+/// vault file on a full disk was fetched whole on every retry. RED before:
+/// the whole file was delivered (B8 N1).
+#[test]
+fn a_vault_file_the_disk_refuses_stops_arriving_at_the_refusal() {
+    let vault = SimVault::new(9_863);
+    let mut world = World::new(9_863, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+    // Three of the decryptor's 4 MiB blocks: the first write, and the
+    // refusal, comes only once a whole block has arrived.
+    let body: Vec<u8> = (0..12_000_000u32).map(|n| (n % 251) as u8).collect();
+    laptop.fs.user_write("Private/big.bin", &body);
+    world.pass(laptop);
+    desktop.net.deliver_in_pieces(64 * 1024);
+    desktop.fs.fail_next(FsOp::Write, Some("Private/big.bin"), FailureKind::OutOfSpace, 1_000);
+    let before = desktop.net.stats().bytes_delivered;
+    world.pass(desktop);
+    let delivered = desktop.net.stats().bytes_delivered - before;
+    assert_eq!(issues_of(desktop, "disk_full").len(), 1, "construction: refused for want of room");
+    assert!(delivered < body.len() as u64 / 2, "{delivered} of {} bytes taken in after the refusal", body.len());
+    desktop.fs.clear_failures();
+    assert!(world.settle().is_some());
+    assert_eq!(disk_tree(desktop).get("Private/big.bin").cloned().flatten(), Some(jd_sim::sha256_hex(&body)));
+}
+
+/// Two files held back by a full disk: one other item, in the singular
+/// (B8 N2).
+#[test]
+fn a_full_disk_holding_back_two_files_says_one_other_item() {
+    let world = World::new(9_864, &["laptop", "desktop"]);
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+    assert!(world.settle().is_some());
+    desktop.fs.fail_next(FsOp::Write, None, FailureKind::OutOfSpace, 1_000);
+    laptop.fs.user_write("a.txt", b"one");
+    laptop.fs.user_write("b.txt", b"two");
+    world.pass(laptop);
+    world.pass(desktop);
+    let said = issues_of(desktop, "disk_full");
+    assert!(said.len() == 1 && said[0].contains(" or 1 other item on "), "{said:?}");
+}
+
+/// What a refusal said goes the pass the file fails for another reason: the
+/// disk let it in, and something else now holds it back, which is said as
+/// work that keeps failing once it does. RED before: the refusal stayed
+/// until no op was left for the file (B8 R4).
+#[test]
+fn a_refusal_is_no_longer_said_once_the_file_fails_for_another_reason() {
+    let world = World::new(9_862, &["laptop", "desktop"]);
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+    assert!(world.settle().is_some());
+    desktop.fs.fail_next(FsOp::Commit, Some("report.txt"), FailureKind::PermissionDenied, 1);
+    desktop.fs.fail_next(FsOp::Commit, Some("report.txt"), FailureKind::Io, 1_000);
+    laptop.fs.user_write("report.txt", b"quarterly");
+    world.pass(laptop);
+    world.pass(desktop);
+    assert_eq!(issues_of(desktop, "disk_refused").len(), 1, "construction: refused first");
+    world.clock.advance_secs(16 * 60);
+    world.pass(desktop);
+    assert!(issues_of(desktop, "disk_refused").is_empty(), "{:?}", issues_of(desktop, "disk_refused"));
+    assert!(!desktop.store.queued_ops().unwrap().is_empty(), "construction: still failing");
+    desktop.fs.clear_failures();
+    assert!(world.settle().is_some());
 }
 
 /// A folder of sixty files and one file beside it, settled on the laptop.

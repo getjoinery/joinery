@@ -490,6 +490,9 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // failure, a timeout, a 5xx, or a refusal a retry can cure (a checksum
     // mismatch at completion): those go as they always went.
     let mut refused = false;
+    // This computer's disk refused the work, for want of room or of
+    // permission: kept with the failure, and said by the pass.
+    let mut disk_refused = None;
     let outcome = match readiness(env, op)? {
         // Decided before anything is in flight: an op that never left needs
         // no recovery and has nothing to ask the server about.
@@ -540,6 +543,9 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                         other => other,
                     };
                     refused = matches!(outcome, OpOutcome::Withdrawn(_)) && held_here(&e);
+                    if matches!(outcome, OpOutcome::Retry(_)) {
+                        disk_refused = refused_by_this_disk(&e);
+                    }
                     outcome
                 }
             }
@@ -616,7 +622,7 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         OpOutcome::Retry(why) => {
             let delay = retry_delay_ms(op.attempts + 1) as i64;
             env.store
-                .record_op_failure(op.op_id, why, (env.now_ms)() as i64 + delay)?;
+                .record_op_failure(op.op_id, why, (env.now_ms)() as i64 + delay, disk_refused.as_ref())?;
         }
         OpOutcome::Waits(why) => {
             // Written once: asked again every run, the row is already what a
@@ -625,6 +631,29 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
     }
     Ok(outcome)
+}
+
+/// The issue for a file this computer's disk will not let Sync in, one per
+/// file (`pass::say_what_keeps_failing`).
+pub(crate) const DISK_REFUSED: &str = "disk_refused";
+
+/// The one issue for a full disk: the first file it holds back, and how many
+/// more (`pass::say_what_keeps_failing`).
+pub(crate) const DISK_FULL: &str = "disk_full";
+
+/// The disk here refusing an op's work, which only the person can put right:
+/// room to free, or a permission to give. Tried again on its backoff all the
+/// same, and said from its first refusal, not once the backoff reaches its
+/// cap: a quarter of an hour of doubling retries told them nothing (B8).
+fn refused_by_this_disk(e: &ExecError) -> Option<crate::store::DiskRefusal> {
+    use crate::store::DiskRefusal;
+    match e {
+        ExecError::Vfs(jd_vfs::VfsError::OutOfSpace(p)) => Some(DiskRefusal::NoRoom(p.display().to_string())),
+        ExecError::Vfs(jd_vfs::VfsError::PermissionDenied(p)) => {
+            Some(DiskRefusal::NoPermission(p.display().to_string()))
+        }
+        _ => None,
+    }
 }
 
 /// A folder with no server id at a call that would send it. `readiness`
@@ -1555,6 +1584,61 @@ impl<'a> Write for Arrival<'a> {
             ArrivalSink::Plain(landing) => landing.flush(),
             ArrivalSink::Encrypted(_) => Ok(()),
         }
+    }
+}
+
+/// A download's spool, watched for the disk refusing its bytes.
+///
+/// A write the disk refuses reaches the executor only as a bare io error, and
+/// not even that: through the transport it is one more failed transfer, and
+/// through the decryptor of an encrypted file a container that would not
+/// open. Kept here by its kind, it is said as what it is, the disk refusing
+/// this file (`VfsError::refused_by_disk`). Every other failure passes as it
+/// was.
+struct DiskWatched<'a> {
+    inner: &'a mut dyn Write,
+    refused: &'a std::cell::Cell<Option<std::io::ErrorKind>>,
+}
+
+impl DiskWatched<'_> {
+    fn watch<T>(&self, r: std::io::Result<T>) -> std::io::Result<T> {
+        if let Err(e) = &r {
+            if jd_vfs::VfsError::disk_refuses(e.kind()) {
+                self.refused.set(Some(e.kind()));
+            }
+        }
+        r
+    }
+}
+
+impl Write for DiskWatched<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let r = self.inner.write(buf);
+        self.watch(r)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let r = self.inner.flush();
+        self.watch(r)
+    }
+}
+
+/// A download that stops taking bytes in once the disk has refused them
+/// (`DiskWatched`): failed with the refusal's own kind, which the download
+/// says as the disk refusing the file.
+struct StopOnceRefused<'a, T: ?Sized> {
+    inner: &'a mut T,
+    refused: &'a std::cell::Cell<Option<std::io::ErrorKind>>,
+}
+
+impl<T: Write + ?Sized> Write for StopOnceRefused<'_, T> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(kind) = self.refused.get() {
+            return Err(std::io::Error::new(kind, "the disk refused this download's bytes"));
+        }
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
     }
 }
 
@@ -2589,16 +2673,26 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             }
         }
     }
+    let disk_said_no = std::cell::Cell::new(None);
+    let mut watched = DiskWatched { inner: &mut *spool, refused: &disk_said_no };
     let mut landing = match (&file_key, &content_id) {
-        (Some(key), Some(cid)) => Arrival::encrypted(&mut *spool, key, cid),
-        _ => Arrival::plain(&mut *spool),
+        (Some(key), Some(cid)) => Arrival::encrypted(&mut watched, key, cid),
+        _ => Arrival::plain(&mut watched),
     };
+    // The disk refused the bytes (`DiskWatched`): said as the disk's refusal
+    // of this file, whatever the transport or the decryptor made of it.
+    let refused_by_disk =
+        || disk_said_no.get().and_then(|kind| jd_vfs::VfsError::refused_by_disk(&path, kind)).map(ExecError::Vfs);
 
     let mut remints = 0u32;
     while landing.cipher_written < want_size {
         let from = landing.cipher_written;
+        // Stopped once the disk has refused: the decryptor takes the rest of a
+        // broken container in only to measure it, and a vault file on a full
+        // disk was fetched whole on every retry for a hash nothing reads.
+        let mut stopping = StopOnceRefused { inner: &mut landing, refused: &disk_said_no };
         let mut heeded = Heeding {
-            inner: &mut landing,
+            inner: &mut stopping,
             stand_down: env.stand_down,
         };
         match env.api.download(&url, from, &mut heeded) {
@@ -2615,6 +2709,10 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             Err(e) if stood_down(&e) => {
                 spool.discard();
                 return Err(ExecError::StoodDown);
+            }
+            Err(_) if disk_said_no.get().is_some() => {
+                spool.discard();
+                return Err(refused_by_disk().expect("only a kind the disk refuses is kept"));
             }
             Err(ProtoError::Api { status: 403, .. }) if remints < URL_REMINTS => {
                 // The link expired mid-transfer. The file is fine; the link is
@@ -2646,6 +2744,12 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let arrived = match landing.finish() {
         Ok(a) => a,
         Err(damaged) => {
+            // Not the bytes at all: the disk would not take the plaintext,
+            // which the decryptor can say only as a failed write.
+            if let Some(refusal) = refused_by_disk() {
+                spool.discard();
+                return Err(refusal);
+            }
             // Ciphertext that did not authenticate. Never committed either way;
             // what is left is to work out whether another attempt could do any
             // better, and the bytes themselves answer that.

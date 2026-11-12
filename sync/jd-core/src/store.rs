@@ -88,6 +88,7 @@ pub enum StoreError {
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;
+pub type StoredIssues = StoreResult<Vec<StoredIssue>>;
 
 /// Where an operation has got to. The three states exist to make the crash
 /// window explicit: anything found `InFlight` at startup was interrupted
@@ -135,6 +136,38 @@ pub struct Op {
     pub attempts: i64,
     pub next_retry_time: Option<i64>,
     pub last_error: Option<String>,
+    /// Its latest failure was this computer's disk refusing it, and the file
+    /// that refusal named: said by the pass (`pass::say_what_keeps_failing`).
+    /// Kept beside `last_error`, written and cleared with it, so what is said
+    /// never outlives why it fails.
+    pub disk_refused: Option<DiskRefusal>,
+}
+
+/// The disk here refusing an op's work, and the file it was for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiskRefusal {
+    /// The disk is full.
+    NoRoom(String),
+    /// The file, its folder or the disk will not let Sync in.
+    NoPermission(String),
+}
+
+impl DiskRefusal {
+    fn columns(refusal: Option<&DiskRefusal>) -> (Option<&'static str>, Option<&str>) {
+        match refusal {
+            None => (None, None),
+            Some(DiskRefusal::NoRoom(p)) => (Some("room"), Some(p)),
+            Some(DiskRefusal::NoPermission(p)) => (Some("permission"), Some(p)),
+        }
+    }
+
+    fn from_columns(why: Option<String>, path: Option<String>) -> Option<DiskRefusal> {
+        match (why.as_deref(), path) {
+            (Some("room"), Some(p)) => Some(DiskRefusal::NoRoom(p)),
+            (Some("permission"), Some(p)) => Some(DiskRefusal::NoPermission(p)),
+            _ => None,
+        }
+    }
 }
 
 /// A problem worth showing a person, with enough context to act on it.
@@ -420,6 +453,8 @@ impl Store {
             store.add_column_if_missing("entries", column, ddl)?;
         }
         store.add_column_if_missing("local_index", "cached_at_ns", "INTEGER")?;
+        store.add_column_if_missing("ops", "disk_refused", "TEXT")?;
+        store.add_column_if_missing("ops", "disk_refused_path", "TEXT")?;
         store.key_refusals_by_action()?;
         store.distrust_hashes_read_by_name()?;
         // Who holds this disk identity: asked by `make_room` for every file it
@@ -1314,15 +1349,19 @@ impl Store {
         op_id: i64,
         error: &str,
         next_retry_time: i64,
+        disk_refused: Option<&DiskRefusal>,
     ) -> StoreResult<()> {
+        let (why, path) = DiskRefusal::columns(disk_refused);
         self.conn.execute(
             "UPDATE ops
                 SET attempts = attempts + 1,
                     last_error = ?2,
                     next_retry_time = ?3,
-                    state = 'queued'
+                    state = 'queued',
+                    disk_refused = ?4,
+                    disk_refused_path = ?5
               WHERE op_id = ?1",
-            params![op_id, error, next_retry_time],
+            params![op_id, error, next_retry_time, why, path],
         )?;
         Ok(())
     }
@@ -1339,9 +1378,12 @@ impl Store {
             "UPDATE ops
                 SET last_error = ?2,
                     next_retry_time = NULL,
-                    state = 'queued'
+                    state = 'queued',
+                    disk_refused = NULL,
+                    disk_refused_path = NULL
               WHERE op_id = ?1
-                AND (last_error IS NOT ?2 OR next_retry_time IS NOT NULL OR state != 'queued')",
+                AND (last_error IS NOT ?2 OR next_retry_time IS NOT NULL OR state != 'queued'
+                     OR disk_refused IS NOT NULL)",
             params![op_id, waiting_for],
         )?;
         Ok(changed > 0)
@@ -1425,7 +1467,8 @@ impl Store {
             .conn
             .query_row(
                 "SELECT op_id, kind, entity_type, server_id, params, state,
-                        idempotency_key, attempts, next_retry_time, last_error
+                        idempotency_key, attempts, next_retry_time, last_error,
+                    disk_refused, disk_refused_path
                    FROM ops WHERE op_id = ?1",
                 params![op_id],
                 |r| {
@@ -1442,6 +1485,7 @@ impl Store {
                         attempts: r.get(7)?,
                         next_retry_time: r.get(8)?,
                         last_error: r.get(9)?,
+                disk_refused: DiskRefusal::from_columns(r.get(10)?, r.get(11)?),
                     })
                 },
             )
@@ -1486,7 +1530,8 @@ impl Store {
     fn ops_in_state(&self, state: OpState) -> StoreResult<Vec<Op>> {
         let mut stmt = self.conn.prepare(
             "SELECT op_id, kind, entity_type, server_id, params, state,
-                    idempotency_key, attempts, next_retry_time, last_error
+                    idempotency_key, attempts, next_retry_time, last_error,
+                    disk_refused, disk_refused_path
                FROM ops WHERE state = ?1 ORDER BY op_id",
         )?;
         let rows = stmt.query_map(params![state.as_str()], |r| {
@@ -1503,6 +1548,7 @@ impl Store {
                 attempts: r.get(7)?,
                 next_retry_time: r.get(8)?,
                 last_error: r.get(9)?,
+                disk_refused: DiskRefusal::from_columns(r.get(10)?, r.get(11)?),
             })
         })?;
         let mut out = Vec::new();
@@ -2231,12 +2277,32 @@ impl Store {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn open_issues(&self) -> StoreResult<Vec<StoredIssue>> {
-        let mut stmt = self.conn.prepare(
+    pub fn open_issues(&self) -> StoredIssues {
+        self.issues_where("dismissed = 0", None)
+    }
+
+    /// The open issues of one kind, off the index: asked every pass, of a
+    /// kind there may be one of for each file a full sync holds.
+    pub fn open_issues_of_kind(&self, kind: &str) -> StoredIssues {
+        self.issues_where("kind = ?1 AND dismissed = 0", Some(kind))
+    }
+
+    /// Say an open issue in new words, as the same issue.
+    pub fn set_issue_detail(&self, issue_id: i64, detail: &str) -> StoreResult<()> {
+        self.conn.execute("UPDATE issues SET detail = ?2 WHERE issue_id = ?1", params![issue_id, detail])?;
+        Ok(())
+    }
+
+    fn issues_where(&self, filter: &str, kind: Option<&str>) -> StoredIssues {
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT issue_id, entity_type, server_id, kind, detail, created_at, dismissed
-               FROM issues WHERE dismissed = 0 ORDER BY issue_id",
-        )?;
-        let rows = stmt.query_map([], |r| {
+               FROM issues WHERE {filter} ORDER BY issue_id"
+        ))?;
+        let args: Vec<&dyn rusqlite::ToSql> = match &kind {
+            Some(k) => vec![k],
+            None => vec![],
+        };
+        let rows = stmt.query_map(args.as_slice(), |r| {
             let etype: Option<String> = r.get(1)?;
             let sid: Option<i64> = r.get(2)?;
             Ok(StoredIssue {
@@ -2877,7 +2943,7 @@ mod tests {
             .queue_op("download", EntityId::file(4), "{}", "idem-x")
             .unwrap();
         s.set_op_state(op, OpState::InFlight).unwrap();
-        s.record_op_failure(op, "quota exceeded", 1_700_000_000)
+        s.record_op_failure(op, "quota exceeded", 1_700_000_000, None)
             .unwrap();
 
         let queued = s.queued_ops().unwrap();
@@ -2895,7 +2961,7 @@ mod tests {
         // find the row already so and write nothing.
         let s = Store::open_in_memory().unwrap();
         let op = s.queue_op("upload_new", EntityId::file(-2), "{}", "k").unwrap();
-        s.record_op_failure(op, "connection reset", 1_700_000_000).unwrap();
+        s.record_op_failure(op, "connection reset", 1_700_000_000, None).unwrap();
         assert!(s.record_op_wait(op, "the folder is not on the server yet").unwrap());
         assert!(!s.record_op_wait(op, "the folder is not on the server yet").unwrap());
         let row = s.queued_ops().unwrap().remove(0);
@@ -2903,6 +2969,26 @@ mod tests {
         assert_eq!(row.last_error.as_deref(), Some("the folder is not on the server yet"));
         // Something else written to the row since is written over again.
         assert!(s.record_op_wait(op, "waiting for something else").unwrap());
+    }
+
+    #[test]
+    fn a_disk_refusal_is_kept_with_the_failure_and_goes_with_it() {
+        // Said by the pass from the queue, so it is exactly as current as the
+        // failure it came with: a later failure for another reason, or a wait,
+        // takes it away.
+        let s = Store::open_in_memory().unwrap();
+        let op = s.queue_op("download", EntityId::file(7), "{}", "k").unwrap();
+        let full = DiskRefusal::NoRoom("/sync/report.txt".into());
+        s.record_op_failure(op, "no space left", 1_700_000_000, Some(&full)).unwrap();
+        assert_eq!(s.queued_ops().unwrap()[0].disk_refused, Some(full.clone()));
+        assert_eq!(s.get_op(op).unwrap().unwrap().disk_refused, Some(full.clone()));
+        s.record_op_failure(op, "connection reset", 1_700_000_000, None).unwrap();
+        assert_eq!(s.queued_ops().unwrap()[0].disk_refused, None);
+        let denied = DiskRefusal::NoPermission("/sync/report.txt".into());
+        s.record_op_failure(op, "permission denied", 1_700_000_000, Some(&denied)).unwrap();
+        assert_eq!(s.queued_ops().unwrap()[0].disk_refused, Some(denied));
+        assert!(s.record_op_wait(op, "the folder is not on the server yet").unwrap());
+        assert_eq!(s.queued_ops().unwrap()[0].disk_refused, None);
     }
 
     #[test]

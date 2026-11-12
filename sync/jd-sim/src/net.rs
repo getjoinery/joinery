@@ -132,12 +132,18 @@ pub struct NetStats {
     pub rate_limited: u64,
     pub corrupted_chunks: u64,
     pub truncated_downloads: u64,
+    /// A download's bytes the device took in, counted as each piece is
+    /// written (`SimNet::deliver_in_pieces`).
+    pub bytes_delivered: u64,
 }
 
 struct NetInner {
     rng: SimRng,
     faults: NetFaults,
     stats: NetStats,
+    /// A download written in pieces of this size, as a real transfer
+    /// arrives, rather than in one write (`deliver_in_pieces`).
+    piece: Option<usize>,
 }
 
 /// The engine's network, wired to a [`MockServer`].
@@ -158,6 +164,7 @@ impl SimNet {
                 rng: SimRng::new(seed),
                 faults: NetFaults::none(),
                 stats: NetStats::default(),
+                piece: None,
             })),
             device: device.to_string(),
         }
@@ -180,6 +187,13 @@ impl SimNet {
     /// a healthy network while claiming to test one under chaos.
     pub fn arm_death(&self, after_calls: u64) {
         self.inner.lock().unwrap().faults.die_after_calls = Some(after_calls);
+    }
+
+    /// Write every download in pieces of `size` bytes, as a real transfer
+    /// arrives, so a test sees where the device stops taking them in. Off
+    /// unless asked: one write is the same bytes, and every seed is run so.
+    pub fn deliver_in_pieces(&self, size: usize) {
+        self.inner.lock().unwrap().piece = Some(size.max(1));
     }
 
     pub fn stats(&self) -> NetStats {
@@ -489,7 +503,11 @@ impl DriveApi for SimNet {
         } else {
             &bytes[..]
         };
-        out.write_all(slice)?;
+        let piece = self.inner.lock().unwrap().piece.unwrap_or(slice.len().max(1));
+        for part in slice.chunks(piece) {
+            out.write_all(part)?;
+            self.inner.lock().unwrap().stats.bytes_delivered += part.len() as u64;
+        }
         Ok(slice.len() as u64)
     }
 }

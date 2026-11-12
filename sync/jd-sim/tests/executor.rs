@@ -4298,6 +4298,7 @@ fn back_in_the_queue_as_it_was(device: &Device, op_id: i64) {
     assert_eq!(op.attempts, 0, "a stand-down is not an attempt: {op:?}");
     assert_eq!(op.last_error, None, "{op:?}");
     assert_eq!(op.next_retry_time, None, "{op:?}");
+    assert_eq!(op.disk_refused, None, "a stand-down is not the disk refusing it: {op:?}");
 }
 
 /// A pass asked to stand down stops at the next op: what it had not started

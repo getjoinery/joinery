@@ -75,6 +75,9 @@ pub enum FsOp {
     Spool,
     Commit,
     OpenRead,
+    /// A download's bytes going into its spool: the disk filling, or turning
+    /// read-only, while they arrive. Matched by the file the spool is for.
+    Write,
 }
 
 /// A failure to hand back, and how many more times to hand it back.
@@ -1997,10 +2000,17 @@ impl MemFs {
     /// Consume a scheduled failure for this op/path, if one is due.
     fn check_failure(&self, op: FsOp, key: &str, path: &Path) -> VfsResult<()> {
         self.run_between_reads(key);
-        let mut st = self.state.lock().unwrap();
-        if !st.root_available {
+        if !self.state.lock().unwrap().root_available {
             return Err(VfsError::RootUnavailable(PathBuf::from("/sync")));
         }
+        self.take_failure(op, key, path)
+    }
+
+    /// The scheduled failure itself, with no scenario hook run before it and
+    /// no look at the root: a spool's every write asks, and either, asked per
+    /// write, would move what every scenario already sees.
+    fn take_failure(&self, op: FsOp, key: &str, path: &Path) -> VfsResult<()> {
+        let mut st = self.state.lock().unwrap();
         let hit = st.failures.iter_mut().position(|f| {
             f.op == op && f.remaining > 0 && f.path.as_deref().map(|p| p == key).unwrap_or(true)
         });
@@ -2568,6 +2578,8 @@ impl Vfs for MemFs {
         drop(st);
         Ok(Box::new(MemSpool {
             fs: self.clone(),
+            target: target.to_path_buf(),
+            target_key: key,
             name,
             buf: Vec::new(),
             folder_at_open,
@@ -2665,6 +2677,9 @@ impl jd_vfs::ScratchFile for MemScratch {
 /// `commit`, and `commit` either replaces it entirely or does not touch it.
 struct MemSpool {
     fs: MemFs,
+    /// The file the bytes are for, which a refused write names (`FsOp::Write`).
+    target: PathBuf,
+    target_key: String,
     name: String,
     buf: Vec<u8>,
     /// The directory standing where the target lands when the spool was
@@ -2693,6 +2708,17 @@ impl Drop for MemSpool {
 
 impl Write for MemSpool {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        // Handed back as a disk hands it back: a bare io error, its kind the
+        // only thing that says what refused.
+        if let Err(e) = self.fs.take_failure(FsOp::Write, &self.target_key, &self.target) {
+            use std::io::ErrorKind as K;
+            let kind = match e {
+                VfsError::OutOfSpace(_) => K::StorageFull,
+                VfsError::PermissionDenied(_) => K::PermissionDenied,
+                _ => K::Other,
+            };
+            return Err(std::io::Error::new(kind, e.to_string()));
+        }
         self.buf.extend_from_slice(data);
         Ok(data.len())
     }

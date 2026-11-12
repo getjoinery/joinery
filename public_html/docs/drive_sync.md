@@ -1477,6 +1477,8 @@ tray reads from.
 | `metadata_unreadable` | this device holds a file's key but cannot read its name and content id | they open |
 | `vault_relink` | the vault key was replaced in the browser and this computer holds the old one, so it needs linking again ([Encrypted files and folders](#encrypted-files-and-folders)) | the probe's key is the one this device holds again, the account has no vault set up, or this device holds no vault key |
 | `keeps_failing` | work that keeps failing (below) | nothing is left at the backoff cap |
+| `disk_full` | this computer's disk is full: the first file it holds back, and how many more (below) | no operation is refused for want of room |
+| `disk_refused` | this computer's disk will not let Sync use a file (below) | no operation for the file is refused for permission |
 | `deletes_held` | deletes the mass-delete guard holds ([The mass-delete guard](#the-mass-delete-guard)) | nothing is held |
 | `folder_would_not_hold_still` | files kept changing in these folders while this computer read them, three passes running, so nothing in them is synced yet ([A look the disk was in](#a-look-the-disk-was-in)) | every folder it names is read whole |
 
@@ -1497,6 +1499,27 @@ the first of them fails; it is withdrawn on the first pass that leaves nothing
 at the cap. It is one issue for the device, not one per operation: an outage on
 the server fails every queued operation at once, and a thousand identical
 issues would hide the one that matters.
+
+Work this computer's disk refuses is said at once, not at the cap. A full
+disk, a folder or file without permission, an immutable file and a disk
+mounted read-only are each put right only by the person, so the pass that
+meets the first refusal says it once its work has run, from what each queued
+operation's latest failure was.
+
+A download's bytes the disk will not take are said the same way: through the
+transport they are a transfer that failed, and through the decryptor of a vault
+file a file that will not open, so the spool's writes are watched for the disk
+refusing them, and the download stops at the refusal. Every refusal names the
+file the person is waiting for, never a landing name, and never the spool but
+for a permission the state folder refuses to make it in, which is that
+folder's to put right. A full disk is one `disk_full` issue, naming the
+first file it holds back and how many more, since a first sync onto a full
+disk is refused for every file it brings. A refused permission is one
+`disk_refused` issue per file, each its own file or folder to put right. The
+operation is still tried again on its backoff. Each issue is withdrawn on the
+pass that leaves no operation refused for it: carried out, failing for some
+other reason, or waiting on other work. Work said this way is not counted
+again in `keeps_failing`.
 
 **A record of something the server has deleted is never a fault.** An entry with
 no way back to the root normally means this device has lost its record of a
