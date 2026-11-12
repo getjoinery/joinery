@@ -525,7 +525,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public function export_as_array() {
 		$user_data = parent::export_as_array();
 
-		$user_data['usr_day_since_register'] = intval(time() / 86400) - intval(date_create($this->get('usr_signup_date'))->format('U') / 86400);
+		$signup = (string)$this->get('usr_signup_date');
+		$user_data['usr_day_since_register'] = $signup !== ''
+			? intval(time() / 86400) - intval(date_create($signup)->format('U') / 86400)
+			: 0;
 
 		unset($user_data['usr_password']);
 

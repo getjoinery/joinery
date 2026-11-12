@@ -547,7 +547,7 @@ private static function UcAddress($string) {
 		if ($this->get('usa_address2')) {
 			$address_out[] = ucwords(strtolower($this->get('usa_address2')));
 		}
-		$address_out[] = $this->get_city_state_string() . ' ' . ucwords(strtolower($this->get('usa_zip_code_id')));
+		$address_out[] = $this->get_city_state_string() . ' ' . ucwords(strtolower((string)$this->get('usa_zip_code_id')));
 		return implode($seperator, $address_out);
 	}
 

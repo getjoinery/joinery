@@ -13,6 +13,9 @@ abstract class PublicPageBase {
 
 	protected $rowcount;
 
+	/** Positions of the current table's columns the reader may not see (tableheader() sets it). */
+	protected $current_table_hidden = array();
+
 	/** The signed-in viewer, loaded when the page is built; null for a visitor. */
 	protected $user = null;
 
@@ -1692,7 +1695,7 @@ abstract class PublicPageBase {
 
 		$html = '<form method="POST" action="' . htmlspecialchars($url) . '" style="display:inline;">';
 		foreach ($hidden_fields as $name => $value) {
-			$html .= '<input type="hidden" name="' . htmlspecialchars($name) . '" value="' . htmlspecialchars($value) . '">';
+			$html .= '<input type="hidden" name="' . htmlspecialchars((string)$name) . '" value="' . htmlspecialchars((string)$value) . '">';
 		}
 		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-soft-default btn-sm';
 		$btn_type  = $confirm_msg ? 'button' : 'submit';

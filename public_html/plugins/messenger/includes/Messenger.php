@@ -199,16 +199,14 @@ class Messenger {
 		// MultiConversation resolves a sealed latest body through the model —
 		// the words while a window is open, the locked stand-in otherwise — so
 		// what arrives here is always showable, never raw sealed bytes.
-		$latest_body   = property_exists($conversation, 'latest_message_body') ? $conversation->latest_message_body : null;
-		$latest_time   = property_exists($conversation, 'latest_message_time') ? $conversation->latest_message_time : null;
-		$latest_type   = property_exists($conversation, 'latest_message_type') ? $conversation->latest_message_type : null;
-		$latest_sender = property_exists($conversation, 'latest_message_sender_id') ? $conversation->latest_message_sender_id : null;
-		$unread        = property_exists($conversation, 'unread_count') ? (int)$conversation->unread_count : 0;
-		$muted         = property_exists($conversation, 'cnp_is_muted')
-			? self::isTrue($conversation->cnp_is_muted)
-			: false;
+		$latest_body   = $conversation->latest_message_body;
+		$latest_time   = $conversation->latest_message_time;
+		$latest_type   = $conversation->latest_message_type;
+		$latest_sender = $conversation->latest_message_sender_id;
+		$unread        = (int)$conversation->unread_count;
+		$muted         = self::isTrue($conversation->cnp_is_muted);
 
-		if (!property_exists($conversation, 'cnp_last_read_time')) {
+		if (!$conversation->inbox_loaded) {
 			// Loaded directly rather than through the inbox query, so the
 			// viewer's own state and the latest message are not attached. Fill
 			// them in here: a caller must never have to know which way a

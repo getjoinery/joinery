@@ -149,7 +149,8 @@ class ApiAuth {
 		// allowlist holds neither backslashes nor quotes, so this parses the
 		// same either way; it is here so no CSV call in the tree relies on a
 		// default PHP 8.4 deprecates.
-		$entries = array_filter(array_map('trim', str_getcsv($restriction, ',', '"', '')), 'strlen');
+		// str_getcsv('') answers [null], so each entry is read as text first.
+		$entries = array_filter(array_map(function ($e) { return trim((string)$e); }, str_getcsv($restriction, ',', '"', '')), 'strlen');
 		if (!$entries) {
 			return true;
 		}

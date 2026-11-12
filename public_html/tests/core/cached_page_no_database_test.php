@@ -155,7 +155,6 @@ $get = function (string $path) use ($port, $jar, $log) {
 	));
 	curl_exec($ch);
 	$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-	curl_close($ch);
 	$lines = is_file($log) ? file($log, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) : array();
 	$last = $lines ? json_decode((string)end($lines), true) : null;
 	return array('status' => $status, 'log' => is_array($last) ? $last : array());

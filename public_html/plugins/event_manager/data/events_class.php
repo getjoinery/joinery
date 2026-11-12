@@ -1274,7 +1274,7 @@ class MultiEvent extends SystemMultiBase {
 			$b_virtual = is_object($b) && isset($b->is_virtual) && $b->is_virtual;
 			$a_time = $a_virtual ? $a->evt_start_time : $a->get('evt_start_time');
 			$b_time = $b_virtual ? $b->evt_start_time : $b->get('evt_start_time');
-			return strcmp($a_time, $b_time);
+			return strcmp((string)$a_time, (string)$b_time); // an event with no start time sorts first
 		});
 
 		// 4. Apply limit

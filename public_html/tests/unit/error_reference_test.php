@@ -256,6 +256,38 @@ $second = ErrorReference::logWarning(new ErrorException('second', 0, E_WARNING, 
 if ($second) { harness_register_row('err_general_errors', 'err_general_error_id', $second); }
 check($first && $second === null, 'a place that warned within the hour in another process is not saved again');
 
+$dep_line = __LINE__ + 1;
+trigger_error('error_reference_test deprecation', E_USER_DEPRECATED);
+$q = DbConnector::get_instance()->get_db_link()->prepare(
+	"SELECT err_general_error_id, err_level FROM err_general_errors WHERE err_file = ? AND err_line = ?");
+$q->execute(array(__FILE__, (string)$dep_line));
+$dep = $q->fetchAll(PDO::FETCH_ASSOC);
+foreach ($dep as $r) { harness_register_row('err_general_errors', 'err_general_error_id', (int)$r['err_general_error_id']); }
+check(count($dep) === 1 && $dep[0]['err_level'] === GeneralError::LEVEL_DEPRECATED,
+	'a deprecation is saved too, as level Deprecated', json_encode($dep));
+// PHP's own deprecations are left out of error_reporting by the production
+// php.ini; they are recorded all the same, and not when silenced with @.
+$saved_reporting = error_reporting(E_ALL & ~E_DEPRECATED);
+$php_dep_line = __LINE__ + 1;
+$unused = strlen(null);
+$quiet_dep_line = __LINE__ + 1;
+$unused = @strlen(null);
+error_reporting($saved_reporting);
+$q->execute(array(__FILE__, (string)$php_dep_line));
+$php_dep = $q->fetchAll(PDO::FETCH_ASSOC);
+foreach ($php_dep as $r) { harness_register_row('err_general_errors', 'err_general_error_id', (int)$r['err_general_error_id']); }
+check(count($php_dep) === 1 && $php_dep[0]['err_level'] === GeneralError::LEVEL_DEPRECATED,
+	'a PHP deprecation is saved even though error_reporting leaves E_DEPRECATED out', json_encode($php_dep));
+$q->execute(array(__FILE__, (string)$quiet_dep_line));
+check(count($q->fetchAll()) === 0, 'and not when silenced with @');
+check(GeneralError::levelOf(new ErrorException('x', 0, E_DEPRECATED)) === GeneralError::LEVEL_DEPRECATED
+		&& GeneralError::levelOf(new ErrorException('x', 0, E_WARNING)) === GeneralError::LEVEL_WARNING
+		&& GeneralError::levelOf(new RuntimeException('x')) === null,
+	'each kind maps to its level, and an exception to none');
+$src = (string)file_get_contents(PathHelper::getIncludePath('includes/ErrorHandler.php'));
+check(strpos($src, '$level !== GeneralError::LEVEL_DEPRECATED && class_exists(\'ProblemReport\')') !== false,
+	'and a deprecation is kept out of automatic problem reports');
+
 $db = DbConnector::get_instance()->get_db_link();
 $db->beginTransaction();
 $in_tx = ErrorReference::logWarning(new ErrorException('in a transaction', 0, E_WARNING, __FILE__, 900002));

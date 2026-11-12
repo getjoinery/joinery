@@ -361,7 +361,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
             echo $pager->url_vars_as_hidden_input(['searchterm']);
             echo '<div style="display:flex;align-items:center;gap:0.375rem;">';
             echo '<label style="font-size:0.8125rem;color:var(--muted);">Search:</label>';
-            echo '<input name="' . $pager->prefix() . 'searchterm" value="' . htmlspecialchars($pager->search_term()) . '" type="text" class="form-control form-control-sm" style="width:180px;" maxlength="100">';
+            echo '<input name="' . $pager->prefix() . 'searchterm" value="' . htmlspecialchars((string)$pager->search_term()) . '" type="text" class="form-control form-control-sm" style="width:180px;" maxlength="100">';
             echo '<button type="submit" class="btn btn-sm btn-soft-default">Search</button>';
             echo '</div>';
             echo $formwriter->end_form();

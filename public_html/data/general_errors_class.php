@@ -21,6 +21,24 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 	/** err_level of a PHP warning or notice: the code went on, but something in it is wrong. */
 	const LEVEL_WARNING = 'Warning';
 
+	/** err_level of a PHP deprecation: code a later PHP will refuse. */
+	const LEVEL_DEPRECATED = 'Deprecated';
+
+	/** The err_level a warning-shaped ErrorException records as, or NULL for anything else. */
+	public static function levelOf(\Throwable $e): ?string {
+		if (!($e instanceof \ErrorException)) {
+			return null;
+		}
+		$severity = $e->getSeverity();
+		if (in_array($severity, array(E_WARNING, E_USER_WARNING, E_NOTICE, E_USER_NOTICE), true)) {
+			return self::LEVEL_WARNING;
+		}
+		if (in_array($severity, array(E_DEPRECATED, E_USER_DEPRECATED), true)) {
+			return self::LEVEL_DEPRECATED;
+		}
+		return null;
+	}
+
 	protected static $foreign_key_actions = [
 		'err_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
@@ -114,9 +132,8 @@ function display_time($session) {
 			if(count($dbhelper->last_query_params)){
 				$error_context .= print_r($dbhelper->last_query_params, true);
 			}
-		} else if ($exception instanceof \ErrorException
-				&& in_array($exception->getSeverity(), array(E_WARNING, E_USER_WARNING, E_NOTICE, E_USER_NOTICE), true)) {
-			$this->set('err_level', self::LEVEL_WARNING);
+		} else if (self::levelOf($exception) !== null) {
+			$this->set('err_level', self::levelOf($exception));
 		} else {
 			$this->set('err_level', 'Exception');
 		}

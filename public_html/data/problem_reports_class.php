@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.3.3 - up to 50 new faults a day start automatic reports (was 20)
  * @version 1.3.2 - code typed at the command line (php -r, stdin) counts as an outside script
  * @version 1.3.1 - a page asked for a row that is not there (SystemRowNotFoundError) is a 404, not a fault, so it is never reported automatically
  * @version 1.3.0 - an error in a command-line script kept outside the site (an ad-hoc script in /tmp) is never reported automatically (fromOutsideScript())
@@ -68,7 +69,7 @@ class ProblemReport extends SystemBase {
 	const HOURLY_LIMIT = 10;
 
 	/** New faults the site may start automatic reports for in a day; recurrences are always counted. */
-	const AUTO_DAILY_LIMIT = 20;
+	const AUTO_DAILY_LIMIT = 50;
 
 	/** @var bool Set while noteError() runs, so an error inside it is not noted in turn. */
 	private static $noting = false;

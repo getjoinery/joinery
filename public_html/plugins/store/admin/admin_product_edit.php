@@ -253,7 +253,7 @@ echo '</div>';
 // Product Scripts
 if(!empty($product_scripts_optionvals)){
 	$optionvals = array_combine($product_scripts_optionvals, $product_scripts_optionvals);
-	$checkedvals = array_filter(explode(',', $product->get('pro_product_scripts')));
+	$checkedvals = array_filter(explode(',', (string)$product->get('pro_product_scripts')));
 
 	$formwriter->checkboxList('product_scripts', 'Run these scripts upon purchase', [
 		'options' => $optionvals,

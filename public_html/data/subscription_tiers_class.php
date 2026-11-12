@@ -240,7 +240,7 @@ class SubscriptionTier extends SystemBase {
      * @return array Associative array of all features
      */
     public function getAllFeatures() {
-        return json_decode($this->get('sbt_features'), true) ?? [];
+        return json_decode((string)$this->get('sbt_features'), true) ?? [];
     }
 
     /**

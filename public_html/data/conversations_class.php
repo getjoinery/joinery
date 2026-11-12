@@ -30,6 +30,22 @@ require_once(PathHelper::getIncludePath('data/messages_class.php'));
 class ConversationException extends SystemBaseException {}
 
 class Conversation extends SystemBase {
+
+	// The inbox query (MultiConversation) attaches the viewer's state and the
+	// latest message; $inbox_loaded says it did. A conversation loaded any
+	// other way leaves them at these defaults.
+	public $inbox_loaded = false;
+	public $latest_message_time = null;
+	public $latest_message_body = null;
+	public $latest_message_sealed = false;
+	public $latest_message_type = null;
+	public $latest_message_id = null;
+	public $latest_message_sender_id = null;
+	public $cnp_last_read_time = null;
+	public $cnp_is_muted = null;
+	public $cnp_is_admin = false;
+	public $unread_count = 0;
+
 	public static $prefix = 'cnv';
 	public static $tablename = 'cnv_conversations';
 	public static $access_class = 'personal';
@@ -1407,6 +1423,7 @@ class MultiConversation extends SystemMultiBase {
 
 			// Store extra inbox data as transient properties
 			if (property_exists($row, 'cnp_last_read_time')) {
+				$conversation->inbox_loaded = true;
 				$conversation->latest_message_time = $row->latest_message_time;
 				$conversation->latest_message_body = $this->previewBody($row);
 				$conversation->latest_message_sealed = !empty($row->latest_message_sealed);

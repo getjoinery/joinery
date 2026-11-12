@@ -464,7 +464,7 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             }
 
             $html .= '>';
-            $html .= '<label for="' . htmlspecialchars($checkbox_id) . '" class="form-check-label">' . htmlspecialchars($opt_label) . '</label>';
+            $html .= '<label for="' . htmlspecialchars($checkbox_id) . '" class="form-check-label">' . htmlspecialchars((string)$opt_label) . '</label>';
             $html .= '</div>';
         }
 

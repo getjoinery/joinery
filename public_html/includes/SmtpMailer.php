@@ -208,7 +208,7 @@ class SmtpMailer extends PHPMailer {
      * lives in exactly one place.
      */
     function applyMessage(EmailMessage $message): void {
-        $this->setFrom($message->getFrom(), $message->getFromName());
+        $this->setFrom($message->getFrom(), (string)$message->getFromName()); // a message may carry no display name
         $this->Subject = $message->getSubject();
 
         // A caller-pinned Message-ID wins over PHPMailer's auto-generated one so a

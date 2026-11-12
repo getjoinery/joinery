@@ -131,7 +131,7 @@
 			} else {
 				$product = new Product($order_item->get('odi_pro_product_id'), TRUE);
 				$title = $product->get('pro_name');
-				$PRODUCT_ID_TO_NAME_CACHE[$product->key] = $title;
+				$PRODUCT_ID_TO_NAME_CACHE[$order_item->get('odi_pro_product_id')] = $title; // the key it is looked up by
 			}
 			
 			if($order_item->get('odi_usr_user_id')){

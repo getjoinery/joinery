@@ -52,7 +52,7 @@ A fatal error (out of memory, a parse error) reaches the handler from PHP's shut
 and is recorded and rendered the same way. The handler does not exit there, so shutdown
 functions registered after it still run; PHP ends the process with status 255.
 
-### Warnings and notices
+### Warnings, notices and deprecations
 
 A PHP warning or notice does not stop the code, so `ErrorManager::handleWarning()` only
 records it and lets PHP write it to `logs/error.log` as usual. `ErrorReference::logWarning()`
@@ -61,6 +61,10 @@ automatic problem reports like any other fault. It is never the request's error
 reference: the page went on. To keep a warning on every request from filling the table,
 a place (file and line) is saved once per process and at most once an hour. A warning
 silenced with `@`, or raised inside an open database transaction, is not saved.
+
+A deprecation (code a later PHP version will refuse) is saved the same way, with
+`err_level` `Deprecated`, and never goes to a problem report: it is the code's to fix
+before that PHP arrives, not a fault on the site.
 
 ### Scheduled tasks
 
@@ -200,7 +204,7 @@ calls `ProblemReport::noteError()`, which:
   with line numbers dropped. With no frames, the message with numbers, quoted text and
   long hex runs blanked stands in;
 - keeps **one automatic report per fault and version**, adding 1 to its count
-  (`prr_occurrences`) on every recurrence, and starts at most 20 new ones a day;
+  (`prr_occurrences`) on every recurrence, and starts at most 50 new ones a day;
 - never sends from the failing request and never throws. While the process holds sealed
   content it only counts, since a new report's text is a long write the sealed-content
   guard refuses.

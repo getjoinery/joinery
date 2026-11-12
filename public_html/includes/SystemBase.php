@@ -43,6 +43,9 @@ class SystemDisplayablePermanentErrorNoLog extends SystemBaseException implement
 // page answers 422, as /api/v1 answers the same result (ErrorStatus::of()).
 class LogicRefusal extends SystemBaseException implements DisplayableErrorMessageNoLog {}
 
+// Single models carry computed fields as properties of their own (a user's,
+// a conversation's): allowed on purpose, so PHP 8.2+ does not deprecate them.
+#[\AllowDynamicProperties]
 abstract class SystemBase {
 	
 	public $key;

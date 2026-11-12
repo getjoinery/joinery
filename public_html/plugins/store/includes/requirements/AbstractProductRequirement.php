@@ -89,7 +89,7 @@ abstract class AbstractProductRequirement {
 
         foreach ($instances as $pri) {
             $class_name = $pri->get('pri_class_name');
-            $config = json_decode($pri->get('pri_config'), true) ?: [];
+            $config = json_decode((string)$pri->get('pri_config'), true) ?: [];
 
             if (self::has($class_name)) {
                 $requirements[] = self::createInstance($class_name, $config);

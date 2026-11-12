@@ -1354,7 +1354,8 @@ class RouteHelper {
             // PathHelper::getActiveThemeDirectory() answers null when the theme's
             // directory is not on disk: core's own views then serve the request
             $theme_dir = PathHelper::getActiveThemeDirectory();
-            $template_directory = PathHelper::getIncludePath($theme_dir);
+            // (null on every member-area page): there is then no theme directory.
+            $template_directory = $theme_dir !== null ? PathHelper::getIncludePath($theme_dir) : null;
         } catch (Exception $e) {
             // Plugin theme configuration error - log and throw
             error_log("Template directory error: " . $e->getMessage());

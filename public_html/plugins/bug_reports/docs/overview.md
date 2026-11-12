@@ -112,6 +112,6 @@ their images by the daily retention sweep. Others are kept.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `bug_reports_rate_limit_requests` | 20 | Reports accepted per hour from one address. |
+| `bug_reports_rate_limit_requests` | 60 | Reports accepted per hour from one address. |
 | `bug_reports_notify_email` | empty | Address for the new-error email; empty sends none. |
 | `bug_reports_retention_days` | 365 | Days to keep resolved reports; 0 keeps them. |

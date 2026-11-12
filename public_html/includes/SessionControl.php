@@ -594,7 +594,7 @@ class SessionControl{
 		$campaign = NULL;
 		$medium = NULL;
 		$content = NULL;
-		if($_SERVER['QUERY_STRING']){
+		if(!empty($_SERVER['QUERY_STRING'])){
 			parse_str($_SERVER['QUERY_STRING'], $qvars);
 			foreach ($qvars as $qvar=>$qval){
 				if($qvar == 'vs' || $qvar == 'utm_source'){
@@ -2158,7 +2158,7 @@ class SessionControl{
 		// Regenerate session ID to prevent session fixation attacks. On the
 		// command line there is no cookie to fix and, once anything has been
 		// printed, nothing to send it with.
-		if (PHP_SAPI !== 'cli' || !headers_sent()) {
+		if (session_status() === PHP_SESSION_ACTIVE && (PHP_SAPI !== 'cli' || !headers_sent())) {
 			session_regenerate_id(true);
 		}
 

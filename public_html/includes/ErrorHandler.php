@@ -288,7 +288,7 @@ class ErrorManager {
     public function register(): void {
         if (!$this->registered) {
             set_exception_handler([$this, 'handleException']);
-            set_error_handler([$this, 'handleWarning'], E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE);
+            set_error_handler([$this, 'handleWarning'], E_WARNING | E_USER_WARNING | E_NOTICE | E_USER_NOTICE | E_DEPRECATED | E_USER_DEPRECATED);
             register_shutdown_function([$this, 'handleFatalError']);
             $this->registered = true;
         }
@@ -329,13 +329,19 @@ class ErrorManager {
     }
 
     /**
-     * A PHP warning or notice: the code carries on, so this only records it
+     * A PHP warning, notice or deprecation: the code carries on, so this only records it
      * (ErrorReference::logWarning()) and returns false, so PHP still writes
      * it to the error log as it always does. A warning silenced with @ is
      * not one.
      */
     public function handleWarning(int $errno, string $errstr, string $errfile = '', int $errline = 0): bool {
-        if (error_reporting() & $errno) {
+        // PHP's production php.ini leaves E_DEPRECATED out of error_reporting,
+        // so a deprecation would never be seen anywhere; it is recorded unless
+        // silenced with @, which leaves only the fatal levels on.
+        $recorded = in_array($errno, [E_DEPRECATED, E_USER_DEPRECATED], true)
+            ? (bool)(error_reporting() & E_WARNING)
+            : (bool)(error_reporting() & $errno);
+        if ($recorded) {
             ErrorReference::logWarning(new \ErrorException($errstr, 0, $errno, $errfile, $errline));
         }
         return false;
@@ -575,7 +581,9 @@ class ErrorReference {
 	/**
 	 * Record a PHP warning or notice in err_general_errors and let an automatic
 	 * problem report count it, like an uncaught exception, so a bug that only
-	 * warns is seen. It never becomes the request's error reference: the page
+	 * warns is seen. A deprecation (code a later PHP will refuse) is recorded
+	 * the same way, as level Deprecated, and is never reported: it is ours to
+	 * find and fix before the PHP that refuses it, not a fault on the site. It never becomes the request's error reference: the page
 	 * went on and did not fail. One place is recorded once per process and at
 	 * most once an hour, so a warning on every request does not fill the table;
 	 * PHP's own error log still carries every occurrence. Inside an open
@@ -600,13 +608,14 @@ class ErrorReference {
 			$q = $dblink->prepare("SELECT 1 FROM err_general_errors
 				WHERE err_create_time > now() - interval '1 hour'
 				  AND err_level = ? AND err_file = ? AND err_line = ? LIMIT 1");
-			$q->execute(array(GeneralError::LEVEL_WARNING, $warning->getFile(), (string)$warning->getLine()));
+			$level = GeneralError::levelOf($warning);
+			$q->execute(array($level, $warning->getFile(), (string)$warning->getLine()));
 			if ($q->fetchColumn() !== false) {
 				return null;
 			}
 			$row = new GeneralError(NULL);
 			$id = $row->logError($warning, $_SESSION ?? array(), $_REQUEST ?? array());
-			if (class_exists('ProblemReport')) {
+			if ($level !== GeneralError::LEVEL_DEPRECATED && class_exists('ProblemReport')) {
 				ProblemReport::noteError($warning, $id);
 			}
 			return $id;

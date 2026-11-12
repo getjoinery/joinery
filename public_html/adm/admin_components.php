@@ -77,7 +77,7 @@ foreach ($contents as $content) {
 
 	// Slug
 	$slug = $content->get('pac_location_name');
-	array_push($rowvalues, '<code>' . htmlspecialchars($slug) . '</code>');
+	array_push($rowvalues, '<code>' . htmlspecialchars((string)$slug) . '</code>');
 
 	// Title
 	$title = $content->get('pac_title') ?: '(no title)';

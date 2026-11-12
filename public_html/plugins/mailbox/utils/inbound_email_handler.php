@@ -28,6 +28,7 @@
  * returned: deferred past the queue lifetime, Postfix bounces it
  * (InboundDeferralExpiry).
  *
+ * @version 1.7 - starts with PCRE's JIT off: executable memory is refused where Postfix runs it
  * @version 1.6 - a message arriving while the mailbox is switched off is deferred (and, on its last retry,
  *               dropped and logged like any deferral), not accepted with nothing stored
  * @version 1.5 - the database is first read inside the try, and a fatal error defers instead of
@@ -35,6 +36,11 @@
  * @version 1.4 - logs a 67 as a lookup/router mismatch; drops a deferral that would expire into a bounce
  * @version 1.3
  */
+
+// Postfix runs this where executable memory is refused, so PCRE's JIT cannot
+// allocate and PHP warns on every delivery before falling back to the
+// interpreter. Start on the interpreter.
+ini_set('pcre.jit', '0');
 
 $envelope_recipient = isset($argv[1]) ? (string)$argv[1] : '';
 $queue_id = isset($argv[2]) ? (string)$argv[2] : '';

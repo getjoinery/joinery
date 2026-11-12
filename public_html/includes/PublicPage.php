@@ -4,6 +4,9 @@ require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 if (!class_exists('PublicPage', false)) {
 class PublicPage extends PublicPageBase {
 
+    /** Whether the header was drawn without its navigation; public_footer() matches it. */
+    protected $_noheader = false;
+
     protected function getTableClasses() {
         return [
             'wrapper' => 'table-wrapper',

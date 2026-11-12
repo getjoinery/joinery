@@ -49,7 +49,7 @@ if($contact_types->count()){
 }
 
 $optionvals = $mailing_lists->get_dropdown_array();
-$optionvals[NULL] = 'Custom';
+$optionvals[''] = 'Custom';
 $formwriter->dropinput("eml_mlt_mailing_list_id", "Mailing list or custom list", [
 	'options' => $optionvals
 ]);
