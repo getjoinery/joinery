@@ -2449,6 +2449,14 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     if entry.waiting_on_a_park() {
         return Ok(OpOutcome::Overtaken("a peer is renaming it; waiting for its real name".into()));
     }
+    // Naming parked it after this download was queued: its name is a
+    // sibling's on this disk, and landed, it would take the sibling's slot --
+    // `make_room` moves the sibling's file aside and renames it on the server
+    // to a conflict copy. Dropped, as the move drops itself (`move_local`);
+    // the park is already said, with an issue of its own.
+    if matches!(entry.status, LocalStatus::Unsyncable(_)) {
+        return Ok(OpOutcome::Overtaken("this disk cannot hold its name beside a sibling's".into()));
+    }
     let mut path = match local_path(env, &entry)? {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),

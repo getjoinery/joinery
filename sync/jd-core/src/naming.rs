@@ -760,9 +760,20 @@ pub fn apply_naming(
                 // with no operation open on it: the pass's put-back owns it,
                 // and that put-back is queued after this verdict and answered
                 // before the next, so it is never open when naming looks.
+                //
+                // Only for an entry with an agreement here: one that has
+                // stood on this disk, whose open op is placing or moving the
+                // copy it has. A file never placed here holds nothing; its
+                // open op is a download, and let through it lands on the
+                // winner's slot -- `make_room` moves the winner aside and the
+                // winner's own name goes to a conflict copy on every device
+                // (winname 123817: `memo-23 ` downloaded onto `memo-23%20`,
+                // the escape of a sibling's literal name). Parked like any
+                // other loser, its download stands down (`download`).
                 Some(reason)
                     if (busy.contains(&entry.id) || jd_vfs::is_internal(&entry.remote.name))
                         && holds(&gone, &entry)
+                        && entry.synced_placement.is_some()
                         && matches!(
                             reason,
                             UnsyncableReason::CaseClash { .. }

@@ -363,6 +363,9 @@ thread_local! {
     static FAT_DISK_HERE: std::cell::Cell<Option<jd_sim::FileIds>> = const { std::cell::Cell::new(None) };
     /// The same for a frozen seed pinned with births hidden (`HIDEBIRTHS`).
     static BIRTHS_HIDDEN_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The server's paths once the world has settled, for a frozen seed that
+    /// asks what the server ended up holding: set it to `Some` before the run.
+    static SERVER_PATHS_HERE: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The FAT disk model a sweep runs on, from `FATDISK`: `win` (Windows FAT and
@@ -2043,6 +2046,11 @@ fn workload_core_with(
         println!("  KILLS {kills_made}");
     }
     let settled = world.settle();
+    SERVER_PATHS_HERE.with(|s| {
+        if let Some(paths) = s.borrow_mut().as_mut() {
+            *paths = jd_sim::scenario::server_tree(&world.server).into_keys().collect();
+        }
+    });
     custody.attribute_harness_writes(&world);
     custody.note_swaps(&world);
     for (di, d) in world.devices.iter().enumerate() {
@@ -8366,5 +8374,39 @@ fn frozen_a_folder_proven_at_a_path_the_server_is_naming_is_not_deleted_on_a_sec
     });
     if let Err(e) = run {
         std::panic::resume_unwind(e);
+    }
+}
+
+/// winname 123817 and 123832: the PC queues the download of a file the server
+/// calls `memo-N ` (a trailing space), and before it runs the server gives a
+/// sibling the literal name `memo-N%20` -- the escape of the first on Windows
+/// -- which the PC already holds. Naming judged the newcomer the loser but let
+/// its open download through; with no local name on record it landed under
+/// the raw name, a file Windows programs cannot open and no record names, and
+/// the PC never matched the server again. Landed under the escape instead, it
+/// would take the sibling's slot and send the sibling's own name to a conflict
+/// copy on every device. Neither: the newcomer is parked with its clash, and
+/// the sibling keeps its name everywhere.
+#[test]
+fn frozen_a_download_open_when_its_name_clashes_stands_down_on_windows_seed() {
+    for (seed, kept) in [(123_817, "memo-23%20"), (123_832, "Sub 1/memo-31%20")] {
+        SERVER_PATHS_HERE.with(|s| *s.borrow_mut() = Some(Vec::new()));
+        workload_core(
+            seed,
+            60,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+            true,
+            Vault::None,
+            false,
+            Names::WindowsHostile,
+        );
+        let server = SERVER_PATHS_HERE.with(|s| s.borrow_mut().take()).unwrap_or_default();
+        assert!(server.iter().any(|p| p == kept), "{seed}: the sibling keeps its own name {kept:?} on the server: {server:?}");
+        // The PC does not set the sibling aside to make room: no copy of it
+        // is made from the PC. (Other devices' edit conflicts on it are the
+        // workload's own, and stand on the base run too.)
+        let copied = format!("{kept} (conflicted copy 2026-07-31 from pc");
+        let renamed: Vec<_> = server.iter().filter(|p| p.starts_with(&copied)).collect();
+        assert!(renamed.is_empty(), "{seed}: and the PC made no conflict copy of it: {renamed:?}");
     }
 }

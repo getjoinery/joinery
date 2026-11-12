@@ -787,3 +787,42 @@ fn a_folder_renamed_on_a_mac_moves_its_children_on_a_pc_without_reuploading_them
     );
     assert!(paths(&world, "pc").iter().any(|p| p.starts_with("New/")));
 }
+
+#[test]
+fn a_download_open_when_its_name_becomes_a_case_twin_of_a_held_file_never_takes_its_slot() {
+    // The Mac holds `Report.txt`. Its download of another file is left open
+    // (the Mac dies part-way through it), and before the Mac comes back the
+    // Linux box renames that file to `report.txt` -- a case twin of the one
+    // the Mac holds. The Mac cannot hold both. The twin must wait, said; the
+    // file the Mac already holds must keep its name everywhere, and nothing
+    // the Mac does may set it aside as a conflict copy.
+    let mut staged = None;
+    for die_after in 0..16 {
+        let world = World::of(9_873, &[("box", Platform::Linux), ("mac", Platform::MacOs)]);
+        let boxx = world.device("box");
+        boxx.fs.user_write("Report.txt", b"the one the Mac holds");
+        assert!(world.settle().is_some());
+        boxx.fs.user_write("other.txt", b"the newcomer");
+        world.pass(boxx);
+        let mac = world.device("mac");
+        mac.net.arm_death(die_after);
+        world.pass(mac);
+        mac.net.set_faults(jd_sim::net::NetFaults::none());
+        let open = mac.store.queued_ops().unwrap().into_iter().any(|o| o.kind == "download");
+        if open && !paths(&world, "mac").contains(&"other.txt".to_string()) {
+            staged = Some(world);
+            break;
+        }
+    }
+    let world = staged.expect("some call leaves the download open");
+    let boxx = world.device("box");
+    let mac = world.device("mac");
+    boxx.fs.user_rename("other.txt", "report.txt");
+    world.pass(boxx);
+    world.pass(mac);
+    assert!(world.settle().is_some(), "it settles");
+    let server = server_names(&world);
+    assert!(server.contains(&"Report.txt".to_string()) && server.contains(&"report.txt".to_string()), "the server keeps both, under their own names: {server:?}");
+    assert!(!server.iter().any(|n| n.contains("conflicted copy")), "and the Mac set nothing aside: {server:?}");
+    assert!(paths(&world, "mac").contains(&"Report.txt".to_string()), "the Mac still holds Report.txt: {:?}", paths(&world, "mac"));
+}
