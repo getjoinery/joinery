@@ -14,6 +14,7 @@
  * goes through IncidentTriage, or IncidentAnalyst for Analyze (shown only
  * where the Joinery AI plugin is active).
  *
+ * @version 1.7 - the title's UTC times show in the viewer's zone (IncidentViews::localize_times)
  * @version 1.6 - a cleared never-do incident says it cleared, not that it clears on the next pass
  * @version 1.5 - the never-do box holds only the alarm; Mark safe remembers each file by its content
  * @version 1.4 - a never-do incident carries its own Mark safe (Security sentinel: suspicious activity), the one thing that clears it
@@ -75,8 +76,8 @@ $inc = IncidentTriage::load($id);
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager-incidents',
-	'page_title' => $inc ? $inc->title() : 'Incident',
-	'readable_title' => $inc ? $inc->title() : 'Incident',
+	'page_title' => $inc ? IncidentViews::localize_times($inc->title()) : 'Incident',
+	'readable_title' => $inc ? IncidentViews::localize_times($inc->title()) : 'Incident',
 	'breadcrumbs' => ['Server Manager' => '/admin/server_manager', 'Incidents' => IncidentViews::LIST_URL, 'Incident #' . $id => ''],
 	'session' => $session,
 ]);

@@ -18,6 +18,7 @@
  *   decommissioned — a former owner had this slug (the site is gone; its backups remain)
  *   orphaned       — nothing in the map matches this slug
  *
+ * @version 2.4 - a refused delete says how many tries it took (S3Signer::failure_text)
  * @version 2.3 - getjoinery's backup storage is refused a delete, by name: getjoinery prunes it (WP4 review L11)
  * @version 2.2 - the folder is the target's normalised prefix (BackupTarget::prefix()); a caller's map may
  *                name a folder's status, owner and storage space; slug_backup_count() is gone (a node's
@@ -145,7 +146,7 @@ class TargetBackups {
 		$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 		$status = (int)$resp['status'];
 		if ($status < 200 || $status >= 300) {
-			$msg = S3Signer::extract_error($resp['body']) ?: ('HTTP ' . $status);
+			$msg = S3Signer::failure_text($resp);
 			throw new TargetBackupsException(
 				'Delete failed for ' . $key . ': ' . $msg
 				. ($already > 0 ? " ({$already} already deleted)." : '.')

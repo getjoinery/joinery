@@ -33,6 +33,7 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.43 - an upload that failed says how many tries it took (S3Signer::failure_text)
  * @version 1.42 - the working directory is always the site's backups/ folder; the backup_output_dir setting is gone
  * @version 1.41 - plan_for_run() plans on the run's own target, so a run is read (verified, restored) where it
  *                 went even when today's target is disabled or deleted
@@ -1681,7 +1682,7 @@ class BackupRunner {
 		}
 		if (empty($resp['pending'])) {
 			// A part was refused; put_stream() has already aborted the upload.
-			$msg = S3Signer::extract_error($resp['body'] ?? '') ?: ('HTTP ' . (int)($resp['status'] ?? 0));
+			$msg = S3Signer::failure_text($resp);
 			throw new BackupRunnerException('Upload of ' . $name . ' failed: ' . $msg
 				. ($rc !== 0 ? ' (the ' . $kind . ' engine exited ' . $rc . ')' : ''));
 		}
@@ -1712,7 +1713,7 @@ class BackupRunner {
 		}
 		$status = (int)($final['status'] ?? 0);
 		if ($status < 200 || $status >= 300) {
-			$msg = S3Signer::extract_error($final['body'] ?? '') ?: ('HTTP ' . $status);
+			$msg = S3Signer::failure_text($final);
 			throw new BackupRunnerException('Upload of ' . $name . ' failed: ' . $msg);
 		}
 
@@ -2350,7 +2351,7 @@ class BackupRunner {
 			}
 			$status = (int)($resp['status'] ?? 0);
 			if ($status < 200 || $status >= 300) {
-				$msg = S3Signer::extract_error($resp['body'] ?? '') ?: ('HTTP ' . $status);
+				$msg = S3Signer::failure_text($resp);
 				throw new BackupRunnerException('Upload of ' . $a['name'] . ' failed: ' . $msg);
 			}
 

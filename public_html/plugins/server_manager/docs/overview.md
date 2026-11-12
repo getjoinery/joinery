@@ -2054,7 +2054,7 @@ A persisted job never contains a credential. A node's **backup run** and **re-up
 
 ### Transient Failures
 
-A storage provider that answers a request with a 5xx does not fail the job. `S3Signer::request()` retries — `MAX_ATTEMPTS` tries, exponential backoff with jitter — for the failures that are worth another go: 5xx, 429, 408, and the transport errors that mean the connection died rather than the request being wrong. A deterministic error (403 signature, 404, 400) is returned immediately; retrying it would only burn the budget and bury the message. `S3Signer::is_retryable()` is the whole policy and is pure, so the classification is testable without a network.
+A storage provider that answers a request with a 5xx does not fail the job. `S3Signer::request()` retries, with jitter, for the failures that are worth another go. A request that carries bytes (an upload, a multipart part, a download to a file) is tried `TRANSFER_MAX_ATTEMPTS` (4) times, pausing 5 s, 20 s and 80 s, because a provider's "Service unavailable, please try again later" (Backblaze's busy answer) can outlast a few seconds. A small control call (a list, a head, a delete) is tried `MAX_ATTEMPTS` (3) times, pausing 2 s and 4 s, since a page may be waiting on it. Both retry the same failures: 5xx, 429, 408, and the transport errors that mean the connection died rather than the request being wrong. A deterministic error (403 signature, 404, 400) is returned immediately; retrying it would only burn the budget and bury the message. `S3Signer::is_retryable()` is the whole policy and is pure, so the classification is testable without a network.
 
 Retrying is safe because every request the class makes is idempotent: a PUT overwrites its key (a single PUT, never multipart, so no orphaned parts survive a failure), and GET/DELETE/list have no cumulative effect.
 
@@ -2063,7 +2063,7 @@ Two bounds keep a retry from doing harm:
 - **Wall clock.** Total time is capped at one attempt's timeout plus `RETRY_WINDOW_SECONDS`. An attempt that burns the entire transfer timeout leaves no room for another — the right answer, since a transfer that cannot finish in an hour will not finish on the second try. Job steps that shell out to the uploader take their own `timeout` from `S3Signer::transfer_budget_seconds()`, so the agent can never kill a transfer part-way through a retry.
 - **Replay.** A retried upload rewinds the body stream before resending. curl consumes the stream on the first attempt while `CURLOPT_INFILESIZE` still claims the full length, so a retry without the rewind sends nothing and then blocks until the timeout — a hang rather than an error. A stream that cannot seek is not retried at all, rather than being sent truncated.
 
-Each retry is named in the job output (`RETRY: attempt 1 failed (HTTP 500 internal incident); retrying in 2s`), and a transfer that only succeeded on a later attempt says so. A provider that is degrading looks exactly like a healthy one unless the attempts are visible.
+Each retry is named in the job output (`RETRY: attempt 1 failed (HTTP 500 internal incident); retrying in 5s`), a transfer that only succeeded on a later attempt says so, and a failure that outlasted every try says how many it took (`S3Signer::failure_text()`: `Upload of code-0002.tar.gz.enc failed: Service unavailable, please try again later (after 4 attempts)`). A provider that is degrading looks exactly like a healthy one unless the attempts are visible.
 
 ### Backup Browser
 
@@ -2456,7 +2456,10 @@ and nothing else would ever end them.
 
 Due is keyed on when the last run was *started*, not on whether it succeeded.
 Retrying a failing node every fifteen minutes until its next slot would hammer a
-machine that is already unwell.
+machine that is already unwell. One retry is allowed: the first run after the
+slot that failed is tried once more an hour after it finished
+(`FleetBackupPolicy::RETRY_AFTER_SECONDS`), so one provider blip does not cost
+the node a day of backups. A failed retry is the last attempt until the next slot.
 
 #### Verifying what was backed up
 

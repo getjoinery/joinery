@@ -14,6 +14,8 @@
  * management node's backup broker), and every finished write is reported to
  * it with its bytes and sha256. The request paths are the same either way.
  *
+ * @version 1.16 - a request that carries bytes is tried 4 times, pausing 5 s, 20 s, 80 s (was 3, pausing 2 s, 4 s);
+ *                 failure_text(): the provider's answer and how many tries it took, for an error message
  * @version 1.15 - an S3LinkReader lists for list() and signs the GET presign() is asked for: a target whose owner
  *                 is getjoinery is read like any other (specs/easy_signup_completion.md WP4)
  * @version 1.14 - object lock (specs/storage_targets.md F8): with_lock() makes a write credential that holds
@@ -92,6 +94,19 @@ class S3Signer {
 	// carries a cancel-unfinished-multipart lifecycle rule as backstop.
 	const MAX_ATTEMPTS = 3;
 	const RETRY_BASE_DELAY_SECONDS = 2;
+
+	// A request that carries bytes (an upload, a part, a download to a file)
+	// waits longer between tries than a small control call: 5 s, 20 s, 80 s.
+	// A provider's "Service unavailable, please try again later" (Backblaze's
+	// busy answer) outlasts a few seconds now and then, and giving up there
+	// failed a whole night's backup (getjoinery-developers, 2026-11-11). The
+	// same schedule BackupFetch uses for downloads. Control calls keep the
+	// short one: a page that lists or deletes waits on them.
+	const TRANSFER_MAX_ATTEMPTS = 4;
+	const TRANSFER_RETRY_FIRST_PAUSE_SECONDS = 5;
+
+	/** Set below 1 by a test so a transfer retry does not wait its full pause. */
+	public static $retry_pause_scale = 1;
 	// Extra wall clock, on top of one attempt's timeout, that retries may consume.
 	// This is what bounds the total: an attempt that burns the entire transfer
 	// timeout leaves no room for another, which is the right answer — a transfer
@@ -1018,17 +1033,20 @@ class S3Signer {
 				$why = 'HTTP ' . $result['status'] . ($msg ? ' ' . $msg : '');
 			}
 
-			if ($attempts_used >= self::MAX_ATTEMPTS) {
+			if ($attempts_used >= ($is_transfer ? self::TRANSFER_MAX_ATTEMPTS : self::MAX_ATTEMPTS)) {
 				$retry_log[] = "attempt {$attempts_used} failed ({$why}); no attempts left";
 				break;
 			}
-			$delay = self::RETRY_BASE_DELAY_SECONDS * (1 << ($attempts_used - 1));
+			$delay = $is_transfer
+				? self::TRANSFER_RETRY_FIRST_PAUSE_SECONDS * (4 ** ($attempts_used - 1))
+				: self::RETRY_BASE_DELAY_SECONDS * (1 << ($attempts_used - 1));
 			if (microtime(true) + $delay >= $deadline) {
 				$retry_log[] = "attempt {$attempts_used} failed ({$why}); out of time budget";
 				break;
 			}
 			$retry_log[] = "attempt {$attempts_used} failed ({$why}); retrying in {$delay}s";
-			sleep($delay);
+			$pause = $is_transfer ? $delay * self::$retry_pause_scale : $delay;
+			if ($pause > 0) { usleep((int)($pause * 1000000)); }
 			// Jitter, so a fleet-wide provider blip does not resynchronise every
 			// node's retry into the same instant.
 			usleep(mt_rand(0, 500000));
@@ -1265,6 +1283,17 @@ class S3Signer {
 		if (preg_match('#<Message>(.*?)</Message>#s', $xml_body, $m)) return trim($m[1]);
 		if (preg_match('#<Code>(.*?)</Code>#s', $xml_body, $m)) return trim($m[1]);
 		return null;
+	}
+
+	/**
+	 * A failed response in words for an error message: the provider's own
+	 * message (or the status), and how many tries it took when more than one,
+	 * so a reader can tell a refusal from a provider that stayed busy.
+	 */
+	public static function failure_text(array $resp): string {
+		$msg = self::extract_error((string)($resp['body'] ?? '')) ?: ('HTTP ' . (int)($resp['status'] ?? 0));
+		$n = (int)($resp['attempts'] ?? 1);
+		return $msg . ($n > 1 ? ' (after ' . $n . ' attempts)' : '');
 	}
 
 	/**

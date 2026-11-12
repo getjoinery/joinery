@@ -34,6 +34,7 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.16 - a failed run in the slot is retried once an hour after it finished (FleetBackupPolicy::is_due)
  * @version 1.15 - the hidden-version sweep skips a site's own getjoinery backup storage target (WP4 review L11)
  * @version 1.14 - the run is told what the backup storage check proved missing from its space (objects_missing),
  *                 so it stores those offloaded files again
@@ -196,7 +197,12 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				continue;
 			}
 
-			if (!FleetBackupPolicy::is_due($policy, $slug, $latest, $now)) {
+			// The run before the newest, only when the newest failed: is_due
+			// retries a failed run in the slot once, and this says whether it
+			// already was the retry.
+			$earlier = ($latest && $latest->get('mjb_status') === 'failed')
+				? ManagementJob::latestForNode($node->key, 'backup_run', $latest->key) : null;
+			if (!FleetBackupPolicy::is_due($policy, $slug, $latest, $now, $earlier)) {
 				continue;
 			}
 

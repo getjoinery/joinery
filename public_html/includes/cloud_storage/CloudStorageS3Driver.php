@@ -11,6 +11,7 @@
  * the key its object was written under (CloudFileStore::key()), so a reader
  * hands that key back unchanged.
  *
+ * @version 2.3 - a refused call says how many tries it took (S3Signer::failure_text)
  * @version 2.2 - a delete object lock still holds throws with S3Signer::LOCKED as its code
  * @version 2.1 - a ranged get answered with the whole object (200) is cut to the span asked for
  * @version 2.0 - on S3Signer instead of the AWS SDK; keys are full keys, the folder is the caller's
@@ -172,7 +173,7 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 	}
 
 	private static function why(array $r): string {
-		return S3Signer::extract_error((string)($r['body'] ?? '')) ?: ('HTTP ' . (int)$r['status']);
+		return S3Signer::failure_text($r);
 	}
 
 	private static function ensure_parent(string $local_path): void {

@@ -13,6 +13,8 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.29 - local() writes UTC when no one signed in is looking: the incident pass keeps the text, and the
+ *                 incident page shows it in its reader's zone
  * @version 1.28 - fleet_backup_health() names its no-recovery-key verdict with reason NO_RECOVERY_KEY, so the
  *                backups-stopped incident can give a new node time to set one up
  * @version 1.27 - an agent built without the release key is named as that, not as a node that cannot be managed (agent 1.82.0)
@@ -1075,10 +1077,20 @@ class NodeMonitorHealth {
 		return $text;
 	}
 
-	/** A stored UTC time in the operator's timezone, the way the rest of the admin shows one. */
+	/**
+	 * A stored UTC time for a person: in the viewer's timezone when someone
+	 * signed in is looking, the way the rest of the admin shows one. With no
+	 * viewer (the scheduled pass that files incidents), in UTC: the text is
+	 * kept and read later by whoever opens it, and the incident page shows
+	 * it in that reader's zone (IncidentViews::localize_times).
+	 */
 	private static function local(string $utc): string {
-		return LibraryFunctions::convert_time($utc, 'UTC',
-			SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A T');
+		$session = SessionControl::get_instance();
+		if (!$session->get_user_id()) {
+			$t = strtotime($utc . ' UTC');
+			return $t === false ? $utc : gmdate('Y-m-d H:i', $t) . ' UTC';
+		}
+		return LibraryFunctions::convert_time($utc, 'UTC', $session->get_timezone(), 'M j, Y g:i A T');
 	}
 
 	/**

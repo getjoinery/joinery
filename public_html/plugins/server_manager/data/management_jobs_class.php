@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.47 - latestForNode() takes before_id: the run before a given one
  * @version 1.46 - ROUTINE_TYPES and option hide_routine: a completed never_do_check (every five minutes)
  *                 is left out of job lists unless its type is asked for (filterTypes offers it); a failed one still shows
  * @version 1.45 - largest_files joins LOG_EXCERPT_TYPES: its file names age out with the other excerpts
@@ -839,18 +840,23 @@ class ManagementJob extends SystemBase {
 	 * Returns a fully loaded model so callers can read whatever field they need
 	 * (->key for a link, ->get('mjb_status'), ->get('mjb_parameters'), ...).
 	 *
-	 * @param int    $node_id
-	 * @param string $type
+	 * With $before_id, the newest one older than that job (the run before it).
+	 *
+	 * @param int      $node_id
+	 * @param string   $type
+	 * @param int|null $before_id
 	 * @return ManagementJob|null
 	 */
-	static function latestForNode($node_id, $type) {
+	static function latestForNode($node_id, $type, $before_id = null) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT mjb_management_job_id FROM mjb_management_jobs
 			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			   AND (?::bigint IS NULL OR mjb_management_job_id < ?::bigint)
 			 ORDER BY mjb_management_job_id DESC LIMIT 1"
 		);
-		$q->execute([(int)$node_id, (string)$type]);
+		$b = $before_id === null ? null : (int)$before_id;
+		$q->execute([(int)$node_id, (string)$type, $b, $b]);
 		$row = $q->fetch(PDO::FETCH_ASSOC);
 		if (!$row) {
 			return null;

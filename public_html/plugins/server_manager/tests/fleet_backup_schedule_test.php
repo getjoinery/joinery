@@ -24,11 +24,13 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupRetention.php'));
 
-/** A stand-in for a job row: is_due only ever asks it when it was created. */
+/** A stand-in for a job row: is_due asks it when it was created and, for a retry, how it ended. */
 class FbsJob {
-	private $created;
-	public function __construct($created) { $this->created = $created; }
-	public function get($field) { return ($field === 'mjb_create_time') ? $this->created : null; }
+	private $fields;
+	public function __construct($created, $status = 'completed', $completed = null) {
+		$this->fields = array('mjb_create_time' => $created, 'mjb_status' => $status, 'mjb_completed_time' => $completed);
+	}
+	public function get($field) { return $this->fields[$field] ?? null; }
 }
 
 /** A stand-in for a node row: the policy readers only ever ask it for the policy. */
@@ -98,10 +100,26 @@ $ran_yesterday = new FbsJob(gmdate('Y-m-d H:i:s', strtotime($day . ' UTC') - 360
 check(FleetBackupPolicy::is_due($policy, 'alpha', $ran_yesterday, $after),
 	'yesterday\'s run does not satisfy today\'s slot');
 
-// Keyed on the attempt, not the outcome: retrying a failing node every fifteen
-// minutes until its next slot would hammer a node that is already unwell.
-check(!FleetBackupPolicy::is_due($policy, 'alpha', $ran_today, $after),
-	'a failed attempt still counts as attempted until the next slot');
+// A failed run in the slot is tried once more, an hour after it finished, and
+// never again until the next slot: a provider's "try again later" should not
+// cost a day, and a node that is unwell should not be hammered.
+$slot_ts   = strtotime($day . ' UTC') + ($slot * 60);
+$at        = function ($minutes) use ($slot_ts) { return gmdate('Y-m-d H:i:s', $slot_ts + ($minutes * 60)); };
+$failed    = new FbsJob($at(1), 'failed', $at(2));
+check(!FleetBackupPolicy::is_due($policy, 'alpha', $failed, $at(30), $ran_yesterday),
+	'a failed run in the slot is not retried within the hour');
+check(FleetBackupPolicy::is_due($policy, 'alpha', $failed, $at(63), $ran_yesterday),
+	'an hour after it finished, a failed run in the slot is tried once more');
+check(FleetBackupPolicy::is_due($policy, 'alpha', $failed, $at(63), null),
+	'the same with no run before it at all');
+$retry_failed = new FbsJob($at(64), 'failed', $at(65));
+check(!FleetBackupPolicy::is_due($policy, 'alpha', $retry_failed, $at(300), $failed),
+	'a failed retry is the last attempt until the next slot');
+check(!FleetBackupPolicy::is_due($policy, 'alpha', $ran_today, $at(300), $ran_yesterday),
+	'a run in the slot that worked is not run again');
+$failed_no_end = new FbsJob($at(1), 'failed', null);
+check(FleetBackupPolicy::is_due($policy, 'alpha', $failed_no_end, $at(62), $ran_yesterday),
+	'a failed run with no finish time counts from when it was made');
 
 $weekly = array_merge($policy, array('frequency' => 'weekly', 'day_of_week' => 3));
 check((int)gmdate('w', strtotime($after . ' UTC')) !== 3

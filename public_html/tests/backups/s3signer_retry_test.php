@@ -65,6 +65,13 @@ section('Retry budget is bounded and matches the job step timeout');
 
 check(S3Signer::MAX_ATTEMPTS >= 2 && S3Signer::MAX_ATTEMPTS <= 5,
 	'MAX_ATTEMPTS is a small bounded number', 'got ' . S3Signer::MAX_ATTEMPTS);
+check(S3Signer::TRANSFER_MAX_ATTEMPTS === 4 && S3Signer::TRANSFER_RETRY_FIRST_PAUSE_SECONDS === 5,
+	'a request carrying bytes is tried 4 times, the first pause 5 s (then 20 s, 80 s)',
+	'a provider\'s "try again later" outlasted 2 s + 4 s and failed a night\'s backup on 2026-11-11');
+$transfer_wait = 0;
+for ($n = 1; $n < S3Signer::TRANSFER_MAX_ATTEMPTS; $n++) { $transfer_wait += S3Signer::TRANSFER_RETRY_FIRST_PAUSE_SECONDS * (4 ** ($n - 1)); }
+check($transfer_wait < S3Signer::RETRY_WINDOW_SECONDS,
+	'every transfer pause fits inside the retry window', $transfer_wait . 's of pauses vs ' . S3Signer::RETRY_WINDOW_SECONDS . 's');
 check(S3Signer::transfer_budget_seconds() > S3Signer::TRANSFER_TIMEOUT_SECONDS,
 	'the transfer budget leaves room beyond one full-length attempt',
 	S3Signer::transfer_budget_seconds() . 's vs ' . S3Signer::TRANSFER_TIMEOUT_SECONDS . 's');
@@ -130,9 +137,65 @@ if ($fixture === null) {
 		'attempt 2 re-sent the full body from byte zero',
 		'got ' . ($lengths[1] ?? 'nothing') . ' — a non-rewound stream sends 0 bytes here');
 
-	check($elapsed >= S3Signer::RETRY_BASE_DELAY_SECONDS,
-		'the retry backed off before trying again', round($elapsed, 1) . 's elapsed');
+	check(strpos(implode(' | ', $resp['retry_log'] ?? []), 'retrying in ' . S3Signer::TRANSFER_RETRY_FIRST_PAUSE_SECONDS . 's') !== false,
+		'the upload backed off on the transfer schedule before trying again', implode(' | ', $resp['retry_log'] ?? []));
+	check($elapsed >= S3Signer::TRANSFER_RETRY_FIRST_PAUSE_SECONDS * S3Signer::$retry_pause_scale,
+		'and really waited', round($elapsed, 2) . 's elapsed');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+section('An upload outlasts a provider that stays busy for three tries');
+
+// The pauses are scaled down so the test does not wait 105 s; the schedule
+// itself is what the retry log names.
+S3Signer::$retry_pause_scale = 0.01;
+harness_defer(function () { S3Signer::$retry_pause_scale = 1; });
+
+$fixture4 = s3signer_start_fixture(3, 503);
+if ($fixture4 === null) {
+	harness_skip('busy provider outlasted', 'no network fixture available');
+} else {
+	harness_defer(function() use ($fixture4) { s3signer_stop_fixture($fixture4); });
+	$local4 = tempnam(sys_get_temp_dir(), 's3retry');
+	file_put_contents($local4, str_repeat('B', 256));
+	harness_defer(function() use ($local4) { @unlink($local4); });
+	$creds4 = ['access_key' => 'TESTKEY', 'secret_key' => 'TESTSECRET',
+		'region' => 'us-east-005', 'endpoint' => 'http://127.0.0.1:' . $fixture4['port']];
+	$resp4 = S3Signer::put_file($creds4, 'test-bucket', '/k', $local4);
+	check((int)$resp4['status'] === 200 && (int)$resp4['attempts'] === 4,
+		'three 503s, then the fourth try lands', 'status ' . $resp4['status'] . ', attempts ' . ($resp4['attempts'] ?? '?'));
+	$log4 = implode(' | ', $resp4['retry_log'] ?? []);
+	check(strpos($log4, 'retrying in 5s') !== false && strpos($log4, 'retrying in 20s') !== false && strpos($log4, 'retrying in 80s') !== false,
+		'pausing 5 s, 20 s and 80 s', $log4);
+}
+
+$fixture5 = s3signer_start_fixture(99, 503);
+if ($fixture5 === null) {
+	harness_skip('busy provider gives up', 'no network fixture available');
+} else {
+	harness_defer(function() use ($fixture5) { s3signer_stop_fixture($fixture5); });
+	$local5 = tempnam(sys_get_temp_dir(), 's3retry');
+	file_put_contents($local5, 'x');
+	harness_defer(function() use ($local5) { @unlink($local5); });
+	$creds5 = ['access_key' => 'TESTKEY', 'secret_key' => 'TESTSECRET',
+		'region' => 'us-east-005', 'endpoint' => 'http://127.0.0.1:' . $fixture5['port']];
+	$resp5 = S3Signer::put_file($creds5, 'test-bucket', '/k', $local5);
+	check((int)$resp5['status'] === 503 && (int)$resp5['attempts'] === S3Signer::TRANSFER_MAX_ATTEMPTS,
+		'a provider busy on every try is given up on after the fourth', 'status ' . $resp5['status'] . ', attempts ' . ($resp5['attempts'] ?? '?'));
+	check(S3Signer::failure_text($resp5) === 'internal incident (after 4 attempts)',
+		'and the error says so: the provider\'s message and how many tries', S3Signer::failure_text($resp5));
+	check(count(s3signer_fixture_lengths($fixture5)) === 4, 'the fixture saw four requests');
+
+	// A control call (no body) keeps the short schedule: a page waits on it.
+	$resp6 = S3Signer::get($creds5, 'test-bucket', '/k');
+	check((int)$resp6['attempts'] === S3Signer::MAX_ATTEMPTS,
+		'a control call is still tried ' . S3Signer::MAX_ATTEMPTS . ' times', 'attempts ' . ($resp6['attempts'] ?? '?'));
+}
+
+section('failure_text names one try plainly');
+check(S3Signer::failure_text(['status' => 403, 'body' => '<Error><Message>Access denied</Message></Error>', 'attempts' => 1]) === 'Access denied',
+	'one try: the message alone');
+check(S3Signer::failure_text(['status' => 500, 'body' => '']) === 'HTTP 500', 'no message: the status');
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('A deterministic error is returned immediately, not retried');

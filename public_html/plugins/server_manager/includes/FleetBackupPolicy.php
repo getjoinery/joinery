@@ -13,6 +13,7 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.10 - a failed run in the slot is tried once more an hour after it finished (is_due's earlier_job)
  * @version 1.9 - a node whose agent moved away is not eligible: nothing here reaches it
  * @version 1.8 - a node verifies weekly by default, and an unverified or stale verify is a problem a day past the
  *                interval (verify_alarm_days(), specs/storage_targets.md F1); the fixed 45 and 60 days are gone
@@ -296,9 +297,16 @@ class FleetBackupPolicy {
 	 * and retrying it every fifteen minutes until the next slot would hammer a
 	 * node that is already unwell.
 	 *
+	 * One exception: the first run after the slot that FAILED is tried once more,
+	 * RETRY_AFTER_SECONDS after it finished. A storage provider's "busy, try
+	 * again later" outlasts the upload's own retries now and then, and without
+	 * this one blip costs the node a whole day of backups. The second attempt is
+	 * the last until the next slot ($earlier_job is the run before $last_job,
+	 * which says whether $last_job was already the retry).
+	 *
 	 * @param string $now UTC 'Y-m-d H:i:s'
 	 */
-	public static function is_due(array $policy, string $slug, $last_job, string $now): bool {
+	public static function is_due(array $policy, string $slug, $last_job, string $now, $earlier_job = null): bool {
 		$now_ts = strtotime($now . ' UTC');
 		if ($now_ts === false) { return false; }
 
@@ -314,11 +322,36 @@ class FleetBackupPolicy {
 		if ($last_job) {
 			$started = strtotime(((string)$last_job->get('mjb_create_time')) . ' UTC');
 			if ($started !== false && $started >= $slot_ts) {
-				return false;
+				return self::is_retry_due($last_job, $earlier_job, $slot_ts, $now_ts);
 			}
 		}
 
 		return true;
+	}
+
+	/** Seconds after a failed run in the slot before its one retry. */
+	const RETRY_AFTER_SECONDS = 3600;
+
+	/**
+	 * Whether the run since the slot failed, was the first attempt since the
+	 * slot, and finished long enough ago to try once more (is_due).
+	 */
+	private static function is_retry_due($last_job, $earlier_job, int $slot_ts, int $now_ts): bool {
+		if ((string)$last_job->get('mjb_status') !== 'failed') {
+			return false;
+		}
+		if ($earlier_job) {
+			$earlier = strtotime(((string)$earlier_job->get('mjb_create_time')) . ' UTC');
+			if ($earlier === false || $earlier >= $slot_ts) {
+				return false;   // the failed run was already the retry
+			}
+		}
+		$done = (string)$last_job->get('mjb_completed_time');
+		$done_ts = $done !== '' ? strtotime($done . ' UTC') : false;
+		if ($done_ts === false) {
+			$done_ts = strtotime(((string)$last_job->get('mjb_create_time')) . ' UTC');
+		}
+		return $done_ts !== false && $now_ts - $done_ts >= self::RETRY_AFTER_SECONDS;
 	}
 
 	/**

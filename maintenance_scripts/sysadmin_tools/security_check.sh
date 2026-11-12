@@ -3,6 +3,11 @@
 # security_check.sh - which security fixes this machine is waiting for, looked
 # for every hour (specs/fleet_security_patching.md WP1, Q3).
 #
+# Version: 1.2 - the check also runs right after the nightly updates finish
+#   (WantedBy= and After= apt-daily-upgrade.service), so the plane judges a fix
+#   from a look taken after the run that should have installed it, never from
+#   the hour before it (joinerydemo, 2026-11-11: warned 16 minutes after the
+#   nightly run had installed the fixes)
 # Version: 1.1 - a package new to the machine is not a fix waiting: an upgrade
 #   pulls it in, and that upgrade is counted where it is a fix (docker-prod's
 #   libdrm-amdgpu1, needed only by an fwupd from -updates, waited forever)
@@ -17,7 +22,8 @@
 #                               would install now; on a container host, also ask the site
 #                               containers' base (site_refresh.sh check)
 #   security_check.sh status    print the state
-#   security_check.sh install   write and enable the hourly timer (root, this tree root's own)
+#   security_check.sh install   write and enable the hourly timer, and the run after the
+#                               nightly updates (root, this tree root's own)
 #
 # A security fix is what this machine's own automatic-update policy takes: a
 # package from a -security pocket (Ubuntu's, or Ubuntu Pro's), or from an
@@ -89,6 +95,7 @@ if [ "$CMD" = install ]; then
         if systemctl is-enabled --quiet joinery-security-check.timer 2> /dev/null; then
             systemctl disable --now joinery-security-check.timer > /dev/null 2>&1 && say "the timer is stopped until the tree is root's alone again"
         fi
+        systemctl disable joinery-security-check.service > /dev/null 2>&1 || true
         die "$1"
     }
     for p in "$HERE" "${HERE}/security_check.sh" "$SITE_REFRESH" "$INSTALL_UPDATES"; do
@@ -102,9 +109,12 @@ if [ "$CMD" = install ]; then
     # systemd must never kill a package run part way (reviewer2 G1).
     svc="$(cat <<EOF
 # Written by security_check.sh install (specs/fleet_security_patching.md WP1).
+# Also run when the nightly updates finish (WantedBy and After
+# apt-daily-upgrade), so what they did not install is seen at once, and an
+# hourly run that falls during them waits for them.
 [Unit]
 Description=Joinery: look for security fixes this machine is waiting for
-After=network-online.target
+After=network-online.target apt-daily-upgrade.service
 Wants=network-online.target
 
 [Service]
@@ -114,6 +124,9 @@ Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
 TimeoutStartSec=2h
+
+[Install]
+WantedBy=apt-daily-upgrade.service
 EOF
 )"
     tmr="$(cat <<'EOF'
@@ -146,6 +159,13 @@ EOF
     fi
     if ! systemctl is-enabled --quiet joinery-security-check.timer 2> /dev/null || ! systemctl is-active --quiet joinery-security-check.timer 2> /dev/null; then
         systemctl enable --now joinery-security-check.timer > /dev/null 2>&1 || die "the timer could not be enabled"
+        changed=1
+    fi
+    # The run after the nightly updates: enabling the service is what links it
+    # into apt-daily-upgrade.service.wants. Re-linked when the unit changed, so
+    # a machine installed before the [Install] section gets the link.
+    if [ "$changed" -eq 1 ] || ! systemctl is-enabled --quiet joinery-security-check.service 2> /dev/null; then
+        systemctl reenable joinery-security-check.service > /dev/null 2>&1 || die "the run after the nightly updates could not be enabled"
         changed=1
     fi
     if [ ! -f "$STATE" ]; then

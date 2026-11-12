@@ -48,6 +48,7 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.8.1 - an upload that failed says how many tries it took (S3Signer::failure_text)
  * @version 1.8.0 - the index names each epoch's envelope re-sealed to the run's recovery key ('envelopes',
  *                  envelope_relname_in()), so verify and restore read the copy today's keys open
  * @version 1.7.1 - the folder is BackupTarget::normalise_prefix(), the rule the engine writes by (WP4 review L12)
@@ -1742,7 +1743,7 @@ class BackupObjects {
 		$resp = S3Signer::put_file($creds, $bucket, '/' . ltrim($base . $relname, '/'), $local, $content_type);
 		$status = (int)($resp['status'] ?? 0);
 		if ($status < 200 || $status >= 300) {
-			$msg = S3Signer::extract_error($resp['body'] ?? '') ?: ('HTTP ' . $status);
+			$msg = S3Signer::failure_text($resp);
 			throw new BackupObjectsException('Upload of ' . basename($relname) . ' failed: ' . $msg);
 		}
 	}

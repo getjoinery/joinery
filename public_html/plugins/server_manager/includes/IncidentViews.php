@@ -13,6 +13,8 @@
  * nothing a node or a note said becomes a link. The only links here are the
  * plane's own pages by id.
  *
+ * @version 1.5 - every time shows in the viewer's zone, named: when() adds the zone to a clock time, and
+ *                localize_times() turns the UTC times a source wrote into it (titles and details)
  * @version 1.4 - a detail value that is only a path on this site is a link
  * @version 1.3 - the timeline shows a cleared incident the reconciler resolved
  * @version 1.2 - the triage badge names a fix awaiting its proof; Looking is gone; the timeline shows the
@@ -34,13 +36,38 @@ class IncidentViews {
 		return htmlspecialchars(is_scalar($v) ? (string)$v : '', ENT_QUOTES, 'UTF-8');
 	}
 
-	/** A stored UTC time as an age, in the viewer's timezone. */
+	/**
+	 * A stored UTC time as an age, in the viewer's timezone, its zone named
+	 * whenever a clock time shows ("1 day ago, 3:14 AM EST").
+	 */
 	public static function when($stored): string {
 		$stored = trim((string)$stored);
 		if ($stored === '') {
 			return 'unknown';
 		}
-		return LibraryFunctions::time_ago($stored, SessionControl::get_instance()->get_timezone());
+		$tz = SessionControl::get_instance()->get_timezone();
+		$text = LibraryFunctions::time_ago($stored, $tz, 'M j, Y g:i A');
+		if (preg_match('/[AP]M$/', $text)) {
+			$text .= ' ' . LibraryFunctions::convert_time($stored, 'UTC', $tz, 'T');
+		}
+		return $text;
+	}
+
+	/**
+	 * Text a source wrote, its UTC times shown in the viewer's timezone. A
+	 * source writes when no one is looking, so it writes UTC ("2026-11-10
+	 * 03:14 UTC", or a report's "2026-11-10T05:11:54Z"); the page says them
+	 * in the zone the rest of it uses, named.
+	 */
+	public static function localize_times(string $text): string {
+		$tz = SessionControl::get_instance()->get_timezone();
+		return (string)preg_replace_callback(
+			'/\b(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?(?:Z| UTC)(?![A-Za-z0-9])/',
+			function ($m) use ($tz) {
+				$out = LibraryFunctions::convert_time($m[1] . ' ' . $m[2] . ($m[3] ?? ''), 'UTC', $tz, 'M j, Y g:i A T');
+				return $out ? $out : $m[0];
+			},
+			$text);
 	}
 
 	public static function severity_badge(IncidentRecord $inc): string {
@@ -165,7 +192,7 @@ class IncidentViews {
 			if ($form !== '') {
 				$html .= '<td><input type="checkbox" name="ids[]" value="' . $id . '" form="' . self::e($form) . '" aria-label="Select incident ' . $id . '"></td>';
 			}
-			$html .= '<td>' . self::severity_badge($inc) . ' <a href="' . self::e(self::url($id)) . '"><strong>' . self::e($inc->title()) . '</strong></a>';
+			$html .= '<td>' . self::severity_badge($inc) . ' <a href="' . self::e(self::url($id)) . '"><strong>' . self::e(self::localize_times($inc->title())) . '</strong></a>';
 			$under = array();
 			if ($show_node) {
 				$node_id = (int)$inc->get('inc_mgn_managed_node_id');
@@ -319,7 +346,7 @@ class IncidentViews {
 		if (is_array($detail) && $detail) {
 			$rows = array();
 			foreach ($detail as $k => $v) {
-				$text = is_scalar($v) ? (string)$v : json_encode($v);
+				$text = self::localize_times(is_scalar($v) ? (string)$v : (string)json_encode($v));
 				// A value that is only a path on this site (a source's 'The run',
 				// 'Where to set it') is a link; anything else stays text.
 				$rows[(string)$k] = preg_match('#^/[A-Za-z0-9_/.?=&%-]*$#', $text)

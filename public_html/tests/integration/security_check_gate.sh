@@ -148,6 +148,8 @@ chk "  the service's time limit is past the run's own bounds, so systemd never k
     "$(grep -c '^TimeoutStartSec=2h$' "$R/etc/systemd/system/joinery-security-check.service")" "1"
 chk "  hourly, spread, caught up after a stop; the service runs this tree's script at low priority" \
     "$(grep -cE '^(OnCalendar=hourly|RandomizedDelaySec=15m|Persistent=true)$' "$R/etc/systemd/system/joinery-security-check.timer")|$(grep -c "^ExecStart=/bin/bash $TS run$" "$R/etc/systemd/system/joinery-security-check.service")|$(grep -c '^Nice=10$' "$R/etc/systemd/system/joinery-security-check.service")" "3|1|1"
+chk "  it also runs right after the nightly updates finish, so a fix they did not take is judged from a look after them (joinerydemo 2026-11-11)" \
+    "$(grep -c '^WantedBy=apt-daily-upgrade.service$' "$R/etc/systemd/system/joinery-security-check.service")|$(grep -c '^After=.*apt-daily-upgrade.service' "$R/etc/systemd/system/joinery-security-check.service")|$(grep -c 'reenable joinery-security-check.service' "$STUB/systemctl")" "1|1|1"
 : > "$STUB/systemctl"
 chk "a second install: current, nothing reloaded" "$(bash "$TS" install)|$(grep -c daemon-reload "$STUB/systemctl")" "security_check: the hourly security check is current|0"
 for f in install_tools/site_refresh.sh sysadmin_tools/install_security_updates.sh; do

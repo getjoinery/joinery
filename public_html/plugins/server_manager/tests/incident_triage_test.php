@@ -356,4 +356,27 @@ if ((int)$q->fetchColumn() !== 3) {
 	check(count(IncidentEvent::for_incident($read_closed)) === 4, 'Running it again changes nothing');
 }
 
+section('Times show in the viewer\'s zone, named');
+{
+	// A source writes UTC when no one is looking; the page shows every time
+	// in its reader's zone. On 2026-11-12 one incident page showed its start
+	// as "3:14 AM" (the reader's UTC, unnamed) beside evidence "10:14 PM EST"
+	// (the zone of the pass that wrote it).
+	$had = $_SESSION['timezone'] ?? null;
+	$_SESSION['timezone'] = 'America/New_York';
+	check(IncidentViews::localize_times('The last one that worked was 2026-11-10 03:14 UTC (48 hr ago).')
+		=== 'The last one that worked was Nov 9, 2026 10:14 PM EST (48 hr ago).',
+		'a source\'s UTC time is shown in the viewer\'s zone, named',
+		IncidentViews::localize_times('The last one that worked was 2026-11-10 03:14 UTC (48 hr ago).'));
+	check(IncidentViews::localize_times('perl 5.40 (waiting since 2026-11-10T05:11:54Z); x') === 'perl 5.40 (waiting since Nov 10, 2026 12:11 AM EST); x',
+		'so is a host report\'s ISO time', IncidentViews::localize_times('perl 5.40 (waiting since 2026-11-10T05:11:54Z); x'));
+	check(IncidentViews::localize_times('version 2026-11-10 and job 43898') === 'version 2026-11-10 and job 43898',
+		'a date with no UTC time is left alone');
+	$three_days = gmdate('Y-m-d H:i:s', time() - 3 * 86400);
+	check((bool)preg_match('/^3 days ago, \d{1,2}:\d{2} [AP]M E[SD]T$/', IncidentViews::when($three_days)),
+		'a clock time on the page names its zone', IncidentViews::when($three_days));
+	check(IncidentViews::when(gmdate('Y-m-d H:i:s', time() - 7200)) === '2 hours ago', 'an age alone needs no zone');
+	if ($had === null) { unset($_SESSION['timezone']); } else { $_SESSION['timezone'] = $had; }
+}
+
 harness_finish();
