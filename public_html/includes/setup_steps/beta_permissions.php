@@ -9,6 +9,7 @@
  * access is the existing agent_log_access switch, also on the Management Node
  * page.
  *
+ * @version 1.3 - offers automatic problem reports (problem_reports_auto_send), unticked unless already on
  * @version 1.2 - log access reads as one plain sentence, no help text
  * @version 1.1 - the line saying nothing reads the logs yet shows only on a site not yet connected (reviewer2 B1)
  * @version 1.0
@@ -48,6 +49,11 @@ if ($beta_offered) {
 
 echo $formwriter->checkboxinput('allow_log_access', "Allow Joinery's agent to read errors and logs on this site for troubleshooting purposes.", array(
 	'checked' => BetaPermissions::log_access_on(),
+));
+
+// Automatic problem reports: off until the owner ticks it here or in Settings.
+echo $formwriter->checkboxinput('allow_auto_reports', 'Send us a report automatically when something breaks. It says what failed and where, never who or what data.', array(
+	'checked' => (bool)(int)$settings->get_setting('problem_reports_auto_send', true, true),
 ));
 ?>
 <div class="jy-mt-2">

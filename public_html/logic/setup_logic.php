@@ -13,6 +13,7 @@
  *                 the site's home page (specs/easy_signup_completion.md WP6)
  * @version 2.15 - services_shelf_use joins the forwarded backups actions: getjoinery backup storage from the step
  * @version 2.14 - the backups actions forward only at the backups page's level (its header, 10): the logic no longer checks itself
+ * @version 2.14 - beta_permissions_save also records the automatic problem reports answer
  * @version 2.13 - action beta_permissions_save: the Beta permissions step's answer (emergency root access, one-way, and
  *                 log access), written with Setting::put as the Management Node page writes it
  * @version 2.12 - every action, and the DNS box's, runs only on a POST: opening a step changes nothing
@@ -247,6 +248,7 @@ function setup_logic(array $input): LogicResult {
 		}
 		if ($error === '') {
 			BetaPermissions::set_log_access(!empty($input['allow_log_access']));
+			Setting::put('problem_reports_auto_send', !empty($input['allow_auto_reports']) ? '1' : '0');
 			SetupSteps::recordDecision('beta_permissions', NULL);
 			SetupSteps::invalidateSessionCache();
 			return LogicResult::redirect('/setup?step=' . urlencode(_setup_next_key($steps, 'beta_permissions')));

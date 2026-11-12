@@ -45,7 +45,7 @@ $stored = function (string $name) use ($db) {
 	return $v === false ? null : (string)$v;
 };
 $before = array();
-foreach (array('beta_root_access', 'beta_root_access_offered', 'agent_log_access', 'agent_log_access_notice_seen') as $name) {
+foreach (array('beta_root_access', 'beta_root_access_offered', 'agent_log_access', 'agent_log_access_notice_seen', 'problem_reports_auto_send') as $name) {
 	$before[$name] = $stored($name);
 }
 harness_defer(function () use ($before) {
@@ -101,6 +101,7 @@ check(is_string($res->redirect) && strpos($res->redirect, '/setup?step=') === 0,
 check($stored('agent_log_access') === '' && $stored('agent_log_access_notice_seen') === '1',
 	'an unchecked log access turns it off, and counts as having seen its notice');
 check($stored('beta_root_access') === '1', 'emergency root access is not touched where the install did not offer it');
+check($stored('problem_reports_auto_send') === '0', 'automatic problem reports stay off unless ticked');
 check(call_user_func($step['status'], null) === SetupSteps::STATUS_GREEN, 'the step is green once answered');
 
 // ======================================================================
@@ -112,6 +113,9 @@ $res = harness_call_logic('logic/setup_logic.php', 'setup_logic',
 	array('action' => 'beta_permissions_save', 'keep_root_access' => '1', 'allow_log_access' => '1'), 'POST');
 check($stored('beta_root_access') === '1' && $stored('agent_log_access') === '1', 'kept checked, both stay on',
 	'error: ' . var_export($res->error, true));
+$res = harness_call_logic('logic/setup_logic.php', 'setup_logic',
+	array('action' => 'beta_permissions_save', 'keep_root_access' => '1', 'allow_log_access' => '1', 'allow_auto_reports' => '1'), 'POST');
+check($stored('problem_reports_auto_send') === '1', 'ticked, automatic problem reports are on');
 $res = harness_call_logic('logic/setup_logic.php', 'setup_logic',
 	array('action' => 'beta_permissions_save', 'allow_log_access' => '1'), 'POST');
 check($stored('beta_root_access') === '0' && !BetaPermissions::root_access_on(), 'unchecked, emergency root access is off');
