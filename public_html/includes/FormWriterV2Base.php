@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.36.1 - a form rendered by a command-line run that has already printed (a scheduled task indexing pages) starts no session
  * @version 2.36.0 - submitbutton takes 'busy': the words it shows, disabled, once its form posts
  * @version 2.35.0 - hiddeninput takes 'browser_timezone': the browser fills it with the visitor's time zone
  * @version 2.34.0 - scriptOnce() is public, so code writing a form block of its own (Product) loads joinery-forms.js once with FormWriter
@@ -332,8 +333,11 @@ abstract class FormWriterV2Base {
     // Implementation would require passing a CSRF token in JS requests and a
     // server-side validation helper callable outside of FormWriter.
     protected function initializeCSRF() {
-        // Start session if not already started
-        if (session_status() === PHP_SESSION_NONE) {
+        // Start session if not already started. A command-line run that has
+        // already printed (a scheduled task indexing a page's text) has no
+        // visitor to hold a session and can no longer start one; its token
+        // lives in this process only.
+        if (session_status() === PHP_SESSION_NONE && !(PHP_SAPI === 'cli' && headers_sent())) {
             SessionGuard::start();
         }
 
