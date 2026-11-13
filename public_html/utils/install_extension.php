@@ -68,6 +68,7 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.14 - a sandboxed plugin is refused while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.13 - the publishing box refuses an unverified staged plugin or page theme, acknowledged or not:
  *                 it runs host installers without asking who built them (specs/shell_command_audit_wp2_results.md D6)
  * @version 1.12 - the private copy of a staged package must itself be a real directory, and the staging
@@ -468,6 +469,10 @@ function install_extension_kind(string $type, string $dir): string {
 	if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($dir)) {
 		// Exactly a manifest and one WebAssembly module: nothing in it runs in
 		// the site's PHP, so like a style theme it has nothing to warn about.
+		if (!SandboxPlugins::enabled()) {
+			fwrite(STDERR, 'install_extension: refusing to install a sandboxed plugin. ' . SandboxPlugins::OFF_MESSAGE . "\n");
+			exit(1);
+		}
 		echo "kind: sandboxed (a WebAssembly module and its manifest; nothing in it runs in the site's PHP)\n";
 		return 'sandboxed';
 	}

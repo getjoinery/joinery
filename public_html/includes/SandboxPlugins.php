@@ -12,10 +12,35 @@
  * Native plugin loading skips sandboxed folders (PluginHelper), so nothing in
  * one is ever included; this class is how the sandboxed tier finds them.
  *
+ * @version 1.1 - enabled(): the sandboxed_plugins_enabled setting, off by default, gates upload, install,
+ *               approval and activation
  * @version 1.0
  */
 
 class SandboxPlugins {
+
+	/** The setting that allows sandboxed plugins on this site. Off by default. */
+	const ENABLED_SETTING = 'sandboxed_plugins_enabled';
+
+	/** What a refused upload, install, approval or activation says. */
+	const OFF_MESSAGE = 'Sandboxed plugins are switched off on this site. They are experimental; '
+		. 'a superadmin can allow them under Settings ("Allow sandboxed (WebAssembly) plugins").';
+
+	/**
+	 * Whether this site allows a sandboxed plugin to be uploaded, installed,
+	 * approved or activated. One already active is not stopped by turning
+	 * this off: it runs until it is deactivated.
+	 */
+	public static function enabled(): bool {
+		return (string)Globalvars::get_instance()->get_setting(self::ENABLED_SETTING) === '1';
+	}
+
+	/** @throws Exception when sandboxed plugins are switched off here */
+	public static function demandEnabled(): void {
+		if (!self::enabled()) {
+			throw new Exception(self::OFF_MESSAGE);
+		}
+	}
 
 	/** Per-request caches. */
 	private static $kind_cache = array();

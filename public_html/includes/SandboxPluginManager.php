@@ -27,6 +27,7 @@
  * what was approved: on activation, on a new approval, and when an active
  * plugin's files are replaced.
  *
+ * @version 1.2 - install() and activate() refuse while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.1 - approval before activation, compatibility (Q13), credential, receiver, scheduled runs
  * @version 1.0
  */
@@ -171,6 +172,7 @@ class SandboxPluginManager {
 
 	/** Install: the plugin's model tables. */
 	public static function install(string $name): void {
+		SandboxPlugins::demandEnabled();
 		self::syncTables($name);
 	}
 
@@ -187,6 +189,7 @@ class SandboxPluginManager {
 	 * @throws Exception when the plugin cannot be activated
 	 */
 	public static function activate(string $name): void {
+		SandboxPlugins::demandEnabled();
 		$validation = self::validate($name);
 		if (!$validation['valid']) {
 			throw new Exception("Cannot activate plugin '$name': " . implode('; ', $validation['errors']));

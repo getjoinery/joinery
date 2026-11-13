@@ -167,6 +167,8 @@ $rmtree($fresh);
 PackageInstallPage::discard('theme', (string)$outcome['staged_dir']);
 
 section('A sandboxed plugin: its manifest, never a fork, and it keeps its kind');
+// Off by default on every site (SandboxPlugins::enabled()); on for this test only.
+harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
 
 // Installed: a sandboxed plugin folder (manifest.json and one module).
 $sbx = 'zzsbxreplace';

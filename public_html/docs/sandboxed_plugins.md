@@ -1,5 +1,12 @@
 # Sandboxed Plugins
 
+> **Experimental, under active development.** Use sandboxed plugins for
+> experiments only, never for anything a site depends on: the manifest, the
+> module contract and what a plugin can reach may all change without a
+> compatible path. They are switched off on every site until a superadmin
+> turns on **Allow sandboxed (WebAssembly) plugins** (`sandboxed_plugins_enabled`,
+> on the Settings page); see [The switch](#the-switch).
+
 A sandboxed plugin is a WebAssembly module that reaches the platform only
 through the doors its manifest declares. It ships no PHP, runs outside the
 PHP pool, and can do nothing its manifest does not say. Native plugins (PHP,
@@ -27,6 +34,21 @@ A sandboxed plugin is a row in `plg_plugins` like any plugin and moves through
 the same lifecycle on the Plugins page (install, activate, deactivate,
 uninstall). `PluginManager` hands the steps that would read a native plugin's
 PHP or `plugin.json` to `SandboxPluginManager`.
+
+## The switch
+
+The setting `sandboxed_plugins_enabled` is off by default
+(`SandboxPlugins::enabled()`). While it is off:
+
+- an uploaded sandboxed zip is refused, by the Plugins page and by the root
+  installer, and the upload box does not mention the kind;
+- a sandboxed folder already in `plugins/` cannot be installed, approved or
+  activated; each refusal says the kind is switched off and where to allow it;
+- `utils/sandbox_plugin.php load` is refused the same way.
+
+A plugin that is already active keeps running, and can be deactivated or
+uninstalled; turning the setting off stops new use, it does not stop a
+running plugin.
 
 ## The manifest
 

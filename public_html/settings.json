@@ -1073,6 +1073,18 @@
       "helptext": "Each call to a sandboxed plugin, with what it used and what was refused, is kept this long. 0 keeps them indefinitely."
     },
     {
+      "name": "sandboxed_plugins_enabled",
+      "default": "0",
+      "group": "diagnostics",
+      "label": "Allow sandboxed (WebAssembly) plugins",
+      "type": "select",
+      "options": {
+        "1": "Yes",
+        "0": "No"
+      },
+      "helptext": "Experimental and under active development: for trying things out only, never for anything a site depends on. While off, no sandboxed plugin can be uploaded, installed, approved or activated. One that is already active keeps running until it is deactivated."
+    },
+    {
       "name": "allowed_upload_extensions",
       "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a",
       "group": "files",

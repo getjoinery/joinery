@@ -54,6 +54,8 @@ harness_defer(function () use ($name, $dir, $db, $table, $prefix) {
 
 try {
 	section('A sandboxed folder');
+	// Off by default on every site (SandboxPlugins::enabled()); on for this test only.
+	harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
 	mkdir($dir, 0755);
 	file_put_contents($dir . '/manifest.json', json_encode(array(
 		'name' => $name, 'title' => 'HarnessTest sandboxed data', 'version' => '1.0.0', 'platform' => 1,

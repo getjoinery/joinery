@@ -17,6 +17,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * @version 1.21 - uninstall() queues run_plugin_remover in place of remove_plugin when the plugin's manifest declares a host_remover: one request runs the remover and then removes the files (specs/plugin_host_removal.md D6)
  * @version 1.20 - sync, syncTables, the namespace check and activation's hook pass iterate PluginHelper::activePluginRows(); runSyncHook() refuses a name that is not a plugin name (unseal_daemon.md C3)
  * @version 1.19 - activate() loads the newly active plugin's bootstrap before its content packs save anything
+ * @version 1.19 - an uploaded sandboxed package is refused while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.18 - a plugin's content packs (content_packs/{pack}/) land once per install: after its activation
  *                commits, and at sync for one not yet applied (PluginContentPacks)
  * @version 1.17 - getDependents() reads each installed plugin's live manifest; the stored dependency rows missed a depends added after activation, so store could be deactivated under event_manager; deactivation counts only active dependents
@@ -140,6 +141,7 @@ class PluginManager extends AbstractExtensionManager {
         }
         foreach ($candidates as $candidate) {
             if (SandboxPlugins::isSandboxedDir($candidate)) {
+                SandboxPlugins::demandEnabled();
                 $sandbox = SandboxManifest::fromFile($candidate . '/' . SandboxManifest::FILE);
                 return array('root' => $candidate, 'manifest' => $sandbox->toArray(), 'name' => $sandbox->name());
             }

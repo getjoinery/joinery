@@ -138,6 +138,31 @@ try {
 	section('Activation waits on an approval');
 	$pm->install($name, false);
 	$reset();
+	section('Switched off');
+	harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '0');
+	$off = null;
+	try {
+		$pm->activate($name);
+	} catch (SandboxApprovalNeededException $e) {
+	} catch (Exception $e) {
+		$off = $e->getMessage();
+	}
+	check($off === SandboxPlugins::OFF_MESSAGE, 'With sandboxed plugins switched off, activation is refused saying so', (string)$off);
+	$off = null;
+	try {
+		SandboxPluginManager::install($name);
+	} catch (Exception $e) {
+		$off = $e->getMessage();
+	}
+	check($off === SandboxPlugins::OFF_MESSAGE, 'and so is an install', (string)$off);
+	$sign_in(make_user('SbxOffSuper', 10));
+	$off_page = harness_call_logic('adm/logic/admin_sandbox_approve_logic.php', 'admin_sandbox_approve_logic', array('plugin' => $name), 'GET');
+	check(in_array(SandboxPlugins::OFF_MESSAGE, (array)($off_page->data['problems'] ?? array()), true),
+		'and the approval page says why nothing can be approved', (string)$off_page->error);
+	harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
+	$reset();
+
+	section('Switched on, activation still waits on an approval');
 	check(SandboxConsent::needsApproval($name), 'An installed plugin waits on an approval');
 	$refused = null;
 	try {

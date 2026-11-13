@@ -13,6 +13,7 @@
  *
  * Both clean themselves up at harness_finish().
  *
+ * @version 1.1 - sandbox_fixture_plugin() switches sandboxed plugins on for the test (off by default)
  * @version 1.0
  */
 
@@ -25,6 +26,8 @@
  */
 function sandbox_fixture_plugin(array $manifest = array(), ?string $wasm = null): array {
 	$wasm = $wasm ?? sandbox_minimal_wasm();
+	// Off by default on every site (SandboxPlugins::enabled()); on for this test only.
+	harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
 	$name = 'hts_' . bin2hex(random_bytes(3));
 	$dir = SandboxPlugins::dirFor($name);
 	mkdir($dir, 0755);

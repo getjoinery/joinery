@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.11 - the upload box offers a sandboxed plugin only while they are switched on (SandboxPlugins::enabled())
 // @version 1.10 - each action is a single-button POST form or a link; the page's script is assets/js/admin-plugins.js (no inline script)
 // @version 1.9 - the host setup line says whether the plugin declares a host remover; an uninstalled plugin's row
 //               names the removal request's kind, links its transcript and offers Run removal again when it
@@ -141,7 +142,9 @@ $page->begin_box(array('altlinks' => $altlinks));
                     <div class="col-md-8">
                         <input type="file" name="plugin_zip" class="form-control" accept=".zip" required>
                         <div class="form-text">
-                            Upload a ZIP of a plugin: a native one (with plugin.json), or a sandboxed one (manifest.json and one .wasm module).
+                            <?php echo SandboxPlugins::enabled()
+                                ? 'Upload a ZIP of a plugin: a native one (with plugin.json), or an experimental sandboxed one (manifest.json and one .wasm module).'
+                                : 'Upload a ZIP of a plugin (with plugin.json).'; ?>
                         </div>
                     </div>
                     <div class="col-md-4">

@@ -12,6 +12,7 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
+ * @version 1.11 - a select whose stored value is none of its choices is drawn at its declared default, not its first choice
  * @version 1.10 - type user: the chosen user is labelled as user_search labels it
  * @version 1.9 - type user: the user search picker (user_search), showing the chosen user by name
  * @version 1.8 - a credential is drawn locked, with no Reset, below SettingsWriter::SECRET_WRITE_PERMISSION
@@ -366,8 +367,15 @@ class SettingsFieldRenderer {
 					if (isset($choices[$choice])) $choices[$choice] = $choice_label;
 				}
 				$field['options'] = $choices;
-				$field['value'] = $value;
 				$field['empty_option'] = $declaration['empty_option'] ?? false;
+				// A value that is none of the choices (a setting with no row
+				// yet) would be drawn as the first choice, and saved as it:
+				// draw the declared default instead.
+				if (!$field['empty_option'] && !array_key_exists((string)$value, $choices)
+					&& isset($declaration['default']) && array_key_exists((string)$declaration['default'], $choices)) {
+					$value = (string)$declaration['default'];
+				}
+				$field['value'] = $value;
 				$form->dropinput($name, $label, $field);
 				return;
 

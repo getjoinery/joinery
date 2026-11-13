@@ -1,5 +1,11 @@
 # Joinery sandboxed plugin kit
 
+> **Experimental, under active development.** Sandboxed plugins are for
+> experiments only, never for anything a site depends on: the manifest, the
+> calls and the doors may all change without a compatible path. A site
+> refuses them until a superadmin turns on **Allow sandboxed (WebAssembly)
+> plugins** in its settings.
+
 Everything an author needs to write a sandboxed plugin: a WebAssembly module
 and a `manifest.json` that a Joinery site installs from a zip, with no
 warning, and runs apart from itself (docs/sandboxed_plugins.md in the
