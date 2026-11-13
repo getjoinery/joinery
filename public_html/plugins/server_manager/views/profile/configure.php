@@ -10,6 +10,7 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.6 - the domain check is a data block and assets/js/domain-availability.js
  * @version 1.5 - a plan choice (Starter or Managed) heads the form; the summary names the plan
  * @version 1.4 - not found where this site does not sell hosting (SmHosting)
  * @version 1.3 - the registrant's details wait for a free name; no Site name field (derived from the domain);
@@ -219,9 +220,7 @@ $formwriter->submitbutton('btn_save', 'Save and continue');
 echo $formwriter->end_form();
 ?>
 
-<script>
-<?php echo $availability_js; ?>
-</script>
+<?php echo $availability_html; ?>
 
 <?php endif; ?>
 

@@ -91,6 +91,15 @@
    local .x[hidden] rule). One rule here, and no component needs its own. */
 [hidden] { display: none !important; }
 
+/* An action that posts but reads as a link inside a sentence: a single-button
+   form (no GET may change anything) drawn inline, its button styled as a
+   link. Unscoped, so it works on every theme, Bootstrap or not. */
+form.jy-inline-form { display: inline; margin: 0; }
+.jy-link-button { display: inline; background: none; border: 0; padding: 0; margin: 0;
+    font: inherit; color: var(--jy-color-link, #0d6efd); text-decoration: underline;
+    cursor: pointer; vertical-align: baseline; }
+.jy-link-button:hover, .jy-link-button:focus-visible { text-decoration: none; }
+
 /* No default body margin, and a stable scrollbar gutter: both keep the
    header from shifting when navigating between scrolling pages and
    viewport-fit app pages. */

@@ -1,0 +1,4 @@
+{
+    "about": "Ceilings for the inline-script sweep in tests/security/csp_header_test.php: per file, how many inline handlers, inline scripts with no src and javascript: URLs it may still hold. Only ever lowered (run the test with --lower). A file not listed must hold none.",
+    "files": []
+}

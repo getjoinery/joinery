@@ -12,6 +12,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.21 - Install Type shows and hides the site fields by visibility_rules (no inline script)
  * @version 1.20 - Install Type 'Starter host': a bare instance made a multi-tenant host for Starter sites
  *                 (specs/starter_tier.md); a Linode 4 GB holds eight
  * @version 1.19 - the Keep root SSH login help says a fresh install keeps an emergency root password during the beta
@@ -302,6 +303,11 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
 		'starter_host' => 'Starter host — a bare instance made a shared host for $4.99 Starter sites (Ubuntu 26.04, g6-standard-2 = 4 GB, holds 8); its host record is made when the install finishes, with provisioning off until you turn it on',
 	],
+	// The site-defining fields belong to a fresh install only.
+	'visibility_rules' => [
+		'fresh'   => ['show' => ['site_fields']],
+		'default' => ['hide' => ['site_fields']],
+	],
 ]);
 
 $formwriter->textinput('domain', 'Domain', [
@@ -333,21 +339,6 @@ $formwriter->textbox('root_ssh_keys', 'Public keys for root', [
 echo '<p class="text-muted">To put an existing site on a new server, use <strong>Copy</strong> on that site\'s node page.</p>';
 
 $formwriter->submitbutton('btn_submit', 'Install');
-$formwriter->addReadyScript('
-
-function toggleModePanel() {
-	var fresh = document.querySelector("input[name=install_mode][value=fresh]");
-	var siteFields = document.getElementById("site_fields");
-	if (siteFields) siteFields.hidden = !(fresh && fresh.checked);
-}
-
-// Wire up events
-var installModeRadios = document.querySelectorAll("input[name=install_mode]");
-installModeRadios.forEach(function(r) { r.addEventListener("change", toggleModePanel); });
-
-// Initial state
-toggleModePanel();
-');
 
 $formwriter->end_form();
 

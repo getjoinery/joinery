@@ -130,7 +130,7 @@ check(!$bad, 'none declares a raw code or phrase input', implode(', ', $bad));
 section('The browser posts KEKs, and keeps the root output');
 
 $posting_files = array('assets/js/vault-lock.js', 'assets/js/vault-keyring.js', 'views/profile/security.php',
-	'includes/setup_steps/encryption_key.php', 'plugins/mailbox/assets/mailbox_reader.js',
+	'includes/setup_steps/encryption_key.php', 'assets/js/setup/encryption_key.js', 'plugins/mailbox/assets/mailbox_reader.js',
 	'plugins/joinery_ai/includes/chat_view_body.php');
 $raw_posts = array();
 foreach ($posting_files as $rel) {

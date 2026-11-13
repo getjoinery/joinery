@@ -1804,32 +1804,11 @@
 
 		echo '<p class="text-muted">Publishing creates: core archive + individual theme/plugin archives for every theme/plugin with included_in_publish=true.</p>';
 
-		echo $formwriter->submitbutton('submit_button', 'Publish Upgrade');
+		// Disabled once pressed, so a second click cannot start a second publish.
+		echo $formwriter->submitbutton('submit_button', 'Publish Upgrade', array('busy' => 'Publishing…'));
 
 		echo $formwriter->end_form();
 
-		// Add JavaScript to disable submit button after click to prevent double submission
-		echo '<script>
-		document.addEventListener("DOMContentLoaded", function() {
-			var form = document.getElementById("form1");
-			if (form) {
-				form.addEventListener("submit", function(e) {
-					var submitButton = form.querySelector("button[type=\'submit\'], input[type=\'submit\']");
-					if (submitButton && !submitButton.disabled) {
-						submitButton.disabled = true;
-						submitButton.style.opacity = "0.6";
-						submitButton.style.cursor = "not-allowed";
-						var originalText = submitButton.textContent || submitButton.value;
-						if (submitButton.textContent !== undefined) {
-							submitButton.textContent = "Publishing...";
-						} else {
-							submitButton.value = "Publishing...";
-						}
-					}
-				});
-			}
-		});
-		</script>';
 
 		$page->end_box();
 

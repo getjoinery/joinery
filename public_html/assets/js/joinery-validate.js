@@ -1,6 +1,7 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.2.8 - the re-submit passes a submitter only while it is still a submit button, else carries its name and value in the hidden input (requestSubmit threw and posted nothing); a refused submission drops the carried name and value
  * @version 1.2.7 - the load banner prints only with window.JOINERY_VALIDATE_DEBUG
  * @version 1.2.6 - an empty field nobody has typed in is not judged as it
  *   loses focus: the error line it drew moved whatever was being pressed, so a
@@ -208,9 +209,29 @@ if (window.JOINERY_VALIDATE_DEBUG) console.log('%c=== JOINERY VALIDATION v1.2.7 
                         // resolves in a microtask - which, on a real click, runs
                         // inside that same dispatch. Calling it here directly
                         // drops the submission with no error and no request.
+                        // Only a real submit button can be the submitter: a
+                        // button whose type changed since (or any other
+                        // element) would make requestSubmit throw and post
+                        // nothing, so its name and value are carried in the
+                        // hidden input instead.
                         const validatedSubmitter =
                             (submitter && submitter.form === this.form) ? submitter : undefined;
                         setTimeout(() => {
+                            if (validatedSubmitter && validatedSubmitter.type !== 'submit') {
+                                if (validatedSubmitter.name) {
+                                    let preserved = this.form.querySelector('input[type="hidden"][data-joinery-submitter]');
+                                    if (!preserved) {
+                                        preserved = document.createElement('input');
+                                        preserved.type = 'hidden';
+                                        preserved.setAttribute('data-joinery-submitter', '1');
+                                        this.form.appendChild(preserved);
+                                    }
+                                    preserved.name = validatedSubmitter.name;
+                                    preserved.value = validatedSubmitter.value || '';
+                                }
+                                this.form.requestSubmit();
+                                return;
+                            }
                             this.form.requestSubmit(validatedSubmitter);
                         }, 0);
                     } else {
@@ -237,6 +258,11 @@ if (window.JOINERY_VALIDATE_DEBUG) console.log('%c=== JOINERY VALIDATION v1.2.7 
                         }
                     }
                 } else {
+                    // A button's name and value carried for this press (a
+                    // confirm button's proof it was confirmed) belong to it
+                    // alone: refused, the next submission must not carry them.
+                    const carried = this.form.querySelector('input[type="hidden"][data-joinery-submitter]');
+                    if (carried) carried.remove();
                     this.showSummary();
                     if (this.invalidHandler) {
                         if (this.debug) console.log('→ Calling invalidHandler');

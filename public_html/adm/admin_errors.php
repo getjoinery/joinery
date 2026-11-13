@@ -92,7 +92,7 @@ if ($page_vars['view'] === 'database') {
 		array_push($rowvalues, $user_name);
 		array_push($rowvalues, $error->get('err_level'));
 		array_push($rowvalues, LibraryFunctions::convert_time($error->get('err_create_time'), "UTC", $session->get_timezone(), 'M j, h:ia'));
-		array_push($rowvalues, $error->get('err_message'));
+		array_push($rowvalues, htmlspecialchars((string)$error->get('err_message'), ENT_QUOTES, 'UTF-8'));
 		// Break up long file paths every 3 slashes
 		$file_path = $error->get('err_file');
 		$file_display = preg_replace('/(\/[^\/]*\/[^\/]*\/[^\/]*)/', '$1<wbr>', htmlspecialchars($file_path));

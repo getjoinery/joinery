@@ -5,6 +5,8 @@
  * Provides a minimal-friction cookie consent system that enables compliance
  * with major privacy regulations while minimizing disruption to users.
  *
+ * @version 1.5 - CCPA: tracking runs until the visitor opts out (it was held back until a cookie existed), the opt-out link is printed, and an opt-out is honoured server-side
+ * @version 1.4 - the banner's script is assets/js/consent.js, its settings a JSON block; the CCPA link has no inline handler
  * @version 1.3 - the banner adds room below the page, so nothing at the bottom stays under it (B5)
  * @version 1.2 - a consent record keeps no IP address
  * @version 1.1 - an unset privacy-policy link or webDir reads as empty (no trim(null) deprecation)
@@ -60,7 +62,8 @@ class ConsentHelper {
         if (!$this->isEnabled()) return true; // If system disabled, allow all
 
         $mode = $this->getMode();
-        if ($mode === 'ccpa') return true; // CCPA allows by default
+        // CCPA allows by default, until the visitor opts out.
+        if ($mode === 'ccpa') return !(isset($this->consent['a']) && $this->consent['a'] == 0);
 
         return isset($this->consent['a']) && $this->consent['a'] == 1;
     }
@@ -74,7 +77,7 @@ class ConsentHelper {
         if (!$this->isEnabled()) return true;
 
         $mode = $this->getMode();
-        if ($mode === 'ccpa') return true;
+        if ($mode === 'ccpa') return !(isset($this->consent['m']) && $this->consent['m'] == 0);
 
         return isset($this->consent['m']) && $this->consent['m'] == 1;
     }
@@ -185,8 +188,8 @@ class ConsentHelper {
     }
 
     /**
-     * Render consent banner HTML, inline CSS, and inline JS
-     * Everything is self-contained - no external files needed
+     * Render the consent banner: its CSS, its settings as a JSON block, and
+     * assets/js/consent.js
      *
      * @return string HTML/CSS/JS for consent banner
      */
@@ -196,7 +199,14 @@ class ConsentHelper {
         $config = $this->getJsConfig();
         if ($config['mode'] === 'off') return '';
 
-        $configJson = json_encode($config);
+        // Data for assets/js/consent.js, which the browser never runs as
+        // script: no inline script (specs/strict_script_policy.md).
+        $configJson = json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE);
+        $script_v = @filemtime(PathHelper::getIncludePath('assets/js/consent.js')) ?: '1';
+        // CCPA owes every page a way to opt out; the banner is the one place
+        // every theme already prints, so the link rides with it.
+        $ccpa = $this->renderCCPALink();
+        $ccpaLink = $ccpa !== '' ? '<div class="joinery-cc-ccpa">' . $ccpa . '</div>' : '';
 
         return <<<HTML
 <style>
@@ -227,139 +237,11 @@ class ConsentHelper {
 .joinery-cc-toggle input:disabled+.joinery-cc-toggle-slider{background:#6c757d;cursor:not-allowed}
 .joinery-cc-modal-buttons{margin-top:20px;display:flex;gap:8px;justify-content:flex-end}
 .joinery-cc-hidden{display:none!important}
+.joinery-cc-ccpa{position:fixed;left:12px;bottom:8px;z-index:9998;font-size:12px}
+.joinery-cc-ccpa-link{color:#495057;text-decoration:underline;background:rgba(255,255,255,.85);padding:2px 6px;border-radius:4px}
 </style>
-<script>
-(function(){
-    var config = {$configJson};
-    var consent = null;
-
-    function getCookie(name) {
-        var match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
-        return match ? decodeURIComponent(match[2]) : null;
-    }
-
-    function setCookie(name, value, days) {
-        var expires = new Date(Date.now() + days * 864e5).toUTCString();
-        document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/; SameSite=Lax';
-    }
-
-    function loadConsent() {
-        var c = getCookie('joinery_cookie_consent');
-        if (!c) return null;
-        try { return JSON.parse(c); } catch(e) { return null; }
-    }
-
-    function saveConsent(analytics, marketing) {
-        var data = { v:'1', a:analytics?1:0, m:marketing?1:0, t:Math.floor(Date.now()/1000) };
-        setCookie('joinery_cookie_consent', JSON.stringify(data), 365);
-        consent = data;
-        recordConsent(data);
-        updateScripts();
-    }
-
-    function recordConsent(data) {
-        joineryApi.post('consent_record', { analytics: data.a === 1, marketing: data.m === 1 })
-            .catch(function() {});
-    }
-
-    function updateScripts() {
-        document.querySelectorAll('script[data-joinery-consent]').forEach(function(script) {
-            var cat = script.getAttribute('data-joinery-consent');
-            var allow = (cat === 'analytics' && consent && consent.a) || (cat === 'marketing' && consent && consent.m);
-            if (allow && script.type === 'text/plain') {
-                var newScript = document.createElement('script');
-                if (script.src) newScript.src = script.src;
-                else newScript.innerHTML = script.innerHTML;
-                script.parentNode.replaceChild(newScript, script);
-            }
-        });
-    }
-
-    function showBanner() {
-        var banner = document.createElement('div');
-        banner.className = 'joinery-cc-banner';
-        banner.id = 'joinery-cc-banner';
-        banner.setAttribute('role', 'dialog');
-        banner.setAttribute('aria-label', 'Cookie consent');
-        banner.innerHTML = '<p>We use cookies to improve your experience and analyze site traffic.</p>' +
-            '<div class="joinery-cc-buttons">' +
-            '<button class="joinery-cc-btn joinery-cc-btn-accept" id="joinery-cc-accept">Accept All</button>' +
-            '<button class="joinery-cc-btn joinery-cc-btn-secondary" id="joinery-cc-reject">Reject All</button>' +
-            '<button class="joinery-cc-btn joinery-cc-btn-secondary" id="joinery-cc-manage">Manage</button>' +
-            (config.privacyPolicyUrl ? '<a class="joinery-cc-link" href="' + config.privacyPolicyUrl + '">Privacy Policy</a>' : '') +
-            '</div>';
-        document.body.appendChild(banner);
-        // The banner floats over the bottom of the page. Room is added below
-        // the content so whatever sits there (a Checkout button) can be
-        // scrolled clear of it instead of staying unclickable underneath.
-        var body = document.body;
-        body.setAttribute('data-joinery-cc-padding', body.style.paddingBottom || '');
-        var current = parseFloat(window.getComputedStyle(body).paddingBottom) || 0;
-        body.style.paddingBottom = (current + banner.offsetHeight + 40) + 'px';
-
-        document.getElementById('joinery-cc-accept').onclick = function() { saveConsent(true, true); hideBanner(); };
-        document.getElementById('joinery-cc-reject').onclick = function() { saveConsent(false, false); hideBanner(); };
-        document.getElementById('joinery-cc-manage').onclick = function() { showModal(); };
-    }
-
-    function hideBanner() {
-        var banner = document.getElementById('joinery-cc-banner');
-        if (banner) banner.remove();
-        var body = document.body;
-        if (body.hasAttribute('data-joinery-cc-padding')) {
-            body.style.paddingBottom = body.getAttribute('data-joinery-cc-padding');
-            body.removeAttribute('data-joinery-cc-padding');
-        }
-    }
-
-    function showModal() {
-        var overlay = document.createElement('div');
-        overlay.className = 'joinery-cc-modal-overlay';
-        overlay.id = 'joinery-cc-modal-overlay';
-        overlay.innerHTML = '<div class="joinery-cc-modal" role="dialog" aria-label="Cookie preferences">' +
-            '<button class="joinery-cc-modal-close" id="joinery-cc-modal-close" aria-label="Close">&times;</button>' +
-            '<h3>Cookie Preferences</h3>' +
-            '<div class="joinery-cc-category"><div class="joinery-cc-category-header"><span class="joinery-cc-category-name">Necessary</span>' +
-            '<label class="joinery-cc-toggle"><input type="checkbox" checked disabled><span class="joinery-cc-toggle-slider"></span></label></div>' +
-            '<p class="joinery-cc-category-desc">Required for the website to function. Cannot be disabled.</p></div>' +
-            '<div class="joinery-cc-category"><div class="joinery-cc-category-header"><span class="joinery-cc-category-name">Analytics</span>' +
-            '<label class="joinery-cc-toggle"><input type="checkbox" id="joinery-cc-analytics"><span class="joinery-cc-toggle-slider"></span></label></div>' +
-            '<p class="joinery-cc-category-desc">Help us understand how visitors use our site.</p></div>' +
-            '<div class="joinery-cc-category"><div class="joinery-cc-category-header"><span class="joinery-cc-category-name">Marketing</span>' +
-            '<label class="joinery-cc-toggle"><input type="checkbox" id="joinery-cc-marketing"><span class="joinery-cc-toggle-slider"></span></label></div>' +
-            '<p class="joinery-cc-category-desc">Used to deliver relevant advertisements.</p></div>' +
-            '<div class="joinery-cc-modal-buttons">' +
-            '<button class="joinery-cc-btn joinery-cc-btn-secondary" id="joinery-cc-save">Save Preferences</button>' +
-            '<button class="joinery-cc-btn joinery-cc-btn-accept" id="joinery-cc-accept-all">Accept All</button></div></div>';
-        document.body.appendChild(overlay);
-
-        document.getElementById('joinery-cc-modal-close').onclick = hideModal;
-        document.getElementById('joinery-cc-save').onclick = function() {
-            saveConsent(document.getElementById('joinery-cc-analytics').checked, document.getElementById('joinery-cc-marketing').checked);
-            hideModal(); hideBanner();
-        };
-        document.getElementById('joinery-cc-accept-all').onclick = function() { saveConsent(true, true); hideModal(); hideBanner(); };
-        overlay.onclick = function(e) { if (e.target === overlay) hideModal(); };
-    }
-
-    function hideModal() {
-        var modal = document.getElementById('joinery-cc-modal-overlay');
-        if (modal) modal.remove();
-    }
-
-    // Initialize
-    consent = loadConsent();
-    if (config.mode === 'gdpr' && !consent) {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', showBanner);
-        } else {
-            showBanner();
-        }
-    } else if (consent) {
-        updateScripts();
-    }
-})();
-</script>
+{$ccpaLink}<script type="application/json" id="joinery-consent-config">{$configJson}</script>
+<script src="/assets/js/consent.js?v={$script_v}"></script>
 HTML;
     }
 
@@ -376,8 +258,8 @@ HTML;
 
         // Convert script to blocked version using namespaced data attribute
         $code = preg_replace(
-            '/<script([^>]*)>/i',
-            '<script$1 type="text/plain" data-joinery-consent="' . htmlspecialchars($category) . '">',
+            '/<script([^>]*)>/i', // jy-allow-script: a pattern, matching tracking code to hold back
+            '<script$1 type="text/plain" data-joinery-consent="' . htmlspecialchars($category) . '">', // jy-allow-script: a pattern or a held-back tag, not a script the page runs
             $code
         );
 
@@ -418,6 +300,7 @@ HTML;
     public function renderCCPALink() {
         if ($this->getMode() !== 'ccpa') return '';
 
-        return '<a href="#" onclick="window.joineryCookieManage && window.joineryCookieManage(); return false;" class="joinery-cc-ccpa-link">Do Not Sell or Share My Personal Information</a>';
+        // assets/js/consent.js opens the preferences when it is clicked
+        return '<a href="#" data-joinery-cc-manage class="joinery-cc-ccpa-link">Do Not Sell or Share My Personal Information</a>';
     }
 }

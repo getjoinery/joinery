@@ -1,5 +1,6 @@
 <?php
 /**
+ * @version 1.2 - opened with no act_code, the page shows its form instead of warning on the missing key
  * @version 1.1 - the terms checkbox appears only for terms the person owes (TermsOwed); its links sit above
  *                 it, where they render, instead of inside the label FormWriter escapes
  */
@@ -22,11 +23,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error('This feature is turned off');
 	}
 
-	$act_code = $input['act_code'];
-	if(!$act_code){
-		$act_code = $input['act_code'];
-	}
+	// Opened without a code (a bookmark, a mistyped link): the form shows, and
+	// a submit is refused as expired below.
+	$act_code = (string)($input['act_code'] ?? '');
 	$page_vars['act_code'] = $act_code;
+	$page_vars['message'] = null;
 
 	// Decide whether to render the terms checkbox. Show it when this code resolves
 	// to a user who has never accepted terms (typically a recipient auto-create or

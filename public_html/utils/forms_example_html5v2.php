@@ -12,6 +12,7 @@
  * - Error handling
  * - Comparison with v1 code
  *
+ * @version 2.1.0 - no custom_script or addReadyScript demos: FormWriter writes no inline script; the country demo is visibility_rules
  * @version 2.0.0
  */
 
@@ -339,84 +340,15 @@ $formwriter3->textinput('test_field_v2_1b', 'Field B (for Option B)', [
     'placeholder' => 'Visible when Option B selected'
 ]);
 
-// Test 2: Custom script with conditional logic
-$formwriter3->dropinput('test_type_v2_2', 'Size Selector (Custom Script)', [
-    'options' => ['Small' => 'small', 'Medium' => 'medium', 'Large' => 'large'],
-    'value' => 'small',
-    'custom_script' => '
-        const size = this.value;
-        const price = document.getElementById("test_price_v2");
-        const warning = document.getElementById("test_bulk_warning_v2");
-
-        if (size === "small") {
-            if (price) price.value = "9.99";
-            if (warning) warning.style.display = "none";
-        } else if (size === "medium") {
-            if (price) price.value = "19.99";
-            if (warning) warning.style.display = "none";
-        } else if (size === "large") {
-            if (price) price.value = "29.99";
-            if (warning) warning.style.display = "";
-        }
-    '
-]);
-
-$formwriter3->textinput('test_price_v2', 'Calculated Price', [
-    'value' => '9.99',
-    'readonly' => true
-]);
-
-$formwriter3->textinput('test_bulk_warning_v2', 'Bulk Order Warning', [
-    'value' => 'Bulk orders require manager approval',
-    'readonly' => true,
-    'helptext' => 'Shown only for large size'
-]);
-
-// Test 3: Form-level script for cross-field logic
-$formwriter3->addReadyScript('
-    const countryV2 = document.getElementById("test_country_v2");
-    if (countryV2) {
-        countryV2.addEventListener("change", function() {
-            const country = this.value;
-            // Target container elements to hide/show both label and input
-            const stateContainer = document.getElementById("test_state_v2_container");
-            const zipContainer = document.getElementById("test_zip_v2_container");
-            const customContainer = document.getElementById("test_custom_v2_container");
-
-            // Also get the input elements for placeholder changes
-            const stateEl = document.getElementById("test_state_v2");
-            const zipEl = document.getElementById("test_zip_v2");
-
-            if (!stateContainer || !zipContainer || !customContainer || !stateEl || !zipEl) return;
-
-            if (country === "us") {
-                stateContainer.style.display = "";
-                zipContainer.style.display = "";
-                customContainer.style.display = "none";
-                stateEl.placeholder = "State";
-                zipEl.placeholder = "ZIP Code (5 digits)";
-            } else if (country === "ca") {
-                stateContainer.style.display = "";
-                zipContainer.style.display = "";
-                customContainer.style.display = "none";
-                stateEl.placeholder = "Province";
-                zipEl.placeholder = "Postal Code";
-            } else {
-                stateContainer.style.display = "none";
-                zipContainer.style.display = "none";
-                customContainer.style.display = "";
-            }
-        });
-
-        // Trigger on load
-        const event = new Event("change");
-        countryV2.dispatchEvent(event);
-    }
-');
-
+// Test 2: One select shows and hides several fields
 $formwriter3->dropinput('test_country_v2', 'Country', [
     'options' => ['United States' => 'us', 'Canada' => 'ca', 'Other' => 'other'],
-    'value' => 'us'
+    'value' => 'us',
+    'visibility_rules' => [
+        'us'      => ['show' => ['test_state_v2', 'test_zip_v2'], 'hide' => ['test_custom_v2']],
+        'ca'      => ['show' => ['test_state_v2', 'test_zip_v2'], 'hide' => ['test_custom_v2']],
+        'default' => ['show' => ['test_custom_v2'], 'hide' => ['test_state_v2', 'test_zip_v2']],
+    ],
 ]);
 
 $formwriter3->textinput('test_state_v2', 'State/Province', [
@@ -431,7 +363,7 @@ $formwriter3->textinput('test_custom_v2', 'Custom Location', [
     'placeholder' => 'Enter your location'
 ]);
 
-// Test 4: Checkbox trigger — keys are 'checked' / 'unchecked'
+// Test 3: Checkbox trigger — keys are 'checked' / 'unchecked'
 $formwriter3->checkboxinput('test_repeats_v2', 'Repeats', [
     'visibility_rules' => [
         'checked'   => ['show' => ['test_repeat_interval_v2', 'test_repeat_ends_v2']],
@@ -444,7 +376,7 @@ $formwriter3->numberinput('test_repeat_interval_v2', 'Every N days', [
     'helptext' => 'Shown only when Repeats is ticked',
 ]);
 
-// Test 5: Radio-group trigger — keys are the option values
+// Test 4: Radio-group trigger — keys are the option values
 $formwriter3->radioinput('test_repeat_ends_v2', 'Ends', [
     'options' => ['never' => 'Never', 'date' => 'On date', 'count' => 'After N occurrences'],
     'value' => 'never',
@@ -466,10 +398,9 @@ $formwriter3->numberinput('test_end_count_v2', 'Number of occurrences', [
 echo '<div class="alert alert-info mt-3">';
 echo '<strong>V2 Test Summary:</strong><ul>';
 echo '<li><strong>Test 1:</strong> Toggle fields with Option A/B selector</li>';
-echo '<li><strong>Test 2:</strong> Size selector updates price automatically</li>';
-echo '<li><strong>Test 3:</strong> Country selector changes field labels and visibility</li>';
-echo '<li><strong>Test 4:</strong> Checkbox trigger reveals interval + ends fields</li>';
-echo '<li><strong>Test 5:</strong> Radio trigger switches between end-date and count</li>';
+echo '<li><strong>Test 2:</strong> Country selector shows state and ZIP, or a custom location</li>';
+echo '<li><strong>Test 3:</strong> Checkbox trigger reveals interval + ends fields</li>';
+echo '<li><strong>Test 4:</strong> Radio trigger switches between end-date and count</li>';
 echo '</ul></div>';
 
 // Submit Button

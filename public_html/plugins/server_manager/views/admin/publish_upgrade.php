@@ -470,7 +470,7 @@ $page->begin_box($pageoptions);
 		<form method="post" class="svm-inline-form mb-2">
 			<?php echo SmAdminCsrf::field(); ?>
 			<input type="hidden" name="action" value="prune_archives">
-			<button type="button" class="btn btn-sm btn-outline-secondary" onclick="var f=this.parentElement; JoineryModal.confirm('Remove <?php echo (int)$reclaimable; ?> old archive file(s) and reclaim <?php echo htmlspecialchars(UpgradeRetention::formatBytes($reclaimable_bytes)); ?>? Release history is kept, and versions in use or marked Keep are never removed.', function(){ f.submit(); })">Reclaim old archives</button>
+			<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="Remove <?php echo (int)$reclaimable; ?> old archive file(s) and reclaim <?php echo htmlspecialchars(UpgradeRetention::formatBytes($reclaimable_bytes)); ?>? Release history is kept, and versions in use or marked Keep are never removed." data-jy-submit="">Reclaim old archives</button>
 		</form>
 	<?php endif; ?>
 	<table class="table table-sm mb-0">
@@ -522,7 +522,7 @@ $page->begin_box($pageoptions);
 							<?php echo SmAdminCsrf::field(); ?>
 							<input type="hidden" name="action" value="delete_upgrade">
 							<input type="hidden" name="upgrade_id" value="<?php echo $u->key; ?>">
-							<button type="button" class="btn btn-sm btn-outline-danger" onclick="var f=this.parentElement; JoineryModal.confirm('Delete upgrade <?php echo htmlspecialchars($version); ?>? This removes both the archive file and the database record.', function(){ f.submit(); })">Delete</button>
+							<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="Delete upgrade <?php echo htmlspecialchars($version); ?>? This removes both the archive file and the database record." data-jy-submit="">Delete</button>
 						</form>
 					</td>
 				</tr>

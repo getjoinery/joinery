@@ -178,7 +178,7 @@
 	function upgrade_plain_text($html) {
 		$tags = 'h[1-6]|p|div|span|strong|b|em|i|small|code|pre|a|table|td|th|hr'
 			. '|fieldset|form|input|button|label|select|option|textarea';
-		$text = preg_replace('~<script\b[^>]*>.*?</script>~is', '', $html);
+		$text = preg_replace('~<script\b[^>]*>.*?</script>~is', '', $html); // jy-allow-script: a pattern or a held-back tag, not a script the page runs
 		$text = preg_replace('~<br\s*/?>~i', "\n", $text);
 		$text = preg_replace('~<li\b[^>]*>~i', '  - ', $text);
 		$text = preg_replace('~</(li|h[1-6]|p|div|ul|ol|tr|table)>~i', "\n", $text);

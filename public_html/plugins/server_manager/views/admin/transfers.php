@@ -10,6 +10,7 @@
  * any to-do. The buttons call the transfer_operator API action. The code itself
  * is never shown here: only the customer's own signed-in page shows it.
  *
+ * @version 1.2 - the transfer buttons' script is assets/js/transfers.js
  * @version 1.1 - shown only where this site sells hosting (SmHosting)
  * @version 1.0
  */
@@ -121,26 +122,7 @@ carry on as a Services subscription. Start a move from a site's node page, or he
 </table>
 <?php endif; ?>
 
-<script>
-document.querySelectorAll('[data-transfer-do]').forEach(function (button) {
-	button.addEventListener('click', function () {
-		if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) { return; }
-		var notice = document.getElementById('transferNotice');
-		var params = { 'do': button.getAttribute('data-transfer-do') };
-		if (button.dataset.provision) { params.provision_id = parseInt(button.dataset.provision, 10); }
-		if (button.dataset.transfer) { params.transfer_id = parseInt(button.dataset.transfer, 10); }
-		button.disabled = true;
-		joineryApi.post('server_manager/transfer_operator', params).then(function () {
-			window.location.reload();
-		}).catch(function (err) {
-			button.disabled = false;
-			notice.hidden = false;
-			notice.className = 'alert alert-danger';
-			notice.textContent = (err && err.message) ? err.message : 'That did not work.';
-		});
-	});
-});
-</script>
+<?php echo PageScript::src('plugins/server_manager/assets/js/transfers.js'); ?>
 
 <?php
 $page->end_box();

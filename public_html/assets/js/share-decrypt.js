@@ -7,8 +7,10 @@
  * on demand — fetches the ciphertext, decrypts it with DriveCrypto, and hands the
  * plaintext to the visitor as a download. The server only ever holds ciphertext.
  *
- * Depends on VaultCrypto + DriveCrypto. window.SHARE_ENC carries the ciphertext
+ * Depends on VaultCrypto + DriveCrypto. The page's #share-enc-config block carries the ciphertext
  * download URL, the encrypted metadata blob, and the ciphertext size.
+ *
+ * @version 1.1 - the details come from a JSON block (no inline script)
  */
 (function () {
 	'use strict';
@@ -37,7 +39,7 @@
 	}
 
 	async function init() {
-		var CFG = window.SHARE_ENC || {};
+		var CFG = (window.joineryPageData && joineryPageData('share-enc-config')) || {};
 		var DC = window.DriveCrypto;
 		if (!DC) { fail('Encryption is unavailable in this browser.'); return; }
 		var supported = await DC.contentSupported();

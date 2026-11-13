@@ -292,7 +292,7 @@ class ApprovalChallenge {
 	/**
 	 * Which scope shows first when more than one is pending. A removal
 	 * outranks a restore: the page renders one ceremony at a time, because
-	 * recovery-readiness.js binds one window.rrApproval and two key boxes on
+	 * recovery-readiness.js binds one #rr-approval-config and two key boxes on
 	 * one screen is how a person answers the wrong one.
 	 */
 	const PRECEDENCE = array(self::DECOMMISSION, self::RESTORE, self::EXPORT, self::REKEY);

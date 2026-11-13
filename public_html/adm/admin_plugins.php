@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.10 - each action is a single-button POST form or a link; the page's script is assets/js/admin-plugins.js (no inline script)
 // @version 1.9 - the host setup line says whether the plugin declares a host remover; an uninstalled plugin's row
 //               names the removal request's kind, links its transcript and offers Run removal again when it
 //               failed (specs/plugin_host_removal.md D7)
@@ -397,6 +398,19 @@ $page->begin_box(array('altlinks' => $altlinks));
                 if ($plugin['directory_exists']) {
                     $plugin_name = htmlspecialchars($plugin['name']);
                     $plugin_status = $plugin['plugin'] ? $plugin['plugin']->get('plg_status') : null;
+                    // Each action is a single-button POST form (action_button), asking
+                    // first where it needs to; a page to visit is a link. No javascript:.
+                    $raw_name = (string)$plugin['name'];
+                    $act = function ($label, $action, $confirm = '') use ($raw_name) {
+                        $opts = array('hidden' => array('action' => $action, 'plugin_name' => $raw_name), 'class' => 'dropdown-item');
+                        if ($confirm !== '') {
+                            $opts['confirm'] = $confirm;
+                        }
+                        return AdminPage::action_button($label, '/admin/admin_plugins', $opts);
+                    };
+                    $go = function ($label, $url) {
+                        return '<a href="' . htmlspecialchars($url) . '" class="dropdown-item">' . htmlspecialchars($label) . '</a>';
+                    };
 
                     // Check if this plugin is the active theme provider
                     $is_active_theme_provider = false;
@@ -411,7 +425,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // Build actions array
                     $actions = array();
 
-                    $uninstall_warning = "This will drop all of this plugin\\'s tables and delete its data now. The host removes the plugin files within a few minutes. This cannot be undone.";
+                    $uninstall_warning = "This will drop all of this plugin's tables and delete its data now. The host removes the plugin files within a few minutes. This cannot be undone.";
 
                     if ($plugin_status === Plugin::STATUS_UNINSTALLED) {
                         // Files still on disk: root is about to remove them, and
@@ -420,31 +434,31 @@ $page->begin_box(array('altlinks' => $altlinks));
                     } elseif (!$plugin['plugin'] || !$plugin_status) {
                         // Not installed (no database record) — files on disk, awaiting install.
                         // Post-uninstall lands here too, since uninstall removes the row.
-                        $actions['Install'] = "javascript:submitPluginAction('install', '$plugin_name')";
+                        $actions['Install'] = $act('Install', 'install');
                     } else {
                         // On or off is plg_active (is_active()). plg_status is a
                         // lifecycle note: 'stale' or 'error' can sit on a plugin
                         // that is switched on and running.
                         if ($plugin_status === 'error') {
-                            $actions['Repair'] = "javascript:submitPluginAction('repair_plugin', '$plugin_name')";
+                            $actions['Repair'] = $act('Repair', 'repair_plugin');
                         }
                         if ($plugin['plugin']->is_active()) {
-                            $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
+                            $actions['Deactivate'] = $act('Deactivate', 'deactivate');
                             if ($is_sandboxed) {
-                                $actions[$waits_on_approval ? 'Review new permissions' : 'What it may do']
-                                    = htmlspecialchars(SandboxPluginManager::approvalUrl($plugin['name']));
-                                $actions['Call log'] = htmlspecialchars('/admin/admin_sandbox_log?plugin=' . rawurlencode($plugin['name']));
+                                $review_label = $waits_on_approval ? 'Review new permissions' : 'What it may do';
+                                $actions[$review_label] = $go($review_label, SandboxPluginManager::approvalUrl($plugin['name']));
+                                $actions['Call log'] = $go('Call log', '/admin/admin_sandbox_log?plugin=' . rawurlencode($plugin['name']));
                             }
                         } else {
                             if ($is_sandboxed && $waits_on_approval) {
                                 // Activation is refused until approved: the
                                 // review page approves and activates in one.
-                                $actions['Review and activate'] = htmlspecialchars(SandboxPluginManager::approvalUrl($plugin['name']));
+                                $actions['Review and activate'] = $go('Review and activate', SandboxPluginManager::approvalUrl($plugin['name']));
                             } elseif ($plugin_status !== 'error') {
-                                $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
+                                $actions['Activate'] = $act('Activate', 'activate');
                             }
                             if (!$is_active_theme_provider) {
-                                $actions['Uninstall'] = "javascript:confirmPluginAction('uninstall', '$plugin_name', '$uninstall_warning')";
+                                $actions['Uninstall'] = $act('Uninstall', 'uninstall', $uninstall_warning);
                             }
                         }
                     }
@@ -456,13 +470,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                         if (isset($edited[$plugin['name']])) {
                             // The same mark as Disable upgrade, offered as what
                             // it means for an edited plugin, with its cost.
-                            $keep_warning = "Deploys will leave $plugin_name alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.";
-                            $actions['Keep my changes'] = "javascript:confirmPluginAction('mark_preserved', '$plugin_name', '$keep_warning')";
+                            $keep_warning = "Deploys will leave $raw_name alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.";
+                            $actions['Keep my changes'] = $act('Keep my changes', 'mark_preserved', $keep_warning);
                         } elseif ($plugin['plugin']->receives_upgrades()) {
-                            $actions['Disable upgrade'] = "javascript:submitPluginAction('mark_preserved', '$plugin_name')";
+                            $actions['Disable upgrade'] = $act('Disable upgrade', 'mark_preserved');
                         } else {
-                            $allow_warning = "The next deploy will replace your copy of $plugin_name with the version Joinery ships. Your copy is not kept.";
-                            $actions['Allow upgrade'] = "javascript:confirmPluginAction('mark_upgradable', '$plugin_name', '$allow_warning')";
+                            $allow_warning = "The next deploy will replace your copy of $raw_name with the version Joinery ships. Your copy is not kept.";
+                            $actions['Allow upgrade'] = $act('Allow upgrade', 'mark_upgradable', $allow_warning);
                         }
                     }
 
@@ -472,14 +486,14 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $action_cell = '<div class="dropdown">';
                         $action_cell .= '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
                         $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-                        foreach ($actions as $label => $action) {
-                            $action_cell .= '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
+                        foreach ($actions as $action) {
+                            $action_cell .= $action;
                         }
                         // Add disabled uninstall option with explanation for active theme providers
                         if ($is_active_theme_provider && $plugin['plugin'] && !$plugin['plugin']->is_active()) {
-                            $action_cell .= '<a href="#" class="dropdown-item disabled" onclick="return false;" title="Cannot uninstall active theme provider">';
+                            $action_cell .= '<span class="dropdown-item disabled" aria-disabled="true" title="Cannot uninstall active theme provider">';
                             $action_cell .= '<span class="text-muted">Uninstall (Active Theme)</span>';
-                            $action_cell .= '</a>';
+                            $action_cell .= '</span>';
                         }
                         $action_cell .= '</div>';
                         $action_cell .= '</div>';
@@ -497,7 +511,10 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $action_cell = '<div class="dropdown">';
                         $action_cell .= '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
                         $action_cell .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-                        $action_cell .= '<a href="javascript:submitPluginAction(\'install\', \'' . $plugin_name . '\')" class="dropdown-item">Install</a>';
+                        $action_cell .= AdminPage::action_button('Install', '/admin/admin_plugins', array(
+                            'hidden' => array('action' => 'install', 'plugin_name' => (string)$plugin['name']),
+                            'class'  => 'dropdown-item',
+                        ));
                         $action_cell .= '</div></div>';
                     } else {
                         $action_cell = '<span class="text-muted">Not published by the upgrade source</span>';
@@ -595,73 +612,6 @@ $page->begin_box(array('altlinks' => $altlinks));
     </div>
 </div>
 
-<script>
-function submitPluginAction(action, pluginName) {
-    var form = document.createElement('form');
-    form.method = 'post';
-    form.style.display = 'none';
-
-    var actionInput = document.createElement('input');
-    actionInput.type = 'hidden';
-    actionInput.name = 'action';
-    actionInput.value = action;
-    form.appendChild(actionInput);
-
-    var pluginInput = document.createElement('input');
-    pluginInput.type = 'hidden';
-    pluginInput.name = 'plugin_name';
-    pluginInput.value = pluginName;
-    form.appendChild(pluginInput);
-
-    document.body.appendChild(form);
-    form.submit();
-}
-
-function confirmPluginAction(action, pluginName, message) {
-    JoineryModal.confirm(message, function() {
-        submitPluginAction(action, pluginName);
-    });
-}
-
-// Run setup again: queue the plugin's host installer as a root request, then
-// show that request's panel. A second press while it waits returns the same one.
-document.addEventListener('click', function(e) {
-    var button = e.target.closest('[data-run-installer]');
-    if (!button) { return; }
-    e.preventDefault();
-    button.disabled = true;
-    button.textContent = 'Queuing…';
-    joineryApi.post('plugin_installer_run', { plugin: button.getAttribute('data-run-installer') })
-        .then(function(data) {
-            if (!data || !data.request_id) { throw new Error('no request'); }
-            window.location = '/admin/admin_plugins?installer_request=' + encodeURIComponent(data.request_id);
-        })
-        .catch(function(err) {
-            button.disabled = false;
-            button.textContent = 'Run setup again';
-            JoineryModal.alert('Could not queue the setup run' + (err && err.message ? ': ' + err.message : '.'));
-        });
-});
-// Run removal again: queue the uninstalled plugin's host remover (and then its
-// file removal) as a root request, then show that request's panel.
-document.addEventListener('click', function(e) {
-    var button = e.target.closest('[data-run-remover]');
-    if (!button) { return; }
-    e.preventDefault();
-    button.disabled = true;
-    button.textContent = 'Queuing…';
-    joineryApi.post('plugin_remover_run', { plugin: button.getAttribute('data-run-remover') })
-        .then(function(data) {
-            if (!data || !data.request_id) { throw new Error('no request'); }
-            window.location = '/admin/admin_plugins?installer_request=' + encodeURIComponent(data.request_id);
-        })
-        .catch(function(err) {
-            button.disabled = false;
-            button.textContent = 'Run removal again';
-            JoineryModal.alert('Could not queue the removal' + (err && err.message ? ': ' + err.message : '.'));
-        });
-});
-</script>
 <style>
 .plugin-host-setup { margin-top: 4px; font-size: 0.8em; color: #495057; }
 .plugin-host-setup-failed { color: #c82333; }
@@ -690,115 +640,7 @@ document.addEventListener('click', function(e) {
 .prov-item-unmet .prov-item-status { color: #9a7400; }
 .prov-item-error .prov-item-status { color: #c82333; }
 </style>
-<script>
-(function() {
-    var nodes = document.querySelectorAll('[data-provisioning-plugin]');
-    if (!nodes.length) { return; }
-    var canRunInstaller = <?php echo $can_run_installer ? 'true' : 'false'; ?>;
-
-    joineryApi.post('plugin_provisioning_check', {})
-        .then(function(data) {
-            if (!data || !data.plugins) { throw new Error('bad response'); }
-            nodes.forEach(function(node) {
-                var name = node.getAttribute('data-provisioning-plugin');
-                render(node, name, data.plugins[name] || {});
-            });
-        })
-        .catch(function() {
-            nodes.forEach(function(node) {
-                node.innerHTML = '<span class="prov-badge prov-unknown">Cannot check setup</span>';
-            });
-        });
-
-    function render(node, pluginName, provisionersMap) {
-        var items = Object.keys(provisionersMap).map(function(k) { return provisionersMap[k]; });
-        if (!items.length) { node.innerHTML = ''; return; }
-
-        var states = items.map(function(i) { return i.state; });
-        var roll = states.indexOf('error') !== -1 ? 'error'
-                 : states.indexOf('unmet') !== -1 ? 'unmet'
-                 : states.indexOf('reachable') !== -1 ? 'reachable'
-                 : 'verified';
-
-        var labels = {
-            verified:  'Setup complete',
-            reachable: 'Reachable — not fully verified',
-            unmet:     'Needs setup',
-            error:     'Check failed'
-        };
-
-        node.innerHTML = '';
-        var badge = document.createElement('span');
-        badge.className = 'prov-badge prov-' + roll;
-        badge.textContent = labels[roll];
-        badge.setAttribute('role', 'button');
-        badge.tabIndex = 0;
-        badge.title = 'Click for details';
-
-        var panel = buildPanel(pluginName, items);
-        node.appendChild(badge);
-        node.appendChild(panel);
-
-        function toggle() {
-            panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
-        }
-        badge.addEventListener('click', toggle);
-        badge.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-        });
-    }
-
-    function buildPanel(pluginName, items) {
-        var panel = document.createElement('div');
-        panel.className = 'prov-panel';
-        panel.style.display = 'none';
-
-        var offeredRun = false;
-        items.forEach(function(it) {
-            var row = document.createElement('div');
-            row.className = 'prov-item prov-item-' + it.state;
-
-            var label = document.createElement('div');
-            label.className = 'prov-item-label';
-            label.textContent = it.label;
-            row.appendChild(label);
-
-            if (it.details) {
-                var details = document.createElement('div');
-                details.className = 'prov-item-details';
-                details.textContent = it.details;
-                row.appendChild(details);
-            }
-
-            var status = document.createElement('div');
-            status.className = 'prov-item-status';
-            if (it.state === 'verified') {
-                status.textContent = 'Verified';
-            } else if (it.state === 'reachable') {
-                status.textContent = 'Reachable (listening, not verified)';
-            } else if (it.state === 'unmet') {
-                status.textContent = 'Needs setup — ' + (it.reason || '');
-            } else {
-                status.textContent = 'Check failed — ' + (it.reason || '');
-            }
-            row.appendChild(status);
-
-            // The plugin's own installer fixes this one: offer it once per panel.
-            if (it.state === 'unmet' && it.fixed_by_installer && canRunInstaller && !offeredRun) {
-                offeredRun = true;
-                var run = document.createElement('button');
-                run.type = 'button';
-                run.className = 'btn btn-sm btn-outline-secondary plugin-run-installer';
-                run.setAttribute('data-run-installer', pluginName);
-                run.textContent = 'Run setup again';
-                row.appendChild(run);
-            }
-            panel.appendChild(row);
-        });
-        return panel;
-    }
-})();
-</script>
+<?php echo PageScript::json('admin-plugins-config', array('can_run_installer' => (bool)$can_run_installer)), PageScript::src('assets/js/admin-plugins.js'); ?>
 <?php endif; ?>
 
 <?php

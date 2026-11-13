@@ -372,6 +372,9 @@ class WebErrorHandler implements ErrorHandlerInterface {
         $html .= $this->renderActions($exception, $context);
         $html .= '</div>';
         
+        // Guarded: an error page must still render when the error was the
+        // class loader's.
+        $html .= class_exists('PageScript') ? PageScript::src('assets/js/error-page.js') : '';
         $html .= '</body></html>';
         
         return $html;
@@ -447,13 +450,46 @@ class WebErrorHandler implements ErrorHandlerInterface {
         return $html;
     }
     
+    /**
+     * "Go Back". assets/js/error-page.js makes it the browser's own Back, so a
+     * form the visitor was filling in keeps what they typed. Without the
+     * script it is a link to the page they came from on this site, or to the
+     * home page when there is none: no inline handler either way
+     * (specs/strict_script_policy.md).
+     */
+    protected static function backLink(): string {
+        $to = self::sameSiteReferer();
+        return '<a href="' . htmlspecialchars($to !== '' ? $to : '/', ENT_QUOTES) . '" class="btn btn-secondary" data-jy-history-back>Go Back</a>';
+    }
+
+    /** The referring page's path and query when it was on this site, else ''. */
+    protected static function sameSiteReferer(): string {
+        $ref = (string)($_SERVER['HTTP_REFERER'] ?? '');
+        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+        $parts = $ref !== '' ? parse_url($ref) : false;
+        if (!is_array($parts) || $host === '' || strcasecmp((string)($parts['host'] ?? '') . (isset($parts['port']) ? ':' . $parts['port'] : ''), $host) !== 0) {
+            return '';
+        }
+        $path = (string)($parts['path'] ?? '/');
+        if ($path === '' || $path[0] !== '/' || (isset($path[1]) && ($path[1] === '/' || $path[1] === '\\'))) {
+            return '';
+        }
+        $to = $path . (isset($parts['query']) ? '?' . $parts['query'] : '');
+        // A browser drops tabs and line breaks from an address and reads a
+        // backslash as "/", so none of those, nor spaces or control characters.
+        if (preg_match('/[\x00-\x20\x7f\\\\]/', $to)) {
+            return '';
+        }
+        return $to;
+    }
+
     protected function renderActions(\Throwable $exception, ErrorContext $context): string {
         $html = '<div class="error-actions">';
         
         if ($exception instanceof AuthenticationException) {
             $html .= '<a href="/login" class="btn btn-primary">Login</a>';
         } else {
-            $html .= '<button onclick="history.back()" class="btn btn-secondary">Go Back</button>';
+            $html .= self::backLink();
             $html .= '<a href="/" class="btn btn-primary">Home</a>';
         }
 
@@ -702,7 +738,7 @@ class AdminErrorHandler extends WebErrorHandler {
         if ($exception instanceof AuthenticationException) {
             $html .= '<a href="/login" class="btn btn-primary">Login to Admin</a>';
         } else {
-            $html .= '<button onclick="history.back()" class="btn btn-secondary">Go Back</button>';
+            $html .= self::backLink();
             $html .= '<a href="/adm" class="btn btn-primary">Admin Dashboard</a>';
         }
 

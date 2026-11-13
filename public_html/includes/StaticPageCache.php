@@ -6,6 +6,16 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 2.1 - the URL in the cached page's comment is escaped: a path holding --> can't close it
+ * @version 2.2 - no nonce code: pages carry none (specs/strict_script_policy.md WP10)
+ * @version 2.0 - a page that already holds NONCE_PLACEHOLDER is never cached (a stored script could claim the nonce)
+ * @version 1.9 - a page built with a CspNonce is saved with NONCE_PLACEHOLDER in its place and served with a
+ *                fresh one, in its CSP header and its scripts
+ * @version 1.8 - a cached page carries the security headers it was built with: createCache() records
+ *                them in its index entry and serve() sends them again, so a cache hit is no longer
+ *                served without its Content-Security-Policy, X-Frame-Options, nosniff and HSTS. An
+ *                entry saved before this has no headers recorded and is built afresh. A page built
+ *                under protocol_mode https_redirect is not served from the cache over plain HTTP.
  * @version 1.7 - /verify-email is an excluded path: its page shows the activation code it was opened with
  * @version 1.6 - /copy-key is an excluded path: it shows what this machine's agent is waiting for, so a
  *                copy saved a moment before the agent asked said "not waiting" for the whole wait
@@ -437,9 +447,88 @@ class StaticPageCache {
     }
 
     /**
-     * Create a cache file for a URL
+     * The response headers a cached page must carry again when it is served:
+     * the ones PublicPageBase::send_transport_headers() sets. A cache hit is
+     * answered before any page object exists, so these are recorded with the
+     * page when it is saved and sent again from the index (serve()).
      */
-    public static function createCache($url, $params, $content) {
+    const TRANSPORT_HEADERS = [
+        'content-security-policy',
+        'content-security-policy-report-only',
+        'strict-transport-security',
+        'x-content-type-options',
+        'x-permitted-cross-domain-policies',
+        'x-frame-options',
+        'referrer-policy',
+    ];
+
+    /**
+     * What this response has said about transport so far, as createCache()
+     * records it: the TRANSPORT_HEADERS lines already sent, whether the
+     * site redirects plain HTTP to HTTPS (a page built under that mode must
+     * never be served from the cache over plain HTTP, which the full page
+     * would have redirected).
+     *
+     * @return array{headers: string[], https_redirect: bool}
+     */
+    public static function currentTransport(): array {
+        $headers = array();
+        foreach (headers_list() as $line) {
+            $name = strtolower(trim(strtok($line, ':')));
+            if (in_array($name, self::TRANSPORT_HEADERS, true)) {
+                $headers[] = $line;
+            }
+        }
+        $mode = class_exists('Globalvars', false)
+            ? Globalvars::get_instance()->get_setting('protocol_mode', false, true)
+            : null;
+        return array('headers' => $headers, 'https_redirect' => ($mode === 'https_redirect'));
+    }
+
+    /**
+     * Answer this request from a cached file, with the headers the page was
+     * built with. Returns false, having sent nothing, when the page must be
+     * built instead: an entry saved before headers were recorded (it is
+     * dropped, so the build replaces it), or a plain-HTTP visit to a site
+     * that redirects to HTTPS.
+     */
+    public static function serve(string $cache_file, $url, $params = []): bool {
+        $entry = self::getCacheMetadata($url, $params);
+        if (!$entry || !isset($entry['headers']) || !is_array($entry['headers'])) {
+            self::invalidateUrl($url, $params);
+            return false;
+        }
+        if (!empty($entry['https_redirect'])) {
+            require_once(__DIR__ . '/LibraryFunctions.php');
+            if (!LibraryFunctions::isSecure()) {
+                return false;
+            }
+        }
+        $body = (string)file_get_contents($cache_file);
+        $headers = array_map('strval', $entry['headers']);
+        foreach ($headers as $line) {
+            $name = strtolower(trim(strtok($line, ':')));
+            if (in_array($name, self::TRANSPORT_HEADERS, true)) {
+                // Not replacing: two CSP headers of one name are two policies.
+                header($line, false);
+            }
+        }
+        header('Content-Type: text/html; charset=utf-8');
+        header('X-Cache: HIT');
+        header('X-Cache-Created: ' . gmdate('c', $entry['time']));
+        header('X-Cache-Age: ' . (time() - $entry['time']));
+        header('Content-Length: ' . strlen($body));
+        echo $body;
+        return true;
+    }
+
+    /**
+     * Create a cache file for a URL
+     *
+     * @param array|null $transport what currentTransport() returns; null reads
+     *                              it from this response (tests pass their own)
+     */
+    public static function createCache($url, $params, $content, ?array $transport = null) {
         if (self::$skip_request) {
             return false;
         }
@@ -451,6 +540,10 @@ class StaticPageCache {
         }
         if (self::hasArrayParam($params)) {
             return false;
+        }
+
+        if ($transport === null) {
+            $transport = self::currentTransport();
         }
 
         $hash = self::generateCacheKey($url, $params);
@@ -483,7 +576,10 @@ class StaticPageCache {
             $content = ltrim($content);
 
             // Insert comment after <head> tag for best compatibility
-            $comment = "\n    <!-- Cached: {$url_with_params} | Created: " . gmdate('c') . " -->";
+            // The URL is the visitor's, decoded: escaped so no "-->" or "--!>"
+            // in it can close the comment.
+            $comment_url = htmlspecialchars($url_with_params, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $comment = "\n    <!-- Cached: {$comment_url} | Created: " . gmdate('c') . " -->";
 
             // Try to insert after <head> tag
             if (preg_match('/(<head[^>]*>)/i', $content, $matches, PREG_OFFSET_CAPTURE)) {
@@ -523,7 +619,9 @@ class StaticPageCache {
                 'status' => 'cached',
                 'url' => $url_with_params,
                 'time' => time(),
-                'extension' => $extension
+                'extension' => $extension,
+                'headers' => array_values(array_map('strval', (array)($transport['headers'] ?? array()))),
+                'https_redirect' => !empty($transport['https_redirect']),
             ];
 
             self::$index = $index;  // Update the static property

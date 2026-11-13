@@ -13,10 +13,12 @@
  * of a scrollable frame, and the frame's opaque origin is exactly what stops us
  * measuring its content to size it. So the sheet inlines the body, run through
  * MailboxHtmlSanitizer::sanitizeForPrint(), under a Content-Security-Policy
- * that allows no script beyond this file's own nonce'd print call and no
+ * that allows no script but the one file that calls print (assets/mailbox_print.js) and no
  * network fetch beyond images. The sanitizer and the policy are independent —
  * a miss in one is still not an execution.
  *
+ * @version 1.4.1 - the print file is named at the configured address and the request's (a proxy's Host)
+ * @version 1.4.0 - the print call is assets/mailbox_print.js, the one script the sheet's policy names (no nonce)
  * @version 1.3.0 - mailbox_message_bytes(): stored, fetched, else rebuilt, for every download (B1)
  * @version 1.2.0 - a Fortress message has no original and no server print sheet
  * @version 1.1.0
@@ -247,13 +249,32 @@ function mailbox_print_message(InboundEmailMessage $message): void {
 		$attachments[] = (string)$att->get('ima_filename');
 	}
 
-	// One-shot nonce: our own print call runs, and nothing the message carried
-	// can, whatever survived the sanitizer.
-	$nonce = base64_encode(random_bytes(16));
+	// The one script allowed is the file that calls print, named by its full
+	// address (a path in a source matches that file only), so nothing the
+	// message carried can run, whatever survived the sanitizer: not inline
+	// script, and not another file of this site's either. It is named at the
+	// site's configured address and at the address this request came in on,
+	// since a proxy may send a Host of its own. An address that is not a plain
+	// scheme, host and port is left out; with neither, no script runs and the
+	// sheet just does not print itself.
+	$print_js = '/plugins/mailbox/assets/mailbox_print.js';
+	$origin_ok = function ($origin) {
+		return preg_match('#^https?://(?:[A-Za-z0-9.\-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$#', $origin) === 1;
+	};
+	$sources = array();
+	$configured = rtrim(LibraryFunctions::get_absolute_url('/'), '/');
+	if ($origin_ok($configured)) {
+		$sources[] = $configured . $print_js;
+	}
+	$request_origin = LibraryFunctions::detect_protocol() . '://' . (string)($_SERVER['HTTP_HOST'] ?? '');
+	if ($origin_ok($request_origin) && strcasecmp($request_origin, $configured) !== 0) {
+		$sources[] = $request_origin . $print_js;
+	}
+	$script_src = $sources ? implode(' ', $sources) : "'none'";
 	header('Content-Type: text/html; charset=utf-8');
 	header('X-Content-Type-Options: nosniff');
 	header("Content-Security-Policy: default-src 'none'; img-src https: data:; "
-		. "style-src 'unsafe-inline'; script-src 'nonce-" . $nonce . "'; "
+		. "style-src 'unsafe-inline'; script-src " . $script_src . "; "
 		. "form-action 'none'; frame-ancestors 'none'; base-uri 'none'");
 
 	$esc = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5); };
@@ -292,7 +313,8 @@ function mailbox_print_message(InboundEmailMessage $message): void {
 	}
 
 	echo '<!--/email_off-->';
-	echo '<script nonce="' . $esc($nonce) . '">window.onload=function(){window.print();};</script>';
+	$print_path = PathHelper::getIncludePath(ltrim($print_js, '/'));
+	echo '<script src="' . $print_js . '?v=' . (is_file($print_path) ? filemtime($print_path) : '1') . '"></script>';
 	echo '</body></html>';
 	exit();
 }

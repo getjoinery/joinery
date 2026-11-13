@@ -219,7 +219,7 @@ function profile_sites_logic(array $input): LogicResult {
 		'account_connected' => $account !== null && $account->get('cca_status') === 'active',
 		'managed_on_sale'   => count(ManagedSiteDraft::offered_plans()) > 0,
 		'configure_url'     => ManagedSiteDraft::CONFIGURE_URL,
-		'availability_js'   => ManagedDomainIntake::availabilityScript('alternate_domain', 'alternate_domain_status'),
+		'availability_html'   => ManagedDomainIntake::availabilityScript('alternate_domain', 'alternate_domain_status'),
 	));
 }
 

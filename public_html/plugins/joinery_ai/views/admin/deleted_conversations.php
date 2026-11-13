@@ -30,7 +30,7 @@ $page->admin_header([
 ]);
 
 if ($numrecords) {
-    echo '<form method="post" action="/admin/joinery_ai/deleted_conversations" class="mb-3" onsubmit="return confirm(\'Permanently delete all ' . intval($numrecords) . ' soft-deleted conversations? This cannot be undone.\')">';
+    echo '<form method="post" action="/admin/joinery_ai/deleted_conversations" class="mb-3" data-jy-confirm="Permanently delete all ' . intval($numrecords) . ' soft-deleted conversations? This cannot be undone.">';
     echo '<input type="hidden" name="action" value="empty_trash">';
     echo '<input type="hidden" name="confirm" value="1">';
     echo '<button type="submit" class="btn btn-sm btn-danger">Empty Trash (' . intval($numrecords) . ')</button>';

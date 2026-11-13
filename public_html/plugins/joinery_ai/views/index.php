@@ -55,8 +55,7 @@ $page->public_header([]);
                         echo '<em>No successful runs yet</em>';
                     endif; ?>
                     <span class="joai-actions">
-                        <a href="/admin/joinery_ai/run_now"
-                           onclick="event.preventDefault(); var f=document.getElementById('runform_<?php echo (int)$recipe->key; ?>'); f.submit();">Run now</a>
+                        <button type="submit" form="runform_<?php echo (int)$recipe->key; ?>" class="jy-link-button">Run now</button>
                         <a href="/admin/joinery_ai/runs?rcp_recipe_id=<?php echo (int)$recipe->key; ?>">History</a>
                     </span>
                     <form id="runform_<?php echo (int)$recipe->key; ?>" method="post"

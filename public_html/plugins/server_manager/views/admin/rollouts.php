@@ -141,7 +141,7 @@ if ($running) {
 	echo '<form method="post" class="svm-inline-form">' . SmAdminCsrf::field()
 		. '<input type="hidden" name="action" value="stop_rollout">'
 		. '<input type="hidden" name="rollout_id" value="' . (int)$running->key . '">'
-		. '<button type="button" class="btn btn-sm btn-outline-danger" onclick="var f=this.parentElement; JoineryModal.confirm(\'Stop this rollout? An apply already running on a node finishes; no further node is started.\', function(){ f.submit(); })">Stop</button></form>';
+		. '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="Stop this rollout? An apply already running on a node finishes; no further node is started." data-jy-submit="">Stop</button></form>';
 } else {
 	echo '<p class="text-muted mb-0">None. A rollout applies this management node\'s release (' . htmlspecialchars($release)
 		. ') to one node at a time and moves on only when that node\'s apply completed, passed its deploy tier, reports the new version, and did not roll back,'

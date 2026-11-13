@@ -133,7 +133,7 @@ if ($is_managed) {
 		echo '<p class="text-muted">Either side can end the connection. '
 		   . 'Leaving here makes the agent tell the management node to forget this machine\'s key and go back to local work only.</p>';
 		echo '<form method="POST" action="' . $self . '" '
-		   . 'onsubmit="return confirm(\'Disconnect from this management node? It stops managing this site, and reconnecting starts a fresh introduction.\');">'
+		   . 'data-jy-confirm="Disconnect from this management node? It stops managing this site, and reconnecting starts a fresh introduction.">'
 		   . '<input type="hidden" name="action" value="disconnect">'
 		   . '<button type="submit" class="btn btn-outline-danger">Disconnect</button>'
 		   . '</form>';
@@ -283,7 +283,7 @@ if ($root_access_offered) {
 		   . 'can log in as root to fix it. The password is locked so only that operator can read it, and every time it is read is recorded. '
 		   . 'It is removed for everyone when the beta ends.</p>';
 		echo '<p class="text-muted small mb-3">Turning this off has the password removed, and cannot be undone: it cannot be turned back on.</p>';
-		echo '<form method="POST" action="' . $self . '" class="d-inline" onsubmit="return confirm(\'Turn off emergency root access? This cannot be undone.\');">'
+		echo '<form method="POST" action="' . $self . '" class="d-inline" data-jy-confirm="Turn off emergency root access? This cannot be undone.">'
 		   . '<input type="hidden" name="action" value="root_access_off">'
 		   . '<button type="submit" class="btn btn-sm btn-outline-secondary">Turn off emergency root access</button>'
 		   . '</form>';

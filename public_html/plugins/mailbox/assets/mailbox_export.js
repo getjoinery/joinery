@@ -15,16 +15,17 @@
  * never crosses a part: a folder past MBOX_PIECE_BYTES continues in
  * "Inbox (2).mbox" and on, which import reads as the same folder.
  *
- * Page contract: window.MAILBOX_EXPORT = {alias_id, address, level, exports};
+ * Page contract: the page's #mailbox-export-config JSON block = {alias_id, address, level, exports};
  * #mail-export-form with [name=export_folder]; [data-export-note];
  * [data-export-list].
  *
+ * @version 1.3 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * Vanilla JS. @version 1.2 - writes the server's export header lines (item.headers) on each message (B70)
  */
 (function () {
 	'use strict';
 
-	var cfg = window.MAILBOX_EXPORT || {};
+	var cfg = window.MAILBOX_EXPORT || (window.MAILBOX_EXPORT = (window.joineryPageData && joineryPageData('mailbox-export-config')) || null) || {};
 	var here = '/profile/mailbox/export?mailbox=' + encodeURIComponent(cfg.alias_id || '');
 	var RESUME = 'joinery_mail_export_resume';
 	var MBOX_PIECE_BYTES = 64 * 1024 * 1024;

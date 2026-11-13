@@ -7,7 +7,12 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.31.4 - its fallback session starts through SessionGuard::start() (unseal_daemon.md C4)
+ * @version 2.36.0 - submitbutton takes 'busy': the words it shows, disabled, once its form posts
+ * @version 2.35.0 - hiddeninput takes 'browser_timezone': the browser fills it with the visitor's time zone
+ * @version 2.34.0 - scriptOnce() is public, so code writing a form block of its own (Product) loads joinery-forms.js once with FormWriter
+ * @version 2.33.0 - radioinput takes 'disabled_values': the choices that may not be picked
+ * @version 2.32.0 - no inline script (specs/strict_script_policy.md WP3): field scripts live in assets/js (joinery-forms.js, joinery-image-selector.js, joinery-file-upload.js), validation and visibility_rules go out as JSON blocks; onclick, onchange, custom_script and addReadyScript() are gone, and passing one throws; submitbutton takes 'confirm', dropinput 'navigate_on_change'
+ * @changelog 2.31.4 - its fallback session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 2.31.3 - hiddeninput: a plain second argument is the value (it was dropped, sending the field empty)
  * @version 2.31.2 - the validator's own debug follows the 'debug' option too (it was always on)
  * @version 2.31.1 - validation details reach the browser console only with the 'debug' option; the uploader's debug logs are gone
@@ -1173,6 +1178,7 @@ abstract class FormWriterV2Base {
     public function submitbutton($name = 'btn_submit', $label = 'Submit', $options = []) {
         // If $name is empty string, use 'btn_submit'
         if (!$name) $name = 'btn_submit';
+        self::refuseScriptOption($name, is_array($options) ? $options : array());
         if ($this->form_locked_level !== null) {
             $options['disabled'] = true;
         }
@@ -1370,7 +1376,8 @@ abstract class FormWriterV2Base {
         echo 'data-endpoint="' . htmlspecialchars($ajaxEndpoint) . '" ';
         echo 'data-pagesize="' . intval($pageSize) . '" ';
         echo 'data-fieldname="' . htmlspecialchars($name) . '" ';
-        echo 'data-fieldid="' . htmlspecialchars($id) . '"';
+        echo 'data-fieldid="' . htmlspecialchars($id) . '" ';
+        echo 'data-placeholder="' . htmlspecialchars($placeholder) . '"';
         echo ' style="--is-primary-color:' . htmlspecialchars($primaryColor) . ';';
         echo '--is-grid-columns:' . intval($gridColumns) . ';';
         echo '--is-thumbnail-width:' . intval($thumbnailWidth) . 'px;';
@@ -1430,14 +1437,14 @@ abstract class FormWriterV2Base {
         echo '</div>'; // end wrapper
 
         // Output CSS and JS assets (once per page)
-        $this->outputImageSelectorAssets($placeholder);
+        $this->outputImageSelectorAssets();
     }
 
     /**
      * Output CSS and JavaScript for image selector functionality
      * Called once per page regardless of number of image selector fields
      */
-    protected function outputImageSelectorAssets($placeholder) {
+    protected function outputImageSelectorAssets() {
         static $assets_loaded = false;
         if ($assets_loaded) return;
         $assets_loaded = true;
@@ -1626,372 +1633,7 @@ abstract class FormWriterV2Base {
 }
 </style>';
 
-        // Inline JavaScript
-        echo '<script>
-(function() {
-    "use strict";
-
-    // Image Selector Manager
-    window.ImageSelectorManager = {
-        modal: null,
-        activeWrapper: null,
-        images: [],
-        offset: 0,
-        hasMore: true,
-        loading: false,
-        searchTimeout: null,
-        selectedUrl: null,
-
-        init: function() {
-            this.createModal();
-            this.bindEvents();
-        },
-
-        createModal: function() {
-            if (document.getElementById("imageselector-modal")) return;
-
-            var modal = document.createElement("div");
-            modal.id = "imageselector-modal";
-            modal.className = "imageselector-modal";
-            modal.innerHTML = \'<div class="imageselector-modal-content">\' +
-                \'<div class="imageselector-modal-header">\' +
-                    \'<h5>Select Image</h5>\' +
-                    \'<button type="button" class="imageselector-modal-close">&times;</button>\' +
-                \'</div>\' +
-                \'<div class="imageselector-search">\' +
-                    \'<input type="text" placeholder="' . htmlspecialchars($placeholder) . '" class="imageselector-search-input">\' +
-                \'</div>\' +
-                \'<div class="imageselector-grid-container">\' +
-                    \'<div class="imageselector-grid"></div>\' +
-                    \'<div class="imageselector-loading" style="display:none;">Loading...</div>\' +
-                    \'<div class="imageselector-empty" style="display:none;">No images found</div>\' +
-                    \'<div class="imageselector-load-more" style="display:none;">\' +
-                        \'<button type="button" class="btn btn-outline-secondary btn-sm">Load More</button>\' +
-                    \'</div>\' +
-                \'</div>\' +
-                \'<div class="imageselector-modal-footer">\' +
-                    \'<button type="button" class="btn btn-secondary imageselector-cancel">Cancel</button>\' +
-                    \'<button type="button" class="btn btn-primary imageselector-confirm" disabled>Select</button>\' +
-                \'</div>\' +
-            \'</div>\';
-            document.body.appendChild(modal);
-            this.modal = modal;
-
-            // Apply CSS variables from active wrapper when opening
-            var gridContainer = modal.querySelector(".imageselector-grid-container");
-            gridContainer.addEventListener("scroll", this.handleScroll.bind(this));
-        },
-
-        bindEvents: function() {
-            var self = this;
-
-            // Delegate click events for open buttons
-            document.addEventListener("click", function(e) {
-                // Open button
-                if (e.target.classList.contains("imageselector-open")) {
-                    var wrapper = e.target.closest(".imageselector-wrapper");
-                    if (wrapper) self.open(wrapper);
-                }
-                // Clear button
-                if (e.target.classList.contains("imageselector-clear")) {
-                    var wrapper = e.target.closest(".imageselector-wrapper");
-                    if (wrapper) self.clear(wrapper);
-                }
-            });
-
-            // Modal events (delegated)
-            document.addEventListener("click", function(e) {
-                // Close button
-                if (e.target.classList.contains("imageselector-modal-close")) {
-                    self.close();
-                }
-                // Cancel button
-                if (e.target.classList.contains("imageselector-cancel")) {
-                    self.close();
-                }
-                // Confirm button
-                if (e.target.classList.contains("imageselector-confirm")) {
-                    self.confirm();
-                }
-                // Image item click
-                if (e.target.closest(".imageselector-item")) {
-                    self.selectImage(e.target.closest(".imageselector-item"));
-                }
-                // Load more button
-                if (e.target.closest(".imageselector-load-more button")) {
-                    self.loadMore();
-                }
-                // Close on backdrop click
-                if (e.target.classList.contains("imageselector-modal")) {
-                    self.close();
-                }
-            });
-
-            // Search input
-            document.addEventListener("input", function(e) {
-                if (e.target.classList.contains("imageselector-search-input")) {
-                    clearTimeout(self.searchTimeout);
-                    self.searchTimeout = setTimeout(function() {
-                        self.search(e.target.value);
-                    }, 300);
-                }
-            });
-
-            // Escape key closes modal
-            document.addEventListener("keydown", function(e) {
-                if (e.key === "Escape" && self.modal && self.modal.classList.contains("active")) {
-                    self.close();
-                }
-            });
-        },
-
-        open: function(wrapper) {
-            this.activeWrapper = wrapper;
-            this.selectedUrl = null;
-            this.offset = 0;
-            this.hasMore = true;
-            this.images = [];
-
-            // Copy CSS variables from wrapper to modal
-            var style = getComputedStyle(wrapper);
-            this.modal.style.setProperty("--is-primary-color", style.getPropertyValue("--is-primary-color"));
-            this.modal.style.setProperty("--is-grid-columns", style.getPropertyValue("--is-grid-columns"));
-            this.modal.style.setProperty("--is-border-radius", style.getPropertyValue("--is-border-radius"));
-
-            // Reset modal state
-            this.modal.querySelector(".imageselector-search-input").value = "";
-            this.modal.querySelector(".imageselector-grid").innerHTML = "";
-            this.modal.querySelector(".imageselector-confirm").disabled = true;
-
-            // Show modal
-            this.modal.classList.add("active");
-            document.body.style.overflow = "hidden";
-
-            // Load first batch
-            this.loadImages();
-        },
-
-        close: function() {
-            this.modal.classList.remove("active");
-            document.body.style.overflow = "";
-            this.activeWrapper = null;
-        },
-
-        loadImages: function(append) {
-            if (this.loading) return;
-            this.loading = true;
-
-            var self = this;
-            var wrapper = this.activeWrapper;
-            var endpoint = wrapper.dataset.endpoint;
-            var pageSize = parseInt(wrapper.dataset.pagesize) || 20;
-            var searchValue = this.modal.querySelector(".imageselector-search-input").value;
-
-            // API-action mode: an /api/v1/ endpoint speaks the JSON envelope —
-            // POST {q, offset, limit} with the browser-session CSRF header and
-            // read data.{images, total, hasMore}. Other endpoints keep the
-            // legacy GET query-string contract returning a bare payload.
-            var isApi = endpoint.indexOf("/api/v1/") === 0;
-            var fetchPromise;
-            if (isApi) {
-                fetchPromise = joineryApi.post(endpoint, { q: searchValue, offset: self.offset, limit: pageSize })
-                    .catch(function(err) { return { error: err.message || "Error loading images" }; });
-            } else {
-                var url = endpoint + "?limit=" + pageSize + "&offset=" + this.offset;
-                if (searchValue) {
-                    url += "&q=" + encodeURIComponent(searchValue);
-                }
-                fetchPromise = fetch(url).then(function(response) { return response.json(); });
-            }
-
-            // Show loading
-            this.modal.querySelector(".imageselector-loading").style.display = "block";
-            this.modal.querySelector(".imageselector-empty").style.display = "none";
-            this.modal.querySelector(".imageselector-load-more").style.display = "none";
-
-            fetchPromise
-                .then(function(data) {
-                    self.loading = false;
-                    self.modal.querySelector(".imageselector-loading").style.display = "none";
-
-                    if (data.error) {
-                        self.modal.querySelector(".imageselector-empty").textContent = data.error;
-                        self.modal.querySelector(".imageselector-empty").style.display = "block";
-                        return;
-                    }
-
-                    self.hasMore = data.hasMore;
-
-                    if (!append) {
-                        self.images = data.images;
-                        self.modal.querySelector(".imageselector-grid").innerHTML = "";
-                    } else {
-                        self.images = self.images.concat(data.images);
-                    }
-
-                    if (self.images.length === 0) {
-                        self.modal.querySelector(".imageselector-empty").style.display = "block";
-                        return;
-                    }
-
-                    self.renderImages(data.images);
-
-                    if (self.hasMore) {
-                        self.modal.querySelector(".imageselector-load-more").style.display = "block";
-                    }
-                })
-                .catch(function(err) {
-                    self.loading = false;
-                    self.modal.querySelector(".imageselector-loading").style.display = "none";
-                    self.modal.querySelector(".imageselector-empty").textContent = "Error loading images";
-                    self.modal.querySelector(".imageselector-empty").style.display = "block";
-                    console.error("ImageSelector error:", err);
-                });
-        },
-
-        renderImages: function(images) {
-            var grid = this.modal.querySelector(".imageselector-grid");
-            var currentValue = this.activeWrapper.querySelector(".imageselector-value").value;
-
-            images.forEach(function(img) {
-                var item = document.createElement("div");
-                item.className = "imageselector-item";
-                item.dataset.url = img.url;
-                item.dataset.filename = img.filename;
-                item.title = img.title || img.filename;
-
-                // Check if this is the currently selected image
-                if (img.url === currentValue) {
-                    item.classList.add("selected");
-                    this.selectedUrl = img.url;
-                    this.modal.querySelector(".imageselector-confirm").disabled = false;
-                }
-
-                var imgEl = document.createElement("img");
-                imgEl.src = img.thumbnail;
-                imgEl.alt = img.title || img.filename;
-                imgEl.loading = "lazy";
-                imgEl.dataset.fallback = img.url;
-                imgEl.dataset.fallbackAttempted = "false";
-                // Fallback to standard URL if thumbnail fails, then show placeholder if both fail
-                imgEl.onerror = function() {
-                    if (this.dataset.fallbackAttempted === "false" && this.dataset.fallback && this.src !== this.dataset.fallback) {
-                        // First failure: try the standard URL
-                        this.dataset.fallbackAttempted = "true";
-                        this.src = this.dataset.fallback;
-                    } else {
-                        // Both thumbnail and standard URL failed - show placeholder
-                        this.style.display = "none";
-                        var placeholder = document.createElement("div");
-                        placeholder.className = "is-placeholder-icon";
-                        placeholder.innerHTML = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"2\" ry=\"2\"/><circle cx=\"8.5\" cy=\"8.5\" r=\"1.5\"/><polyline points=\"21 15 16 10 5 21\"/></svg><span>Image unavailable</span>";
-                        this.parentNode.appendChild(placeholder);
-                    }
-                };
-
-                item.appendChild(imgEl);
-                grid.appendChild(item);
-            }, this);
-        },
-
-        selectImage: function(item) {
-            // Remove selection from all
-            this.modal.querySelectorAll(".imageselector-item.selected").forEach(function(el) {
-                el.classList.remove("selected");
-            });
-
-            // Select this one
-            item.classList.add("selected");
-            this.selectedUrl = item.dataset.url;
-
-            // Enable confirm button
-            this.modal.querySelector(".imageselector-confirm").disabled = false;
-        },
-
-        confirm: function() {
-            if (!this.selectedUrl || !this.activeWrapper) return;
-
-            var wrapper = this.activeWrapper;
-            var valueInput = wrapper.querySelector(".imageselector-value");
-            var preview = wrapper.querySelector(".imageselector-preview");
-            var clearBtn = wrapper.querySelector(".imageselector-clear");
-            var filenameEl = wrapper.querySelector(".imageselector-filename");
-
-            // Update value
-            valueInput.value = this.selectedUrl;
-
-            // Update preview
-            preview.innerHTML = \'<img src="\' + this.selectedUrl + \'" alt="Selected image">\';
-
-            // Show clear button
-            clearBtn.style.display = "";
-
-            // Update filename
-            var filename = this.selectedUrl.split("/").pop();
-            filenameEl.textContent = filename;
-
-            // Trigger change event
-            valueInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-            this.close();
-        },
-
-        clear: function(wrapper) {
-            var valueInput = wrapper.querySelector(".imageselector-value");
-            var preview = wrapper.querySelector(".imageselector-preview");
-            var clearBtn = wrapper.querySelector(".imageselector-clear");
-            var filenameEl = wrapper.querySelector(".imageselector-filename");
-
-            // Clear value
-            valueInput.value = "";
-
-            // Reset preview
-            preview.innerHTML = \'<div class="imageselector-no-preview"><i class="bx bx-image" style="font-size:24px;color:#ccc;"></i></div>\';
-
-            // Hide clear button
-            clearBtn.style.display = "none";
-
-            // Clear filename
-            filenameEl.textContent = "";
-
-            // Trigger change event
-            valueInput.dispatchEvent(new Event("change", { bubbles: true }));
-        },
-
-        search: function(query) {
-            this.offset = 0;
-            this.hasMore = true;
-            this.loadImages(false);
-        },
-
-        loadMore: function() {
-            if (!this.hasMore || this.loading) return;
-            var pageSize = parseInt(this.activeWrapper.dataset.pagesize) || 20;
-            this.offset += pageSize;
-            this.loadImages(true);
-        },
-
-        handleScroll: function(e) {
-            var container = e.target;
-            // Auto-load more when near bottom
-            if (this.hasMore && !this.loading) {
-                if (container.scrollHeight - container.scrollTop - container.clientHeight < 100) {
-                    this.loadMore();
-                }
-            }
-        }
-    };
-
-    // Initialize when DOM is ready
-    if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", function() {
-            ImageSelectorManager.init();
-        });
-    } else {
-        ImageSelectorManager.init();
-    }
-})();
-</script>';
+        echo self::scriptOnce('joinery-image-selector.js');
     }
 
     /**
@@ -2405,108 +2047,7 @@ abstract class FormWriterV2Base {
 }
 </style>';
 
-        echo '<script>
-(function() {
-    "use strict";
-
-    document.addEventListener("click", function(e) {
-        // Expand button click
-        if (e.target.closest(".colorpicker-expand-btn")) {
-            e.preventDefault();
-            var wrapper = e.target.closest(".colorpicker-wrapper");
-            wrapper.classList.toggle("expanded");
-            return;
-        }
-
-        // Swatch click
-        if (e.target.classList.contains("colorpicker-swatch")) {
-            var wrapper = e.target.closest(".colorpicker-wrapper");
-            var color = e.target.dataset.color;
-            selectColor(wrapper, color);
-            wrapper.classList.remove("expanded");
-            return;
-        }
-
-        // Show more link
-        if (e.target.classList.contains("colorpicker-show-more")) {
-            e.preventDefault();
-            var wrapper = e.target.closest(".colorpicker-wrapper");
-            wrapper.querySelectorAll(".colorpicker-hidden").forEach(function(el) {
-                el.classList.remove("colorpicker-hidden");
-            });
-            e.target.style.display = "none";
-            return;
-        }
-
-        // Click outside - close any open panels
-        if (!e.target.closest(".colorpicker-wrapper")) {
-            document.querySelectorAll(".colorpicker-wrapper.expanded").forEach(function(w) {
-                w.classList.remove("expanded");
-            });
-        }
-    });
-
-    document.addEventListener("input", function(e) {
-        // Native color picker change
-        if (e.target.classList.contains("colorpicker-native")) {
-            var wrapper = e.target.closest(".colorpicker-wrapper");
-            var color = e.target.value;
-            selectColor(wrapper, color);
-        }
-
-        // Hex input change
-        if (e.target.classList.contains("colorpicker-hex-input")) {
-            var wrapper = e.target.closest(".colorpicker-wrapper");
-            var color = e.target.value.trim();
-            if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color)) {
-                selectColor(wrapper, color, true);
-            }
-        }
-    });
-
-    function selectColor(wrapper, color, fromInput) {
-        var valueInput = wrapper.querySelector(".colorpicker-value");
-        var preview = wrapper.querySelector(".colorpicker-preview");
-        var hexInput = wrapper.querySelector(".colorpicker-hex-input");
-        var nativePicker = wrapper.querySelector(".colorpicker-native");
-
-        // Update hidden value
-        valueInput.value = color;
-
-        // Update preview
-        preview.style.backgroundColor = color;
-
-        // Update hex input (unless triggered from it)
-        if (!fromInput) {
-            hexInput.value = color;
-        }
-
-        // Update native picker
-        if (nativePicker) {
-            // Expand 3-char hex for native picker
-            var expandedColor = color;
-            if (/^#[0-9a-fA-F]{3}$/.test(color)) {
-                expandedColor = "#" + color[1] + color[1] + color[2] + color[2] + color[3] + color[3];
-            }
-            nativePicker.value = expandedColor;
-        }
-
-        // Update swatch selection
-        wrapper.querySelectorAll(".colorpicker-swatch").forEach(function(swatch) {
-            var swatchColor = swatch.dataset.color.toLowerCase();
-            var selectedColor = color.toLowerCase();
-            // Expand for comparison
-            if (/^#[0-9a-fA-F]{3}$/.test(selectedColor)) {
-                selectedColor = "#" + selectedColor[1] + selectedColor[1] + selectedColor[2] + selectedColor[2] + selectedColor[3] + selectedColor[3];
-            }
-            swatch.classList.toggle("selected", swatchColor === selectedColor);
-        });
-
-        // Trigger change event
-        valueInput.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-})();
-</script>';
+        echo self::scriptOnce('joinery-forms.js');
     }
 
     /**
@@ -2674,6 +2215,25 @@ abstract class FormWriterV2Base {
      * Production logs and renders — a live site refusing a page over a spelling
      * mistake in a help string would be the worse failure.
      */
+    /**
+     * FormWriter writes no script a caller hands it: the strict script policy
+     * refuses an inline handler, so one would silently stop working
+     * (specs/strict_script_policy.md WP3). Always a throw, never only in
+     * debug: a confirm quietly dropped in production deletes without asking.
+     */
+    private static function refuseScriptOption($name, array $options) {
+        $instead = array(
+            'onclick' => "submitbutton's 'confirm' option for a confirm, or a listener in the page's own script file",   // jy-allow-script: the option refused, not a handler written
+            'onchange' => "visibility_rules for show/hide, dropinput's 'navigate_on_change', or a listener in the page's own script file",   // jy-allow-script: the option refused, not a handler written
+            'custom_script' => "visibility_rules, or a listener in the page's own script file",   // jy-allow-script: the option refused, not a handler written
+        );
+        foreach ($instead as $key => $use) {
+            if (array_key_exists($key, $options)) {
+                throw new InvalidArgumentException("FormWriter: field '{$name}' passes '{$key}', and FormWriter writes no inline script. Use {$use}.");
+            }
+        }
+    }
+
     private function refuseUnknownOption($name, $input_type, array $options) {
         $known = static::knownOptionKeys();
         if (empty($known)) {
@@ -2762,6 +2322,7 @@ abstract class FormWriterV2Base {
 
     protected function registerField($name, $input_type, $label, &$options) {
         $this->refuseHandDrawnSetting($name);
+        self::refuseScriptOption($name, is_array($options) ? $options : array());
         $this->refuseUnknownOption($name, $input_type, is_array($options) ? $options : array());
         if ($input_type !== 'hidden' && ($this->form_locked_level !== null || isset($this->locked_columns[$name]))) {
             // A checkbox list's 'disabled' names the options it disables.
@@ -2920,9 +2481,6 @@ abstract class FormWriterV2Base {
         // Get JavaScript validation (this returns HTML string)
         $html .= $this->getJavascriptValidation();
 
-        // Get any ready scripts
-        $html .= $this->outputReadyScripts();
-
         $html .= '</form>';
 
         // Either echo immediately or store for deferred output
@@ -3035,7 +2593,8 @@ abstract class FormWriterV2Base {
     }
 
     /**
-     * Output JavaScript validation initialization
+     * Output the form's client-side validation: its rules as a JSON block,
+     * and the script that reads it
      */
     protected function outputJavascriptValidation() {
         $validation_rules = $this->getAllValidationRules();
@@ -3043,31 +2602,8 @@ abstract class FormWriterV2Base {
         $debug = !empty($this->options['debug']);
 
         if (empty($validation_rules)) {
-            if ($debug) {
-                echo '<script type="text/javascript">';
-                echo 'console.log("No validation rules found for form");';
-                echo '</script>';
-            }
             return;  // No validation needed
         }
-
-        echo '<script type="text/javascript">';
-        if ($debug) {
-            echo 'console.log("=== FormWriterV2 DEBUG ===");';
-            echo 'console.log("Form ID:", "' . htmlspecialchars($this->form_id) . '");';
-        }
-
-        // Output model validation information
-        if ($debug && !empty($this->model_validated_fields)) {
-            echo 'console.log("🔍 Automatic Model Validation Detected:");';
-            foreach ($this->model_validated_fields as $field_name => $info) {
-                echo 'console.log("  ✓ ' . htmlspecialchars($field_name) . ' → Model: ' . htmlspecialchars($info['model']) . '", ' . json_encode($info['rules']) . ');';
-            }
-        }
-
-        echo 'document.addEventListener("DOMContentLoaded", function() {';
-        echo '    var form = document.getElementById("' . htmlspecialchars($this->form_id) . '");';
-        echo '    if (form) {';
 
         // Build rules and messages in JoineryValidator format
         $js_rules = [];
@@ -3235,149 +2771,75 @@ abstract class FormWriterV2Base {
             }
         }
 
-        // Output JoineryValidator initialization
-        if ($debug && !empty($js_rules)) {
-            echo '        console.log("✓ Validation rules:", ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ');';
-        }
-        echo '        var validator = new JoineryValidator(form, {';
-        echo '            rules: ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ',';
-        echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';
-        echo '            errorSummary: ' . ($this->errorSummaryEnabled() ? 'true' : 'false') . ',';
+        // The form's rules go out as data, and assets/js/joinery-forms.js
+        // starts JoineryValidator from them: no inline script
+        // (specs/strict_script_policy.md WP3).
+        $cfg = array(
+            'form' => (string)$this->form_id,
+            'rules' => (object)$js_rules,
+            'messages' => (object)$js_messages,
+            'errorSummary' => (bool)$this->errorSummaryEnabled(),
+            'debug' => $debug,
+        );
         if (!empty($this->validate_when_changed)) {
-            echo '            changedOnly: ' . json_encode(array_keys($this->validate_when_changed), JSON_UNESCAPED_SLASHES) . ',';
+            $cfg['changedOnly'] = array_keys($this->validate_when_changed);
         }
         if (!empty($this->options['error_summary_title'])) {
-            echo '            errorSummaryTitle: ' . json_encode($this->options['error_summary_title'], JSON_UNESCAPED_SLASHES) . ',';
+            $cfg['errorSummaryTitle'] = (string)$this->options['error_summary_title'];
         }
-        echo '            debug: ' . ($debug ? 'true' : 'false');
-        echo '        });';
-        // Expose the instance so page JS can take over submission (set
-        // validator.submitHandler) — the validator otherwise re-submits the
-        // form natively via form.submit() when valid, which bypasses and
-        // navigates over any page-level submit interception.
-        echo '        form.joineryValidator = validator;';
-
-        // Add AJAX submission handler if needed
         if (isset($this->options['data-ajax']) && $this->options['data-ajax'] === 'true') {
-            echo $this->renderAjaxHandler();
+            $cfg['ajax'] = true;
         }
-
-        echo '    }';
-        echo '});';
-        echo '</script>';
+        if ($debug && !empty($this->model_validated_fields)) {
+            $cfg['modelFields'] = $this->model_validated_fields;
+        }
+        echo self::jsonBlock('data-jy-validate', $cfg);
+        echo self::scriptOnce('joinery-forms.js');
     }
 
     /**
-     * Render inline AJAX handler
-     *
-     * @return string JavaScript code
+     * A <script type="application/json"> block carrying $data for FormWriter's
+     * field scripts. The browser never runs it, so the strict script policy
+     * lets it through. Every < > & ' is \u-escaped, so nothing in the data can
+     * end the block.
      */
-    protected function renderAjaxHandler() {
-        return '
-        form.addEventListener("submit", function(e) {
-            e.preventDefault();
-
-            var formData = new FormData(form);
-
-            fetch(form.action, {
-                method: form.method,
-                body: formData,
-                headers: {
-                    "X-Requested-With": "XMLHttpRequest"
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    var callback = form.dataset.callback;
-                    if (callback && window[callback]) {
-                        window[callback](data);
-                    } else {
-                        alert(data.message || "Saved successfully");
-                    }
-                } else if (data.errors) {
-                    Object.keys(data.errors).forEach(function(fieldName) {
-                        var field = form.querySelector("[name=\'" + fieldName + "\']");
-                        if (field) {
-                            var errorDiv = field.parentElement.querySelector(".error-message");
-                            if (!errorDiv) {
-                                errorDiv = document.createElement("div");
-                                errorDiv.className = "error-message text-danger";
-                                field.parentElement.appendChild(errorDiv);
-                            }
-                            errorDiv.textContent = data.errors[fieldName].join(", ");
-                        }
-                    });
-                } else if (data.error) {
-                    alert(data.error);
-                }
-            })
-            .catch(error => {
-                console.error("Form submission error:", error);
-                alert("An error occurred. Please try again.");
-            });
-        });';
+    protected static function jsonBlock(string $attr, $data): string {
+        return '<script type="application/json" ' . $attr . '>'
+            . PageScript::encode($data) . '</script>';
     }
 
     // ===== SHARED JAVASCRIPT OUTPUT METHODS =====
     // These methods extract JavaScript that was previously duplicated across theme implementations
 
     /**
-     * Output shared JavaScript for time input fields
-     * Handles the updateTimeInput function and DOMContentLoaded event listener
+     * The script that keeps a time input's hidden field in step with its three
+     * selects (assets/js/joinery-forms.js), once per page
      */
-    protected function outputTimeInputJavaScript() {
-        static $time_input_js_loaded = false;
-        if (!$time_input_js_loaded) {
-            echo '<script type="text/javascript">
-function updateTimeInput(hourId, minuteId, ampmId, hiddenId) {
-    var hourEl = document.getElementById(hourId);
-    var minuteEl = document.getElementById(minuteId);
-    var ampmEl = document.getElementById(ampmId);
-    var hiddenEl = document.getElementById(hiddenId);
-    if (!hourEl || !minuteEl || !ampmEl || !hiddenEl) return;
-
-    var hour = hourEl.value;
-    var minute = minuteEl.value;
-    var ampm = ampmEl.value;
-
-    if (hour === "" || minute === "") {
-        hiddenEl.value = "";
-        return;
+    /**
+     * A script tag loading by src one of FormWriter's files under assets/js, the first
+     * time a page asks for it, and '' after that. Field code lives in files,
+     * never inline, so the strict script policy runs it
+     * (specs/strict_script_policy.md WP3). Not deferred: it registers its
+     * DOMContentLoaded work where the inline script it took over from did,
+     * so page code that runs on DOMContentLoaded after a form still finds
+     * form.joineryValidator.
+     *
+     * @param string $file a file name in assets/js, e.g. 'joinery-forms.js'
+     * @return string
+     */
+    public static function scriptOnce(string $file): string {
+        static $emitted = array();
+        if (isset($emitted[$file])) {
+            return '';
+        }
+        $emitted[$file] = true;
+        $path = PathHelper::getIncludePath('assets/js/' . $file);
+        return '<script src="/assets/js/' . htmlspecialchars($file) . '?v='
+            . (is_string($path) && is_file($path) ? filemtime($path) : '1') . '"></script>';
     }
 
-    var h = parseInt(hour, 10);
-    if (ampm === "PM" && h !== 12) h += 12;
-    if (ampm === "AM" && h === 12) h = 0;
-
-    hiddenEl.value = String(h).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
-}
-
-function wireTimeInput(el) {
-    var hourId = el.getAttribute("data-time-hour");
-    var minuteId = el.getAttribute("data-time-minute");
-    var ampmId = el.getAttribute("data-time-ampm");
-    var hiddenId = el.getAttribute("data-time-hidden");
-    var ids = [hourId, minuteId, ampmId];
-    var update = function() { updateTimeInput(hourId, minuteId, ampmId, hiddenId); };
-    ids.forEach(function(id) {
-        var node = document.getElementById(id);
-        if (!node) return;
-        node.addEventListener("change", update);
-        node.addEventListener("input", update);
-    });
-    // Normalize the hidden input on page load so server sees a clean value
-    // even if the user submits without changing any of the parts.
-    update();
-}
-
-document.addEventListener("DOMContentLoaded", function() {
-    var timeInputs = document.querySelectorAll("[data-time-hour]");
-    timeInputs.forEach(wireTimeInput);
-});
-</script>';
-            $time_input_js_loaded = true;
-        }
+    protected function outputTimeInputJavaScript() {
+        return self::scriptOnce('joinery-forms.js');
     }
 
     // ===== TIME HANDLING HELPER METHODS =====
@@ -3525,7 +2987,6 @@ document.addEventListener("DOMContentLoaded", function() {
         if (!empty($data['required'])) $attrs .= ' required';
         if (!empty($data['readonly'])) $attrs .= ' readonly';
         if (!empty($data['autofocus'])) $attrs .= ' autofocus';
-        if (!empty($data['onchange'])) $attrs .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
         if (!empty($data['autocomplete'])) $attrs .= ' autocomplete="' . htmlspecialchars($data['autocomplete']) . '"';
         if (!empty($data['inputmode'])) $attrs .= ' inputmode="' . htmlspecialchars($data['inputmode']) . '"';
         foreach ($extra_keys as $key => $attr_name) {
@@ -3650,133 +3111,10 @@ document.addEventListener("DOMContentLoaded", function() {
      * @return string Script HTML block
      */
     protected function buildAjaxSelectScript($id, $endpoint) {
-        $js = <<<'JS'
-<script>
-(function() {
-  class AjaxSearchSelect {
-    constructor(selectEl, ajaxUrl) {
-      this.select = selectEl;
-      this.ajaxUrl = ajaxUrl;
-      this.cache = {};
-      this.debounceTimer = null;
-
-      // API-action mode: an /api/v1/ endpoint speaks the JSON envelope — POST
-      // {q, ...} with the browser-session CSRF header and read data.items. Any
-      // query string on the configured URL (e.g. ?includenone=1) folds into the
-      // POST body. Other URLs keep the legacy GET ?q= contract returning a bare
-      // [{id, text}] array.
-      this.isApi = ajaxUrl.indexOf('/api/v1/') === 0;
-      var qpos = ajaxUrl.indexOf('?');
-      this.baseUrl = qpos === -1 ? ajaxUrl : ajaxUrl.slice(0, qpos);
-      this.extraParams = {};
-      if (qpos !== -1) {
-        new URLSearchParams(ajaxUrl.slice(qpos + 1)).forEach((v, k) => { this.extraParams[k] = v; });
-      }
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = selectEl.className;
-      input.placeholder = 'Type to search...';
-
-      const list = document.createElement('datalist');
-      list.id = selectEl.id + '_list';
-      input.setAttribute('list', list.id);
-
-      selectEl.style.display = 'none';
-      selectEl.parentNode.insertBefore(input, selectEl);
-      selectEl.parentNode.insertBefore(list, selectEl);
-
-      this.input = input;
-      this.list = list;
-      this.data = [];
-
-      if (selectEl.value) {
-        input.value = selectEl.options[selectEl.selectedIndex].text;
-      }
-
-      input.addEventListener('input', (e) => this.search(e.target.value));
-      input.addEventListener('change', (e) => {
-        const inputVal = e.target.value.trim();
-        if (!inputVal) {
-          selectEl.value = '';
-        } else {
-          const matching = this.data.find(item => item.text === inputVal);
-          if (matching) {
-            let option = selectEl.querySelector('option[value="' + matching.id + '"]');
-            if (!option) {
-              option = document.createElement('option');
-              option.value = matching.id;
-              option.textContent = matching.text;
-              selectEl.innerHTML = '';
-              selectEl.appendChild(option);
-            }
-            selectEl.value = matching.id;
-          }
-        }
-        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    }
-
-    search(query) {
-      clearTimeout(this.debounceTimer);
-      if (query.length < 3) {
-        this.list.innerHTML = '';
-        this.data = [];
-        return;
-      }
-
-      if (this.cache[query]) {
-        this.updateList(this.cache[query]);
-        return;
-      }
-
-      this.debounceTimer = setTimeout(() => {
-        if (this.isApi) {
-          joineryApi.post(this.baseUrl, Object.assign({}, this.extraParams, { q: query }))
-            .then(data => {
-              var items = (data && data.items) ? data.items : [];
-              this.cache[query] = items;
-              this.updateList(items);
-            })
-            .catch(() => {});
-        } else {
-          const separator = this.ajaxUrl.includes('?') ? '&' : '?';
-          fetch(this.ajaxUrl + separator + 'q=' + encodeURIComponent(query))
-            .then(r => r.json())
-            .then(data => {
-              this.cache[query] = data;
-              this.updateList(data);
-            });
-        }
-      }, 250);
-    }
-
-    updateList(data) {
-      this.data = data;
-      this.list.innerHTML = '';
-      data.forEach(item => {
-        const opt = document.createElement('option');
-        opt.value = item.text;
-        opt.dataset.id = item.id;
-        this.list.appendChild(opt);
-      });
-    }
-  }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    const select = document.getElementById('__JOINERY_SELECT_ID__');
-    if (select) {
-      new AjaxSearchSelect(select, '__JOINERY_SELECT_ENDPOINT__');
-    }
-  });
-})();
-</script>
-JS;
-        return str_replace(
-            ['__JOINERY_SELECT_ID__', '__JOINERY_SELECT_ENDPOINT__'],
-            [htmlspecialchars($id), htmlspecialchars($endpoint)],
-            $js
-        );
+        // The select carries its endpoint as data-jy-ajax-select (the
+        // renderer writes it); the script that turns it into a search box is
+        // assets/js/joinery-forms.js.
+        return self::scriptOnce('joinery-forms.js');
     }
 
     // ── Prepare methods (behavioral logic) ───────────────────────────────────
@@ -3799,7 +3137,6 @@ JS;
             'required' => !empty($options['required']),
             'autocomplete' => $options['autocomplete'] ?? '',
             'inputmode' => $options['inputmode'] ?? '',
-            'onchange' => $options['onchange'] ?? '',
             'pattern' => $options['pattern'] ?? '',
             'min' => $options['min'] ?? null,
             'max' => $options['max'] ?? null,
@@ -3938,13 +3275,14 @@ JS;
             'multiple' => !empty($options['multiple']),
             'disabled' => !empty($options['disabled']),
             'required' => !empty($options['required']),
-            'onchange' => $options['onchange'] ?? '',
             'ajaxendpoint' => $options['ajaxendpoint'] ?? '',
+            // Choosing an option opens it: each option's value is a path on
+            // this site (data-jy-navigate, assets/js/base.js).
+            'navigate_on_change' => !empty($options['navigate_on_change']),
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
             'visibility_rules' => $options['visibility_rules'] ?? null,
-            'custom_script' => $options['custom_script'] ?? null,
         ];
     }
 
@@ -3964,12 +3302,10 @@ JS;
             'class' => $options['class'] ?? '',
             'disabled' => !empty($options['disabled']),
             'required' => !empty($options['required']),
-            'onchange' => $options['onchange'] ?? '',
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
             'visibility_rules' => $options['visibility_rules'] ?? null,
-            'custom_script' => $options['custom_script'] ?? null,
             'switch' => !empty($options['switch']),
         ];
     }
@@ -3981,13 +3317,13 @@ JS;
             'options_list' => $options['options'] ?? [],
             'class' => $options['class'] ?? '',
             'disabled' => !empty($options['disabled']),
+            // The choices that may not be picked, by value (the rest still can).
+            'disabled_values' => array_values(array_map('strval', (array)($options['disabled_values'] ?? []))),
             'required' => !empty($options['required']),
-            'onchange' => $options['onchange'] ?? '',
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
             'visibility_rules' => $options['visibility_rules'] ?? null,
-            'custom_script' => $options['custom_script'] ?? null,
             // Card layout: 'descriptions' maps each option value to outcome
             // language (a string, or an array of lines) shown under the option
             // label; 'card' renders each option as a selectable card.
@@ -4011,7 +3347,6 @@ JS;
             'readonly' => !empty($options['readonly']),
             'disabled' => !empty($options['disabled']),
             'required' => !empty($options['required']),
-            'onchange' => $options['onchange'] ?? '',
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
@@ -4076,7 +3411,6 @@ JS;
             'multiple' => !empty($options['multiple']),
             'disabled' => !empty($options['disabled']),
             'required' => !empty($options['required']),
-            'onchange' => $options['onchange'] ?? '',
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
@@ -4088,6 +3422,9 @@ JS;
             'name' => $name,
             'id' => $options['id'] ?? $name,
             'value' => $options['value'] ?? ($this->values[$name] ?? ''),
+            // Filled in the browser with the visitor's time zone (base.js,
+            // data-jy-browser-timezone).
+            'browser_timezone' => !empty($options['browser_timezone']),
         ];
     }
 
@@ -4097,7 +3434,18 @@ JS;
             'id' => $options['id'] ?? $name,
             'class' => $options['class'] ?? '',
             'disabled' => !empty($options['disabled']),
-            'onclick' => $options['onclick'] ?? '',
+            // A question the kit's modal asks before the form goes
+            // (data-jy-confirm, assets/js/base.js); the button then submits as
+            // itself, so its name and value are sent. confirm_label and
+            // confirm_style word and colour the modal's confirm button.
+            'confirm' => (string)($options['confirm'] ?? ''),
+            'confirm_label' => (string)($options['confirm_label'] ?? ''),
+            'confirm_style' => (string)($options['confirm_style'] ?? ''),
+            // What the button posts under its name when it is the one pressed.
+            'value' => isset($options['value']) ? (string)$options['value'] : null,
+            // Words the button shows once its form is on its way, when it can
+            // no longer be pressed (data-jy-busy, assets/js/base.js).
+            'busy' => (string)($options['busy'] ?? ''),
             // Emits the HTML formnovalidate attribute so this button bypasses
             // client-side validation (Delete/Cancel actions). 'skip_validation'
             // is accepted as a friendlier alias.
@@ -4122,7 +3470,6 @@ JS;
             'required' => !empty($options['required']),
             'minlength' => $options['minlength'] ?? null,
             'maxlength' => $options['maxlength'] ?? null,
-            'onchange' => $options['onchange'] ?? '',
             'has_errors' => isset($this->errors[$name]),
             'errors' => $this->errors[$name] ?? [],
             'helptext' => $options['helptext'] ?? '',
@@ -4216,8 +3563,6 @@ JS;
         $html = $this->renderDropInput($data);
         if (!empty($data['visibility_rules'])) {
             $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules'], 'select');
-        } elseif (!empty($data['custom_script'])) {
-            $html .= $this->generateFieldScript($data['id'], $data['custom_script']);
         }
         $this->handleOutput($name, $html);
     }
@@ -4227,8 +3572,6 @@ JS;
         $html = $this->renderCheckboxInput($data);
         if (!empty($data['visibility_rules'])) {
             $html .= $this->generateVisibilityScript($data['name'], $data['id'], $data['visibility_rules'], 'checkbox');
-        } elseif (!empty($data['custom_script'])) {
-            $html .= $this->generateFieldScript($data['id'], $data['custom_script']);
         }
         $this->handleOutput($name, $html);
     }
@@ -4340,55 +3683,7 @@ JS;
     abstract protected function renderTextarea($data);
     abstract protected function renderImageInput($data);
 
-    // ===== NEW FIELD VISIBILITY & CUSTOM SCRIPT METHODS =====
-
-    /**
-     * Array to store ready scripts for output at form end
-     */
-    protected $ready_scripts = array();
-
-    /**
-     * Add JavaScript to run when form loads
-     * @param string $script - Raw JavaScript (will be wrapped in DOMContentLoaded)
-     */
-    public function addReadyScript($script) {
-        if (!isset($this->ready_scripts)) {
-            $this->ready_scripts = array();
-        }
-        $this->ready_scripts[] = $script;
-    }
-
-    /**
-     * Output all accumulated ready scripts
-     * @return string - JavaScript HTML to be included before form close
-     */
-    protected function outputReadyScripts() {
-        if (empty($this->ready_scripts)) return '';
-
-        $output = '<script>';
-        $output .= 'document.addEventListener("DOMContentLoaded", function() {';
-        foreach ($this->ready_scripts as $script) {
-            $output .= $script;
-        }
-        $output .= '});';
-        $output .= '</script>';
-        return $output;
-    }
-
-    /**
-     * Sanitize field name for use as JavaScript variable name
-     * @param string $fieldName - Field name that may contain special characters
-     * @return string - Valid JavaScript variable name
-     */
-    protected function sanitizeForJsVariable($fieldName) {
-        // Replace non-alphanumeric characters with underscores
-        // Ensure it starts with a letter or underscore
-        $sanitized = preg_replace('/[^a-zA-Z0-9_]/', '_', $fieldName);
-        if (preg_match('/^[0-9]/', $sanitized)) {
-            $sanitized = '_' . $sanitized;
-        }
-        return $sanitized;
-    }
+    // ===== FIELD VISIBILITY =====
 
     /**
      * Validate visibility rules for conflicts and errors
@@ -4446,12 +3741,12 @@ JS;
     }
 
     /**
-     * Generate visibility rules JavaScript
+     * The data for a field's visibility_rules, and the script that applies them
      *
      * Trigger-type aware. The rule structure, target resolution, fade CSS,
      * 'default' fallback, and initial-on-load evaluation are identical across
      * types — only how the current rule key is *read* and which element(s) the
-     * change listener is wired to differ:
+     * change listener is wired to differ (assets/js/joinery-forms.js):
      *   - select   : key = element.value;  listen on the <select>
      *   - checkbox : key = 'checked'|'unchecked';  listen on the checkbox
      *   - radio    : key = the checked option's value;  listen on every radio
@@ -4463,17 +3758,11 @@ JS;
      * @param string|null $groupName - DOM name attribute of the radio group
      *        (radio only). Defaults to $fieldName. checkboxList radios use
      *        '{name}[]', so callers pass it explicitly.
-     * @return string - JavaScript code
+     * @return string - the fade CSS (once per page), a JSON block, and the script tag (once per page)
      */
     protected function generateVisibilityScript($fieldName, $fieldId, $rules, $type = 'select', $groupName = null) {
         // Validate rules first (type-aware)
         $this->validateVisibilityRules($fieldId, $rules, $type);
-
-        // Sanitize field name for JavaScript variable
-        $varName = $this->sanitizeForJsVariable($fieldName);
-
-        // Convert PHP array to JavaScript object
-        $jsRules = json_encode($rules);
 
         // Add CSS for fade transitions (only once per page)
         static $cssAdded = false;
@@ -4494,100 +3783,17 @@ JS;
             $cssAdded = true;
         }
 
-        // Per-type "read current key" and listener wiring. The radio group is
-        // addressed by its DOM name attribute (single-quoted selector — field
-        // names never contain single quotes).
+        // The trigger and its rules go out as data; assets/js/joinery-forms.js
+        // wires every block on the page (specs/strict_script_policy.md WP3).
+        // A radio group is addressed by its DOM name attribute.
         if ($groupName === null) { $groupName = $fieldName; }
-        $groupSelector = "input[name='" . $groupName . "']";
-
-        if ($type === 'checkbox') {
-            $readKey  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
-            $readKey .= '    if (!el) return;' . "\n";
-            $readKey .= '    const selected = el.checked ? "checked" : "unchecked";' . "\n";
-            $wiring  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
-            $wiring .= '    if (!el) return;' . "\n";
-            $wiring .= '    update' . $varName . 'Visibility();' . "\n";
-            $wiring .= '    el.addEventListener("change", update' . $varName . 'Visibility);' . "\n";
-        } elseif ($type === 'radio') {
-            $readKey  = '    const checkedRadio = document.querySelector("' . $groupSelector . ':checked");' . "\n";
-            $readKey .= '    const selected = checkedRadio ? checkedRadio.value : "";' . "\n";
-            $wiring  = '    const radios = document.querySelectorAll("' . $groupSelector . '");' . "\n";
-            $wiring .= '    if (!radios.length) return;' . "\n";
-            $wiring .= '    update' . $varName . 'Visibility();' . "\n";
-            $wiring .= '    radios.forEach(function(r) { r.addEventListener("change", update' . $varName . 'Visibility); });' . "\n";
-        } else { // select
-            $readKey  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
-            $readKey .= '    if (!el) return;' . "\n";
-            $readKey .= '    const selected = el.value;' . "\n";
-            $wiring  = '    const el = document.getElementById("' . $fieldId . '");' . "\n";
-            $wiring .= '    if (!el) return;' . "\n";
-            $wiring .= '    update' . $varName . 'Visibility();' . "\n";
-            $wiring .= '    el.addEventListener("change", update' . $varName . 'Visibility);' . "\n";
-        }
-
-        $output = $cssOutput . '<script>' . "\n";
-        $output .= '(function() {' . "\n";
-        $output .= '  const visibilityRules' . $varName . ' = ' . $jsRules . ';' . "\n";
-        $output .= '  ' . "\n";
-        $output .= '  function update' . $varName . 'Visibility() {' . "\n";
-        $output .= $readKey;
-        $output .= '    const rules = visibilityRules' . $varName . '[selected] || visibilityRules' . $varName . '["default"] || {};' . "\n";
-        $output .= '    ' . "\n";
-        $output .= '    (rules.show || []).forEach(function(id) {' . "\n";
-        $output .= '      // Try to find element with _container suffix first, then fall back to plain ID' . "\n";
-        $output .= '      const el = document.getElementById(id + "_container") || document.getElementById(id);' . "\n";
-        $output .= '      if (el) {' . "\n";
-        $output .= '        // Show with fade in effect' . "\n";
-        $output .= '        el.style.display = "";' . "\n";
-        $output .= '        el.classList.remove("fw-field-hidden");' . "\n";
-        $output .= '        setTimeout(function() {' . "\n";
-        $output .= '          el.classList.add("fw-field-visible");' . "\n";
-        $output .= '        }, 10);' . "\n";
-        $output .= '      }' . "\n";
-        $output .= '    });' . "\n";
-        $output .= '    ' . "\n";
-        $output .= '    (rules.hide || []).forEach(function(id) {' . "\n";
-        $output .= '      // Try to find element with _container suffix first, then fall back to plain ID' . "\n";
-        $output .= '      const el = document.getElementById(id + "_container") || document.getElementById(id);' . "\n";
-        $output .= '      if (el) {' . "\n";
-        $output .= '        // Hide with fade out effect' . "\n";
-        $output .= '        el.classList.remove("fw-field-visible");' . "\n";
-        $output .= '        el.classList.add("fw-field-hidden");' . "\n";
-        $output .= '        setTimeout(function() {' . "\n";
-        $output .= '          el.style.display = "none";' . "\n";
-        $output .= '        }, 300);' . "\n";
-        $output .= '      }' . "\n";
-        $output .= '    });' . "\n";
-        $output .= '  }' . "\n";
-        $output .= '  ' . "\n";
-        $output .= '  document.addEventListener("DOMContentLoaded", function() {' . "\n";
-        $output .= $wiring;
-        $output .= '  });' . "\n";
-        $output .= '})();' . "\n";
-        $output .= '</script>';
-
-        return $output;
-    }
-
-    /**
-     * Generate field-level event handler wrapper
-     * @param string $fieldId - HTML id of the element
-     * @param string $scriptBody - JavaScript to execute in handler
-     * @return string - JavaScript code with addEventListener wrapper
-     */
-    protected function generateFieldScript($fieldId, $scriptBody) {
-        $output = '<script>' . "\n";
-        $output .= 'document.addEventListener("DOMContentLoaded", function() {' . "\n";
-        $output .= '  const selectEl = document.getElementById("' . $fieldId . '");' . "\n";
-        $output .= '  if (!selectEl) return;' . "\n";
-        $output .= '  ' . "\n";
-        $output .= '  selectEl.addEventListener("change", function() {' . "\n";
-        $output .= $scriptBody;
-        $output .= '  });' . "\n";
-        $output .= '});' . "\n";
-        $output .= '</script>';
-
-        return $output;
+        $cfg = array(
+            'type' => in_array($type, array('checkbox', 'radio'), true) ? $type : 'select',
+            'id' => (string)$fieldId,
+            'group' => (string)$groupName,
+            'rules' => (object)$rules,
+        );
+        return $cssOutput . self::jsonBlock('data-jy-visibility', $cfg) . self::scriptOnce('joinery-forms.js');
     }
 
     /**
@@ -4674,7 +3880,7 @@ JS;
         $getargs = '';
         if($getvars){
             foreach($getvars as $getvar=>$getval){
-                $getargs.= '<input type="hidden" name="'.$getvar.'" value="'.$getval.'"/>';
+                $getargs.= '<input type="hidden" name="' . htmlspecialchars((string)$getvar) . '" value="' . htmlspecialchars((string)$getval) . '"/>';
             }
         }
 
@@ -4685,8 +3891,9 @@ JS;
         // Get actual PHP upload limits
         $upload_max = ini_get('upload_max_filesize');
         $post_max = ini_get('post_max_size');
-        // Convert to bytes to compare
-        function parseSize($size) {
+        // Convert to bytes to compare. A closure, not a named function: a
+        // named one declared in here fatals the second time the method runs.
+        $parseSize = function ($size) {
             $unit = preg_replace('/[^bkmgtpezy]/i', '', $size);
             $size = preg_replace('/[^0-9\.]/', '', $size);
             if ($unit) {
@@ -4694,21 +3901,25 @@ JS;
             } else {
                 return round($size);
             }
-        }
-        $upload_max_bytes = parseSize($upload_max);
-        $post_max_bytes = parseSize($post_max);
+        };
+        $upload_max_bytes = $parseSize($upload_max);
+        $post_max_bytes = $parseSize($post_max);
         $max_size = min($upload_max_bytes, $post_max_bytes);
         $max_size_display = round($max_size / (1024 * 1024)) . 'MB';
     ?>
         <!-- File Drop Zone -->
-        <div id="file-drop-zone" class="file-drop-zone" style="border: 2px dashed #ccc; border-radius: 5px; padding: 20px; text-align: center; margin-bottom: 20px; background-color: #f9f9f9; transition: all 0.3s ease; cursor: pointer;">
+        <div id="file-drop-zone" class="file-drop-zone"
+            data-allowed-extensions="<?php echo htmlspecialchars((string)$allowed_extensions); ?>"
+            data-max-size="<?php echo (int)$max_size; ?>"
+            data-max-size-display="<?php echo htmlspecialchars($max_size_display); ?>"
+            style="border: 2px dashed #ccc; border-radius: 5px; padding: 20px; text-align: center; margin-bottom: 20px; background-color: #f9f9f9; transition: all 0.3s ease; cursor: pointer;">
             <div style="font-size: 48px; color: #999; margin-bottom: 10px;">☁️</div>
             <h3 style="color: #666; margin: 10px 0;">Drop files here or click to browse</h3>
-            <p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo $max_size_display; ?> | Allowed types: <?php echo strtoupper(str_replace(',', ', ', $allowed_extensions)); ?></p>
+            <p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo htmlspecialchars($max_size_display); ?> | Allowed types: <?php echo htmlspecialchars(strtoupper(str_replace(',', ', ', (string)$allowed_extensions))); ?></p>
             <div style="margin-top: 10px;">
                 <label class="button primary" style="cursor: pointer; display: inline-block; position: relative; overflow: hidden;">
                     📁 Browse Files
-                    <input type="file" id="file-input" multiple accept="<?php echo $accept_attr; ?>" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
+                    <input type="file" id="file-input" multiple accept="<?php echo htmlspecialchars($accept_attr); ?>" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
                 </label>
             </div>
         </div>
@@ -4751,419 +3962,7 @@ JS;
             <?php echo $getargs; ?>
         </form>
         <?php endif; ?>
-        <script>
-        (function() {
-            'use strict';
-
-            function initFileUploader() {
-            let selectedFiles = [];
-
-            // Get allowed file extensions from server setting
-            const allowedExtensions = '<?php echo $allowed_extensions; ?>';
-            const allowedTypes = new RegExp('\\.(' + allowedExtensions.replace(/,/g, '|') + ')$', 'i');
-            const maxFileSize = <?php echo $max_size; ?>; // Maximum file size in bytes
-
-            // DOM elements
-            const dropZone = document.getElementById('file-drop-zone');
-            const fileInput = document.getElementById('file-input');
-            const browseBtn = document.getElementById('browse-btn');
-            const uploadAllBtn = document.getElementById('upload-all-btn');
-            const clearAllBtn = document.getElementById('clear-all-btn');
-            const filesList = document.getElementById('files-list');
-            const noFilesMessage = document.getElementById('no-files-message');
-            const overallProgress = document.getElementById('overall-progress');
-            const progressBar = document.getElementById('overall-progress-bar');
-
-            // File size formatter
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-
-            // Generate unique ID for each file
-            function generateFileId() {
-                return 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-            }
-
-            // Get file icon based on extension
-            function getFileIcon(filename) {
-                const ext = filename.split('.').pop().toLowerCase();
-                const iconMap = {
-                    'pdf': '📕',
-                    'doc': '📘',
-                    'docx': '📘',
-                    'xls': '📗',
-                    'xlsx': '📗',
-                    'jpg': '🖼️',
-                    'jpeg': '🖼️',
-                    'png': '🖼️',
-                    'gif': '🖼️',
-                    'mp3': '🎵',
-                    'mp4': '🎬',
-                    'm4a': '🎵'
-                };
-                return iconMap[ext] || '📄';
-            }
-
-            // Add files to the list
-            function addFiles(files) {
-                Array.from(files).forEach(file => {
-                    // Validate file type using server setting
-                    if (!allowedTypes.test(file.name)) {
-                        showToast('Invalid file type: ' + file.name + '. Allowed: ' + allowedExtensions, 'error');
-                        return;
-                    }
-
-                    // Validate file size using server limit
-                    if (file.size > maxFileSize) {
-                        showToast('File too large: ' + file.name + '. Maximum size: <?php echo $max_size_display; ?>', 'error');
-                        return;
-                    }
-
-                    const fileId = generateFileId();
-                    const fileObj = {
-                        id: fileId,
-                        file: file,
-                        status: 'pending'
-                    };
-
-                    selectedFiles.push(fileObj);
-                    renderFileRow(fileObj);
-                });
-
-                updateUI();
-            }
-
-            // Render a file row in the table
-            function renderFileRow(fileObj) {
-                noFilesMessage.style.display = 'none';
-
-                const fileIcon = getFileIcon(fileObj.file.name);
-                const rowHTML = `
-                    <tr data-file-id="${fileObj.id}" class="file-row" style="border-bottom: 1px solid #eee;">
-                        <td style="padding: 10px;">
-                            <div style="display: flex; align-items: center;">
-                                <span style="margin-right: 8px; font-size: 20px;">${fileIcon}</span>
-                                <span class="file-name">${fileObj.file.name}</span>
-                            </div>
-                        </td>
-                        <td class="file-size" style="padding: 10px;">${formatFileSize(fileObj.file.size)}</td>
-                        <td class="file-status" style="padding: 10px;">
-                            <span style="padding: 2px 8px; background: #6c757d; color: white; border-radius: 3px; font-size: 12px;">Ready to upload</span>
-                        </td>
-                        <td class="file-actions" style="padding: 10px;">
-                            <button type="button" class="button small upload-single-btn" title="Upload this file" style="padding: 4px 8px; font-size: 12px;">
-                                ⬆️
-                            </button>
-                            <button type="button" class="button small danger remove-file-btn" title="Remove this file" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
-                                ❌
-                            </button>
-                        </td>
-                    </tr>
-                `;
-
-                filesList.insertAdjacentHTML('beforeend', rowHTML);
-            }
-
-            // Update UI state
-            function updateUI() {
-                const hasFiles = selectedFiles.length > 0;
-                const pendingFilesCount = selectedFiles.filter(f => f.status === 'pending').length;
-
-                uploadAllBtn.disabled = pendingFilesCount === 0;
-                clearAllBtn.disabled = !hasFiles;
-
-                if (!hasFiles) {
-                    noFilesMessage.style.display = '';
-                }
-
-                // Update button text with count
-                if (pendingFilesCount > 0) {
-                    uploadAllBtn.innerHTML = `⬆️ Upload All (${pendingFilesCount})`;
-                } else {
-                    uploadAllBtn.innerHTML = '⬆️ Upload All';
-                }
-            }
-
-            // Show toast notification
-            function showToast(message, type = 'info') {
-                console.log(type + ': ' + message);
-                // Simple alert for now - can be enhanced with proper toast notifications
-                if (type === 'error') {
-                    alert('Error: ' + message);
-                }
-            }
-
-            // Upload a single file
-            function uploadFile(fileObj) {
-                return new Promise((resolve, reject) => {
-                    const formData = new FormData();
-                    formData.append('files[]', fileObj.file);
-
-                    // Add any additional form data
-                    const hiddenForm = document.getElementById('hidden-form-data');
-                    if (hiddenForm) {
-                        hiddenForm.querySelectorAll('input').forEach(function(input) {
-                            formData.append(input.name, input.value);
-                        });
-                    }
-
-                    const row = document.querySelector(`.file-row[data-file-id="${fileObj.id}"]`);
-                    const statusCell = row.querySelector('.file-status');
-                    const actionsCell = row.querySelector('.file-actions');
-
-                    // Update UI to uploading state
-                    statusCell.innerHTML = '<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading...</span>';
-                    actionsCell.innerHTML = `
-                        <div style="display: flex; align-items: center;">
-                            <progress value="0" max="100" style="width: 60px; height: 20px; margin-right: 8px;">0%</progress>
-                            <span style="color: #666; font-size: 12px;">0%</span>
-                        </div>
-                    `;
-
-                    // Create XMLHttpRequest for progress tracking
-                    const xhr = new XMLHttpRequest();
-
-                    xhr.upload.addEventListener('progress', function(e) {
-                        if (e.lengthComputable) {
-                            const progress = Math.round((e.loaded / e.total) * 100);
-                            const progressEl = actionsCell.querySelector('progress');
-                            const spanEl = actionsCell.querySelector('span');
-                            if (progressEl) {
-                                progressEl.value = progress;
-                                progressEl.textContent = progress + '%';
-                            }
-                            if (spanEl) {
-                                spanEl.textContent = progress + '%';
-                            }
-                            statusCell.innerHTML = `<span style="padding: 2px 8px; background: #007bff; color: white; border-radius: 3px; font-size: 12px;">Uploading ${progress}%</span>`;
-                        }
-                    });
-
-                    xhr.addEventListener('load', function() {
-                        if (xhr.status === 200) {
-                            try {
-                                const response = JSON.parse(xhr.responseText);
-                                if (response.files && response.files[0]) {
-                                    const file = response.files[0];
-                                    if (file.url) {
-                                        // Success. A warning is a file that was saved but could not have
-                                        // its sizes made (a photo over the decode ceiling): say so on the row.
-                                        statusCell.innerHTML = '<span style="padding: 2px 8px; background: #28a745; color: white; border-radius: 3px; font-size: 12px;">✓ Upload successful</span>';
-                                        if (file.warning) {
-                                            const warn = document.createElement('div');
-                                            warn.style.cssText = 'margin-top: 4px; font-size: 12px; color: #856404;';
-                                            warn.textContent = file.warning;
-                                            statusCell.appendChild(warn);
-                                        }
-                                        actionsCell.innerHTML = `
-                                            <a href="${file.url}" target="_blank" class="button small success" title="Download file" style="padding: 4px 8px; font-size: 12px; text-decoration: none;">
-                                                ⬇️
-                                            </a>
-                                            <button type="button" class="button small danger remove-file-btn" title="Remove from list" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
-                                                ❌
-                                            </button>
-                                        `;
-
-                                        // Make filename clickable if we have a file ID
-                                        if (file.file_id) {
-                                            const nameElement = row.querySelector('.file-name');
-                                            const fileName = nameElement.textContent;
-                                            const fileIcon = getFileIcon(fileName);
-
-                                            nameElement.parentElement.innerHTML = `
-                                                <div style="display: flex; align-items: center;">
-                                                    <span style="margin-right: 8px; font-size: 20px;">${fileIcon}</span>
-                                                    <a href="/admin/admin_file?fil_file_id=${file.file_id}" style="color: #0066cc; text-decoration: none;">${fileName}</a>
-                                                </div>
-                                            `;
-                                        }
-
-                                        fileObj.status = 'completed';
-                                        fileObj.url = file.url;
-                                        fileObj.file_id = file.file_id;
-                                        resolve(fileObj);
-                                    } else if (file.error) {
-                                        throw new Error(file.error);
-                                    }
-                                } else {
-                                    throw new Error('Invalid response format');
-                                }
-                            } catch (e) {
-                                reject(e);
-                            }
-                        } else {
-                            reject(new Error('Upload failed with status: ' + xhr.status));
-                        }
-                    });
-
-                    xhr.addEventListener('error', function() {
-                        reject(new Error('Network error during upload'));
-                    });
-
-                    xhr.open('POST', '/admin/admin_file_upload_process');
-                    xhr.send(formData);
-                }).catch(error => {
-                    // Handle error
-                    const row = document.querySelector(`.file-row[data-file-id="${fileObj.id}"]`);
-                    const statusCell = row.querySelector('.file-status');
-                    const actionsCell = row.querySelector('.file-actions');
-
-                    statusCell.innerHTML = `<span style="padding: 2px 8px; background: #dc3545; color: white; border-radius: 3px; font-size: 12px;">⚠️ Error</span>`;
-                    actionsCell.innerHTML = `
-                        <button type="button" class="button small upload-single-btn" title="Retry upload" style="padding: 4px 8px; font-size: 12px;">
-                            🔄
-                        </button>
-                        <button type="button" class="button small danger remove-file-btn" title="Remove this file" style="padding: 4px 8px; font-size: 12px; margin-left: 5px;">
-                            ❌
-                        </button>
-                    `;
-                    fileObj.status = 'error';
-                    showToast(`Upload failed: ${fileObj.file.name} - ${error.message}`, 'error');
-                    throw error;
-                });
-            }
-
-            // Event Handlers
-            // Note: Browse button is now a <label for="file-input"> which natively triggers the file input
-            // No JavaScript handler needed for the browse button
-
-            fileInput.addEventListener('change', function() {
-                if (this.files.length > 0) {
-                    addFiles(this.files);
-                    this.value = ''; // Reset input
-                }
-            });
-
-            // Drag and drop styling
-            ['dragover', 'dragenter'].forEach(function(eventName) {
-                dropZone.addEventListener(eventName, function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.style.borderColor = '#007bff';
-                    this.style.backgroundColor = '#e7f3ff';
-                });
-            });
-
-            dropZone.addEventListener('dragleave', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                this.style.borderColor = '#ccc';
-                this.style.backgroundColor = '#f9f9f9';
-            });
-
-            dropZone.addEventListener('drop', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                this.style.borderColor = '#ccc';
-                this.style.backgroundColor = '#f9f9f9';
-
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                    addFiles(files);
-                }
-            });
-
-            // Upload all files
-            uploadAllBtn.addEventListener('click', async function() {
-                const pendingFiles = selectedFiles.filter(f => f.status === 'pending');
-                if (pendingFiles.length === 0) return;
-
-                overallProgress.style.display = 'flex';
-                uploadAllBtn.disabled = true;
-
-                let completed = 0;
-                const total = pendingFiles.length;
-
-                for (const fileObj of pendingFiles) {
-                    try {
-                        await uploadFile(fileObj);
-                        completed++;
-                        const progress = Math.round((completed / total) * 100);
-                        progressBar.value = progress;
-                    } catch (error) {
-                        console.error('Upload failed:', error);
-                        completed++; // Count errors as completed for progress
-                        const progress = Math.round((completed / total) * 100);
-                        progressBar.value = progress;
-                    }
-                }
-
-                setTimeout(function() {
-                    overallProgress.style.display = 'none';
-                    progressBar.value = 0;
-                    updateUI();
-                }, 1000);
-            });
-
-            // Clear all files
-            clearAllBtn.addEventListener('click', function() {
-                if (confirm('Are you sure you want to clear all files?')) {
-                    selectedFiles = [];
-                    filesList.querySelectorAll('.file-row').forEach(function(row) {
-                        row.remove();
-                    });
-                    updateUI();
-                }
-            });
-
-            // Event delegation for dynamic buttons
-            filesList.addEventListener('click', function(e) {
-                const uploadBtn = e.target.closest('.upload-single-btn');
-                const removeBtn = e.target.closest('.remove-file-btn');
-
-                if (uploadBtn) {
-                    const row = uploadBtn.closest('.file-row');
-                    const fileId = row.dataset.fileId;
-                    const fileObj = selectedFiles.find(f => f.id === fileId);
-                    if (fileObj && (fileObj.status === 'pending' || fileObj.status === 'error')) {
-                        uploadFile(fileObj).then(function() {
-                            updateUI();
-                        }).catch(function() {
-                            updateUI();
-                        });
-                    }
-                }
-
-                if (removeBtn) {
-                    const row = removeBtn.closest('.file-row');
-                    const fileId = row.dataset.fileId;
-
-                    // Remove from array
-                    selectedFiles = selectedFiles.filter(f => f.id !== fileId);
-
-                    // Remove from DOM with fade animation
-                    row.style.transition = 'opacity 0.3s';
-                    row.style.opacity = '0';
-                    setTimeout(function() {
-                        row.remove();
-                        updateUI();
-                    }, 300);
-                }
-            });
-
-            // Click to browse anywhere in drop zone (except on the file input label area)
-            dropZone.addEventListener('click', function(e) {
-                // Don't interfere with the file input or its label container
-                if (e.target.closest('label') || e.target.closest('button') || e.target.id === 'file-input') {
-                    return; // Let native behavior handle it
-                }
-                // For clicks on the drop zone itself or text elements, trigger file input
-                fileInput.click();
-            });
-            } // end initFileUploader
-
-            // Run immediately if DOM is already ready, otherwise wait for DOMContentLoaded
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', initFileUploader);
-            } else {
-                initFileUploader();
-            }
-        })();
-        </script>
+        <?php echo self::scriptOnce('joinery-file-upload.js'); ?>
 
         <style>
         #file-drop-zone:hover {
@@ -5566,7 +4365,7 @@ JS;
             }
         }
 
-        // A rich-text sub-field emits the editor's <link> and <script> the
+        // A rich-text sub-field emits the editor's link and script tags the
         // first time it renders. If that first time is inside the <template>
         // row (an empty repeater), nothing loads; emit them here first.
         foreach ($subfields as $subfield) {
@@ -5575,6 +4374,11 @@ JS;
                 break;
             }
         }
+
+        // The repeater's script, and every field script its rows may need, go
+        // out before the rows: a script tag a sub-field writes inside the
+        // <template> row never loads, and would use up the once-per-page tag.
+        $this->outputRepeaterJavaScript();
 
         // Repeater container - data-name used by JavaScript for targeting
         echo '<div class="repeater mb-4" data-name="' . htmlspecialchars($name) . '"';
@@ -5608,96 +4412,14 @@ JS;
         echo '</template>';
 
         echo '</div>';
-
-        // Output repeater JavaScript (once per page)
-        $this->outputRepeaterJavaScript();
     }
 
     /**
-     * Output shared JavaScript for repeater field functionality
-     * Handles add/remove row operations via event delegation
+     * The repeater's add and remove buttons (assets/js/joinery-forms.js), once
+     * per page
      */
     protected function outputRepeaterJavaScript() {
-        static $repeater_js_loaded = false;
-        if (!$repeater_js_loaded) {
-            echo '<script type="text/javascript">
-document.addEventListener("DOMContentLoaded", function() {
-    // Update button disabled states and row numbering
-    function updateRepeaterState(repeater) {
-        var items = repeater.querySelector(".repeater-items");
-        var count = items.querySelectorAll(".repeater-row").length;
-        var min = repeater.dataset.min ? parseInt(repeater.dataset.min) : null;
-        var max = repeater.dataset.max ? parseInt(repeater.dataset.max) : null;
-
-        // Disable add button at max
-        var addBtn = repeater.querySelector(".repeater-add");
-        if (addBtn) {
-            addBtn.disabled = (max !== null && count >= max);
-        }
-
-        // Disable remove buttons at min
-        var removeBtns = items.querySelectorAll(".repeater-remove");
-        removeBtns.forEach(function(btn) {
-            btn.disabled = (min !== null && count <= min);
-        });
-
-        // Re-number row labels (if item_label is used)
-        var labels = items.querySelectorAll(".repeater-row-number");
-        labels.forEach(function(label, i) {
-            label.textContent = " " + (i + 1);
-        });
-    }
-
-    // Add row - with max enforcement
-    document.addEventListener("click", function(e) {
-        if (e.target.classList.contains("repeater-add")) {
-            var repeater = e.target.closest(".repeater");
-            var items = repeater.querySelector(".repeater-items");
-            var max = repeater.dataset.max;
-            var currentCount = items.querySelectorAll(".repeater-row").length;
-
-            if (max && currentCount >= parseInt(max)) {
-                return;
-            }
-
-            var template = repeater.querySelector(".repeater-template");
-            var nextIndex = currentCount;
-            var clone = template.content.cloneNode(true);
-            var row = clone.querySelector(".repeater-row");
-            var html = row.outerHTML.replace(/__INDEX__/g, nextIndex);
-
-            items.insertAdjacentHTML("beforeend", html);
-            updateRepeaterState(repeater);
-            var added = items.lastElementChild;
-            if (added) {
-                added.dispatchEvent(new CustomEvent("jy-repeater-row-added", { bubbles: true }));
-            }
-        }
-    });
-
-    // Remove row - with min enforcement
-    document.addEventListener("click", function(e) {
-        if (e.target.classList.contains("repeater-remove")) {
-            var repeater = e.target.closest(".repeater");
-            var items = repeater.querySelector(".repeater-items");
-            var min = repeater.dataset.min;
-            var currentCount = items.querySelectorAll(".repeater-row").length;
-
-            if (min && currentCount <= parseInt(min)) {
-                return;
-            }
-
-            e.target.closest(".repeater-row").remove();
-            updateRepeaterState(repeater);
-        }
-    });
-
-    // Initialize button states on page load for repeaters with min/max
-    document.querySelectorAll(".repeater[data-min], .repeater[data-max]").forEach(updateRepeaterState);
-});
-</script>';
-            $repeater_js_loaded = true;
-        }
+        echo self::scriptOnce('joinery-forms.js');
     }
 
     /**

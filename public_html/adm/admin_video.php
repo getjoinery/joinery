@@ -174,9 +174,7 @@
 				</div>
 				<div class="card-body">
 					<pre class="mb-0 bg-100 p-3 rounded" style="font-size: 0.75rem;"><code><?php echo htmlspecialchars($video->get_embed()); ?></code></pre>
-					<button class="btn btn-soft-default btn-sm mt-2" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent)">
-						<i class="bi bi-clipboard me-1"></i> Copy to Clipboard
-					</button>
+					<button type="button" class="btn btn-soft-default btn-sm mt-2" data-jy-copy="<?php echo htmlspecialchars($video->get_embed()); ?>"><i class="bi bi-clipboard me-1"></i> Copy to Clipboard</button>
 				</div>
 			</div>
 		</div>

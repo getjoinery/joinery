@@ -360,15 +360,15 @@ class StripeHelper {
 		$client_secret = (is_array($pending) && !empty($pending['client_secret'])
 			&& (int)($pending['time'] ?? 0) > time() - self::CARD_PENDING_MAX_AGE) ? (string)$pending['client_secret'] : '';
 
+		// Stripe.js loads from js.stripe.com, the card form's own code from
+		// assets/js/stripe-card.js; the public key and any pending bank
+		// confirmation ride on the form as data (no inline script).
 		$output = '
-				<script>
-					document.addEventListener(\'DOMContentLoaded\', function() {
-						var el = document.getElementById(\'nojavascript\'); if (el) el.style.display = \'none\';
-				});
-				</script>
 				<div id="nojavascript" style="border: 3px solid red; padding: 10px; margin: 10px;">Our payment form requires javascript to be turned on.  Please set your browser to allow javascript, turn off ad blockers, or try another browser.</div>
 				<script src="https://js.stripe.com/v3/"></script>
-				<form action="/cart_charge" method="post" id="payment-form">
+				<form action="/cart_charge" method="post" id="payment-form"'
+				. ' data-stripe-key="' . htmlspecialchars((string)$this->get_stripe_public_key(), ENT_QUOTES) . '"'
+				. ' data-pending-secret="' . htmlspecialchars($client_secret, ENT_QUOTES) . '">
 				  <div>
 					<div id="card-element">
 					  <!-- A Stripe Element will be inserted here. -->
@@ -377,72 +377,11 @@ class StripeHelper {
 					<!-- Used to display form errors. -->
 					<div id="card-errors" role="alert"></div>
 				  </div>
-				<br />'. '<button type="submit" id="payment-submit" class="btn btn-primary '.$button_class.'">Pay with Stripe</button></form>
+				<br />'. '<button type="submit" id="payment-submit" class="btn btn-primary '.$button_class.'" disabled>Pay with Stripe</button></form>
 				<form action="/cart_charge" method="post" id="card-confirm-form">
 				  <input type="hidden" name="card_payment_confirm" value="1">
-				</form>';
-
-		$output .= '<script> var stripe = Stripe(' . json_encode($this->get_stripe_public_key()) . ');
-							var pendingSecret = ' . json_encode($client_secret) . ';';
-
-		$output .= "
-							var elements = stripe.elements();
-							var style = {
-							  base: {
-								color: '#32325d',
-								fontFamily: '\"Helvetica Neue\", Helvetica, sans-serif',
-								fontSmoothing: 'antialiased',
-								fontSize: '24px',
-								 '::placeholder': {
-								  color: '#aab7c4'
-								}
-							  },
-							  invalid: {
-								color: '#fa755a',
-								iconColor: '#fa755a'
-							  }
-							};
-
-							var card = elements.create('card', {style: style});
-							card.mount('#card-element');
-
-							var displayError = document.getElementById('card-errors');
-							var submitButton = document.getElementById('payment-submit');
-							card.on('change', function(event) {
-							  displayError.textContent = event.error ? event.error.message : '';
-							});
-
-							// The card becomes a PaymentMethod here; only its id is posted.
-							var form = document.getElementById('payment-form');
-							form.addEventListener('submit', function(event) {
-							  event.preventDefault();
-							  submitButton.disabled = true;
-							  stripe.createPaymentMethod({type: 'card', card: card}).then(function(result) {
-								if (result.error) {
-								  displayError.textContent = result.error.message;
-								  submitButton.disabled = false;
-								  return;
-								}
-								var hiddenInput = document.createElement('input');
-								hiddenInput.setAttribute('type', 'hidden');
-								hiddenInput.setAttribute('name', 'stripePaymentMethod');
-								hiddenInput.setAttribute('value', result.paymentMethod.id);
-								form.appendChild(hiddenInput);
-								form.submit();
-							  });
-							});
-
-							// A checkout waiting on the buyer's bank: Stripe shows the bank's
-							// confirmation, then the checkout carries on at /cart_charge.
-							if (pendingSecret) {
-							  submitButton.disabled = true;
-							  displayError.textContent = 'Confirming the payment with your bank...';
-							  stripe.confirmCardPayment(pendingSecret).then(function() {
-								document.getElementById('card-confirm-form').submit();
-							  });
-							}";
-
-		$output .= '</script>';
+				</form>'
+				. PageScript::src('plugins/store/assets/js/stripe-card.js');
 
 		return $output;
 	}

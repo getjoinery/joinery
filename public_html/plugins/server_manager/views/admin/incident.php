@@ -14,6 +14,7 @@
  * goes through IncidentTriage, or IncidentAnalyst for Analyze (shown only
  * where the Joinery AI plugin is active).
  *
+ * @version 1.8 - the reload is data-jy-reload-after (no inline script)
  * @version 1.7 - the title's UTC times show in the viewer's zone (IncidentViews::localize_times)
  * @version 1.6 - a cleared never-do incident says it cleared, not that it clears on the next pass
  * @version 1.5 - the never-do box holds only the alarm; Mark safe remembers each file by its content
@@ -151,9 +152,7 @@ if ((string)$inc->get('inc_source') === IncidentSourceNeverDo::NAME && $node_id)
 		$nd_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . $node_id;
 		echo '<form method="post" action="' . $e($nd_url) . '" id="incident_never_do_accept">'
 			. '<input type="hidden" name="action" value="never_do_accept">' . SmAdminCsrf::field()
-			. '<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm('
-			. htmlspecialchars(json_encode($nd_ask), ENT_QUOTES, 'UTF-8')
-			. ', function(){ document.getElementById(\'incident_never_do_accept\').submit(); })">Mark safe</button></form>';
+			. '<button type="button" class="btn btn-sm btn-outline-primary" data-jy-confirm="' . htmlspecialchars($nd_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="incident_never_do_accept">Mark safe</button></form>';
 	} else {
 		echo '<p class="mb-0">The alarm holds nothing now: it was marked safe, or what it held moved to Changes to review on the node page. The incident clears on the next pass.</p>';
 	}
@@ -173,7 +172,7 @@ if (IncidentAnalyst::available()) {
 			. '<button type="submit" class="btn btn-sm btn-outline-primary">' . ($latest ? 'Analyze again' : 'Analyze') . '</button></form>';
 	} else {
 		// Reload until the worker has stored its answer.
-		echo '<script>setTimeout(function () { window.location.reload(); }, 10000);</script>';
+		echo '<span hidden data-jy-reload-after="10"></span>';
 	}
 	$page->end_box();
 }

@@ -1863,11 +1863,11 @@ To prevent color in emoji icons, use: `style="filter: grayscale(1);"`
 
 #### 6. jQuery → Vanilla JS Patterns
 
-Any interactive behavior from the Bootstrap theme must be rewritten in vanilla JS.
+Any interactive behavior from the Bootstrap theme must be rewritten in vanilla JS, in a file under the theme's `assets/js/`, never inline: the strict script policy ([Settings § The strict script policy](settings.md#the-strict-script-policy)) runs no `<script>` without `src` and no `onclick=`. Load the file from the page class or view with `PageScript::src('theme/$THEME_NAME/assets/js/menu.js')`; a value from PHP goes to it as a `data-` attribute or a `PageScript::json()` block ([Admin Pages § No inline script](admin_pages.md)).
 
-**Mobile menu toggle:**
-```html
-<script>
+**Mobile menu toggle** (`assets/js/menu.js`):
+```js
+(function () {
     const menuToggle = document.querySelector('.menu-toggle');
     const mainNav = document.querySelector('.main-nav');
     if (menuToggle && mainNav) {
@@ -1875,7 +1875,7 @@ Any interactive behavior from the Bootstrap theme must be rewritten in vanilla J
             mainNav.classList.toggle('open');
         });
     }
-</script>
+})();
 ```
 
 With CSS:
@@ -1894,9 +1894,8 @@ With CSS:
 }
 ```
 
-**Comment reply toggle** (replaces jQuery `.slideToggle()`):
-```html
-<script>
+**Comment reply toggle** (replaces jQuery `.slideToggle()`; `assets/js/post.js`):
+```js
 document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.comment-reply-link').forEach(function(link) {
         link.addEventListener('click', function(e) {
@@ -1910,7 +1909,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
-</script>
 ```
 
 **Sidebar panel toggle** (for sidebar-based navigation designs):

@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Joinery page hook fixtures</title>
+<!--
+	Browser-side fixtures for the page hooks in assets/js/base.js that stand in
+	for inline script under the strict script policy: joinery-body-class,
+	data-jy-body-insert, data-jy-select-all, data-jy-current-path, and the
+	same-site path check behind data-jy-reload-to and data-jy-navigate, and
+	data-jy-dismiss, data-jy-reveal, data-jy-autosubmit and data-jy-busy.
+	tests/unit/joinery_page_hooks_test.php loads this in headless Chrome and
+	reads the <li data-result> rows.
+-->
+<meta name="joinery-body-class" content="jy-app-mode jy-other">
+<template data-jy-body-insert="beforeend"><div id="chip">Admin</div></template>
+<template data-jy-body-insert="afterbegin"><div id="banner"><form><input type="hidden" id="ret" name="return" value="" data-jy-current-path></form></div></template>
+<script src="../../../assets/js/base.js"></script>
+</head>
+<body>
+<ul id="results"></ul>
+<input type="text" id="sel" value="copy me" readonly data-jy-select-all>
+<div id="note" data-jy-dismissible><p><button type="button" id="dismiss" data-jy-dismiss>OK</button></p></div>
+<div id="reveal-wrap"><a href="#adv" id="reveal" data-jy-reveal="adv" data-jy-reveal-hide="reveal-wrap">Show</a></div>
+<div id="adv" style="display:none">advanced</div>
+<iframe name="sink" style="display:none"></iframe>
+<form id="filter" target="sink" action="about:blank"><select id="auto" name="s" data-jy-autosubmit><option value="a">a</option><option value="b">b</option></select></form>
+<form id="busy-plain" target="sink" action="about:blank"><button type="submit" id="busy1" name="go" value="1" data-jy-busy="Running…">Go</button></form>
+<form id="busy-ask" target="sink" action="about:blank" data-jy-confirm="Sure?"><button type="submit" id="busy2" data-jy-busy="Running…">Go</button></form>
+<form id="busy-self" target="sink" action="about:blank"><button type="button" id="busy3" name="go" value="1" data-jy-confirm="Really?" data-jy-submit="" data-jy-submit-self data-jy-busy="Publishing…">Publish</button></form>
+<select id="nav" data-jy-navigate><option value="">-</option><option value="//evil.example/">bad</option><option value="javascript:alert(1)">worse</option></select>
+<script>
+(function () {
+	'use strict';
+	var results = document.getElementById('results');
+	function report(name, ok, detail) {
+		var li = document.createElement('li');
+		li.setAttribute('data-result', ok ? 'pass' : 'fail');
+		li.setAttribute('data-name', name);
+		li.textContent = name + (ok ? '' : ' :: ' + (detail || ''));
+		results.appendChild(li);
+	}
+	function run() {
+		try {
+			var b = document.body;
+			report('joinery-body-class adds each class to the body', b.classList.contains('jy-app-mode') && b.classList.contains('jy-other'), b.className);
+			report('a beforeend template lands at the end of the body', b.lastElementChild && b.lastElementChild.id === 'chip', b.lastElementChild && b.lastElementChild.id);
+			report('an afterbegin template lands at the top of the body', b.firstElementChild && b.firstElementChild.id === 'banner', b.firstElementChild && b.firstElementChild.id);
+			report('and the templates are gone', document.querySelectorAll('template[data-jy-body-insert]').length === 0);
+			var ret = document.getElementById('ret');
+			report('data-jy-current-path is given this page\'s path', !!ret && ret.value === location.pathname + location.search, ret && ret.value);
+			var sel = document.getElementById('sel');
+			sel.click();
+			report('data-jy-select-all selects the whole value on click', sel.selectionStart === 0 && sel.selectionEnd === sel.value.length,
+				sel.selectionStart + '-' + sel.selectionEnd);
+			var ok = ['/x', '/x?y=1', '/'];
+			// A browser drops tab, CR and LF and reads "\\" as "/", so each of these
+			// would leave the site (reviewer2 B4).
+			var bad = ['//evil.example/', '/\\evil.example', 'https://evil.example/', 'javascript:alert(1)', 'x', '',
+				'/\t/evil.example/x', '/\n/evil.example', '/\r\\evil.example', '/ /evil.example', '/x\\y'];
+			report('a same-site path passes the check', ok.every(joinerySameSitePath), ok.filter(function (p) { return !joinerySameSitePath(p); }).join(' '));
+			report('anything else is refused', bad.every(function (p) { return !joinerySameSitePath(p); }), bad.filter(joinerySameSitePath).join(' '));
+			var before = location.href, nav = document.getElementById('nav');
+			nav.value = '//evil.example/'; nav.dispatchEvent(new Event('change', { bubbles: true }));
+			nav.value = 'javascript:alert(1)'; nav.dispatchEvent(new Event('change', { bubbles: true }));
+			report('data-jy-navigate ignores an address off the site', location.href === before, location.href);
+		} catch (e) {
+			report('the fixtures ran without throwing', false, String(e && e.stack || e));
+		}
+		later().catch(function (e) {
+			report('the later fixtures ran without throwing', false, String(e && e.stack || e));
+		}).then(function () { document.body.setAttribute('data-done', '1'); });
+	}
+	function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+	async function later() {
+		document.getElementById('dismiss').click();
+		report('data-jy-dismiss hides its dismissible notice', document.getElementById('note').hidden === true);
+		document.getElementById('reveal').click();
+		report('data-jy-reveal shows its target and hides the one named', document.getElementById('adv').style.display === ''
+			&& document.getElementById('reveal-wrap').style.display === 'none');
+		var sent = [];
+		document.addEventListener('submit', function (e) { sent.push(e.target.id + ':' + (e.defaultPrevented ? 'stopped' : 'sent')); });
+		var auto = document.getElementById('auto');
+		auto.value = 'b'; auto.dispatchEvent(new Event('change', { bubbles: true }));
+		await wait(50);
+		report('data-jy-autosubmit submits its form on change', sent.indexOf('filter:sent') !== -1, JSON.stringify(sent));
+		var b1 = document.getElementById('busy1');
+		b1.click();
+		await wait(50);
+		report('data-jy-busy: once its form posts, the button says so and is disabled', b1.disabled && b1.textContent === 'Running…', b1.disabled + ' ' + b1.textContent);
+		var b2 = document.getElementById('busy2');
+		b2.click();
+		await wait(100);
+		var d = document.querySelector('dialog[open]');
+		var btns = d ? d.querySelectorAll('.dialog-actions button') : [];
+		if (btns.length) btns[0].click();
+		await wait(100);
+		report('data-jy-busy: a submit the kit confirm stopped leaves the button alone', !!d && !b2.disabled && b2.textContent === 'Go',
+			(d ? 'asked' : 'not asked') + ' ' + b2.disabled + ' ' + b2.textContent);
+		var b3 = document.getElementById('busy3');
+		b3.click();
+		await wait(100);
+		var d3 = document.querySelector('dialog[open]');
+		var y3 = d3 ? d3.querySelectorAll('.dialog-actions button') : [];
+		if (y3.length) y3[y3.length - 1].click();
+		await wait(100);
+		report('data-jy-busy on a confirm button: once the answer is yes and the form posts, it says so', !!d3 && b3.disabled && b3.textContent === 'Publishing…',
+			(d3 ? 'asked' : 'not asked') + ' ' + b3.disabled + ' ' + b3.textContent);
+	}
+	if (document.readyState === 'complete') run(); else window.addEventListener('load', run);
+})();
+</script>
+</body>
+</html>

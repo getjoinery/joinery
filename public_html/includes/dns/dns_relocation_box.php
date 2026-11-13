@@ -18,6 +18,7 @@
  *           copied, and here is why a subdomain we could not guess is not in
  *           that list.
  *
+ * @version 1.5 - the host picker's script is assets/js/dns-boxes.js (no inline script)
  * @version 1.4 - the could-not-copy caveat is an always-visible amber notice on
  *                the handover, no longer folded inside the copied-records
  *                details; the reassurance line claims only what was copied
@@ -191,19 +192,10 @@ function dns_relocation_form($page, array $vars, array $targets, string $domain)
 		array('class' => 'btn btn-primary'));
 	echo '</div>';
 	$form->end_form();
-?>
-<script>
-(function () {
-	var target = document.getElementById('dns_move_target');
-	if (!target) { return; }
-	function sync() {
-		document.querySelectorAll('.dns-move-cred').forEach(function (div) {
-			div.classList.toggle('d-none', div.getAttribute('data-move-target') !== target.value);
-		});
+	// assets/js/dns-boxes.js shows the chosen host's credential fields
+	if (!defined('JY_DNS_BOXES_JS')) {   // one tag, whichever box asks first
+		define('JY_DNS_BOXES_JS', true);
+		echo '<script defer src="/assets/js/dns-boxes.js?v='
+			. (@filemtime(PathHelper::getIncludePath('assets/js/dns-boxes.js')) ?: '1') . '"></script>';
 	}
-	target.addEventListener('change', sync);
-	sync();
-})();
-</script>
-<?php
 }

@@ -68,7 +68,7 @@ check(preg_match('/class="jy-error-summary"[^>]*\bhidden\b/', $html) === 1,
     'container ships hidden when there are no errors');
 check(strpos($html, 'role="alert"') !== false && strpos($html, 'tabindex="-1"') !== false,
     'container is announceable and focusable');
-check(strpos($html, 'errorSummary: true') !== false,
+check(strpos($html, '"errorSummary":true') !== false,
     'validator init enables the client summary');
 
 $html = render_form(function ($fw) {
@@ -152,7 +152,7 @@ $html = render_form(function ($fw) {
 }, ['error_summary' => false]);
 check(strpos($html, 'jy-error-summary') === false,
     'error_summary => false emits no container');
-check(strpos($html, 'errorSummary: false') !== false,
+check(strpos($html, '"errorSummary":false') !== false,
     'error_summary => false also disables the client summary');
 
 $fw = new FormWriterV2JSON('summary_test_form');

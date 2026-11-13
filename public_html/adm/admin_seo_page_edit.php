@@ -103,7 +103,7 @@ if ($spm->key) {
 	echo ' ';
 	$formwriter->submitbutton('btn_delete', 'Soft-delete', array(
 		'class'          => 'btn btn-danger',
-		'onclick'        => "return confirm('Soft-delete this SEO row?');",
+		'confirm'        => 'Soft-delete this SEO row?',
 		'formnovalidate' => true,
 	));
 }

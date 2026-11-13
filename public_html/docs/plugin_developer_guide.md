@@ -1058,7 +1058,7 @@ never overwritten.
 | `vault_gated` | No | `false` | Changing it requires an open vault unlock window. |
 | `managed` | No | `false` | Machine-written. Never rendered. Mutually exclusive with `label`. |
 | `legacy_core` | No | `false` | Opts this one setting out of the prefix rule so it keeps an unprefixed core-era name. See below. |
-| `clearsPages` | No | — | Same-site paths whose static-cached pages (and everything under them) are cleared whenever its stored value changes (the settings form or `Setting::put()`) — e.g. `["/forum", "/sitemap"]` on a setting that turns public pages on or off. The cache answers signed-out visitors before any code runs, so without it a page the setting turns off goes on being served. |
+| `clearsPages` | No | — | Same-site paths whose static-cached pages (and everything under them) are cleared whenever its stored value changes (the settings form or `Setting::put()`) — e.g. `["/forum", "/sitemap"]` on a setting that turns public pages on or off, or `["/"]` (every cached page) on one that changes a header every page sends. The cache answers signed-out visitors before any code runs, so without it a page the setting turns off goes on being served. |
 
 The full field-spec reference, including how a plugin admin page requests a group
 and wraps it with context, is in [Settings](settings.md).
@@ -2561,18 +2561,18 @@ This shows detailed routing information in HTML comments.
 
 If your plugin adds analytics or marketing scripts to public pages, you should wrap them for GDPR/CCPA consent compliance.
 
+The script is a file, loaded by `src` from a host the site's policy lists: under the strict script policy ([Settings § The strict script policy](settings.md#the-strict-script-policy)) no inline script runs, consented or not.
+
 **Using ConsentHelper to wrap scripts:**
 ```php
 require_once(PathHelper::getIncludePath('includes/ConsentHelper.php'));
 $consent = ConsentHelper::get_instance();
-echo $consent->wrapTrackingCode('<script>...your tracking code...</script>', 'analytics');
+echo $consent->wrapTrackingCode('<script src="/plugins/myplugin/assets/js/tracking.js"></script>', 'analytics');
 ```
 
 **Or manually add the consent attribute to script tags:**
 ```html
-<script type="text/plain" data-joinery-consent="analytics">
-  // This script only runs after user consents to analytics
-</script>
+<script type="text/plain" data-joinery-consent="analytics" src="/plugins/myplugin/assets/js/tracking.js"></script>
 ```
 
 **Consent categories:**

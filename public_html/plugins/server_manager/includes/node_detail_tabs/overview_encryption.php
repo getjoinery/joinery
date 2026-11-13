@@ -17,6 +17,7 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.14 - the unlock's ceremony is a JSON block (no inline script)
  * @version 1.13 - a stored report missing newer fields reads with their defaults
  * @version 1.12 - the unlock page gets the X-Wing ciphertext only: no v1 ephemeral key
  * @version 1.10 - what to do while the provider's layer is on is DataRootEncryptionOffer::provider_layer_fix(): a machine
@@ -74,7 +75,7 @@ if ($dre_offer && !$dre_row) {
 			. '<label class="form-check-label small" for="keep_provider_layer">Keep the provider\'s layer as well (two layers; this node page will say so)</label></div>';
 	}
 	echo '<button type="button" class="btn btn-sm btn-primary"' . ($ready ? '' : ' disabled')
-		. ' onclick="JoineryModal.confirm(\'Encrypt this data root where it stands? Its sites and services stop for a few seconds, then it encrypts in the background for hours, and they stop again for a few seconds when it finishes, as its logs move onto it. A reboot part-way opens it with the recovery key.\', function(){ document.getElementById(\'data_root_encrypt_form\').submit(); })">Encrypt the data root</button></form>';
+		. ' data-jy-confirm="Encrypt this data root where it stands? Its sites and services stop for a few seconds, then it encrypts in the background for hours, and they stop again for a few seconds when it finishes, as its logs move onto it. A reboot part-way opens it with the recovery key." data-jy-submit="data_root_encrypt_form">Encrypt the data root</button></form>';
 	$page->end_box();
 }
 if (is_array($dre_enc) || $dre_row) {
@@ -192,7 +193,7 @@ if (is_array($dre_enc) || $dre_row) {
 				. '<a href="' . $base_url . '&tab=copy">a copy from its backups</a> onto a new server and retire this one.'
 				. '<form id="data_root_escrow_excuse_form" method="post" action="' . $base_url . '" class="mt-2">'
 				. '<input type="hidden" name="action" value="data_root_escrow_excuse">' . SmAdminCsrf::field()
-				. '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm(\'Say you caused this yourself (a rescue boot or a password reset you ran)? It is recorded with your name, and its next ask is answered: whatever was written to its root disk then is trusted from now on.\', function(){ document.getElementById(\'data_root_escrow_excuse_form\').submit(); })">I did this myself</button></form>');
+				. '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="Say you caused this yourself (a rescue boot or a password reset you ran)? It is recorded with your name, and its next ask is answered: whatever was written to its root disk then is trusted from now on." data-jy-submit="data_root_escrow_excuse_form">I did this myself</button></form>');
 		}
 		if ($dre_row->get('dre_tier2_excused_time')) {
 			$excuser = new User((int)$dre_row->get('dre_tier2_excused_usr_user_id'), TRUE);
@@ -249,10 +250,10 @@ if (is_array($dre_enc) || $dre_row) {
 			. '<input type="hidden" name="shared" value=""><input type="hidden" name="public_key" value="">' . SmAdminCsrf::field()
 			. '<button type="button" class="btn btn-sm btn-warning" id="copy_key_open">Unlock</button>'
 			. '<div id="copy_key_status" class="small mt-2"></div></form>';
-		echo '<script>window.copyKeyCeremony = ' . json_encode(array('fingerprint' => $parts['fingerprint'], 'version' => $parts['version'],
-			'ciphertext' => $parts['ciphertext'])) . ';</script>';
+		echo PageScript::json('copy-key-ceremony', array('fingerprint' => $parts['fingerprint'], 'version' => $parts['version'],
+			'ciphertext' => $parts['ciphertext']));
 		echo VaultCrypto::browserScriptTag(false);
-		echo '<script src="/assets/js/copy-key.js?v=' . filemtime(PathHelper::getIncludePath('assets/js/copy-key.js')) . '"></script>';
+		echo PageScript::src('assets/js/copy-key.js', false);
 		echo '</div>';
 	}
 
@@ -262,19 +263,19 @@ if (is_array($dre_enc) || $dre_row) {
 			&& JobCommandBuilder::has_primitive($node, 'data_root_rekey')) {
 		echo '<form id="data_root_rekey_form" method="post" action="' . $base_url . '" class="mt-3 d-inline-block me-2">'
 			. '<input type="hidden" name="action" value="data_root_rekey">' . SmAdminCsrf::field()
-			. '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="JoineryModal.confirm(\'Re-encrypt this data root under a new volume key? Do this when someone else could have seen the recovery key it was sealed to: from then on that key opens no copy of its disk. It runs in the background for hours; its escrow slot is made again with a new secret. One machine at a time.\', function(){ document.getElementById(\'data_root_rekey_form\').submit(); })">Re-encrypt under a new key&hellip;</button></form>';
+			. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="Re-encrypt this data root under a new volume key? Do this when someone else could have seen the recovery key it was sealed to: from then on that key opens no copy of its disk. It runs in the background for hours; its escrow slot is made again with a new secret. One machine at a time." data-jy-submit="data_root_rekey_form">Re-encrypt under a new key&hellip;</button></form>';
 	}
 	if (is_array($dre_enc) && $dre_open && !in_array(($dre_enc['reencrypt'] ?? ''), array('decrypt', 'reencrypt'), true)
 			&& JobCommandBuilder::has_primitive($node, 'data_root_decrypt')) {
 		echo '<form id="data_root_decrypt_form" method="post" action="' . $base_url . '" class="mt-3 d-inline-block me-2">'
 			. '<input type="hidden" name="action" value="data_root_decrypt">' . SmAdminCsrf::field()
-			. '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="JoineryModal.confirm(\'Decrypt this data root, back to plain, online? It runs in the background for hours; its data is readable in a copy of its disk from then on.\', function(){ document.getElementById(\'data_root_decrypt_form\').submit(); })">Decrypt (undo)</button></form>';
+			. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="Decrypt this data root, back to plain, online? It runs in the background for hours; its data is readable in a copy of its disk from then on." data-jy-submit="data_root_decrypt_form">Decrypt (undo)</button></form>';
 	}
 
 	if ($dre_row && $held_here) {
 		echo '<form id="data_root_escrow_retire_form" method="post" action="' . $base_url . '" class="mt-3">'
 			. '<input type="hidden" name="action" value="data_root_escrow_retire">' . SmAdminCsrf::field()
-			. '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm(\'Stop holding this machine\\\'s key? It opens by its recovery key at every boot until it is enrolled again.\', function(){ document.getElementById(\'data_root_escrow_retire_form\').submit(); })">Stop holding its key</button></form>';
+			. '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="Stop holding this machine\'s key? It opens by its recovery key at every boot until it is enrolled again." data-jy-submit="data_root_escrow_retire_form">Stop holding its key</button></form>';
 	}
 	$page->end_box();
 }

@@ -246,19 +246,8 @@ if (count($vault_aggregate)) {
 $stepup = isset($page_vars['stepup']) ? $page_vars['stepup'] : array('needed' => false, 'passkey' => false);
 ?>
 <?php echo VaultCrypto::browserScriptTag(); ?>
-<script defer src="/assets/js/recovery-readiness.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1'; ?>"></script>
-<script>
-window.rrCeremonyConfigs = <?php echo json_encode($ceremony_configs); ?>;
-window.rrClientConfigs = <?php echo json_encode($client_configs); ?>;
-window.rrStepup = <?php echo json_encode($stepup); ?>;
-document.addEventListener('DOMContentLoaded', function () {
-	if (window.recoveryReadiness) {
-		(window.rrCeremonyConfigs || []).forEach(function (c) { window.recoveryReadiness.attachCeremony(c); });
-		window.recoveryReadiness.attachClientChecks();
-		window.recoveryReadiness.attachStepUp(window.rrStepup);
-	}
-});
-</script>
+<?php echo PageScript::json('rr-page-config', array('ceremonies' => $ceremony_configs, 'client_configs' => (object)$client_configs, 'stepup' => $stepup)); ?>
+<?php echo PageScript::src('assets/js/recovery-readiness.js'); ?>
 <?php
 $page->admin_footer();
 ?>

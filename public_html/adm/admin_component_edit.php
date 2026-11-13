@@ -267,9 +267,9 @@ if ($content->key) {
 		'options' => $type_options_fw,
 		'value'   => (string)$current_type_id,
 		'model'   => false,
+		'disabled' => true,
 	]);
 	$formwriter->hiddeninput('pac_com_component_id', '', ['value' => (int)$current_type_id]);
-	echo '<script>document.querySelector("[name=_pac_com_component_id_display]").disabled=true;</script>';
 } else {
 	// Add mode — reload page on change to show schema fields for the chosen type
 	$formwriter->dropinput('pac_com_component_id', 'Component Type', [
@@ -279,13 +279,8 @@ if ($content->key) {
 		'model'    => false,
 	]);
 	$type_change_base = '/admin/admin_component_edit?' . ($return_page_id ? 'pag_page_id=' . (int)$return_page_id . '&' : '');
-	echo '<script>(function(){';
-	echo 'var s=document.querySelector("[name=pac_com_component_id]");';
-	echo 'if(!s)return;';
-	echo 's.addEventListener("change",function(){';
-	echo 'if(this.value)window.location.href=' . json_encode($type_change_base) . '+"component_type="+encodeURIComponent(this.value);';
-	echo '});';
-	echo '})();</script>';
+	// assets/js/admin-component-edit.js reloads with the chosen type.
+	echo PageScript::json('component-edit-config', array('type_change_base' => $type_change_base));
 }
 
 $formwriter->textinput('pac_title', 'Label', [
@@ -560,48 +555,7 @@ if ($content->key && !empty(PageContent::$ab_testable)) {
 
 // JavaScript for advanced fields toggle
 ?>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-	// Main advanced fields toggle
-	document.querySelectorAll('.advanced-fields-toggle').forEach(function(link) {
-		link.addEventListener('click', function(e) {
-			e.preventDefault();
-			var targetId = this.getAttribute('data-target');
-			var target = document.getElementById(targetId);
-			if (target) {
-				var isHidden = target.style.display === 'none';
-				target.style.display = isHidden ? 'block' : 'none';
-				var count = target.querySelectorAll('.mb-3, .form-group').length;
-				if (isHidden) {
-					this.innerHTML = '<i class="fas fa-cog me-1"></i>Hide advanced fields';
-				} else {
-					this.innerHTML = '<i class="fas fa-cog me-1"></i>Show advanced fields (' + count + ')';
-				}
-			}
-		});
-	});
-
-	// Repeater advanced fields toggle (use event delegation for dynamic rows)
-	document.addEventListener('click', function(e) {
-		if (e.target.closest('.repeater-advanced-toggle')) {
-			e.preventDefault();
-			var link = e.target.closest('.repeater-advanced-toggle');
-			var targetId = link.getAttribute('data-target');
-			var target = document.getElementById(targetId);
-			if (target) {
-				var isHidden = target.style.display === 'none';
-				target.style.display = isHidden ? 'block' : 'none';
-				var count = target.querySelectorAll('.col-md, .col-md-3, .col-md-5').length;
-				if (isHidden) {
-					link.innerHTML = '<i class="fas fa-cog me-1"></i>Hide advanced';
-				} else {
-					link.innerHTML = '<i class="fas fa-cog me-1"></i>Advanced (' + count + ')';
-				}
-			}
-		}
-	});
-});
-</script>
+<?php echo PageScript::src('assets/js/admin-component-edit.js'); ?>
 <?php
 
 $page->admin_footer();

@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.38 - no inline script: the reload is data-jy-reload-after, the poller assets/js/job-detail.js
  * @version 1.37 - an apply result's warnings (a role step that left the site on postgres) show as alerts on the card
  * @version 1.36 - a log_table_tail event read shows the vault windows paired and counted (VaultWindowHistory) above its rows
  * @version 1.35 - v1_census results removed with the v1 code; relay transport key shows kind and generation only
@@ -286,7 +287,7 @@ $status_class = match($job->get('mjb_status')) {
 					nothing will be published, because this apply did not complete.
 				<?php elseif ($tp_status === 'completed'): ?>
 					the apply has finished; its publish starts within a minute if the apply succeeded. This page reloads until it does.
-					<script>setTimeout(function () { window.location.reload(); }, 15000);</script>
+					<span hidden data-jy-reload-after="15"></span>
 				<?php else: ?>
 					once this apply brings the node to <?php echo htmlspecialchars((string)($then_publish['target'] ?? '')); ?>
 					or later and succeeds, that version is published with these notes<?php echo !empty($then_publish['deploy_all']) ? ' and deployed to all managed nodes' : ''; ?>.
@@ -377,14 +378,14 @@ $status_class = match($job->get('mjb_status')) {
 				<form method="post" action="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>" id="cancel_job_form" style="display:inline;">
 					<input type="hidden" name="action" value="cancel_job">
 					<?php echo SmAdminCsrf::field(); ?>
-					<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Cancel this job?', function(){ document.getElementById('cancel_job_form').submit(); })">Cancel</button>
+					<button type="button" class="btn btn-sm btn-warning" data-jy-confirm="Cancel this job?" data-jy-submit="cancel_job_form">Cancel</button>
 				</form>
 			<?php endif; ?>
 			<?php if ($job->get('mjb_status') === 'running' && $job->isPrimitiveJob()): ?>
 				<form method="post" action="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>" id="mark_job_lost_form" style="display:inline;">
 					<input type="hidden" name="action" value="mark_job_lost">
 					<?php echo SmAdminCsrf::field(); ?>
-					<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('Mark this job as failed? Do this only when the node is not going to report it: its agent or machine restarted, or it is long past its time. It is never run again by itself, and the node is free for its next job. If the node does report it later, its result replaces this.', function(){ document.getElementById('mark_job_lost_form').submit(); })">Mark as failed</button>
+					<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="Mark this job as failed? Do this only when the node is not going to report it: its agent or machine restarted, or it is long past its time. It is never run again by itself, and the node is free for its next job. If the node does report it later, its result replaces this." data-jy-submit="mark_job_lost_form">Mark as failed</button>
 				</form>
 			<?php endif; ?>
 			<?php if (in_array($job->get('mjb_status'), ['completed', 'failed', 'cancelled'])): ?>
@@ -1293,70 +1294,13 @@ if ($commands_data && isset($commands_data['steps'])) {
 
 <?php if (in_array($job->get('mjb_status'), ['queued', 'pending', 'running'])): ?>
 <?php echo SmAssets::script_tag(); ?>
-<script>
-(function() {
-	var outputEl = document.getElementById('job-output');
-	var statusEl = document.getElementById('job-status');
-	var progressEl = document.getElementById('job-progress');
-	var offset = <?php echo strlen(SmSecretRedactor::redact($job->transcript() ?: '')); ?>;
-	var polling = true;
-
-	function poll() {
-		if (!polling) return;
-		smApiPost('job_status', { job_id: <?php echo (int)$job->key; ?>, output_offset: offset })
-			.then(function(data) {
-				if (!data.success) return;
-
-				if (data.new_output) {
-					if (offset === 0 && outputEl.textContent === 'Waiting for output...') {
-						outputEl.textContent = '';
-					}
-					outputEl.textContent += data.new_output;
-					offset = data.output_offset;
-					outputEl.scrollTop = outputEl.scrollHeight;
-				}
-
-				var totalSteps = <?php echo $total_steps; ?>;
-				// Translate 0-based raw index to user-facing completed count.
-				var doneSteps;
-				if (data.status === 'completed') {
-					doneSteps = totalSteps;
-				} else {
-					doneSteps = data.current_step;
-				}
-				progressEl.textContent = doneSteps;
-
-				if (data.status !== 'queued' && data.status !== 'pending' && data.status !== 'running') {
-					polling = false;
-					statusEl.textContent = data.status;
-					statusEl.className = 'badge bg-' + (data.status === 'completed' ? 'success' : 'danger');
-					<?php if ($deploy_all !== null): ?>
-					// The page says what became of the deploy, and loading it starts the rollout.
-					if (data.status === 'completed') { window.location.reload(); return; }
-					<?php endif; ?>
-					<?php if ($then_publish !== null): ?>
-					// The page says what became of the publish that follows.
-					window.location.reload(); return;
-					<?php endif; ?>
-					if (data.error_message) {
-						var errDiv = document.createElement('div');
-						errDiv.className = 'alert alert-danger mt-2';
-						errDiv.textContent = 'Error: ' + data.error_message;
-						statusEl.parentNode.appendChild(errDiv);
-					}
-					return;
-				}
-
-				setTimeout(poll, 2000);
-			})
-			.catch(function() {
-				setTimeout(poll, 5000);
-			});
-	}
-
-	setTimeout(poll, 2000);
-})();
-</script>
+<?php echo PageScript::json('job-detail-config', array(
+	'job_id'             => (int)$job->key,
+	'offset'             => strlen(SmSecretRedactor::redact($job->transcript() ?: '')),
+	'total_steps'        => (int)$total_steps,
+	'reload_on_complete' => $deploy_all !== null,
+	'reload_on_end'      => $then_publish !== null,
+)), PageScript::src('plugins/server_manager/assets/js/job-detail.js'); ?>
 <?php endif; ?>
 
 <?php

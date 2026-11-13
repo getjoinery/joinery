@@ -22,6 +22,7 @@
  * site's selection policy), under joinery_ai's monthly token ceiling. Without
  * joinery_ai active, available() is false and the form offers no button.
  *
+ * @version 1.4 - the Auto-notes button's script is assets/js/release-notes-draft.js
  * @version 1.3 - the last release's core commit is followed through the commit map, so a rewritten public history
  *                still drafts from the right commits (specs_private_repo D5)
  * @version 1.2 - a republishing site's draft may run through a newer version than it runs ($through): the one
@@ -70,32 +71,10 @@ class ReleaseNotesDrafter {
 		ob_start();
 		?>
 		<div class="mb-3">
-			<button type="button" class="btn btn-sm btn-outline-secondary" id="auto_notes_btn">Auto-notes</button>
+			<button type="button" class="btn btn-sm btn-outline-secondary" id="auto_notes_btn" data-target="<?php echo htmlspecialchars($textarea, ENT_QUOTES); ?>" data-through="<?php echo htmlspecialchars((string)$through, ENT_QUOTES); ?>">Auto-notes</button>
 			<small class="text-muted" id="auto_notes_status">Drafts short notes for a general audience from <?php echo htmlspecialchars($from); ?>. Replaces what is in the box.</small>
 		</div>
-		<script>
-		(function () {
-			var btn = document.getElementById('auto_notes_btn');
-			var status = document.getElementById('auto_notes_status');
-			var box = document.querySelector(<?php echo json_encode($textarea, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>);
-			btn.addEventListener('click', function () {
-				btn.disabled = true;
-				status.textContent = 'Writing a draft…';
-				window.joineryApi.post('server_manager/release_notes_draft', <?php echo json_encode($through !== '' ? array('through' => $through) : new stdClass(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>).then(function (data) {
-					if (data && data.ok) {
-						box.value = data.notes;
-						status.textContent = 'Drafted from ' + data.source + ' by ' + data.model + '. Read it over before publishing.';
-					} else {
-						status.textContent = (data && data.message) || 'No draft came back.';
-					}
-				}).catch(function (err) {
-					status.textContent = 'The draft failed: ' + err.message;
-				}).then(function () {
-					btn.disabled = false;
-				});
-			});
-		})();
-		</script>
+		<?php echo PageScript::src('plugins/server_manager/assets/js/release-notes-draft.js'); ?>
 		<?php
 		return ob_get_clean();
 	}

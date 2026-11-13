@@ -37,6 +37,9 @@
  * it there).
  *
  * @version 2.2.1 - header: a v1 key box is refused (v1_key_retirement WP2)
+ * @version 2.4.1 - runs once per page however many panels load it; the page part waits on base.js's joineryDomReady
+ * @version 2.4.0 - the page's ceremonies, client check configs and step-up come from #rr-page-config, read here
+ * @version 2.3.0 - the panel and approval configs are JSON blocks (#rr-panel-config, #rr-approval-config), not page globals
  * @version 2.2.0 - a client check refuses text that is not shaped like a recovery code, before it runs
  * @version 2.1.0 - attachStepUp hands the data-stepup forms to JoineryPasskeys.confirmForms: it
  *                  matched action names this page's forms no longer all used, so a check lost its post
@@ -51,10 +54,12 @@
  * @version 1.2.0 - one-screen setup: paste-back match + save/prove via the
  *                  backup_recovery_save / backup_recovery_prove API actions
  * @version 1.1.0 - keypair generation in the page (generateKeypair/attachGenerator)
- *                  and self-attachment from window.rrPanel
+ *                  and self-attachment from the panel's config
  * @version 1.0.0
  */
-window.recoveryReadiness = (function () {
+// Two panels on one page (admin_backups) each load this file; only the first
+// copy runs, so no button gets a second listener.
+window.recoveryReadiness = window.recoveryReadiness || (function () {
 	'use strict';
 
 	function VC() {
@@ -308,8 +313,8 @@ window.recoveryReadiness = (function () {
 	}
 
 	/**
-	 * Client-custody vault code dry runs. Configs are emitted by the page as
-	 * window.rrClientConfigs = { scope: { wrappings: [{wrapped, salt, ad}] } }.
+	 * Client-custody vault code dry runs. Configs come from the page's
+	 * #rr-page-config block, as client_configs = { scope: { wrappings: [{wrapped, salt, ad}] } }.
 	 * Requires window.VaultCrypto (vault-crypto.js) for the KEK/unwrap
 	 * primitives — the same code the real recovery flow runs.
 	 */
@@ -335,7 +340,7 @@ window.recoveryReadiness = (function () {
 					? window.VaultCrypto.recoveryCodeProblem(code) : null;
 				if (shape) { say(shape, false); return; }
 
-				var cfg = (window.rrClientConfigs || {})[scope];
+				var cfg = ((readConfig('rr-page-config') || {}).client_configs || {})[scope];
 				if (!cfg || !window.VaultCrypto) {
 					say('The vault crypto scripts did not load — reload the page and try again.', false);
 					return;
@@ -384,20 +389,42 @@ window.recoveryReadiness = (function () {
 		}
 	}
 
-	// RecoveryKeySetupPanel emits window.rrPanel and nothing else — the panel
+	// A config the page carries as a JSON block (no inline script).
+	function readConfig(id) {
+		var el = document.getElementById(id);
+		if (!el) return null;
+		try { return JSON.parse(el.textContent); } catch (e) { return null; }
+	}
+
+	// RecoveryKeySetupPanel emits #rr-panel-config and nothing else — the panel
 	// renders in several places and each one wiring its own listeners is how one
 	// of them ends up with a button that does nothing.
 	function attachPanel() {
 		// The approval screen (ApprovalChallengePanel, every scope) uses the same
 		// ceremony — open a challenge sealed to the recovery key, submit what
-		// came out — under its OWN global. Separate because the two panels can
-		// appear on one page, and a second assignment to window.rrPanel would
-		// silently replace the first: on the approval screen, that means a
-		// button that does nothing on the page where someone is trying to
-		// authorize a restore.
-		if (window.rrApproval) attachCeremony(window.rrApproval);
+		// came out — under its OWN block (#rr-approval-config). Separate because
+		// the two panels can appear on one page, and one config replacing the
+		// other would leave, on the approval screen, a button that does
+		// nothing on the page where someone is trying to authorize a restore.
+		var approval = readConfig('rr-approval-config');
+		if (approval) attachCeremony(approval);
 
-		var cfg = window.rrPanel;
+		// A page listing several vaults (the readiness pages) carries
+		// #rr-page-config: { ceremonies: [...], client_configs: {...}, stepup: {...} }.
+		// Run once every deferred file has (DOMContentLoaded comes after them),
+		// since the step-up needs passkeys.js wherever the page loads it.
+		var page = readConfig('rr-page-config');
+		if (page) {
+			var attachPage = function () {
+				(page.ceremonies || []).forEach(function (c) { attachCeremony(c); });
+				attachClientChecks();
+				if (page.stepup) attachStepUp(page.stepup);
+			};
+			if (window.joineryDomReady) attachPage();
+			else document.addEventListener('DOMContentLoaded', attachPage);
+		}
+
+		var cfg = readConfig('rr-panel-config');
 		if (!cfg) return;
 		if (cfg.generator) attachGenerator(cfg.generator);
 		if (cfg.ceremony) attachCeremony(cfg.ceremony);

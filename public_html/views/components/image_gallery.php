@@ -22,6 +22,7 @@
  *   $component_data   - Dynamic data (empty for this component)
  *   $component        - PageContent object or null (null in programmatic mode)
  *
+ * @version 1.3.0 - a thumbnail click is assets/js/image-gallery.js (no inline script or handler)
  * @version 1.2.0
  */
 
@@ -111,22 +112,9 @@ $has_thumbs  = count($photos_data) > 1;
 		     alt="<?php echo htmlspecialchars($pdata['alt']); ?>"
 		     class="jy-gallery-thumb<?php echo $i === 0 ? ' is-active' : ''; ?>"
 		     data-large-src="<?php echo htmlspecialchars($pdata['large']); ?>"
-		     data-caption="<?php echo htmlspecialchars($pdata['caption'] ?? ''); ?>"
-		     onclick="jGalleryClick(this,'<?php echo $gallery_id; ?>')">
+		     data-caption="<?php echo htmlspecialchars($pdata['caption'] ?? ''); ?>">
 		<?php endforeach; ?>
 	</div>
-	<script>
-	function jGalleryClick(el, gid) {
-		var g = document.getElementById(gid);
-		g.querySelector('#' + gid + '-main').src = el.dataset.largeSrc;
-		var cap = g.querySelector('#' + gid + '-caption');
-		if (cap) {
-			if (el.dataset.caption) { cap.textContent = el.dataset.caption; cap.hidden = false; }
-			else { cap.hidden = true; }
-		}
-		g.querySelectorAll('.jy-gallery-thumb').forEach(function(t) { t.classList.remove('is-active'); });
-		el.classList.add('is-active');
-	}
-	</script>
+	<?php echo PageScript::src('assets/js/image-gallery.js'); ?>
 	<?php endif; ?>
 </div>

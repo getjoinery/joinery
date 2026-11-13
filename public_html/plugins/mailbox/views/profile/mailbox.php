@@ -116,11 +116,11 @@ if (!$has_mailboxes) {
 			// mailboxes — the drain that judges mail with the member's own
 			// model, and a line when that model needs them.
 			$dai_path = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai.js');
-			echo '<script>window.MAILBOX_DEVICE_AI = ' . json_encode(array(
+			echo PageScript::json('mailbox-device-ai-config', array(
 				'origin'       => $device_ai_origin ?: null,
 				'user_id'      => (int)SessionControl::get_instance()->get_user_id(),
 				'settings_url' => '/profile/mailbox/settings#your-model',
-			)) . ';</script>';
+			));
 			// The digest and verdict checks the browser judges with, byte-for-byte
 			// the server's (specs/fortress_mail_device_ai.md § R5).
 			foreach (array('html-entities.js', 'email-digest.js', 'verdict-check.js') as $js) {
@@ -129,23 +129,8 @@ if (!$has_mailboxes) {
 			}
 			echo '<script src="/plugins/mailbox/assets/mailbox_device_ai.js?v=' . (is_file($dai_path) ? filemtime($dai_path) : '1') . '"></script>';
 		}
-		?>
-		<script>
-		JoineryAiPanel.mount({
-			area: 'mailbox',
-			hostSection: window.MailboxDeviceAi ? window.MailboxDeviceAi.section() : null,
-			getContext: function () {
-				return { mailbox: window.MailboxReader ? window.MailboxReader.currentAddress() : '' };
-			},
-			anchor: document.getElementById('mbx-ai-panel-anchor'),
-			// The reader's right column: the panel docks above the contact panel
-			// and shares the column with it. The reader drops that column below
-			// 1100px, and the panel notices and moves into its own slide-over, so
-			// the AI button keeps working on a phone.
-			container: document.getElementById('mbx-context-ai')
-		});
-		</script>
-		<?php
+		// The panel mounts from a file, not inline: the page runs no inline script.
+		echo PageScript::src('plugins/mailbox/assets/mailbox_ai_panel_mount.js', false);
 	}
 }
 

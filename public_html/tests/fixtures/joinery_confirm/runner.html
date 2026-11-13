@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Joinery confirm fixtures</title>
+<!--
+	Browser-side fixtures for the kit's confirm and alert attributes in
+	assets/js/base.js (data-jy-confirm, data-jy-submit, data-jy-confirm-typed,
+	data-jy-alert): what the strict script policy's WP4a moved the inline
+	onclick confirms onto. tests/unit/joinery_confirm_test.php loads this page in
+	headless Chrome and reads the <li data-result> rows. Open it in a browser to
+	see the same rows by eye.
+-->
+<script>
+	// A form must never really submit here: record it instead.
+	window.__submitted = [];
+	HTMLFormElement.prototype.submit = function () { window.__submitted.push({ id: this.id, how: 'submit', by: null }); };
+	HTMLFormElement.prototype.requestSubmit = function (by) { window.__submitted.push({ id: this.id, how: 'requestSubmit', by: by ? by.id : null }); };
+</script>
+<script src="../../../assets/js/base.js"></script>
+<style>
+	body { font: 14px/1.4 system-ui, sans-serif; margin: 20px; }
+	li[data-result="pass"] { color: #2f7d4f; }
+	li[data-result="fail"] { color: #b3261e; }
+</style>
+</head>
+<body>
+<h1>Joinery confirm fixtures</h1>
+<ul id="results"></ul>
+
+<div id="stage">
+	<form id="f_by_id" method="post"><input type="hidden" name="a" value="1"></form>
+	<button type="button" id="b_by_id" data-jy-confirm="Delete the thing?" data-jy-submit="f_by_id">Delete</button>
+
+	<form id="f_own" method="post"><button type="submit" id="b_own" name="act" value="go" data-jy-confirm="Go ahead?">Go</button></form>
+
+	<form id="f_parent" method="post"><button type="button" id="b_parent" data-jy-confirm="Stop it?" data-jy-submit="">Stop</button></form>
+
+	<form id="f_typed" method="post"></form>
+	<button type="button" id="b_typed" data-jy-confirm="Remove the site?" data-jy-confirm-typed="site-1" data-jy-submit="f_typed">Remove</button>
+
+	<form id="f_link_submit" method="post"></form>
+	<a href="#" id="a_submit" data-jy-confirm="Run it?" data-jy-submit="f_link_submit">Run</a>
+
+	<a href="#followed" id="a_follow" data-jy-confirm="Leave this page?">Leave</a>
+
+	<button type="button" id="b_alert" data-jy-alert="Not allowed: it is busy.">Busy</button>
+
+	<form id="f_labelled" method="post"><button type="button" id="b_labelled" data-jy-confirm="Remove it?" data-jy-submit="" data-jy-confirm-label="Remove" data-jy-confirm-style="primary">Remove</button></form>
+	<form id="f_typed_labelled" method="post"><button type="button" id="b_typed_labelled" data-jy-confirm="Wipe it?" data-jy-confirm-typed="wipe" data-jy-submit="" data-jy-confirm-label="Wipe">Wipe</button></form>
+
+	<form id="f_form_confirm" method="post" data-jy-confirm="Form-level ask?"><button type="submit" id="b_form_confirm">Send</button></form>
+</div>
+
+<script>
+(function () {
+	'use strict';
+	var results = document.getElementById('results');
+	function report(name, ok, detail) {
+		var li = document.createElement('li');
+		li.setAttribute('data-result', ok ? 'pass' : 'fail');
+		li.setAttribute('data-name', name);
+		li.textContent = name + (ok ? '' : ' :: ' + (detail || ''));
+		results.appendChild(li);
+	}
+	function dialog() { return document.querySelector('dialog.jy-ui'); }
+	function message() { var d = dialog(); return d ? d.querySelector('.dialog-message').textContent : ''; }
+	function buttons() { var d = dialog(); return d ? d.querySelectorAll('.dialog-actions button') : []; }
+	function confirmBtn() { var b = buttons(); return b[b.length - 1]; }
+	function cancelBtn() { var b = buttons(); return b.length > 1 ? b[0] : null; }
+	function isOpen() { var d = dialog(); return !!(d && d.open); }
+	function click(id) { document.getElementById(id).click(); }
+	function submitted() { return JSON.stringify(window.__submitted); }
+	function reset() { window.__submitted = []; if (isOpen()) dialog().close(); }
+
+	try {
+		// 1. Button that submits a form by id.
+		reset(); click('b_by_id');
+		report('a data-jy-submit button opens the confirm with its message', isOpen() && message() === 'Delete the thing?', message());
+		report('nothing is submitted before the answer', window.__submitted.length === 0, submitted());
+		cancelBtn().click();
+		report('Cancel submits nothing', window.__submitted.length === 0 && !isOpen(), submitted());
+		click('b_by_id'); confirmBtn().click();
+		report('Confirm submits the named form with submit()', submitted() === JSON.stringify([{ id: 'f_by_id', how: 'submit', by: null }]), submitted());
+
+		// 2. Submit button in its own form: submitted as that button.
+		reset(); click('b_own');
+		report('a submit button asks before its form goes', isOpen() && message() === 'Go ahead?' && window.__submitted.length === 0, message());
+		confirmBtn().click();
+		report('Confirm submits its own form as that button (its name and value go too)',
+			submitted() === JSON.stringify([{ id: 'f_own', how: 'requestSubmit', by: 'b_own' }]), submitted());
+
+		// 3. Empty data-jy-submit: the button's own form.
+		reset(); click('b_parent'); confirmBtn().click();
+		report('an empty data-jy-submit submits the button\'s own form', submitted() === JSON.stringify([{ id: 'f_parent', how: 'submit', by: null }]), submitted());
+
+		// 4. Type-to-confirm.
+		reset(); click('b_typed');
+		var d = dialog(), input = d.querySelector('.dialog-input');
+		report('data-jy-confirm-typed asks for the word', isOpen() && message().indexOf('site-1') !== -1 && input.style.display !== 'none', message());
+		report('Confirm stays disabled until the word is typed', confirmBtn().disabled === true);
+		input.value = 'site-1'; input.dispatchEvent(new Event('input'));
+		report('typing the word enables Confirm', confirmBtn().disabled === false);
+		confirmBtn().click();
+		report('and Confirm submits the named form', submitted() === JSON.stringify([{ id: 'f_typed', how: 'submit', by: null }]), submitted());
+
+		// 5. A link that submits a form is not followed.
+		reset(); var before = location.hash; click('a_submit'); confirmBtn().click();
+		report('a link with data-jy-submit submits the form and is not followed',
+			submitted() === JSON.stringify([{ id: 'f_link_submit', how: 'submit', by: null }]) && location.hash === before, submitted() + ' ' + location.hash);
+
+		// 6. A link with only a confirm is followed after the answer.
+		reset(); click('a_follow');
+		report('a confirm link is not followed before the answer', location.hash !== '#followed');
+		confirmBtn().click();
+		report('and is followed after Confirm', location.hash === '#followed', location.hash);
+
+		// 7. Alert.
+		reset(); click('b_alert');
+		report('data-jy-alert shows its message with one button', isOpen() && message() === 'Not allowed: it is busy.' && buttons().length === 1, message());
+		confirmBtn().click();
+		report('and submits nothing', window.__submitted.length === 0 && !isOpen(), submitted());
+
+		// 8. The confirm button's words and style.
+		reset(); click('b_labelled');
+		report('data-jy-confirm-label and -style set the confirm button', confirmBtn().textContent === 'Remove' && confirmBtn().className === 'btn btn-primary',
+			confirmBtn().textContent + ' / ' + confirmBtn().className);
+		confirmBtn().click();
+		report('and Confirm still submits its own form', submitted() === JSON.stringify([{ id: 'f_labelled', how: 'submit', by: null }]), submitted());
+		reset(); click('b_typed_labelled');
+		report('the label reaches a type-to-confirm too', confirmBtn().textContent === 'Wipe' && confirmBtn().disabled === true, confirmBtn().textContent);
+		reset();
+
+		// 9. The form-level confirm still works beside the new ones.
+		reset();
+		var f = document.getElementById('f_form_confirm');
+		var ev = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: document.getElementById('b_form_confirm') });
+		f.dispatchEvent(ev);
+		report('a form with data-jy-confirm still asks on submit', ev.defaultPrevented && isOpen() && message() === 'Form-level ask?', message());
+		reset();
+	} catch (e) {
+		report('the fixtures ran without throwing', false, String(e && e.stack || e));
+	}
+	document.body.setAttribute('data-done', '1');
+})();
+</script>
+</body>
+</html>

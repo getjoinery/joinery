@@ -5,6 +5,7 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.3 - the menus' script is assets/js/menus.js (no inline script)
  * @version 1.2.2 - the stylesheet's link carries its file time, so a changed one reaches visitors past a cache at once
  * @version 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
@@ -45,61 +46,7 @@ class PublicPage extends PublicPageBase {
             <link rel="stylesheet" type="text/css" href="<?php echo $gt_css . '?v=' . $this->asset_mtime(ltrim($gt_css, '/')); ?>">
             <?php $this->render_theme_tail(); ?>
 
-            <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                // Dropdown menus
-                document.querySelectorAll('.js-clickable-menu').forEach(function(btn) {
-                    btn.addEventListener('click', function(e) {
-                        var clicked_menu = this.nextElementSibling;
-                        while (clicked_menu && !clicked_menu.classList.contains('js-clicked-menu')) {
-                            clicked_menu = clicked_menu.nextElementSibling;
-                        }
-                        if (clicked_menu) {
-                            clicked_menu.classList.toggle('invisible');
-                            document.querySelectorAll('.js-clicked-menu').forEach(function(m) {
-                                if (m !== clicked_menu) m.classList.add('invisible');
-                            });
-                        }
-                        e.stopPropagation();
-                    });
-                });
-
-                // User menu
-                var userMenuBtn = document.getElementById('user-menu-button');
-                if (userMenuBtn) {
-                    userMenuBtn.addEventListener('click', function(e) {
-                        var menu = document.getElementById('user-menu');
-                        if (menu) menu.classList.toggle('invisible');
-                        e.stopPropagation();
-                    });
-                }
-
-                // Mobile menu
-                var mobileToggle = document.getElementById('mobile-toggle-button');
-                if (mobileToggle) {
-                    mobileToggle.addEventListener('click', function() {
-                        var m = document.getElementById('mobile-menu');
-                        if (m) m.classList.remove('invisible');
-                    });
-                }
-                var mobileClose = document.getElementById('mobile-close-button');
-                if (mobileClose) {
-                    mobileClose.addEventListener('click', function() {
-                        var m = document.getElementById('mobile-menu');
-                        if (m) m.classList.add('invisible');
-                    });
-                }
-
-                // Close all dropdowns on outside click
-                document.addEventListener('click', function() {
-                    document.querySelectorAll('.js-clicked-menu').forEach(function(m) {
-                        m.classList.add('invisible');
-                    });
-                    var userMenu = document.getElementById('user-menu');
-                    if (userMenu) userMenu.classList.add('invisible');
-                });
-            });
-            </script>
+            <?php echo PageScript::src('theme/galactictribune-html5/assets/js/menus.js'); ?>
         </head>
 
         <body class="h-full">

@@ -74,7 +74,7 @@ $formwriter->submitbutton('btn_submit', $is_new ? 'Create' : 'Save');
 if (!$is_new) {
     $formwriter->submitbutton('btn_delete', 'Delete', [
         'class'          => 'btn btn-outline-danger ms-2',
-        'onclick'        => "return confirm('Delete this memory?');",
+        'confirm'        => 'Delete this memory?',
         'formnovalidate' => true,
     ]);
 }

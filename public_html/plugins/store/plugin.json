@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.6.26",
+    "version": "1.6.28",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, Apple/Google mobile billing, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
     "license": "Joinery-Commercial",
@@ -224,6 +224,9 @@
             "default": "0",
             "legacy_core": true,
             "group": "paypal",
+            "show_when": {
+                "use_paypal_checkout": "1"
+            },
             "label": "Offer Venmo at checkout",
             "type": "select",
             "options": {
@@ -440,6 +443,9 @@
             "default": "",
             "legacy_core": true,
             "group": "paypal",
+            "show_when": {
+                "use_paypal_checkout": "1"
+            },
             "label": "PayPal client id",
             "type": "text"
         },
@@ -448,6 +454,9 @@
             "default": "",
             "legacy_core": true,
             "group": "paypal",
+            "show_when": {
+                "use_paypal_checkout": "1"
+            },
             "label": "Test PayPal client id",
             "type": "text"
         },
@@ -457,6 +466,9 @@
             "legacy_core": true,
             "secret": true,
             "group": "paypal",
+            "show_when": {
+                "use_paypal_checkout": "1"
+            },
             "label": "PayPal client secret"
         },
         {
@@ -465,6 +477,9 @@
             "legacy_core": true,
             "secret": true,
             "group": "paypal",
+            "show_when": {
+                "use_paypal_checkout": "1"
+            },
             "label": "Test PayPal client secret"
         },
         {

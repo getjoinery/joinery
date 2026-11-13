@@ -18,6 +18,7 @@
  *
  * Run: php tests/integration/root_request_panel_test.php [base_url] [origin_ip]
  *
+ * @version 1.1 - the URL is read from the poller file the panel loads
  * @version 1.0
  */
 
@@ -36,7 +37,11 @@ $jar = harness_jar_new('rrp');
 section('The panel polls the status action');
 
 $panel = AdminPage::root_request_panel('harness-' . $run_id);
-check(preg_match("#fetch\\('(/api/v1/[^']+)'#", $panel, $m) === 1, 'the panel names the URL it polls');
+// The poller is a file the panel loads (no inline script): read the URL there.
+check(preg_match('#<script defer src="/(assets/js/root-request\.js)\?v=\d+"></script>#', $panel, $src) === 1
+	&& strpos($panel, 'data-request="harness-' . $run_id . '"') !== false, 'the panel loads its poller and names its request');
+$poller = (string)@file_get_contents(PathHelper::getIncludePath($src[1] ?? 'assets/js/root-request.js'));
+check(preg_match("#fetch\\('(/api/v1/[^']+)'#", $poller, $m) === 1, 'the poller names the URL it polls');
 $url = $m[1] ?? '';
 
 $csrf = harness_web_login($jar, $super->get('usr_email'), 'TestPassword_Rrp' . $run_id);

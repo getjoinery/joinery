@@ -111,18 +111,7 @@
 		<div class="mb-8 pb-8 border-b border-gray-200">
 			<h2 class="text-2xl font-bold text-gray-900 mb-6">Comments (<?php echo $page_vars['numcomments']; ?>)</h2>
 
-			<script>
-			document.addEventListener('DOMContentLoaded', function(){
-				document.querySelectorAll('.commentbutton').forEach(function(btn){
-					btn.addEventListener('click', function(){
-						var container = document.getElementById(this.id + 'container');
-						if (container) {
-							container.style.display = (container.style.display === 'none' || container.style.display === '') ? 'block' : 'none';
-						}
-					});
-				});
-			});
-			</script>
+			<?php echo PageScript::src('theme/galactictribune-html5/assets/js/post.js'); ?>
 
 			<div class="space-y-6">
 				<?php foreach($page_vars['comments'] as $comment): ?>

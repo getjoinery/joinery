@@ -9,6 +9,7 @@
  * renders only at permission 10 and only once some endpoint is configured —
  * before that there is nothing to test.
  *
+ * @version 1.1 - the button's script is assets/js/test-connection.js (no inline script)
  * @version 1.0
  */
 
@@ -20,21 +21,5 @@ $ai_test_configured = (string)$ai_test_settings->get_setting('joinery_ai_anthrop
 if ($ai_test_configured && Access::permits(10)) { ?>
 	<button type="button" class="btn btn-secondary" id="joinery-ai-test">Test it</button>
 	<span class="jy-muted" id="joinery-ai-test-result"></span>
-	<script>
-	(function () {
-		var test = document.getElementById('joinery-ai-test');
-		test.addEventListener('click', function () {
-			var out = document.getElementById('joinery-ai-test-result');
-			out.textContent = 'Testing…';
-			test.disabled = true;
-			joineryApi.post('joinery_ai/test_connection', {}).then(function (data) {
-				out.textContent = 'It answers — ' + data.model + ' replied in ' + data.ms + ' ms.';
-				test.disabled = false;
-			}).catch(function (e) {
-				out.textContent = e.message || 'The test failed.';
-				test.disabled = false;
-			});
-		});
-	})();
-	</script>
+	<?php echo PageScript::src('plugins/joinery_ai/assets/js/test-connection.js'); ?>
 <?php } ?>

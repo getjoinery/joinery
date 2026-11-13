@@ -115,35 +115,16 @@ class PaypalHelper{
 			<div id="paypal-button-container"></div>
 		  </div></div>
 
-		  <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&currency='.urlencode($this->currency).$venmo_param.'&disable-funding=paylater"></script>
-		  <script>
-			var selectedFundingSource = "paypal";
-			let paypalData = '. json_encode($data) .';
-			paypal.Buttons({
-			  // The cart is recorded for this payment first (store/checkout_record_paypal);
-			  // the order carries the reference of that record, which the return completes from.
-			  createOrder: function(data, actions) {
-				return joineryApi.post("store/checkout_record_paypal", { cart_cs: '.json_encode((string)$cart_hash).' }).then(function(recorded) {
-				  paypalData.purchase_units[0].custom_id = recorded.custom_id;
-				  return actions.order.create(paypalData);
-				});
-			  },
-			  onClick: function(data) {
-				selectedFundingSource = data.fundingSource || "paypal";
-			  },
-			  onApprove: function(data, actions) {
-				return actions.order.capture().then(function(details) {
-				  var fundingSource = data.paymentSource || selectedFundingSource || "paypal";
-				  window.location.href = "'.$this->return_url.'?id=" + details.id + "&funding=" + encodeURIComponent(fundingSource);
-				});
-			  },
-			  onError: function(err) {
-				// The record action refuses in a sentence of its own (the cart
-				// changed, log in first); PayPal errors say nothing a buyer can use.
-				alert((err && err.status && err.message) ? err.message : "An error occurred during the payment. Please try again.");
-			  }
-			}).render("#paypal-button-container");
-		  </script>	';
+		  <script src="https://www.paypal.com/sdk/js?client-id='.urlencode((string)$this->api_key).'&currency='.urlencode($this->currency).$venmo_param.'&disable-funding=paylater"></script>
+		  '
+		  // The buttons' code is assets/js/paypal-buttons.js; what it needs is data.
+		  . PageScript::json('paypal-checkout-config', array(
+			'mode'       => 'order',
+			'cart_cs'    => (string)$cart_hash,
+			'return_url' => (string)$this->return_url,
+			'order'      => $data,
+		  ))
+		  . PageScript::src('plugins/store/assets/js/paypal-buttons.js', false);
 		  return $output;
 
 	}
@@ -160,25 +141,15 @@ class PaypalHelper{
 		<div class="flex justify-end"><div class="inline-flex justify-end mt-3 mr-3 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ">
 			<div id="paypal-button-container"></div>
 		  </div></div>
- <script src="https://www.paypal.com/sdk/js?client-id='.$this->api_key.'&currency='.urlencode($this->currency).'&intent=subscription&vault=true&disable-funding=paylater">
+ <script src="https://www.paypal.com/sdk/js?client-id='.urlencode((string)$this->api_key).'&currency='.urlencode($this->currency).'&intent=subscription&vault=true&disable-funding=paylater">
    </script>
- 
-   <script>
-    paypal.Buttons({
-      createSubscription: function(data, actions) {
-        return joineryApi.post("store/checkout_record_paypal", { cart_cs: '.json_encode((string)$cart_hash).' }).then(function(recorded) {
-          return actions.subscription.create({ plan_id: recorded.plan_id, custom_id: recorded.custom_id });
-        });
-      },
-      onApprove: function(data, actions) {
-		// Go to the return URL page with subscription ID
-		window.location.href = "'.$this->return_url.'?subscription=1&paypal_subscription_id=" + encodeURIComponent(data.subscriptionID);
-      },
-	  onError: function(err) {
-		alert((err && err.status && err.message) ? err.message : "An error occurred during the payment. Please try again.");
-	  }
-    }).render("#paypal-button-container"); 
-  </script>';
+ '
+		  . PageScript::json('paypal-checkout-config', array(
+			'mode'       => 'subscription',
+			'cart_cs'    => (string)$cart_hash,
+			'return_url' => (string)$this->return_url,
+		  ))
+		  . PageScript::src('plugins/store/assets/js/paypal-buttons.js', false);
 		  
 		  return $output;
 		

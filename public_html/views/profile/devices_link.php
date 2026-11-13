@@ -59,11 +59,10 @@
     </div>
 </section>
 </div>
-<script>window.DEVICE_LINK_CFG = <?php echo json_encode([
+<?php echo PageScript::json('device-link-config', [
     'code'            => $page_vars['code'] ?? '',
     'hasVault'        => (bool)($page_vars['has_vault'] ?? false),
-]); ?>;</script>
-<script defer src="/assets/js/device-link.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/device-link.js')) ?: '1'; ?>"></script>
+]), PageScript::src('assets/js/device-link.js'); ?>
 <?php
 $page->public_footer(['track' => TRUE]);
 ?>

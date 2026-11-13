@@ -656,13 +656,46 @@ keeps the dialog open (as does `close: false`). It returns `{dialog, content}`.
 The `alertAsync` / `confirmAsync` / `promptAsync` variants return promises that
 settle on close, so Esc and Cancel resolve too instead of hanging.
 
-Two delegated behaviours ride on the same file, so markup rendered at any time —
-including inside an open modal — works with nothing wired:
+**No inline script.** A page never writes an `on*=` handler, a `javascript:` link or a `<script>` without `src`: the strict script policy (`csp_strict_scripts`, see [Settings § The strict script policy](settings.md#the-strict-script-policy)) refuses them. Page code goes in a file loaded with `src`; it reads its values from `data-` attributes or a `<script type="application/json">` block, which the browser never runs. Most pages need no code of their own, because `base.js` handles these attributes on any markup rendered at any time, including inside an open modal:
 
-- `<button data-jy-copy="text">` copies that text and confirms on the button.
-- `<button data-jy-help="{template id}">` opens that `<template>`'s content in the
-  modal. FormWriter's [`help_modal` option](formwriter.md#telling-the-user-where-a-credential-comes-from-help_modal)
-  emits both halves for you — prefer it over hand-rolling a trigger.
+| Markup | What it does |
+|---|---|
+| `<button type="button" data-jy-confirm="Delete it?" data-jy-submit="form_id">` | Asks in the modal, then submits that form (`submit()`). An empty `data-jy-submit` means the button's own form. |
+| `<button type="button" data-jy-confirm="Delete it?" data-jy-submit="" data-jy-submit-self>` | Checks the form's fields, asks, then submits its own form as that button, so its name and value are sent. Being `type="button"`, it posts nothing before the question. It may not carry `formaction`, `formmethod`, `formenctype` or `formtarget`: put those on the form. FormWriter's `submitbutton` with `'confirm'` writes this. |
+| `<a href="/x" data-jy-confirm="Leave?">` | Asks, then follows the link. |
+| `data-jy-confirm-typed="DELETE"` | Also makes the person type that word first. |
+| `data-jy-confirm-label="Remove"`, `data-jy-confirm-style="primary"` | The confirm button's words and style. |
+| `<button type="button" data-jy-alert="Not now.">` | Shows the message. |
+| `<form data-jy-confirm="Sure?">` | Asks before the form submits. |
+| `<button data-jy-copy="text">` | Copies the text and confirms on the button. |
+| `<button data-jy-help="{template id}">` | Opens that `<template>` in the modal. FormWriter's [`help_modal` option](formwriter.md#telling-the-user-where-a-credential-comes-from-help_modal) writes both halves. |
+| `<select data-jy-navigate>` | Choosing an option opens its value, a path on this site. FormWriter's `navigate_on_change`. |
+| `<input data-jy-select-all>` | Selects the whole value when clicked. |
+| `<button data-jy-dismiss>` | Hides the notice it sits in: its nearest `[data-jy-dismissible]` ancestor, or its parent. |
+| `<a href="#x" data-jy-reveal="x" data-jy-reveal-hide="y">` | Shows the element with id `x`, and hides `y` (or itself). |
+| `<select data-jy-autosubmit>` | Submits its form when changed. |
+| `<button type="button" data-jy-prompt="Why?" data-jy-prompt-form="form_id" data-jy-prompt-field="reason">` | Asks in the modal (an answer is required), puts the answer in that field of that form, and submits it. |
+| `<button type="submit" data-jy-busy="Running…">` | Once its form posts, says that and cannot be pressed again. |
+| `<input data-jy-current-path>` | Filled with this page's path and query, for a form that comes back here. |
+| `<input data-jy-browser-timezone>` | Filled with the browser's time zone (`UTC` when it says none). |
+| `data-jy-reload-after="30"`, plus `data-jy-reload-to="/path"` | Reloads the page after that many seconds, or goes to that path on this site. |
+| `<template data-jy-body-insert="afterbegin">` | Puts its content at the top (or with `beforeend`, the end) of `<body>`. |
+| `<meta name="joinery-body-class" content="x">` | Adds that class to `<body>`. |
+
+`AdminPage::action_button()` and an `altlinks` entry's `confirm` write the confirm attributes for you, and so does FormWriter's `submitbutton` with `'confirm' => '...'`.
+
+A page that does need its own code writes the two halves with `PageScript`:
+
+```php
+echo PageScript::json('my-page-config', array('user_id' => $user_id, 'next' => $next));
+echo PageScript::src('assets/js/my-page.js');            // or plugins/{plugin}/assets/...
+```
+
+```js
+var cfg = joineryPageData('my-page-config') || {};
+```
+
+`PageScript::src()` loads the file deferred, with its file time as the cache key; pass `false` as the second argument for a file that later markup or a later script needs to have run already. `PageScript::json()` escapes its text so nothing in the data can close the element. `joineryPageData(id)` (in `base.js`) reads the block, and gives `null` when it is missing or not JSON. A component that can appear more than once on a page sets up every instance its file finds, rather than being handed one instance's id in script.
 
 All three text modes accept an options object:
 
@@ -681,20 +714,14 @@ JoineryModal.confirm('Apply this update?', function() {
 }, { confirmLabel: 'Apply', confirmStyle: 'primary' });
 ```
 
-**From PHP-rendered action links:**
+**From a PHP-rendered action:** a POST button carrying the confirm, never a link with a handler:
 
 ```php
-$plugin_name = htmlspecialchars($plugin['name']);
-$warning = 'This will permanently delete all data. This cannot be undone.';
-$action_cell .= '<a href="javascript:void(0)" onclick="confirmAndDelete(\'' . $plugin_name . '\', \'' . addslashes($warning) . '\')">Delete</a>';
-```
-
-```js
-function confirmAndDelete(name, message) {
-    JoineryModal.confirm(message, function() {
-        submitPluginAction('delete', name);
-    }, { confirmLabel: 'Delete' });
-}
+$action_cell .= AdminPage::action_button('Delete', '/admin/admin_plugins', array(
+    'hidden'        => array('action' => 'delete', 'plugin' => $plugin['name']),
+    'confirm'       => 'This will permanently delete all data. This cannot be undone.',
+    'confirm_label' => 'Delete',
+));
 ```
 
 **Form-hosting modals** — when a modal needs real form fields, use a raw `<dialog>` element; the theme styles it automatically:
@@ -704,7 +731,7 @@ function confirmAndDelete(name, message) {
     <form method="post">
         <!-- fields -->
         <div class="dialog-actions">
-            <button type="button" onclick="document.getElementById('myModal').close()">Cancel</button>
+            <button type="button" class="js-close">Cancel</button>
             <button type="submit" class="dialog-btn-confirm dialog-btn-primary">Save</button>
         </div>
     </form>
@@ -712,8 +739,10 @@ function confirmAndDelete(name, message) {
 ```
 
 ```js
-document.getElementById('myModal').showModal();
-document.getElementById('myModal').close();
+// In the page's own script file
+var modal = document.getElementById('myModal');
+document.getElementById('openMyModal').addEventListener('click', function () { modal.showModal(); });
+modal.querySelector('.js-close').addEventListener('click', function () { modal.close(); });
 ```
 
 Full API: `specs/joinery_modal_api.md`.

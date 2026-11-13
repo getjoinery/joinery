@@ -50,7 +50,8 @@ echo PublicPage::BeginPage($title, array());
 	$formwriter = $page->getFormWriter('bookform', ['action' => '/book/' . $type->get('bty_slug')]);
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('book_submit', '', ['value' => '1']);
-	$formwriter->hiddeninput('invitee_timezone', '', ['value' => '']);
+	// The invitee's time zone, for storage (display already follows the picker's).
+	$formwriter->hiddeninput('invitee_timezone', '', ['value' => '', 'browser_timezone' => true]);
 
 	// Slot picker writes the chosen UTC slot into the hidden 'slot_start' field.
 	echo ComponentRenderer::render(null, 'slot_picker', [
@@ -87,14 +88,6 @@ echo PublicPage::BeginPage($title, array());
 	$formwriter->submitbutton('btn_book', 'Confirm booking');
 	$formwriter->end_form();
 	?>
-	<script>
-	// Auto-detect the invitee's timezone for storage (display already follows the picker's tz).
-	(function(){
-		var tz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
-		var f = document.querySelector('[name="invitee_timezone"]');
-		if (f) { f.value = tz; }
-	})();
-	</script>
 <?php endif; ?>
 </div>
 <?php

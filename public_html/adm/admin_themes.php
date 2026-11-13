@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.5 - each action is a single-button POST form (no javascript: links, no inline script)
 // @version 1.4 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited theme (specs/local_edits_detected.md)
 // @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Allow upgrade asks first (specs/package_replace_on_upload.md WP2, WP3)
 // @version 1.2 - the Kind column, the two slot lines, Apply and Remove for a style theme; the Unsigned badge on page themes only (specs/style_themes.md WP4)
@@ -258,15 +259,25 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 $actions = array();
                                 $action_note = '';
 
+                                // Each action is a single-button POST form (action_button), asking
+                                // first where the action needs it: no javascript: link.
+                                $act = function ($label, $action, $confirm = '', $confirm_label = '') use ($theme_name) {
+                                    $opts = array('hidden' => array('action' => $action, 'theme_name' => $theme_name), 'class' => 'dropdown-item');
+                                    if ($confirm !== '') {
+                                        $opts['confirm'] = $confirm;
+                                        $opts['confirm_label'] = $confirm_label;
+                                    }
+                                    return AdminPage::action_button($label, '/admin/admin_themes', $opts);
+                                };
                                 if ($is_style) {
                                     if ($is_look) {
-                                        $actions['Remove'] = "javascript:submitAction('remove_look', '$theme_name')";
+                                        $actions['Remove'] = $act('Remove', 'remove_look');
                                     } elseif ($files_exist && $theme) {
-                                        $actions['Apply'] = "javascript:submitAction('apply_look', '$theme_name')";
+                                        $actions['Apply'] = $act('Apply', 'apply_look');
                                         $action_note = $look_help;
                                     }
                                 } elseif (!$is_active && $files_exist) {
-                                    $actions['Activate'] = "javascript:submitAction('activate', '$theme_name')";
+                                    $actions['Activate'] = $act('Activate', 'activate');
                                 }
 
                                 // Actions below require a DB record
@@ -279,25 +290,19 @@ $page->begin_box(array('altlinks' => $altlinks));
                                         if (isset($edited[$theme_name])) {
                                             // The same mark as Disable upgrade, offered as
                                             // what it means for an edited theme, with its cost.
-                                            $keep_json = htmlspecialchars(json_encode('Deploys will leave ' . $theme_name
-                                                . ' alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.'));
-                                            $name_json = htmlspecialchars(json_encode($theme_name));
-                                            $actions['Keep my changes'] = "javascript:JoineryModal.confirm($keep_json, function(){ submitAction('mark_preserved', $name_json); }, { confirmLabel: 'Keep my changes' })";
+                                            $actions['Keep my changes'] = $act('Keep my changes', 'mark_preserved', 'Deploys will leave ' . $theme_name
+                                                . ' alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.', 'Keep my changes');
                                         } elseif ($receives_upgrades) {
-                                            $actions['Disable upgrade'] = "javascript:submitAction('mark_preserved', '$theme_name')";
+                                            $actions['Disable upgrade'] = $act('Disable upgrade', 'mark_preserved');
                                         } else {
-                                            $allow_json = htmlspecialchars(json_encode('The next deploy will replace your copy of ' . $theme_name
-                                                . ' with the version Joinery ships. Your copy is not kept.'));
-                                            $name_json = htmlspecialchars(json_encode($theme_name));
-                                            $actions['Allow upgrade'] = "javascript:JoineryModal.confirm($allow_json, function(){ submitAction('mark_upgradable', $name_json); }, { confirmLabel: 'Allow upgrade' })";
+                                            $actions['Allow upgrade'] = $act('Allow upgrade', 'mark_upgradable', 'The next deploy will replace your copy of ' . $theme_name
+                                                . ' with the version Joinery ships. Your copy is not kept.', 'Allow upgrade');
                                         }
                                     }
 
                                     // Add delete option for non-system themes with missing files or inactive themes
                                     if (!$is_system && (!$files_exist || (!$is_active && !$is_look))) {
-                                        $msg_json = htmlspecialchars(json_encode('Delete theme "' . $display_name . '"?'));
-                                        $name_json = htmlspecialchars(json_encode($theme_name));
-                                        $actions['Permanently Delete'] = "javascript:JoineryModal.confirm($msg_json, function(){ submitAction('delete', $name_json); }, { confirmLabel: 'Delete' })";
+                                        $actions['Permanently Delete'] = $act('Permanently Delete', 'delete', 'Delete theme "' . $display_name . '"?', 'Delete');
                                     }
                                 }
 
@@ -306,7 +311,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     echo '<button class="btn btn-soft-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
                                     echo '<div class="dropdown-menu dropdown-menu-end py-0">';
                                     foreach ($actions as $label => $action) {
-                                        echo '<a href="' . $action . '" class="dropdown-item">' . $label . '</a>';
+                                        echo $action;
                                     }
                                     echo '</div>';
                                     echo '</div>';
@@ -332,32 +337,6 @@ $page->begin_box(array('altlinks' => $altlinks));
     
 </div>
 
-<script>
-function submitAction(action, themeName) {
-    var form = document.createElement('form');
-    form.method = 'post';
-    form.style.display = 'none';
-    
-    var actionInput = document.createElement('input');
-    actionInput.type = 'hidden';
-    actionInput.name = 'action';
-    actionInput.value = action;
-    form.appendChild(actionInput);
-    
-    var themeInput = document.createElement('input');
-    themeInput.type = 'hidden';
-    themeInput.name = 'theme_name';
-    themeInput.value = themeName;
-    form.appendChild(themeInput);
-    
-    document.body.appendChild(form);
-    form.submit();
-}
-
-function checkUpdates() {
-    alert('Check for updates functionality will be implemented in a future update.');
-}
-</script>
 
 <?php
 $page->end_box();

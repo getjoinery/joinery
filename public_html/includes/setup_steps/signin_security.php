@@ -6,6 +6,7 @@
  * (start_enable / confirm_enable). Included by views/setup.php with $page,
  * $page_vars, $viewer, $settings, $next_key in scope.
  *
+ * @version 1.7 - its scripts are assets/js/setup/signin_security.js (no inline script)
  * @version 1.6
  * @changelog 1.6 - An account whose second factor must be confirmed first is
  *   taken to /profile/verify-stepup and brought back, not left at a message.
@@ -50,30 +51,6 @@ $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 	<div class="jy-mt-2">
 		<a class="btn btn-primary" id="setup-codes-continue" href="/setup?step=<?php echo urlencode($next_key); ?>" aria-disabled="true">Continue &rarr;</a>
 	</div>
-	<script>
-	(function () {
-		var codes = document.getElementById('setup-totp-codes').textContent;
-		var saved = document.getElementById('setup-codes-saved');
-		var cont = document.getElementById('setup-codes-continue');
-		cont.style.pointerEvents = 'none'; cont.style.opacity = '0.5';
-		saved.addEventListener('change', function () {
-			var on = saved.checked;
-			cont.style.pointerEvents = on ? '' : 'none';
-			cont.style.opacity = on ? '' : '0.5';
-			cont.setAttribute('aria-disabled', on ? 'false' : 'true');
-		});
-		document.getElementById('setup-codes-copy').addEventListener('click', function () {
-			navigator.clipboard.writeText(codes);
-		});
-		document.getElementById('setup-codes-download').addEventListener('click', function () {
-			var a = document.createElement('a');
-			a.href = URL.createObjectURL(new Blob([codes], { type: 'text/plain' }));
-			a.download = 'backup-codes.txt';
-			a.click();
-			URL.revokeObjectURL(a.href);
-		});
-	})();
-	</script>
 <?php return; } ?>
 
 <?php if ($setup_passkeys_enabled) { ?>
@@ -132,58 +109,4 @@ $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 
 <?php if ($setup_passkeys_enabled) { ?>
 <script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-	var btn = document.getElementById('setup-pk-add');
-	var hint = document.getElementById('setup-pk-hint');
-	if (!btn) { return; }
-	if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) {
-		btn.disabled = true;
-		var pwRow = document.getElementById('setup-pk-password-row');
-		if (pwRow) { pwRow.style.display = 'none'; }
-		hint.textContent = window.isSecureContext
-			? 'This browser does not support passkeys — use the authenticator app below.'
-			: 'Passkeys only work on the secure version of the site — finish the "Secure connection" step first, or use the authenticator app below.';
-		return;
-	}
-	btn.addEventListener('click', async function () {
-		hint.textContent = '';
-		btn.disabled = true;
-		try {
-			var body = {};
-			var pw = document.getElementById('setup-pk-password');
-			if (pw) { body.current_password = pw.value; }
-			var opts = await joineryApi.post('passkey_register_options', body);
-			if (opts.second_factor_required) {
-				// Confirm with the second factor this account has (its
-				// authenticator app, before any passkey), then come back here.
-				hint.textContent = 'Taking you to confirm with your second factor…';
-				window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/setup?step=signin_security');
-				return;
-			}
-			var credential = await JoineryPasskeys.register(opts.options);
-			// If a vault already exists, the creation just derived its key and
-			// the verify can write the wrapping when an unlocker the vault
-			// already has confirms it — the same activation the security page
-			// runs. Best-effort: backing out leaves the passkey enrolled and
-			// the security page can finish it.
-			var unlocker = null;
-			if (window.JoineryVaultLock && window.JoineryVaultLock.collectUnlocker) {
-				try {
-					unlocker = await JoineryVaultLock.collectUnlocker('to let the new passkey open your vault');
-				} catch (e) { unlocker = null; }
-			}
-			var res = await joineryApi.post('passkey_register_verify', {
-				credential: credential,
-				label: 'Added during setup',
-				unlocker: unlocker
-			});
-			window.location = '/setup?step=signin_security';
-		} catch (e) {
-			hint.textContent = e.message || 'The passkey could not be added.';
-			btn.disabled = false;
-		}
-	});
-});
-</script>
 <?php } ?>

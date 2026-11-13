@@ -77,14 +77,14 @@
 
 	// Display one-time secret warning box if applicable
 	if($show_secret) {
-		echo '<div class="alert alert-warning" style="background-color: #fff3cd; border: 2px solid #ffc107; padding: 20px; margin-bottom: 20px;">';
+		echo '<div class="alert alert-warning" data-jy-dismissible style="background-color: #fff3cd; border: 2px solid #ffc107; padding: 20px; margin-bottom: 20px;">';
 		echo '<h4 style="color: #856404; margin-top: 0;">⚠️ Important: Save Your Secret Key</h4>';
 		echo '<p style="color: #856404;"><strong>This is the ONLY time you will see the plain text secret key. Save it now in a secure location.</strong></p>';
 		echo '<div style="background-color: #fff; padding: 15px; border: 1px solid #ffc107; margin: 10px 0; font-family: monospace; font-size: 16px; word-break: break-all;">';
 		echo '<strong>Secret Key:</strong> ' . htmlspecialchars($plain_secret);
 		echo '</div>';
 		echo '<p style="color: #856404;">Store securely. If lost, regenerate it. Never expose in client-side code.</p>';
-		echo '<button class="btn btn-primary" onclick="this.parentElement.style.display=\'none\'">I have saved the secret key</button>';
+		echo '<button type="button" class="btn btn-primary" data-jy-dismiss>I have saved the secret key</button>';
 		echo '</div>';
 	}
 

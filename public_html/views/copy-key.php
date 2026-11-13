@@ -7,6 +7,7 @@
  * never part of anything posted; assets/js/copy-key.js works out the one value
  * that opens this backup's sealed key and puts that in the form.
  *
+ * @version 1.7 - no inline script: the reload is data-jy-reload-after, the ceremony a JSON block
  * @version 1.6 - no ephemeralPublic: the box is X-Wing only
  * @version 1.5 - the ceremony carries the box's seal version and X-Wing ciphertext, and loads vault-crypto.js
  * @version 1.4 - copy-key.js carries its file time, so a changed one is never served from a cache
@@ -90,7 +91,7 @@
 <?php endif; ?>
 <?php if ($pending['answered']): ?>
 		<p>Your answer is with this machine's agent. This page reloads in a few seconds.</p>
-		<script>setTimeout(function () { window.location.href = '/copy-key?sent=1'; }, 5000);</script>
+		<span hidden data-jy-reload-after="5" data-jy-reload-to="/copy-key?sent=1"></span>
 <?php else: ?>
 		<label for="copy_key_secret" class="form-label">Recovery key (private half)</label>
 		<input type="password" id="copy_key_secret" class="form-control" autocomplete="off" spellcheck="false">
@@ -112,15 +113,13 @@
 		$decline->submitbutton('btn_decline', 'This is not my backup: decline', ['class' => 'btn btn-outline-danger mt-3']);
 		$decline->end_form();
 ?>
-		<script>
-			window.copyKeyCeremony = <?php echo json_encode(array(
-				'version'         => $pending['version'],
-				'ciphertext'      => $pending['ciphertext'],
-				'fingerprint'     => $pending['recovery_fingerprint'],
-			)); ?>;
-		</script>
+		<?php echo PageScript::json('copy-key-ceremony', array(
+			'version'         => $pending['version'],
+			'ciphertext'      => $pending['ciphertext'],
+			'fingerprint'     => $pending['recovery_fingerprint'],
+		)); ?>
 		<?php echo VaultCrypto::browserScriptTag(false); ?>
-		<script src="/assets/js/copy-key.js?v=<?php echo filemtime(PathHelper::getIncludePath('assets/js/copy-key.js')); ?>"></script>
+		<?php echo PageScript::src('assets/js/copy-key.js', false); ?>
 <?php endif; ?>
 <?php endif; ?>
 	</div>

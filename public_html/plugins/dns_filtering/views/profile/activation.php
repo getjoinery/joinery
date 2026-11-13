@@ -67,7 +67,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 									<h5 class="price dnsf-mono-sm">'.$doh_url_safe.'</h5>
 								</div>
 							</div>
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy URL\',2000);">Copy URL</button>
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($doh_url).'">Copy URL</button>
 						</div>';
 
 		if($dot_hostname){
@@ -80,7 +80,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 									<h5 class="price dnsf-mono-sm">'.$dot_hostname_safe.'</h5>
 								</div>
 							</div>
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($dot_hostname).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy\',2000);">Copy</button>
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($dot_hostname).'">Copy</button>
 						</div>';
 		}
 
@@ -178,7 +178,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 
 		if($dot_hostname){
 			echo '
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($dot_hostname).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy Hostname\',2000);">Copy Hostname</button>';
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($dot_hostname).'">Copy Hostname</button>';
 		}
 
 		echo '
@@ -226,7 +226,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 									</ol>
 								</div>
 							</div>
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoH URL\',2000);">Copy DoH URL</button>
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($doh_url).'">Copy DoH URL</button>
 						</div>
 					</div>
 				</div>';
@@ -260,7 +260,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 
 		if($dot_hostname){
 			echo '
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($dot_hostname).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoT Hostname\',2000);">Copy DoT Hostname</button>';
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($dot_hostname).'">Copy DoT Hostname</button>';
 		}
 
 		echo '
@@ -299,7 +299,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 		echo '
 								</div>
 							</div>
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoH URL\',2000);">Copy DoH URL</button>
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($doh_url).'">Copy DoH URL</button>
 						</div>
 					</div>
 				</div>';
@@ -326,7 +326,7 @@ $page_vars = process_logic(activation_logic(array_merge($_GET, $_POST, $params ?
 									<p class="dnsf-fs12">Settings → Privacy &amp; Security → DNS over HTTPS → Max Protection → Custom → paste DoH URL</p>
 								</div>
 							</div>
-							<button class="th-btn style5" onclick="navigator.clipboard.writeText(\''.addslashes($doh_url).'\');this.textContent=\'Copied!\';setTimeout(()=>this.textContent=\'Copy DoH URL\',2000);">Copy DoH URL</button>
+							<button type="button" class="th-btn style5" data-jy-copy="'.htmlspecialchars($doh_url).'">Copy DoH URL</button>
 						</div>
 					</div>
 				</div>';

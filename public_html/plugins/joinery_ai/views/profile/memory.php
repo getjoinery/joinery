@@ -85,7 +85,7 @@ $page->public_header([
         if ($is_edit) {
             $formwriter->submitbutton('btn_delete', 'Delete', [
                 'class'          => 'btn btn-outline-danger ms-2',
-                'onclick'        => "return confirm('Delete this memory?');",
+                'confirm'        => 'Delete this memory?',
                 'formnovalidate' => true,
             ]);
             echo ' <a class="btn btn-outline" href="/profile/joinery_ai/memory">Cancel</a>';

@@ -11,6 +11,7 @@
  * and actions post back to the Server tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.14 - the grant buttons' script is assets/relay_grant.js (no inline script)
  * @version 2.13 - a site container (no mail server of its own) is never told to receive directly
  * @version 2.12 - the relay region defaults to us-east
  * @version 2.11 - a lasting "Last tested" line: the relay's answer and the leak test's result
@@ -128,29 +129,7 @@ function mailbox_relay_grant_script(): string {
 		return '';
 	}
 	$done = true;
-	return <<<'JS'
-<script>
-document.addEventListener('click', function (e) {
-	var b = e.target.closest ? e.target.closest('[data-relay-grant]') : null;
-	if (!b || !window.JoineryModal) return;
-	e.preventDefault();
-	var holder = document.getElementById(b.getAttribute('data-relay-grant'));
-	if (!holder || !holder.firstElementChild) return;
-	var node = holder.firstElementChild;
-	var from = b.getAttribute('data-copy-from');
-	var src = from ? document.getElementById(from) : null;
-	if (src) {
-		node.querySelectorAll('input[data-copy]').forEach(function (i) {
-			var f = src.querySelector('[name="' + i.getAttribute('data-copy') + '"]');
-			if (f) i.value = f.value;
-		});
-	}
-	var m = JoineryModal.open(node, { buttons: [{ label: 'Cancel', style: 'secondary' }] });
-	// Back into its holder when the modal closes, so it opens again.
-	m.dialog.addEventListener('close', function () { holder.appendChild(node); }, { once: true });
-});
-</script>
-JS;
+	return PageScript::src('plugins/mailbox/assets/relay_grant.js');
 }
 
 /**

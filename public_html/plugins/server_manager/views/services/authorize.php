@@ -6,6 +6,7 @@
  * button (a POST) and a Cancel that sends the visitor back to the site with
  * nothing minted. The key never appears on this page.
  *
+ * @version 1.3 - Cancel is a submit button posting decision=decline (no inline handler)
  * @version 1.2 - the linking site's origin is allowed in form-action for this render, so Approve's
  *                redirect to it is not blocked by the content security policy
  * @version 1.1 - not found where this site does not sell hosting (SmHosting)
@@ -74,8 +75,8 @@ $page->public_header(array(
 			?>
 			<div class="sms-actions">
 				<?php $fw->submitbutton('btn_approve', 'Link this site', array('class' => 'btn btn-primary')); ?>
-				<button type="submit" class="btn btn-soft-default jy-w-full sms-cancel"
-					onclick="this.form.querySelector('input[name=decision]').value='decline';">Cancel</button>
+				<?php // Cancel posts decision=decline after the hidden approve: the later value wins. ?>
+				<button type="submit" class="btn btn-soft-default jy-w-full sms-cancel" name="decision" value="decline" formnovalidate>Cancel</button>
 			</div>
 			<?php $fw->end_form(); ?>
 		<?php endif; ?>

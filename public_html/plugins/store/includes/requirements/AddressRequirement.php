@@ -5,6 +5,7 @@
  * Tier 2 custom requirement: collects address using Address model.
  * Shows existing address picker for logged-in users.
  *
+ * @version 1.1 - the new-address toggle is assets/js/address-requirement.js (no inline script)
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('plugins/store/includes/requirements/AbstractProductRequirement.php'));
@@ -62,27 +63,9 @@ class AddressRequirement extends AbstractProductRequirement {
         }
     }
 
-    public function get_javascript(): string {
-        return '
-        document.addEventListener("DOMContentLoaded", function() {
-            const addressSelect = document.getElementById("address");
-            const newAddressBlock = document.getElementById("new_address_block");
-
-            if (addressSelect && newAddressBlock) {
-                addressSelect.addEventListener("change", function() {
-                    if (this.value === "new") {
-                        newAddressBlock.style.display = "block";
-                    } else {
-                        newAddressBlock.style.display = "none";
-                    }
-                });
-            }
-        });
-
-        function is_new_address(element) {
-            const addressSelect = document.getElementById("address");
-            return addressSelect && addressSelect.value === "new";
-        }';
+    /** Shows the new-address fields while "new" is chosen. */
+    public function get_script_files(): array {
+        return array('plugins/store/assets/js/address-requirement.js');
     }
 
     public function validate($post_data, $product) {

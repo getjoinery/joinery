@@ -82,7 +82,8 @@ foreach (array('vault_regenerate_codes', 'vault_passphrase_enroll', 'vault_passp
 }
 
 section('The setup wizard sends the step-up, not a dead end');
-$src = file_get_contents(PathHelper::getIncludePath('includes/setup_steps/signin_security.php'));
+// The step's script is its own file (no inline script).
+$src = file_get_contents(PathHelper::getIncludePath('assets/js/setup/signin_security.js'));
 $at = strpos($src, 'if (opts.second_factor_required)');
 $branch = $at === false ? '' : substr($src, $at, 400);
 check(strpos($branch, "'/profile/verify-stepup?return='") !== false,

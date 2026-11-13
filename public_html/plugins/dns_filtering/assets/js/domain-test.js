@@ -1,0 +1,238 @@
+/*
+ * /profile/dns_filtering/test: test a domain against a device's filters, and
+ * add a rule from the answer.
+ *
+ * #domain-test-config: { device_id, can_add_rules }.
+ *
+ * @version 1.1 - the result shows by the hidden property: it starts [hidden], which beats
+ *   style.display, so a test's answer never appeared
+ * @version 1.0
+ */
+(function () {
+	var TCFG = (window.joineryPageData && joineryPageData('domain-test-config')) || {};
+	var deviceId     = TCFG.device_id | 0;
+	var scdCanAddRules = !!TCFG.can_add_rules;
+
+	var _svgAttrs = 'xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="dnsf-icon-mr4"';
+	var _icons = {
+		'xmark-circle':    '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+		'rotate':          '<svg ' + _svgAttrs + '><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+		'check-circle':    '<svg ' + _svgAttrs + '><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>',
+		'ban':             '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>',
+		'question-circle': '<svg ' + _svgAttrs + '><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+	};
+
+	function escHtml(s) {
+		var div = document.createElement('div');
+		div.appendChild(document.createTextNode(String(s)));
+		return div.innerHTML;
+	}
+
+	function detectMode(input) {
+		var noProto = input.replace(/^https?:\/\//, '');
+		var match = noProto.match(/\/(.+)/);
+		return (match && match[1].length > 0) ? 'url_scan' : 'domain';
+	}
+
+	function cleanDomain(input) {
+		var d = input.trim().toLowerCase();
+		d = d.replace(/^https?:\/\//, '');
+		d = d.replace(/[\/\?#].*$/, '');
+		d = d.replace(/\.+$/, '');
+		return d.trim();
+	}
+
+	function runTest() {
+		var inputEl   = document.getElementById('scd-test-input');
+		var resultDiv = document.getElementById('scd-result');
+		var input     = inputEl.value.trim();
+
+		if (!input) {
+			resultDiv.hidden = false;
+			resultDiv.innerHTML = '<span class="dnsf-danger">Please enter a domain or URL.</span>';
+			return;
+		}
+
+		var mode = detectMode(input);
+
+		if (mode === 'domain') {
+			var domain = cleanDomain(input);
+			if (!domain || domain.indexOf('.') === -1) {
+				resultDiv.hidden = false;
+				resultDiv.innerHTML = '<span class="dnsf-danger">Please enter a valid domain (e.g. facebook.com).</span>';
+				return;
+			}
+			resultDiv.hidden = false;
+			resultDiv.innerHTML = '<span class="dnsf-muted">Testing...</span>';
+
+			dnsfApiPost('test_domain', { device_id: deviceId, domain: domain }).then(function (data) {
+				if (!data.success) { resultDiv.innerHTML = '<span class="dnsf-danger">' + escHtml(data.message) + '</span>'; return; }
+				resultDiv.innerHTML = formatDomainResult(data);
+			}).catch(function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; });
+
+		} else {
+			resultDiv.hidden = false;
+			resultDiv.innerHTML = '<span class="dnsf-muted">Fetching page\u2026 (this may take a few seconds)</span>';
+
+			dnsfApiPost('scan_url', { device_id: deviceId, url: input }).then(function (data) {
+				if (!data.success) { resultDiv.innerHTML = '<span class="dnsf-danger">' + escHtml(data.message) + '</span>'; return; }
+				resultDiv.innerHTML = formatScanResult(data);
+			}).catch(function () { resultDiv.innerHTML = '<span class="dnsf-danger">Network error. Please try again.</span>'; });
+		}
+	}
+
+	// POST a dns_filtering API action and normalize the envelope back to the
+	// legacy { success, ...data, message } shape the render helpers expect.
+	function dnsfApiPost(action, params) {
+		return joineryApi.post('dns_filtering/' + action, params || {})
+			.then(function (data) { return Object.assign({ success: true }, data || {}); })
+			.catch(function (err) { return { success: false, message: err.message || 'Request failed.' }; });
+	}
+
+	function formatDomainResult(data) {
+		var iconKey, color, label;
+		if (data.result === 'BLOCKED') {
+			iconKey = 'xmark-circle'; color = '#dc3545'; label = 'Blocked';
+		} else if (data.result === 'FORWARDED' && (data.reason === 'safesearch_rewrite' || data.reason === 'safeyoutube_rewrite')) {
+			iconKey = 'rotate'; color = '#0d6efd'; label = 'Rewritten';
+		} else if (data.result === 'FORWARDED') {
+			iconKey = 'check-circle'; color = '#198754'; label = 'Allowed';
+		} else if (data.result === 'REFUSED') {
+			iconKey = 'ban'; color = '#dc3545'; label = 'Refused';
+		} else {
+			iconKey = 'question-circle'; color = '#6c757d'; label = data.result;
+		}
+
+		var html = '<div class="job-post style2 dnsf-result-box">';
+		html += '<div class="dnsf-result-title" style="--dnsf-c:' + color + ';">' + _icons[iconKey] + escHtml(data.domain) + ' &mdash; ' + label + '</div>';
+		if (data.detail)   html += '<div class="dnsf-result-detail">' + escHtml(data.detail) + '</div>';
+		if (data.profile)  html += '<div class="dnsf-result-profile">Active profile: ' + escHtml(data.profile) + '</div>';
+
+		if (scdCanAddRules
+				&& data.reason !== 'custom_block_rule' && data.reason !== 'custom_allow_rule'
+				&& data.reason !== 'safesearch_rewrite' && data.reason !== 'safeyoutube_rewrite') {
+			var ruleAction, ruleLabel;
+			if (data.result === 'BLOCKED' || data.result === 'REFUSED') {
+				ruleAction = 1; ruleLabel = 'Allow this domain';
+			} else if (data.result === 'FORWARDED') {
+				ruleAction = 0; ruleLabel = 'Block this domain';
+			}
+			if (ruleAction !== undefined) {
+				html += '<div class="dnsf-result-actions">';
+				html += '<button type="button" class="scd-add-rule-btn th-btn"'
+					  + ' data-domain="' + escHtml(data.domain) + '"'
+					  + ' data-device="' + deviceId + '"'
+					  + ' data-action="' + ruleAction + '">'
+					  + escHtml(ruleLabel) + '</button>';
+				html += '<span class="scd-rule-feedback dnsf-feedback13"></span>';
+				html += '</div>';
+			}
+		}
+
+		html += '</div>';
+		return html;
+	}
+
+	function renderGroup(label, items, color, collapsed, ruleAction) {
+		var html = '<details' + (collapsed ? '' : ' open') + ' class="dnsf-mb8">';
+		html += '<summary class="dnsf-group-summary" style="--dnsf-c:' + color + ';">';
+		html += escHtml(label) + ' <span class="dnsf-group-count">(' + items.length + ')</span>';
+		html += '</summary>';
+		html += '<div class="dnsf-group-body">';
+		items.forEach(function (r) {
+			html += '<div class="dnsf-scan-row">';
+			html += '<div class="dnsf-flex1">';
+			html += '<div class="dnsf-fs14">' + escHtml(r.domain) + '</div>';
+			if (r.detail) html += '<div class="dnsf-scan-detail">' + escHtml(r.detail) + '</div>';
+			html += '</div>';
+			if (scdCanAddRules && ruleAction !== null && r.result !== 'ERROR'
+					&& r.reason !== 'custom_block_rule' && r.reason !== 'custom_allow_rule') {
+				var btnLabel = ruleAction === 1 ? 'Allow' : 'Block';
+				html += '<button type="button" class="scd-add-rule-btn th-btn"'
+					  + ' data-domain="' + escHtml(r.domain) + '"'
+					  + ' data-device="' + deviceId + '"'
+					  + ' data-action="' + ruleAction + '">'
+					  + escHtml(btnLabel) + '</button>';
+				html += '<span class="scd-rule-feedback dnsf-feedback12"></span>';
+			}
+			html += '</div>';
+		});
+		html += '</div></details>';
+		return html;
+	}
+
+	function formatScanResult(data) {
+		var results = data.results || [];
+		var grouped = { BLOCKED: [], REFUSED: [], REWRITTEN: [], ALLOWED: [] };
+
+		results.forEach(function (r) {
+			if (r.result === 'BLOCKED') {
+				grouped.BLOCKED.push(r);
+			} else if (r.result === 'REFUSED') {
+				grouped.REFUSED.push(r);
+			} else if (r.result === 'FORWARDED' && (r.reason === 'safesearch_rewrite' || r.reason === 'safeyoutube_rewrite')) {
+				grouped.REWRITTEN.push(r);
+			} else {
+				grouped.ALLOWED.push(r);
+			}
+		});
+
+		var html = '<div class="job-post style2 dnsf-result-box">';
+
+		html += '<div class="dnsf-scan-title">Scan complete: ' + escHtml(String(data.domains_checked)) + ' domains checked</div>';
+
+		if (data.capped) {
+			html += '<div class="dnsf-scan-note">Showing first ' + escHtml(String(data.domains_checked)) + ' of ' + escHtml(String(data.domains_found)) + ' external domains found on the page.</div>';
+		}
+		if (data.truncated) {
+			html += '<div class="dnsf-scan-warn">Time limit reached \u2014 some domains may not have been checked.</div>';
+		}
+
+		var blockedCount = grouped.BLOCKED.length + grouped.REFUSED.length;
+		html += '<div class="dnsf-scan-summary">';
+		html += blockedCount + ' blocked &bull; ' + grouped.REWRITTEN.length + ' rewritten &bull; ' + grouped.ALLOWED.length + ' allowed';
+		html += '</div>';
+
+		if (grouped.BLOCKED.length > 0)   html += renderGroup('Blocked',   grouped.BLOCKED,   '#dc3545', false, 1);
+		if (grouped.REFUSED.length > 0)   html += renderGroup('Refused',   grouped.REFUSED,   '#e67e22', false, 1);
+		if (grouped.REWRITTEN.length > 0) html += renderGroup('Rewritten', grouped.REWRITTEN, '#0d6efd', false, null);
+		if (grouped.ALLOWED.length > 0)   html += renderGroup('Allowed',   grouped.ALLOWED,   '#198754', true,  0);
+
+		html += '</div>';
+		return html;
+	}
+
+	var btn      = document.getElementById('scd-test-btn');
+	var inputEl  = document.getElementById('scd-test-input');
+	if (btn)     btn.addEventListener('click', runTest);
+	if (inputEl) inputEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); runTest(); } });
+
+	document.addEventListener('click', function (e) {
+		var btn = e.target.closest('.scd-add-rule-btn');
+		if (!btn) return;
+		btn.disabled = true;
+		var feedback = btn.parentNode.querySelector('.scd-rule-feedback');
+		dnsfApiPost('block_rule_add', {
+			device_id: btn.dataset.device,
+			sdr_hostname: btn.dataset.domain,
+			sdr_action: btn.dataset.action
+		}).then(function (data) {
+			if (data && data.success) {
+				btn.style.display = 'none';
+				feedback.style.display = 'inline';
+				feedback.style.color = '#198754';
+				feedback.innerHTML = 'Rule added. <a href="/profile/dns_filtering/devices">Manage rules \u2192</a>';
+			} else {
+				btn.disabled = false;
+				feedback.style.display = 'inline';
+				feedback.style.color = '#dc3545';
+				feedback.textContent = (data && data.message) ? data.message : 'Failed to add rule.';
+			}
+		}).catch(function () {
+			btn.disabled = false;
+			feedback.style.display = 'inline';
+			feedback.style.color = '#dc3545';
+			feedback.textContent = 'Network error. Please try again.';
+		});
+	});
+})();

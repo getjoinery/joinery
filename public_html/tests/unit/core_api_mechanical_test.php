@@ -226,7 +226,7 @@ $confirmed = $reflect->invoke($page, 'Permanent Delete', array(
 	'hidden'  => array('action' => 'permanent_delete'),
 	'confirm' => 'Delete permanently?',
 ), 'dropdown-item');
-check(strpos($confirmed, 'JoineryModal.confirm') !== false,
+check(strpos($confirmed, 'data-jy-confirm="Delete permanently?"') !== false && stripos($confirmed, 'onclick=') === false,
 	'and a destructive one can demand confirmation first');
 
 section('Only the server may write during a page view');

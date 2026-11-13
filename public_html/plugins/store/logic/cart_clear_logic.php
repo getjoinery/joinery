@@ -1,5 +1,7 @@
 <?php
-
+/**
+ * @version 1.1 - only a POST clears the cart
+ */
 function cart_clear_logic(array $input): LogicResult{
 	require_once(PathHelper::getIncludePath('plugins/store/includes/ShoppingCart.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -15,8 +17,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return LogicResult::error('This feature is turned off');
 	}
 	
-	$cart = ShoppingCart::current();
-	$cart->clear_cart();
+	// Clearing is an action, so only a POST does it. A GET (an old link, a
+	// prefetch, another site's image tag) changes nothing and goes to the cart.
+	if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+		$cart = ShoppingCart::current();
+		$cart->clear_cart();
+	}
 	
 	return LogicResult::render($page_vars);
 }

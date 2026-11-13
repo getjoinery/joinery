@@ -56,40 +56,8 @@
 
 	$formwriter = $page->getFormWriter('form1');
 
-		?>
-		<script type="text/javascript">
-
-		function set_choices(){
-			const controlField = document.getElementById('use_paypal_checkout');
-			const value = controlField ? controlField.value : '';
-
-			const containers = ['paypal_api_key_container', 'paypal_api_secret_container',
-			                   'paypal_api_key_test_container', 'paypal_api_secret_test_container',
-			                   'use_venmo_checkout_container'];
-			const display = (value == 0 || value == '') ? 'none' : 'block';
-
-			containers.forEach(function(containerId) {
-				const container = document.getElementById(containerId);
-				if (container) {
-					container.style.display = display;
-				}
-			});
-		}
-
-		document.addEventListener('DOMContentLoaded', function() {
-			set_choices();
-
-			const controlField = document.getElementById('use_paypal_checkout');
-			if (controlField) {
-				controlField.addEventListener('change', function() {
-					set_choices();
-				});
-			}
-
-		});
-
-		</script>
-		<?php
+		// The PayPal keys and Venmo show only while PayPal is on: show_when in
+		// plugin.json, drawn as FormWriter visibility_rules.
 
 	// Note: Validation rules moved to individual field definitions in V2
 

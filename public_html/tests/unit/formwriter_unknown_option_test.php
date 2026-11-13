@@ -35,6 +35,7 @@
  *
  * Run:  php tests/unit/formwriter_unknown_option_test.php
  *
+ * @version 1.2 - the tree scan also reads keys set by assignment on an options variable handed to a field
  * @version 1.1 - Reads the refusal from whichever channel the site uses instead
  *                of only the debug throw. Declared `env: any`, it asserted dev
  *                behaviour, so ten of its checks failed on any production-mode
@@ -208,6 +209,7 @@ foreach ($files as $file) {
 
 	$tokens = @token_get_all($src);
 	$n = count($tokens);
+	$passed_vars = array();
 	for ($i = 0; $i < $n; $i++) {
 		if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_OBJECT_OPERATOR) { continue; }
 		$j = $i + 1;
@@ -230,6 +232,14 @@ foreach ($files as $file) {
 				if ($depth === 0) { break; }
 				continue;
 			}
+			// An options array handed over as a variable: its keys may be set
+			// by assignment elsewhere in the file ($opts['key'] = ...), which no
+			// scan of the call's own literal sees (the protection picker's
+			// 'disabled_values' reached radioinput that way).
+			if ($depth === 1 && is_array($tokens[$p]) && $tokens[$p][0] === T_VARIABLE
+					&& $tokens[$p][1] !== '$this') {
+				$passed_vars[$tokens[$p][1]] = $line;
+			}
 			if ($depth !== 2 || !is_array($tokens[$p])
 					|| $tokens[$p][0] !== T_CONSTANT_ENCAPSED_STRING) { continue; }
 			$q = $p + 1;
@@ -238,6 +248,18 @@ foreach ($files as $file) {
 			$key = trim($tokens[$p][1], "'\"");
 			if ($key !== '' && !isset($known[$key])) {
 				$offenders[] = str_replace($root . '/', '', $path) . ':' . $line . " passes '" . $key . "'";
+			}
+		}
+	}
+	// FormWriter's own files read their $options; they hand none over.
+	if (strpos($path, '/includes/FormWriterV2') !== false) { continue; }
+	foreach ($passed_vars as $var => $call_line) {
+		if (preg_match_all('/' . preg_quote($var, '/') . '\[\s*[\'"]([a-zA-Z0-9_]+)[\'"]\s*\]\s*=(?![=>])/', $src, $am, PREG_OFFSET_CAPTURE)) {
+			foreach ($am[1] as $hit) {
+				if (!isset($known[$hit[0]])) {
+					$offenders[] = str_replace($root . '/', '', $path) . ':' . (substr_count(substr($src, 0, $hit[1]), "\n") + 1)
+						. " sets '" . $hit[0] . "' on " . $var . ', handed to a field at line ' . $call_line;
+				}
 			}
 		}
 	}
@@ -258,5 +280,19 @@ check(preg_match('/name="cmt_comment_id_parent"[^>]*value="42"|value="42"[^>]*na
 	'hiddeninput(name, value) sends the value', $hidden_html);
 check(strpos($hidden_html, 'value="7"') !== false && strpos($hidden_html, 'value="save"') !== false,
 	'the options and legacy array forms still work', $hidden_html);
+
+section('A radio field disables only the choices named in disabled_values');
+
+$rad = new FormWriterV2HTML5('fw_radio_probe', array('deferred_output' => true, 'csrf' => false));
+$rad->radioinput('lvl', 'Level', array('options' => array('a' => 'A', 'b' => 'B', 'c' => 'C'), 'value' => 'a', 'disabled_values' => array('b')));
+$rad_html = $rad->getFieldsHTML();
+check(preg_match('/<input[^>]*value="b"[^>]*disabled/', $rad_html) === 1, "the choice named is disabled", $rad_html);
+check(preg_match('/<input[^>]*value="a"[^>]*disabled/', $rad_html) === 0 && preg_match('/<input[^>]*value="c"[^>]*disabled/', $rad_html) === 0,
+	'the others are not', $rad_html);
+$radj = new FormWriterV2JSON('fw_radio_probe_json');
+$radj->radioinput('lvl', 'Level', array('options' => array('a' => 'A', 'b' => 'B'), 'disabled_values' => array('b')));
+$radj_field = null;
+foreach ((array)($radj->getDefinition()['fields'] ?? array()) as $f) { if (($f['name'] ?? '') === 'lvl') { $radj_field = $f; } }
+check(($radj_field['disabled_values'] ?? null) === array('b'), 'and the JSON writer says which', json_encode($radj_field));
 
 harness_finish();

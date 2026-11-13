@@ -239,7 +239,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 
 	// MIME types safe to render inline in the browser. Only raster image
 	// formats that cannot carry executable script belong here. SVG is
-	// deliberately excluded: it is XML and can embed <script>, so an inline
+	// deliberately excluded: it is XML and can embed a script tag, so an inline
 	// SVG served from our origin is stored XSS. Everything not on this list is
 	// served as a download (Content-Disposition: attachment). See is_inline_safe_type().
 	const INLINE_SAFE_TYPES = array(

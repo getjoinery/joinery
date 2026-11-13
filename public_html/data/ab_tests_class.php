@@ -16,6 +16,7 @@
  *   declares $ab_testable (unseal_daemon.md C3)
  * @version 1.4 - a panel action returns to the page it was posted from; it no longer
  *   follows a posted abtest_redirect, which no form sent and which named any URL
+ * @version 1.5 - the Delete variant confirm is a type="button" the kit submits, so it never posts unasked
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -669,7 +670,7 @@ class AbTestVersionsPanel {
 		}
 
 		if ($status !== AbTest::STATUS_CROWNED && $variants->count() > 0) {
-			echo '<form method="post" class="d-inline-block me-2" onsubmit="return confirm(\'Crown this variant? This copies its values onto the parent entity and ends the test.\')">';
+			echo '<form method="post" class="d-inline-block me-2" data-jy-confirm="Crown this variant? This copies its values onto the parent entity and ends the test.">';
 			self::hidden_keys($entity_class, $entity_id);
 			echo '<input type="hidden" name="abtest_action" value="crown">';
 			echo '<div class="input-group input-group-sm">';
@@ -686,7 +687,7 @@ class AbTestVersionsPanel {
 			echo '</div></form>';
 		}
 
-		echo '<form method="post" class="d-inline-block" onsubmit="return confirm(\'Zero trials and rewards for every variant of this test?\')">';
+		echo '<form method="post" class="d-inline-block" data-jy-confirm="Zero trials and rewards for every variant of this test?">';
 		self::hidden_keys($entity_class, $entity_id);
 		echo '<input type="hidden" name="abtest_action" value="reset_counters">';
 		echo '<button type="submit" class="btn btn-outline-secondary btn-sm">Reset Counters</button>';
@@ -768,7 +769,7 @@ class AbTestVersionsPanel {
 		echo '<div class="col-md-6 text-end">';
 		echo '<button type="submit" class="btn btn-sm btn-primary me-1">' . ($is_edit ? 'Save' : 'Create') . '</button>';
 		if ($is_edit) {
-			echo '<button type="submit" formaction="" name="abtest_action" value="delete_variant" class="btn btn-sm btn-outline-danger" onclick="return confirm(\'Delete this variant?\')">Delete</button>';
+			echo '<button type="button" name="abtest_action" value="delete_variant" class="btn btn-sm btn-outline-danger" data-jy-confirm="Delete this variant?" data-jy-submit="" data-jy-submit-self>Delete</button>';
 		}
 		echo '</div></div>';
 

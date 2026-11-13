@@ -225,7 +225,7 @@ public static $phone_carriers = array(
 		// All other numbers: group digits in blocks of 3-4 for readability
 		// e.g., +44 20 7946 0958, +49 170 123 4567
 		$formatted = implode(' ', str_split($digits, 4));
-		return $country_code . ' ' . $formatted;
+		return trim($country_code . ' ' . $formatted);
 	}
 	
 	function get_formatted_country_code(){
@@ -242,8 +242,9 @@ public static $phone_carriers = array(
 			$dbhelper->handle_query_error($e);
 		}
 
+		// A number with no country code on record (one not yet saved) has no prefix.
 		$country_code = $q->fetch();
-		return '+'.$country_code->cco_code;			
+		return $country_code ? '+' . $country_code->cco_code : '';
 	}
 
 	function get_phone_string_anonymized() {

@@ -15,9 +15,10 @@
  * (server_manager node_detail_tabs/overview_encryption.php): the same value,
  * for the machine's break-glass box.
  *
- * window.copyKeyCeremony is { version, ciphertext, fingerprint };
+ * The page's #copy-key-ceremony block is { version, ciphertext, fingerprint };
  * assets/js/vault-crypto.js loads before this file.
  *
+ * @version 2.2 - the ceremony is the page's #copy-key-ceremony JSON block, not a global
  * @version 2.1 - header: a v1 box is refused (v1_key_retirement WP2)
  * @version 2.0 - X-Wing (specs/post_quantum_sealing.md WP2): a v2 box posts its dek-scope key; the
  *   arithmetic is VaultCrypto's
@@ -25,7 +26,7 @@
  */
 (function () {
 	'use strict';
-	var c = window.copyKeyCeremony;
+	var c = window.joineryPageData ? joineryPageData('copy-key-ceremony') : null;
 	var keyInput = document.getElementById('copy_key_secret');
 	var button = document.getElementById('copy_key_open');
 	var status = document.getElementById('copy_key_status');

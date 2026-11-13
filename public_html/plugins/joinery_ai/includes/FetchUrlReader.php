@@ -50,7 +50,7 @@ class FetchUrlReader implements SandboxParserInterface {
         $doc = self::loadDom($html);
 
         // Tier 1: visible main-content walk. Harvest embedded data first, since
-        // it lives in <script> tags the walk is about to strip.
+        // it lives in script tags the walk is about to strip.
         $title = '';
         $embedded = null;
         $markdown = '';
@@ -247,7 +247,7 @@ class FetchUrlReader implements SandboxParserInterface {
 
     /**
      * Capture the page's structured-data blobs before the visible walk strips
-     * the <script> tags they live in. Used only if the visible walk is thin.
+     * the script tags they live in. Used only if the visible walk is thin.
      */
     private static function harvestEmbeddedData(DOMDocument $doc): array {
         $data = ['jsonld' => [], 'meta' => []];
@@ -310,7 +310,7 @@ class FetchUrlReader implements SandboxParserInterface {
 
     private static function htmlToText(string $html): string {
         // Drop scripts and styles entirely (they contain noise but no readable text).
-        $html = preg_replace('#<script\b[^>]*>.*?</script>#is', '', $html);
+        $html = preg_replace('#<script\b[^>]*>.*?</script>#is', '', $html); // jy-allow-script: a pattern or a held-back tag, not a script the page runs
         $html = preg_replace('#<style\b[^>]*>.*?</style>#is', '', $html);
         $html = preg_replace('#<noscript\b[^>]*>.*?</noscript>#is', '', $html);
         // Convert block-ish tags to newlines so paragraphs survive strip_tags.

@@ -177,19 +177,7 @@ $page->public_header([
     </div>
 </section>
 
-<script>
-// Simple tab toggle for blog sidebar
-document.querySelectorAll('.tabs-nav .tab-link').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-        var tab = this.dataset.tab;
-        document.querySelectorAll('.tabs-nav .tab-link').forEach(function(b) { b.classList.remove('active'); });
-        this.classList.add('active');
-        document.querySelectorAll('[data-tab-content]').forEach(function(c) {
-            c.classList.toggle('active', c.dataset.tabContent === tab);
-        });
-    });
-});
-</script>
+<?php echo PageScript::src('assets/js/blog-page.js'); ?>
 
 </div>
 <?php

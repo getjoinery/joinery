@@ -7,6 +7,7 @@
  * start_logic hands them to the platform's own sign-in and sign-up handlers
  * and every success lands on the configure page (step 2).
  *
+ * @version 1.4 - the passkey button's script is assets/js/passkey-pages.js (no inline script)
  * @version 1.3 - the lead names every plan on sale
  * @version 1.2 - not found where this site does not sell hosting (SmHosting)
  * @version 1.1 - the time zone starts as the browser's (timezone-from-browser.js)
@@ -79,7 +80,7 @@ $page->public_header(array(
 
 				<?php if ($passkeys_enabled): ?>
 				<div class="jy-passkey-signin d-none" id="passkey-signin">
-					<button type="button" class="btn btn-secondary jy-w-full" id="passkey-signin-btn">Sign in with a passkey</button>
+					<button type="button" class="btn btn-secondary jy-w-full" id="passkey-signin-btn" data-email-field="lbx_email" data-quiet-cancel data-jy-next="<?php echo htmlspecialchars($next); ?>">Sign in with a passkey</button>
 				</div>
 				<?php endif; ?>
 			</section>
@@ -125,32 +126,7 @@ $page->public_header(array(
 
 <script defer src="/assets/js/timezone-from-browser.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/timezone-from-browser.js')) ?: '1'; ?>"></script>
 <?php if ($passkeys_enabled): ?>
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script defer>
-document.addEventListener('DOMContentLoaded', function () {
-	if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
-	var wrap = document.getElementById('passkey-signin');
-	var btn = document.getElementById('passkey-signin-btn');
-	if (!wrap || !btn) return;
-	wrap.classList.remove('d-none');
-	btn.addEventListener('click', async function () {
-		btn.disabled = true;
-		try {
-			var emailField = document.querySelector('input[name="lbx_email"]');
-			var email = emailField ? emailField.value.trim() : '';
-			var data = await JoineryPasskeys.runFlow(
-				'/api/v1/action/passkey_login_options',
-				'/api/v1/action/passkey_login_verify',
-				{ email: email }
-			);
-			window.location.href = data.redirect || <?php echo json_encode($next); ?>;
-		} catch (e) {
-			btn.disabled = false;
-			if (e && e.message && e.name !== 'NotAllowedError') { alert(e.message); }
-		}
-	});
-});
-</script>
+<?php echo PageScript::src('assets/js/passkeys.js'), PageScript::src('assets/js/passkey-pages.js'); ?>
 <?php endif; ?>
 
 <?php $page->public_footer(array('header_only' => true, 'track' => true)); ?>

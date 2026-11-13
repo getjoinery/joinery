@@ -15,6 +15,7 @@
  * (vault_scope_{scope}); each chosen one is unlocked and sealed the same way,
  * one unlock per vault, and travels in sealed_vault_keys.
  *
+ * @version 1.5 - its settings are the page's #device-link-config JSON block
  * @version 1.4 - the server names the device kind (phones included); a signed-in app's
  *   handover says to return to the app
  * @version 1.3 - a checkbox, an unlock and a sealed key per vault beyond Drive
@@ -26,7 +27,7 @@
 (function () {
 	'use strict';
 
-	var CFG = window.DEVICE_LINK_CFG || {};
+	var CFG = (window.joineryPageData && joineryPageData('device-link-config')) || {};
 	var api = window.joineryApi;
 	var SCOPE = 'drive';
 

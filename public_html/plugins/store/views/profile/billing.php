@@ -148,7 +148,7 @@ $page->public_header([
                             <span class="jy-billing-savings"><?php echo $savings_text; ?></span>
                             <?php endif; ?>
                         </div>
-                        <form method="POST" action="/profile/billing" onsubmit="return confirm('Switch to <?php echo htmlspecialchars($alt->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?> billing? Your subscription will be updated and prorated.');">
+                        <form method="POST" action="/profile/billing" data-jy-confirm="Switch to <?php echo htmlspecialchars($alt->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?> billing? Your subscription will be updated and prorated.">
                             <input type="hidden" name="action" value="change_billing_cycle">
                             <input type="hidden" name="new_version_id" value="<?php echo $alt->key; ?>">
                             <button type="submit" class="btn btn-primary btn-sm">Switch</button>

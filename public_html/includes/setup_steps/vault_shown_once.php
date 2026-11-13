@@ -9,9 +9,10 @@
  * is shown exactly once, is identical either way. Included by
  * includes/setup_steps/encryption_key.php with $next_key in scope.
  *
- * Defines window.setupVaultShowResult(result), which swaps the step's form for
+ * window.setupVaultShowResult(result) (assets/js/setup/encryption_key.js) swaps the step's form for
  * this panel and wires the copy/download buttons to that result.
  *
+ * @version 1.2 - window.setupVaultShowResult is in assets/js/setup/encryption_key.js (no inline script)
  * @version 1.1 - codes only; the key file moved to the security page
  * @version 1.0
  */
@@ -33,40 +34,3 @@
 	</div>
 </div>
 
-<script>
-window.setupVaultShowResult = function (result, hideElementId) {
-	var codes = (result.recovery_codes || []).join('\n');
-	document.getElementById('setup-vault-codes').textContent = codes;
-	var hide = document.getElementById(hideElementId);
-	if (hide) { hide.classList.add('d-none'); }
-	document.getElementById('setup-vault-result').classList.remove('d-none');
-
-	function download(name, blob) {
-		var a = document.createElement('a');
-		a.href = URL.createObjectURL(blob);
-		a.download = name;
-		a.click();
-		URL.revokeObjectURL(a.href);
-	}
-
-	document.getElementById('setup-vault-copy').addEventListener('click', function () {
-		navigator.clipboard.writeText(codes);
-	});
-	document.getElementById('setup-vault-codes-download').addEventListener('click', function () {
-		download('vault-recovery-codes.txt', new Blob([codes], { type: 'text/plain' }));
-	});
-
-	// Continue stays inert until the codes are acknowledged — this screen is
-	// the only time they exist.
-	var saved = document.getElementById('setup-vault-saved');
-	var cont = document.getElementById('setup-vault-continue');
-	cont.style.pointerEvents = 'none';
-	cont.style.opacity = '0.5';
-	saved.addEventListener('change', function () {
-		var on = saved.checked;
-		cont.style.pointerEvents = on ? '' : 'none';
-		cont.style.opacity = on ? '' : '0.5';
-		cont.setAttribute('aria-disabled', on ? 'false' : 'true');
-	});
-};
-</script>

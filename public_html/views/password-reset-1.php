@@ -68,33 +68,7 @@
 </div>
 
 <?php if (empty($page_vars['message']) && $page_vars['settings']->get_setting('passkeys_enabled')): ?>
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script defer>
-document.addEventListener('DOMContentLoaded', function () {
-    if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
-    var btn = document.getElementById('pwreset-passkey-btn');
-    if (!btn) return;
-    btn.addEventListener('click', async function () {
-        btn.disabled = true;
-        try {
-            var emailField = document.querySelector('input[name="email"]');
-            var email = emailField ? emailField.value.trim() : '';
-
-            // Vault holders finish the second factor first; everyone else goes
-            // straight to setting a new password.
-            var data = await JoineryPasskeys.runFlow(
-                '/api/v1/action/password_reset_passkey_options',
-                '/api/v1/action/password_reset_passkey_verify',
-                { email: email }
-            );
-            window.location.href = data.redirect || '/password-reset-2';
-        } catch (e) {
-            alert(e.message || 'Passkey reset was not completed.');
-            btn.disabled = false;
-        }
-    });
-});
-</script>
+<?php echo PageScript::src('assets/js/passkeys.js'), PageScript::src('assets/js/passkey-pages.js'); ?>
 <?php endif; ?>
 
 <?php

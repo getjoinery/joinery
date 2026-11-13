@@ -13,6 +13,7 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.6 - the root request panel's poller is assets/js/root-request.js (no inline script)
  * @version 1.5 - email_audience_table() lists direct messages; direct_messages_to()
  * @version 1.4 - the root request panel polls /api/v1/action/root_request_status; the bare /api/v1/ path is the
  *                model API, so every panel answered 400 and sat at Queued whatever the request did
@@ -90,15 +91,26 @@ class AdminPage extends PublicPage {
 			return '';
 		}
 		$safe = htmlspecialchars($id, ENT_QUOTES, 'UTF-8');
-		$json = json_encode($id);
 		$unverified_url = (string)$unverified_url;
-		if ($unverified_url !== '' && ($unverified_url[0] !== '/' || (isset($unverified_url[1]) && $unverified_url[1] === '/'))) {
-			$unverified_url = '';           // same-site relative only, never an open redirect
+		// Same-site relative only, never an open redirect: a browser drops
+		// tabs and line breaks and reads "\" as "/", so none of those either.
+		if ($unverified_url !== '' && ($unverified_url[0] !== '/' || (isset($unverified_url[1]) && $unverified_url[1] === '/')
+				|| preg_match('/[\x00-\x20\x7f\\\\]/', $unverified_url))) {
+			$unverified_url = '';
 		}
-		$json_unverified = json_encode($unverified_url);
+		$safe_unverified = htmlspecialchars($unverified_url, ENT_QUOTES, 'UTF-8');
 
+		// assets/js/root-request.js polls each panel on the page, from these
+		// attributes: no inline script.
+		static $script_sent = false;
+		$script = '';
+		if (!$script_sent) {
+			$script_sent = true;
+			$script = '<script defer src="/assets/js/root-request.js?v='
+				. (@filemtime(PathHelper::getIncludePath('assets/js/root-request.js')) ?: '1') . '"></script>';
+		}
 		return <<<HTML
-<div class="jy-rootreq" data-request="{$safe}" data-state="queued">
+<div class="jy-rootreq" data-request="{$safe}" data-unverified-url="{$safe_unverified}" data-state="queued">
 <style>
 .jy-rootreq{margin:1rem 0;border:1px solid var(--jy-border,#d4d4d8);border-radius:6px;overflow:hidden}
 .jy-rootreq__head{display:flex;align-items:center;gap:.5rem;padding:.6rem .9rem;background:var(--jy-surface-2,#f4f4f5);font-size:.95rem}
@@ -118,54 +130,7 @@ class AdminPage extends PublicPage {
 </div>
 <pre class="jy-rootreq__log"></pre>
 </div>
-<script>
-(function () {
-	var id = {$json};
-	var unverifiedUrl = {$json_unverified};
-	var box = document.querySelector('.jy-rootreq[data-request="' + id + '"]');
-	if (!box) { return; }
-	var stateEl = box.querySelector('.jy-rootreq__state');
-	var noteEl  = box.querySelector('.jy-rootreq__note');
-	var logEl   = box.querySelector('.jy-rootreq__log');
-	var meta    = document.querySelector('meta[name="joinery-api-csrf"]');
-	var words   = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed' };
-
-	function tick() {
-		fetch('/api/v1/action/root_request_status', {
-			method: 'POST',
-			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': meta ? meta.content : '' },
-			body: JSON.stringify({ id: id })
-		}).then(function (r) { return r.json(); }).then(function (d) {
-			var data = (d && d.data) ? d.data : d;
-			if (!data || !data.state) { setTimeout(tick, 5000); return; }
-			box.setAttribute('data-state', data.state);
-			stateEl.textContent = words[data.state] || data.state;
-			if (data.transcript && data.transcript !== logEl.textContent) {
-				logEl.textContent = data.transcript;
-				logEl.scrollTop = logEl.scrollHeight;
-			}
-			if (data.state === 'failed' && data.exit_code === 3 && unverifiedUrl) {
-				// Not ours: the warning page decides what happens next.
-				noteEl.textContent = 'the package did not verify — opening the warning';
-				window.location = unverifiedUrl;
-				return;
-			}
-			if (data.state === 'queued' && data.actor !== 'present') {
-				noteEl.textContent = 'waiting for this machine’s root actor';
-			} else if (data.state === 'failed' && data.abandoned) {
-				noteEl.textContent = 'interrupted — the run carrying it out was killed; submit it again';
-			} else if (data.state === 'failed') {
-				noteEl.textContent = 'exit ' + (data.exit_code === null ? '?' : data.exit_code);
-			} else {
-				noteEl.textContent = '';
-			}
-			if (!data.finished) { setTimeout(tick, 2000); }
-		}).catch(function () { setTimeout(tick, 5000); });
-	}
-	tick();
-})();
-</script>
+{$script}
 HTML;
 	}
 

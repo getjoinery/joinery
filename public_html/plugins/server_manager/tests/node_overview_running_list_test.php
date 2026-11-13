@@ -13,6 +13,7 @@
  * the reason a reboot is not offered; the Data root gauge's script version and
  * a service kept there with no drop-in; the Plugins row.
  *
+ * @version 1.1 - the reboot confirm is the kit's data-jy-confirm, not an inline handler
  * @version 1.0
  */
 
@@ -105,7 +106,7 @@ check(strpos($diag, 'form="nodeActionListeningSockets"') !== false && strpos($di
 	'Listening ports is offered on the Diagnostics tab, with its form');
 check(strpos($html, '>Listening ports</button>') === false, 'and not on the Overview');
 check(strpos($diag, 'All containers') !== false, 'All containers is offered where the report lists containers (a machine with an engine)');
-check(preg_match('/onclick="JoineryModal\.confirm\(&quot;Reboot HarnessTest NOR [0-9a-f]{6}\?[^"]*nodeActionRebootMachine\'\)\.submit\(\)/', $html) === 1,
+check(preg_match('/data-jy-confirm="Reboot HarnessTest NOR [0-9a-f]{6}\?[^"]*" data-jy-submit="nodeActionRebootMachine"/', $html) === 1,
 	'Reboot asks in the system modal, naming the machine, then posts the reboot form');
 check(strpos($html, 'id="nodeActionRebootMachine"') !== false && strpos($html, 'value="reboot_machine"') !== false,
 	'the reboot form posts the reboot_machine action');

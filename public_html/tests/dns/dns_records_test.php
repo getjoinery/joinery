@@ -725,14 +725,18 @@ check($gate_html(array($row(DnsReconciler::MISSING, false, 'a'),
 $html = $gate_html(array($row(DnsReconciler::CONFLICTS, false, 'b'),
 	$row(DnsReconciler::MISSING, true, 'c')));
 check($html !== '', 'a diff where every record needs a tick emits the gate');
-check(strpos($html, 'btn.disabled=!any') !== false, 'the gate drives the button disabled state');
-check(strpos($html, 'publish nothing') !== false, 'and says why the button is off');
+// The gate's records go out as data; the rule is assets/js/dns-boxes.js.
+$gate_js = (string)file_get_contents(PathHelper::getIncludePath('assets/js/dns-boxes.js'));
+check(strpos($html, '<script type="application/json" id="dns-publish-gated">') !== false && stripos($html, '<script>') === false,
+	'the gated records are a JSON block, with no inline script');
+check(strpos($gate_js, 'btn.disabled = !any') !== false, 'the gate drives the button disabled state');
+check(strpos($gate_js, 'publish nothing') !== false, 'and says why the button is off');
 
 // The per-record shape is what makes a conflicting cutover correct.
 $both = $gate_html(array($row(DnsReconciler::CONFLICTS, true, 'mx')));
 check(strpos($both, '"cutover":true') !== false && strpos($both, '"adopt":true') !== false,
 	'a record that is both a cutover and an overwrite carries both gates');
-check(strpos($both, '(!g.cutover||c[g.key])&&(!g.adopt||a[g.key])') !== false,
+check(strpos($gate_js, '(!g.cutover || c[g.key]) && (!g.adopt || a[g.key])') !== false,
 	'and the rule requires every gate on a record, not any one box anywhere');
 
 // Unchanged records are not writes: a diff of only matches plus one gated record
@@ -973,7 +977,7 @@ $removal_gate = $gate_html(array(array('key' => 'r1', 'outcome' => DnsReconciler
 	'cutover' => false, 'record' => $absent, 'live' => array($foreign))));
 check($removal_gate !== '', 'a diff of only removals gates the Apply button');
 check(strpos($removal_gate, '"remove":true') !== false, 'the removal carries its own gate');
-check(strpos($removal_gate, '(!g.remove||r[g.key])') !== false,
+check(strpos($gate_js, '(!g.remove || r[g.key])') !== false,
 	'and the rule requires the removal tick, not any box anywhere', $removal_gate);
 
 // Deleting a live MX stops mail with nothing taking over, so it is a cutover

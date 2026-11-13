@@ -90,23 +90,14 @@ foreach ($page_vars['time_series'] as $src => $points) {
 <h3>Visits over time — top sources</h3>
 <div style="width: 1000px; height: 400px;">
 <script src="/assets/vendor/chart.js-2.8.0/Chart.min.js"></script>
-<canvas id="attributionChart"></canvas>
+<canvas id="attributionChart" data-jy-chart="analytics-attribution-chart"></canvas>
 </div>
-<script>
-(function(){
-	var ctx = document.getElementById('attributionChart').getContext('2d');
-	new Chart(ctx, {
-		type: 'line',
-		data: {
-			labels:   <?php echo json_encode($page_vars['xvals']); ?>,
-			datasets: <?php echo json_encode($datasets); ?>
-		},
-		options: {
-			scales: { yAxes: [{ ticks: { beginAtZero: true } }] }
-		}
-	});
-})();
-</script>
+<?php echo PageScript::json('analytics-attribution-chart', array(
+	'type'     => 'line',
+	'labels'   => $page_vars['xvals'],
+	'datasets' => $datasets,
+	'options'  => array('scales' => array('yAxes' => array(array('ticks' => array('beginAtZero' => true))))),
+)), PageScript::src('assets/js/admin-analytics.js'); ?>
 <?php
 
 // === Section 4: Campaign drilldown ===

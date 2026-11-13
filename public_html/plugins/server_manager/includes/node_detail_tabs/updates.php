@@ -124,7 +124,7 @@
 		<form method="post" class="svm-inline-form" id="apply_update_form">
 			<input type="hidden" name="action" value="apply_update">
 			<?php echo SmAdminCsrf::field(); ?>
-			<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm('Apply update to ' + smNodeName + '?', function(){ document.getElementById('apply_update_form').submit(); })">Apply Update</button>
+			<button type="button" class="btn btn-sm btn-outline-primary" data-jy-confirm="<?php echo htmlspecialchars('Apply update to ' . $node->get('mgn_name') . '?', ENT_QUOTES); ?>" data-jy-submit="apply_update_form">Apply Update</button>
 		</form>
 	</div>
 <?php
@@ -151,7 +151,7 @@
 		<form method="post" class="svm-inline-form" id="upgrade_all_form">
 			<input type="hidden" name="action" value="apply_update_all_on_host">
 			<?php echo SmAdminCsrf::field(); ?>
-			<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Queue an upgrade job for every enabled site on host <?php echo htmlspecialchars($node->get('mgn_host')); ?>?', function(){ document.getElementById('upgrade_all_form').submit(); })">Upgrade All Sites on This Host</button>
+			<button type="button" class="btn btn-sm btn-warning" data-jy-confirm="Queue an upgrade job for every enabled site on host <?php echo htmlspecialchars($node->get('mgn_host'), ENT_QUOTES); ?>?" data-jy-submit="upgrade_all_form">Upgrade All Sites on This Host</button>
 		</form>
 		<p class="text-muted small mt-2 mb-0">
 			Queues one independent upgrade job per enabled, non-deleted site that shares this host

@@ -5,6 +5,7 @@
  * parallel: true
  * env: dev-only
  * needs: [chrome]
+ * covers: [public_html/assets/js/html-cleanup.js, public_html/assets/js/joinery-editor.js, public_html/assets/css/joinery-editor.css]
  * timeout: 90
  */
 /**
@@ -42,6 +43,7 @@
  *
  * Run:  php tests/unit/joinery_editor_test.php
  *
+ * @version 1.0.1 - covers the files Chrome loads, so a change to them runs this suite
  * @version 1.0.0
  */
 

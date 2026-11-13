@@ -5,7 +5,11 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.8.0 - textbox markdownmode options markdown_restricted (the toolbar and preview of the restricted profile, for text members write for each other) and mention_space (the @ mention picker)
+ * @version 2.12.0 - a submit button's 'busy' is data-jy-busy
+ * @version 2.11.0 - a hidden field with 'browser_timezone' carries data-jy-browser-timezone
+ * @version 2.10.0 - a radio choice named in 'disabled_values' is disabled
+ * @version 2.9.0 - no inline handlers: the AJAX select carries data-jy-ajax-select, a submit button's confirm is data-jy-confirm, navigate_on_change is data-jy-navigate
+ * @changelog 2.8.0 - textbox markdownmode options markdown_restricted (the toolbar and preview of the restricted profile, for text members write for each other) and mention_space (the @ mention picker)
  * @changelog 2.7.0 - A checkbox with `switch` draws as an on/off switch (role="switch", .jy-switch)
  * @changelog 2.6.0 - A stored credential (passwordinput 'stored') draws locked with a Reset button (assets/js/stored-secret.js); 'rows' draws a multi-line credential as a textarea
  * @changelog 2.5.0 - One editor for htmlmode and markdownmode (assets/js/joinery-editor.js): editor_view and editor_cleanup options, no jQuery
@@ -210,8 +214,12 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         if ($data['required']) {
             $html .= ' required';
         }
-        if ($data['onchange']) {
-            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
+        if ($data['navigate_on_change']) {
+            $html .= ' data-jy-navigate';
+        }
+        if ($data['ajaxendpoint']) {
+            // assets/js/joinery-forms.js turns this select into a search box
+            $html .= ' data-jy-ajax-select="' . htmlspecialchars($data['ajaxendpoint']) . '"';
         }
 
         if ($data['has_errors']) {
@@ -290,9 +298,6 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         if ($data['required']) {
             $html .= ' required';
         }
-        if ($data['onchange']) {
-            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
-        }
 
         if ($data['has_errors']) {
             $html .= ' aria-invalid="true"';
@@ -366,14 +371,11 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             if ((string)$data['value'] === (string)$opt_value) {
                 $html .= ' checked';
             }
-            if ($data['disabled']) {
+            if ($data['disabled'] || in_array((string)$opt_value, $data['disabled_values'] ?? [], true)) {
                 $html .= ' disabled';
             }
             if ($data['required']) {
                 $html .= ' required';
-            }
-            if ($data['onchange']) {
-                $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
             }
 
             if ($data['has_errors']) {
@@ -532,9 +534,6 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         if (isset($data['max'])) {
             $html .= ' max="' . htmlspecialchars($data['max']) . '"';
         }
-        if ($data['onchange']) {
-            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
-        }
 
         if ($data['has_errors']) {
             $html .= ' aria-invalid="true"';
@@ -582,8 +581,8 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
 
         $html .= '<input type="hidden" name="' . htmlspecialchars($data['name']) . '" id="' . htmlspecialchars($id) . '" value="' . htmlspecialchars($data['value']) . '">';
 
-        // The data-time-* attributes wire this widget to the shared
-        // outputTimeInputJavaScript() handler, which keeps the hidden input
+        // The data-time-* attributes wire this widget to the shared time
+        // script (assets/js/joinery-forms.js), which keeps the hidden input
         // in sync with the three select dropdowns. Without these, the dropdowns
         // (which intentionally have no `name` attribute) would never propagate
         // their values to the form POST.
@@ -634,7 +633,7 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
 
         $html .= '</div>';
 
-        // Append the shared time JS
+        // The shared time script, once per page
         $html .= $this->outputTimeInputJavaScript($id);
 
         return $html;
@@ -775,9 +774,6 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         if ($data['required']) {
             $html .= ' required';
         }
-        if ($data['onchange']) {
-            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
-        }
 
         if ($data['has_errors']) {
             $html .= ' aria-invalid="true"';
@@ -816,6 +812,7 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $html .= ' name="' . htmlspecialchars($data['name']) . '"';
         $html .= ' id="' . htmlspecialchars($data['id']) . '"';
         $html .= ' value="' . htmlspecialchars($data['value']) . '"';
+        if (!empty($data['browser_timezone'])) $html .= ' data-jy-browser-timezone';
         $html .= '>';
 
         return $html;
@@ -831,19 +828,36 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $class = $data['class'] ?: 'btn btn-primary';
         $id = $data['id'];
 
-        $html = '<button type="submit"';
+        // A button that asks first is type="button": it does nothing until
+        // base.js has run and the person has said yes, so a press on a page
+        // still loading (or one whose script failed) never posts unasked.
+        // base.js then submits the form as this button (data-jy-submit-self).
+        $asks = $data['confirm'] !== '';
+        $html = '<button type="' . ($asks ? 'button' : 'submit') . '"';
         $html .= ' name="' . htmlspecialchars($data['name']) . '"';
+        if ($data['value'] !== null) {
+            $html .= ' value="' . htmlspecialchars($data['value']) . '"';
+        }
         $html .= ' id="' . htmlspecialchars($id) . '"';
         $html .= ' class="' . htmlspecialchars($class) . '"';
 
         if ($data['disabled']) {
             $html .= ' disabled';
         }
-        if ($data['onclick']) {
-            $html .= ' onclick="' . htmlspecialchars($data['onclick']) . '"';
+        if ($asks) {
+            $html .= ' data-jy-confirm="' . htmlspecialchars($data['confirm']) . '" data-jy-submit="" data-jy-submit-self';
+            if ($data['confirm_label'] !== '') {
+                $html .= ' data-jy-confirm-label="' . htmlspecialchars($data['confirm_label']) . '"';
+            }
+            if ($data['confirm_style'] !== '') {
+                $html .= ' data-jy-confirm-style="' . htmlspecialchars($data['confirm_style']) . '"';
+            }
         }
         if (!empty($data['formnovalidate'])) {
             $html .= ' formnovalidate';
+        }
+        if (($data['busy'] ?? '') !== '') {
+            $html .= ' data-jy-busy="' . htmlspecialchars($data['busy']) . '"';
         }
 
         $html .= '>';
@@ -1055,11 +1069,11 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      * .markdown-content rules its preview pane renders with, once.
      *
      * The script self-initialises from the wrapper's data attributes, so a
-     * page carrying an editor needs no inline <script> and stays clean under
+     * page carrying an editor needs no inline script and stays clean under
      * the Content-Security-Policy.
      *
      * Public so a repeater can emit the assets before its <template> row: a
-     * <link> or <script> echoed inside a template never loads.
+     * a link or script tag echoed inside a template never loads.
      *
      * @param string $dialect 'html' or 'markdown'
      */
@@ -1395,9 +1409,6 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         }
         if (isset($data['maxlength'])) {
             $html .= ' maxlength="' . intval($data['maxlength']) . '"';
-        }
-        if ($data['onchange']) {
-            $html .= ' onchange="' . htmlspecialchars($data['onchange']) . '"';
         }
 
         if ($data['has_errors']) {

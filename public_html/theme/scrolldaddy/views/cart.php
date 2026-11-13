@@ -159,7 +159,7 @@ Contact Area
 						<?php
 					if($require_login){
 							echo '<div class="alert alert-warning" role="alert">
-							  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <a href="/cart_clear">clear the cart</a>.
+							  The email ('.strip_tags($cart->billing_user['billing_email']).') you entered already exists in our system.  <a href="/login">Log in</a> to continue checkout or <form method="post" action="/cart_clear" class="jy-inline-form"><button type="submit" class="jy-link-button">clear the cart</button></form>.
 							</div>';
 					}
 					else{							
@@ -169,22 +169,6 @@ Contact Area
 							echo '<br><br>';
 						}
 						else{
-							/*
-							?>
-							<script>
-							$(document).ready(function() {
-								$("#usr_first_name").focus();
-								$('#new_billing').hide();
-								$('#existing_billing_email').change(function () {
-									if ($('#existing_billing_email option:selected').text() == 'A different person') {
-										$('#new_billing').show();
-									}
-									else $('#new_billing').hide(); // hide div if value is not "custom"
-								});
-							});
-							</script>
-							<?php	
-							*/
 							$formwriter = $page->getFormWriter('form2', ['action' => '/cart']);
 							$formwriter->begin_form();
 							echo '<div id="new_billing">';

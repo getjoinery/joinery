@@ -33,7 +33,7 @@ const scriptPath = path.resolve(here, '../../assets/js/recovery-readiness.js');
 const source = readFileSync(scriptPath, 'utf8');
 
 // The smallest window the file needs to load. It wires listeners on
-// DOMContentLoaded and reads window.rrPanel / window.rrApproval; neither is set,
+// DOMContentLoaded and reads the #rr-panel-config / #rr-approval-config blocks; neither exists,
 // so attachPanel finds nothing and returns. Everything else it exports is pure.
 const sandbox = {
 	window: {},

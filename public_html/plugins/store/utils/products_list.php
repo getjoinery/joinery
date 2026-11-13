@@ -20,15 +20,6 @@
 	echo PublicPage::BeginPage('Products');
 	echo PublicPage::BeginPanel();
 	
-	?>
-	<script language="javascript">
-	 $(document).ready(function() {	
-		$('input[name="full_name_first"]').val('Jeremy');
-		$('input[name="full_name_last"]').val('Test');
-		$('input[name="email"]').val('jeremy.tunnell@gmail.com');
-	});
-	</script>
-	<?php
 	
 	if(StripeHelper::isTestMode()){
 		echo '<div style="border: 3px solid red; padding: 10px; margin: 10px;">Using test mode with type '.$settings->get_setting('checkout_type').'.</div>';

@@ -16,6 +16,7 @@
  *
  * Run: php tests/run.php --only=tests/core/test_mode_test.php
  *
+ * @version 1.2 - the banner is a template base.js inserts, with no inline script
  * @version 1.1 - on_test_side(): on for the one call, the session untouched, off again after a throw
  * @version 1.0
  */
@@ -48,8 +49,10 @@ check($r->error === null && TestMode::session_on() && TestMode::active(), 'on fo
 check(StripeHelper::isTestMode(), 'the store uses the test accounts');
 check(StripeHelper::getStripeSettingKey('stripe_api_key') === 'stripe_api_key_test', 'the store reads the test key');
 $banner = TestMode::banner_html();
-check(strpos($banner, 'jy-test-mode-banner') !== false && strpos($banner, '\/test_mode') !== false
+check(strpos($banner, 'jy-test-mode-banner') !== false && strpos($banner, 'action="/test_mode"') !== false
 	&& strpos($banner, 'Turn off') !== false, 'the banner is printed, with the Turn off form', substr($banner, 0, 160));
+check(strpos($banner, '<template data-jy-body-insert="afterbegin">') === 0 && stripos($banner, '<script') === false
+	&& strpos($banner, 'data-jy-current-path') !== false, 'as a template base.js inserts, with no inline script', substr($banner, 0, 160));
 
 section('Anyone turns it off, and the banner button goes back where it was pressed');
 $session->store_session_variables($member);

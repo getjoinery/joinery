@@ -30,6 +30,7 @@
  * - Creates detailed log of all changes made
  *
  * @author Generated with Claude Code
+ * @version 1.2 - Apply Fixes asks through assets/js/fix-duplicate-keys.js (no inline handler)
  * @version 1.1 - on the web a GET only previews; Apply Fixes is a POST button (it renumbers primary keys)
  * @version 1.0
  * @since 2025-09-26
@@ -493,7 +494,9 @@ try {
                     . "<input type='hidden' name='table' value='" . htmlspecialchars($table_name) . "'>"
                     . ($verbose ? "<input type='hidden' name='verbose' value='1'>" : '')
                     . "<button type='submit' style='background: #007bff; color: white; padding: 8px 16px; border: 0; border-radius: 5px;'"
-                    . " onclick=\"return confirm('Renumber the duplicate keys in this table?');\">Apply Fixes</button></form>";
+                    . " data-confirm='Renumber the duplicate keys in this table?'>Apply Fixes</button></form>"
+                    // This page loads no kit: its own file asks before posting.
+                    . PageScript::src('assets/js/fix-duplicate-keys.js');
             }
             echo "</div>";
         }

@@ -172,7 +172,7 @@ $formwriter = $page->getFormWriter('tier_form');
         <div class="text-center">
             <?php $formwriter->begin_form(); ?>
             <input type="hidden" name="action" value="cancel">
-            <button type="submit" class="btn btn-danger" onclick="return confirm('Are you sure you want to cancel your subscription?');">
+            <button type="button" class="btn btn-danger" data-jy-confirm="Are you sure you want to cancel your subscription?" data-jy-submit="" data-jy-submit-self>
                 <?php echo htmlspecialchars($page_vars['cancel_button_text']); ?>
             </button>
             <?php $formwriter->end_form(); ?>

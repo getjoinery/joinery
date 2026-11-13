@@ -6,6 +6,8 @@
  * and an optional image, and everything the report will carry (built live for
  * this reporter and this error, and exactly what is saved and sent). The form
  * posts to the report_problem_submit API action; the page says what happened.
+ * Posted to this page instead (before its script runs, or with none), the
+ * logic sends it through the same action.
  *
  * Renders under the platform's member chrome, so it looks the same in every
  * theme and inside the mobile apps' webview, whose native picker handles the
@@ -13,6 +15,8 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.0.3 - a form posted here natively is still sent (report_problem_logic 1.1.0); the script is not deferred
+ * @version 1.0.2 - the form's script is assets/js/report-problem.js (no inline script)
  * @version 1.0.1
  */
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -49,7 +53,7 @@ $inputs = $page_vars['inputs'];
 			</div>
 			<?php endif; ?>
 
-			<div class="jy-panel" id="report-problem-form-panel">
+			<div class="jy-panel" id="report-problem-form-panel"<?php echo $page_vars['submit_message'] !== null ? ' hidden' : ''; ?>>
 				<h2>What went wrong?</h2>
 				<p class="jy-muted">Say what you were trying to do and the steps that led to the problem, what you expected to happen, and what happened instead. Name the page you were on, and say whether it happens every time or only sometimes.</p>
 				<?php
@@ -75,10 +79,10 @@ $inputs = $page_vars['inputs'];
 				$formwriter->submitbutton('btn_submit', $page_vars['sending_enabled'] ? 'Send report' : 'Save report');
 				$formwriter->end_form();
 				?>
-				<div class="jy-callout jy-callout-danger" id="report-problem-error" hidden></div>
+				<div class="jy-callout jy-callout-danger" id="report-problem-error"<?php echo $page_vars['submit_error'] === null ? ' hidden' : ''; ?>><?php echo htmlspecialchars((string)$page_vars['submit_error']); ?></div>
 			</div>
 
-			<div class="jy-callout jy-callout-success" id="report-problem-done" hidden></div>
+			<div class="jy-callout jy-callout-success" id="report-problem-done"<?php echo $page_vars['submit_message'] === null ? ' hidden' : ''; ?>><?php echo htmlspecialchars((string)$page_vars['submit_message']); ?></div>
 
 			<div class="jy-panel">
 				<h2>What will be sent</h2>
@@ -104,31 +108,7 @@ $inputs = $page_vars['inputs'];
 	</div>
 </section>
 </div>
-<script>
-(function () {
-	var form = document.getElementById('report_problem_form');
-	if (!form) return;
-	var errorBox = document.getElementById('report-problem-error');
-	var doneBox = document.getElementById('report-problem-done');
-	var panel = document.getElementById('report-problem-form-panel');
-	form.addEventListener('submit', function (e) {
-		e.preventDefault();
-		var button = form.querySelector('[type="submit"]');
-		if (button) { button.disabled = true; }
-		errorBox.hidden = true;
-		window.joineryApi.postForm('report_problem_submit', new FormData(form)).then(function (data) {
-			doneBox.textContent = data.message || 'Thank you. Your report is saved.';
-			doneBox.hidden = false;
-			panel.hidden = true;
-			doneBox.scrollIntoView({ block: 'nearest' });
-		}).catch(function (err) {
-			errorBox.textContent = (err && err.message) || 'The report could not be saved. Please try again.';
-			errorBox.hidden = false;
-			if (button) { button.disabled = false; }
-		});
-	});
-})();
-</script>
+<?php echo PageScript::src('assets/js/report-problem.js', false); ?>
 <?php
 $page->public_footer(['track' => TRUE]);
 ?>

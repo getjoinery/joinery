@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.36 - the reload while a copy runs is data-jy-reload-after
+ * @version 1.35 - a press that asks first is submitbutton's confirm; the button posts copy_confirm=1 (no inline handler)
  * @version 1.34 - the root-login sentence only for a release whose install.sh turns it off (B115)
  * @version 1.33 - the owner's own-server command says it turns root SSH login off, and how to keep it
  * @version 1.32 - an old container whose host did not answer is said owed, before and after the switch-over is kept (B103)
@@ -728,10 +730,10 @@ if (!$in_switch) {
 	// A copy onto a host is a container its host removes; any other copy's
 	// server is the owner's to delete at its provider (B23).
 	$discard_note = $site_copy->on_host()
-		? 'Its host removes the copy\\\'s container and everything in it, and its record leaves the dashboard.'
+		? 'Its host removes the copy\'s container and everything in it, and its record leaves the dashboard.'
 		: 'Its record leaves the dashboard. The server itself is not deleted: delete it at its provider afterwards.';
-	echo '<button type="button" class="btn btn-outline-danger" onclick="JoineryModal.confirm(\'Discard this copy? ' . $discard_note
-		. '\', function(){ document.getElementById(\'copy_discard_form\').submit(); })">Discard the copy</button></form>';
+	echo '<button type="button" class="btn btn-outline-danger" data-jy-confirm="'
+		. htmlspecialchars('Discard this copy? ' . $discard_note, ENT_QUOTES) . '" data-jy-submit="copy_discard_form">Discard the copy</button></form>';
 }
 echo '</div>';
 $page->end_box();
@@ -790,17 +792,18 @@ $copy_press_form = function ($action, $button, $btn_class, $confirm_label = '', 
 		}
 	}
 	$btn_opts = ['class' => 'btn ' . $btn_class];
+	$btn_name = 'btn_' . $action;
 	if ($confirm_label !== '') {
 		// A press that cannot be taken back says what it does in the system
-		// modal, once; copy_confirm is set only by the modal's yes, and the
-		// handler refuses a press without it.
-		$fw->hiddeninput('copy_confirm', ['value' => '']);
-		$json = function ($v) { return json_encode($v, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); };
-		$btn_opts['onclick'] = 'event.preventDefault(); var f = this.closest(\'form\'); if (!f.reportValidity()) { return; } '
-			. 'JoineryModal.confirm(' . $json($confirm_label) . ', function () { f.elements[\'copy_confirm\'].value = \'1\'; f.submit(); }, '
-			. $json(['confirmLabel' => $button, 'confirmStyle' => 'warning']) . ');';
+		// modal, once. The button is the proof: it posts copy_confirm=1, and
+		// only base.js submits it, after the fields check out and the modal's
+		// yes. The handler refuses a press without it.
+		$btn_name = 'copy_confirm';
+		// Several presses can show at once: each button its own id.
+		$btn_opts += ['id' => 'copy_confirm_' . $action, 'value' => '1', 'confirm' => $confirm_label,
+			'confirm_label' => $button, 'confirm_style' => 'warning'];
 	}
-	$fw->submitbutton('btn_' . $action, $button, $btn_opts);
+	$fw->submitbutton($btn_name, $button, $btn_opts);
 	$fw->end_form();
 };
 $copy_plain_form = function ($action, $button, $btn_class) use ($base_url, $copy_h) {
@@ -1088,5 +1091,5 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 if (in_array($copy_status, array_merge(array(SiteCopy::STATUS_WAITING), SiteCopy::MOVING_STATUSES), true)) {
 	// The run moves on the scheduled task's tick, a node's posted result, or
 	// the worker following local steps; the page follows it.
-	echo '<script>setTimeout(function () { window.location.reload(); }, 15000);</script>';
+	echo '<span hidden data-jy-reload-after="15"></span>';
 }

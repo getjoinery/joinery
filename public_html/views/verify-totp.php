@@ -90,29 +90,7 @@
 </div>
 
 <?php if ($has_passkey): ?>
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script defer>
-document.addEventListener('DOMContentLoaded', function () {
-    if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
-    var btn = document.getElementById('login-2fa-passkey-btn');
-    if (!btn) return;
-    btn.addEventListener('click', async function () {
-        btn.disabled = true;
-        try {
-            var trustEl = document.getElementById('trust_device');
-            var data = await JoineryPasskeys.runFlow(
-                '/api/v1/action/login_2fa_passkey_options',
-                '/api/v1/action/login_2fa_passkey_verify',
-                (trustEl && trustEl.checked) ? { trust_device: 1 } : {}
-            );
-            window.location.href = data.redirect || '/profile';
-        } catch (e) {
-            alert(e.message || 'Passkey verification was not completed.');
-            btn.disabled = false;
-        }
-    });
-});
-</script>
+<?php echo PageScript::src('assets/js/passkeys.js'), PageScript::src('assets/js/passkey-pages.js'); ?>
 <?php endif; ?>
 
 <?php

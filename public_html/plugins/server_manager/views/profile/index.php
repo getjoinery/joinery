@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.6 - no inline script: the move card is assets/js/profile-move.js, the reload data-jy-reload-after
  * @version 2.5 - a site on the buyer's own domain lists the email records still to add (B3)
  * @version 2.4 - not found where this site does not sell hosting (SmHosting)
  * @version 2.3 - a built site on the buyer's own domain shows the address record to add until it takes effect
@@ -195,7 +196,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			echo $fw_alt->end_form();
 			?>
 		</section>
-		<script><?php echo $availability_js; ?></script>
+		<?php echo $availability_html; ?>
 		<?php endif; ?>
 
 		<?php if ($site['password_state'] === 'sealed'): ?>
@@ -323,49 +324,11 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 #alternate_domain_status[data-state="unavailable"] { color: #b42318; }
 </style>
 
-<script>
-/* The move card's buttons call the transfer_customer action; the code is
-   fetched only when its button is pressed, and never kept anywhere else. */
-document.querySelectorAll('.sms-move [data-do]').forEach(function (button) {
-	button.addEventListener('click', function () {
-		var card = button.closest('.sms-move');
-		var notice = card.querySelector('.sms-move-notice');
-		var what = button.getAttribute('data-do');
-		if (button.dataset.confirm && !window.confirm(button.dataset.confirm)) { return; }
-		notice.textContent = '';
-		button.disabled = true;
-		joineryApi.post('server_manager/transfer_customer', {
-			'do': what, provision_id: parseInt(card.getAttribute('data-provision'), 10)
-		}).then(function (data) {
-			if (what === 'reveal_code' && data && data.code) {
-				var box = card.querySelector('.sms-code');
-				box.querySelector('[data-code]').textContent = data.code;
-				box.hidden = false;
-				button.hidden = true;
-				return;
-			}
-			window.location.reload();
-		}).catch(function (err) {
-			button.disabled = false;
-			notice.textContent = (err && err.message) ? err.message : 'That did not work. Try again in a minute.';
-			var link = joineryApi.reportLink(err);
-			if (link) { notice.appendChild(document.createTextNode(' ')); notice.appendChild(link); }
-		});
-	});
-});
-document.querySelectorAll('.sms-move [data-copy]').forEach(function (button) {
-	button.addEventListener('click', function () {
-		var code = button.closest('.sms-code').querySelector('[data-code]').textContent;
-		if (navigator.clipboard) { navigator.clipboard.writeText(code); button.textContent = 'Copied'; }
-	});
-});
-</script>
+<?php echo PageScript::src('plugins/server_manager/assets/js/profile-move.js'); ?>
 
 <?php if ($in_progress): ?>
-<script>
-/* Follow setup progress while a site is mid-pipeline. */
-setTimeout(function () { window.location.reload(); }, 30000);
-</script>
+<?php /* Follow setup progress while a site is mid-pipeline. */ ?>
+<span hidden data-jy-reload-after="30"></span>
 <?php endif; ?>
 
 <?php

@@ -117,11 +117,15 @@ class PublicPageJoinerySystem extends PublicPageBase {
         // the admin palette. Only joinery-styles.css loads here:
         //  - base.css (reset/utility layer) is intentionally skipped — it conflicts
         //    with joinery-system's own reset.
-        //  - base.js already loads in public_footer(), so it is not re-added.
+        //  - base.js (the kit's JS: JoineryModal, the confirm buttons, the page
+        //    hooks) loads here, not deferred: its listeners are delegated from
+        //    document, so they ask before any form can post, even while the
+        //    page is loading, and a page that stops before its footer has it.
         // This runs immediately before render_brand_token_overrides() in
         // global_includes_top(), so the kit's :root token defaults load first and the
         // brand overrides win after.
         echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=' . $this->asset_mtime('assets/css/joinery-styles.css') . '">' . "\n";
+        echo '<script src="/assets/js/base.js?v=' . $this->asset_mtime('assets/js/base.js') . '"></script>' . "\n";
     }
 
     // Admin always renders with the joinery-system theme, regardless of the
@@ -518,9 +522,8 @@ class PublicPageJoinerySystem extends PublicPageBase {
               <?php foreach (($user_menu['launcher_items'] ?? []) as $item):
                 $icon = $this->get_admin_icon_svg($item['icon']);
                 ?>
-                <a href="<?php echo htmlspecialchars($item['link']); ?>"
-                   style="display:flex;flex-direction:column;align-items:center;padding:0.625rem 0.25rem;border-radius:var(--radius);text-decoration:none;color:var(--body-color);font-size:0.6875rem;font-weight:500;text-align:center;transition:background var(--transition);"
-                   onmouseover="this.style.background='var(--lighter)'" onmouseout="this.style.background=''">
+                <a href="<?php echo htmlspecialchars($item['link']); ?>" class="jy-launcher-item"
+                   style="display:flex;flex-direction:column;align-items:center;padding:0.625rem 0.25rem;border-radius:var(--radius);text-decoration:none;color:var(--body-color);font-size:0.6875rem;font-weight:500;text-align:center;transition:background var(--transition);">
                   <span style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;margin-bottom:0.25rem;"><?php echo $icon; ?></span>
                   <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;"><?php echo htmlspecialchars($item['label']); ?></span>
                 </a>
@@ -724,8 +727,6 @@ class PublicPageJoinerySystem extends PublicPageBase {
 
   <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
   <script src="/assets/js/file-thumb.js?v=<?php echo $this->asset_mtime('assets/js/file-thumb.js'); ?>"></script>
-  <!-- Shared kit JS (JoineryModal etc.); admin provides its own CSS but uses the kit's JS -->
-  <script defer src="/assets/js/base.js?v=<?php echo $this->asset_mtime('assets/js/base.js'); ?>"></script>
   <?php $_js_js_sys = PathHelper::getThemeFilePath('script.js', 'assets/js', 'system', 'joinery-system'); ?>
   <script src="<?php echo PathHelper::getThemeFilePath('script.js', 'assets/js', 'web', 'joinery-system') . '?v=' . (file_exists($_js_js_sys) ? filemtime($_js_js_sys) : '1'); ?>"></script>
 </body>

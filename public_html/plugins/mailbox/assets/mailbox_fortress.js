@@ -41,6 +41,7 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.16 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * @version 1.15 - an opened message's inline parts are the ones its body shows by cid: (MailboxMime.isInline, B5)
  * @version 1.14 - a draft's key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
  * @version 1.13.2 - a failed device_rules fetch is not cached for the drain (review F6); the rule
@@ -110,7 +111,7 @@ window.MailboxFortress = (function () {
 	// the vault shut (specs/fortress_mail_device_ai.md § R6, B12).
 	var lockEpoch = 0;
 
-	function cfg() { return window.MAILBOX_READER || {}; }
+	function cfg() { return window.MAILBOX_READER || (window.MAILBOX_READER = (window.joineryPageData && joineryPageData('mailbox-reader-config')) || null) || {}; }
 
 	function isOpen() {
 		return !!(window.JoinerySealed && JoinerySealed.isOpen(SCOPE));

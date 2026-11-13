@@ -78,7 +78,7 @@ function smps_badge(bool $ok, string $ok_label = 'OK', string $bad_label = 'Miss
 /** A single-button POST on the Hosting tab: an account action with the page's CSRF token. */
 function smps_account_button(string $action, int $oca_id, string $label, string $class = 'btn btn-sm btn-outline-secondary', string $confirm = ''): string {
 	return '<form method="post" action="/admin/server_manager/provisioning_setup?tab=hosting" style="display:inline"'
-		. ($confirm !== '' ? ' onsubmit="return confirm(' . htmlspecialchars(json_encode($confirm), ENT_QUOTES) . ');"' : '') . '>'
+		. ($confirm !== '' ? ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '"' : '') . '>'
 		. '<input type="hidden" name="action" value="' . htmlspecialchars($action) . '">'
 		. ($oca_id ? '<input type="hidden" name="oca_id" value="' . $oca_id . '">' : '')
 		. SmAdminCsrf::field()
@@ -207,7 +207,7 @@ if ($tab === 'setup'):
 		<button type="submit" class="btn btn-primary">Create service user + API key</button>
 	</form>
 <?php else: ?>
-	<form method="post" action="<?= $base_url ?>?tab=setup" onsubmit="return confirm('Mint a new API key and retire the current one?');">
+	<form method="post" action="<?= $base_url ?>?tab=setup" data-jy-confirm="Mint a new API key and retire the current one?">
 		<input type="hidden" name="action" value="setup_api">
 		<input type="hidden" name="rotate" value="1">
 		<button type="submit" class="btn btn-outline-secondary btn-sm">Rotate API key</button>

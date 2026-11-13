@@ -279,20 +279,7 @@ $page->public_header($hoptions);
     </div>
 </section>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.comment-reply-link').forEach(function(link) {
-        link.addEventListener('click', function(e) {
-            e.preventDefault();
-            var commentId = this.getAttribute('data-comment-id');
-            var formContainer = document.getElementById('reply-form-' + commentId);
-            if (formContainer) {
-                formContainer.style.display = formContainer.style.display === 'none' ? 'block' : 'none';
-            }
-        });
-    });
-});
-</script>
+<?php echo PageScript::src('theme/phillyzouk-html5/assets/js/post.js'); ?>
 
 <?php
 $page->public_footer();

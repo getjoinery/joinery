@@ -5,18 +5,19 @@
  * reloads on the same mailbox, so the server-rendered list is always what is
  * stored. Download is contacts_export, saved as a file in place.
  *
- * Page contract: window.MAILBOX_CONTACTS = {alias_id, edit_id}; the forms
+ * Page contract: the page's #mailbox-contacts-config JSON block = {alias_id, edit_id}; the forms
  * #contact-add-form, #contact-import-form and #contact-edit-form (in the
  * [data-contacts-dialog] dialog); one .mbx-cp-row per contact carrying
  * data-contact-id / data-name / data-address; edit_id opens that contact's
  * dialog on arrival (the mail page's pencil).
  *
+ * @version 1.2 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * Vanilla JS. @version 1.1 - Download vCard / Download CSV ([data-contacts-export])
  */
 (function () {
 	'use strict';
 
-	var cfg = window.MAILBOX_CONTACTS || {};
+	var cfg = window.MAILBOX_CONTACTS || (window.MAILBOX_CONTACTS = (window.joineryPageData && joineryPageData('mailbox-contacts-config')) || null) || {};
 	var here = '/profile/mailbox/contacts?mailbox=' + encodeURIComponent(cfg.alias_id || '');
 
 	function note(sel, text) {

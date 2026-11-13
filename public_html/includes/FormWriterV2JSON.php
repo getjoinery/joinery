@@ -10,16 +10,18 @@
  * prepare*Data() methods; each render*() accumulates the prepared data into
  * the definition rather than producing markup.
  *
- * Unsupported constructs fail loudly: a builder that uses JavaScript hooks
- * (custom_script, onchange) or a non-serializable field type (file, image,
- * rich text, repeater) throws, so the problem is caught when the form
+ * Unsupported constructs fail loudly: a builder that hands a field script
+ * (onclick, onchange, custom_script, which no FormWriter writes) or uses a
+ * non-serializable field type (file, image, rich text, repeater) throws, so the problem is caught when the form
  * definition is first built — never silently dropped in production.
  *
  * CSRF is forced off: API requests authenticate via key headers, which
  * browsers never attach cross-origin, and the CSRF token is bound to a
  * web session that API clients do not have.
  *
- * @version 1.2.0
+ * @version 1.4.0 - a radio field carries its disabled_values
+ * @version 1.3.0
+ * @changelog 1.3.0 - Script options are refused by FormWriterV2Base for every writer, so the JSON writer's own check is gone
  * @changelog 1.2.0 - A password field carries `stored` and `rows`: a native client draws a stored credential locked and follows the keep / clear / set wire contract of FormWriterV2Base::process_secretinput()
  * @changelog 1.1.0 - Opts out of the error summary container: a definition has no markup, and the API error envelope already carries per-field messages for native renderers
  */
@@ -106,18 +108,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
         return '';
     }
 
-    /**
-     * Throw if the prepared data carries JavaScript hooks (loud-failure rule).
-     */
-    protected function assertSerializable($data) {
-        foreach (['custom_script', 'onchange'] as $key) {
-            if (!empty($data[$key])) {
-                throw new Exception('FormWriterV2JSON: field "' . $data['name'] . '" uses "' . $key
-                    . '" — JavaScript cannot be serialized into a JSON form definition');
-            }
-        }
-    }
-
     protected function unsupported($what) {
         throw new Exception('FormWriterV2JSON: ' . $what
             . ' is not supported in JSON form definitions (schema v' . self::SCHEMA_VERSION . ')');
@@ -126,7 +116,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     // ── render*() implementations (accumulate definition data) ───────────────
 
     protected function renderTextInput($data) {
-        $this->assertSerializable($data);
         $field = array_merge(['type' => 'text'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
             'placeholder' => $data['placeholder'] ?? '',
@@ -144,7 +133,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderPasswordInput($data) {
-        $this->assertSerializable($data);
         // Never serialize a password value — definitions travel to clients.
         $field = array_merge(['type' => 'password'], $this->commonKeys($data), [
             'placeholder' => $data['placeholder'] ?? '',
@@ -162,7 +150,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderNumberInput($data) {
-        $this->assertSerializable($data);
         $field = array_merge(['type' => 'number'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
             'placeholder' => $data['placeholder'] ?? '',
@@ -174,7 +161,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderDropInput($data) {
-        $this->assertSerializable($data);
         $field = array_merge(['type' => 'drop'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
             'options' => $data['options_list'] ?? [],
@@ -189,7 +175,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderCheckboxInput($data) {
-        $this->assertSerializable($data);
         $field = array_merge(['type' => 'checkbox'], $this->commonKeys($data), [
             'checked_value' => (string)$data['checked_value'],
             'is_checked' => !empty($data['is_checked']),
@@ -199,17 +184,16 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderRadioInput($data) {
-        $this->assertSerializable($data);
         $field = array_merge(['type' => 'radio'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
             'options' => $data['options_list'] ?? [],
+            'disabled_values' => $data['disabled_values'] ?? [],
             'visibility_rules' => $data['visibility_rules'] ?? null,
         ]);
         return $this->addField($field);
     }
 
     protected function renderCheckboxList($data) {
-        $this->assertSerializable($data);
         // checkboxList's disabled/readonly are arrays of option values, not
         // booleans — serialized under distinct keys. Submits as an array
         // under the field name.
@@ -234,7 +218,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderDateInput($data) {
-        $this->assertSerializable($data);
         // Submits as a single key: name => YYYY-MM-DD
         $field = array_merge(['type' => 'date'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
@@ -245,7 +228,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderTimeInput($data) {
-        $this->assertSerializable($data);
         // Submits as a single key: name => HH:MM (24-hour), matching the
         // hidden input the web time widget keeps in sync
         $field = array_merge(['type' => 'time'], $this->commonKeys($data), [
@@ -255,7 +237,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderDateTimeInput($data) {
-        $this->assertSerializable($data);
         // Compound submit contract: the same multi-part POST keys the web
         // form produces, so process_datetimeinput() and logic files work
         // unchanged. Values are in the user's timezone, exactly as on the web.
@@ -299,7 +280,6 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     protected function renderTextarea($data) {
-        $this->assertSerializable($data);
         $field = array_merge(['type' => 'textarea'], $this->commonKeys($data), [
             'value' => ($data['value'] === null) ? '' : (string)$data['value'],
             'placeholder' => $data['placeholder'] ?? '',
@@ -378,9 +358,5 @@ class FormWriterV2JSON extends FormWriterV2Base {
     protected function generateVisibilityScript($fieldName, $fieldId, $rules, $type = 'select', $groupName = null) {
         $this->validateVisibilityRules($fieldId, $rules, $type);
         return '';
-    }
-
-    protected function generateFieldScript($fieldId, $scriptBody) {
-        $this->unsupported('custom_script (field id "' . $fieldId . '")');
     }
 }

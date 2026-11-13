@@ -22,6 +22,7 @@
  * records. Nothing on this screen came from the management node, which is the
  * party being checked.
  *
+ * @version 1.7 - no inline script: the config is the JSON block #rr-approval-config, the reload is data-jy-reload-after
  * @version 1.6 - the answered notice is the scope's own (answered_approved, answered_declined)
  * @version 1.5 - the key box is X-Wing only: no ephemeralPublic
  * @version 1.4 - loads vault-crypto.js, which opens the challenge and the key box (post_quantum_sealing WP2)
@@ -68,11 +69,11 @@ class ApprovalChallengePanel {
 		// Answered, and the agent has not taken it yet: say so instead of
 		// asking again. The page reloads until the request is gone.
 		if ($pending['answered'] !== null) {
-			echo '<div class="alert alert-info mb-3">';
+			// data-jy-reload-after: base.js reloads the page in 4 seconds
+			echo '<div class="alert alert-info mb-3" data-jy-reload-after="4">';
 			echo '<strong>' . htmlspecialchars($s['headline']) . '</strong> ';
 			echo htmlspecialchars($pending['answered'] === 'declined' ? $s['answered_declined'] : $s['answered_approved']);
 			echo '</div>';
-			echo '<script>setTimeout(function () { window.location.reload(); }, 4000);</script>';
 			return true;
 		}
 
@@ -154,15 +155,15 @@ class ApprovalChallengePanel {
 			array('class' => 'btn btn-sm btn-outline-secondary mt-3'));
 		$fwd->end_form();
 
-		// Its own global rather than window.rrPanel: the recovery setup panel
-		// owns that one, and a page showing both would have the second
-		// assignment silently replace the first. A page renders one approval
+		// Its own block (#rr-approval-config) rather than the recovery setup
+		// panel's (#rr-panel-config): a page showing both must not have one
+		// replace the other. A page renders one approval
 		// at a time (ApprovalChallenge::PRECEDENCE), so one global serves every
 		// scope.
 		echo VaultCrypto::browserScriptTag();
 		echo '<script defer src="/assets/js/recovery-readiness.js?v='
 		   . (@filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1') . '"></script>';
-		echo '<script>window.rrApproval = ' . json_encode(array(
+		echo '<script type="application/json" id="rr-approval-config">' . json_encode(array(
 			'keyInputId' => $id . '-privkey',
 			'buttonId'   => $id . '-open',
 			'statusId'   => $id . '-status',
@@ -178,7 +179,7 @@ class ApprovalChallengePanel {
 				'sharedId'        => $id . '-shared',
 				'publicId'        => $id . '-boxpub',
 			),
-		), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
+		), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) . '</script>';
 
 		return true;
 	}

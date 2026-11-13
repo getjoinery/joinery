@@ -24,6 +24,7 @@
  *    domain: a half-configured deployment must never take money for hosting
  *    and silently not buy the name.
  *
+ * @version 1.4 - availabilityScript() returns a data block and assets/js/domain-availability.js (no inline script)
  * @version 1.3 - availabilityScript() may reveal a block (the registrant's details) only once the name is free
  * @version 1.2 - the registrant's address and phone are the platform's own form blocks (Address and
  *                PhoneNumber), so a country and a phone country code are chosen from the country table
@@ -389,75 +390,23 @@ class ManagedDomainIntake {
 	}
 
 	/**
-	 * The client-side availability check, wired to a domain field.
+	 * The client-side availability check, wired to a domain field: its
+	 * settings as a JSON block, read by assets/js/domain-availability.js.
 	 *
 	 * Debounced; calls the server_manager/domain_check action and writes the
 	 * answer into the status element. A courtesy only — the number that is
-	 * charged is derived again server-side at submit. $when_id names a radio
+	 * charged is derived again server-side at submit. $when_name names a radio
 	 * group whose value must equal $when_value for the check to run (the
 	 * register/own split); empty means always.
+	 *
+	 * @return string HTML: the data block and the script file (no inline script)
 	 */
 	public static function availabilityScript(string $input_id, string $status_id,
 			string $when_name = '', string $when_value = '', string $reveal_id = ''): string {
-		$cfg = json_encode(array(
+		return '<script type="application/json" data-sm-domain-check>' . PageScript::encode(array(
 			'input' => $input_id, 'status' => $status_id,
 			'when_name' => $when_name, 'when_value' => $when_value,
 			'reveal' => $reveal_id,
-		));
-		return <<<JS
-(function () {
-	var cfg = {$cfg};
-	function wire() {
-		var input = document.getElementById(cfg.input);
-		var status = document.getElementById(cfg.status);
-		if (!input || !status || !window.joineryApi) { return; }
-		var timer = null, last = '';
-		// The block asked for only once the name can be bought: shown on a free
-		// name, or when the check could not run, and kept open once it holds
-		// answers (data-keep, set by the page on a re-shown form).
-		var reveal = cfg.reveal ? document.getElementById(cfg.reveal) : null;
-		function armed() {
-			if (!cfg.when_name) { return true; }
-			var picked = document.querySelector('input[name="' + cfg.when_name + '"]:checked');
-			return !!picked && picked.value === cfg.when_value;
-		}
-		function show(text, state) {
-			status.textContent = text;
-			status.setAttribute('data-state', state);
-			if (reveal && reveal.getAttribute('data-keep') !== '1') {
-				reveal.hidden = (state !== 'available' && state !== 'error');
-			}
-		}
-		function check() {
-			if (!armed()) { last = ''; show('', ''); return; }
-			var value = (input.value || '').trim().toLowerCase();
-			if (value === last) { return; }
-			last = value;
-			if (value === '') { show('', ''); return; }
-			show('Checking ' + value + '…', 'checking');
-			window.joineryApi.post('server_manager/domain_check', { domain: value }).then(function (data) {
-				if ((input.value || '').trim().toLowerCase() !== value) { return; }
-				if (data && data.available) {
-					show(value + ' is available — ' + (data.price_display || '') + ' for the first year.', 'available');
-				} else {
-					show((data && data.message) || 'That name is not available.', 'unavailable');
-				}
-			}).catch(function () {
-				show('We could not check that name just now. You can still continue — we check again before anything is charged.', 'error');
-			});
-		}
-		input.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(check, 600); });
-		input.addEventListener('blur', function () { clearTimeout(timer); check(); });
-		if (cfg.when_name) {
-			document.querySelectorAll('input[name="' + cfg.when_name + '"]').forEach(function (radio) {
-				radio.addEventListener('change', function () { last = ''; check(); });
-			});
-		}
-		if (reveal && reveal.getAttribute('data-keep') !== '1') { reveal.hidden = true; }
-		check();
-	}
-	if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', wire); } else { wire(); }
-})();
-JS;
+		)) . '</script>' . PageScript::src('plugins/server_manager/assets/js/domain-availability.js');
 	}
 }

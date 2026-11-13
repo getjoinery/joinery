@@ -667,7 +667,7 @@ identifier and is almost never changed after setup.
 
 ## Transport security headers
 
-Every page sent through `PublicPageBase` (public views and, through `PublicPage`, the admin) carries a set of response headers that tell the browser what it may do with the page. They are emitted once by `PublicPageBase::send_transport_headers()`, and most are switchable in the **protocol** settings group:
+Every page sent through `PublicPageBase` (public views and, through `PublicPage`, the admin) carries a set of response headers that tell the browser what it may do with the page. They are emitted by `PublicPageBase::send_transport_headers()`, and most are switchable in the **protocol** settings group. A page the static page cache answers carries the same headers: the cache records them with the page (`StaticPageCache::TRANSPORT_HEADERS`) and sends them again on every serve, and each of these settings declares `clearsPages: ["/"]`, so changing one empties the cache. Under `protocol_mode = https_redirect` a plain-HTTP visit is never answered from the cache; the page is built, and redirects.
 
 | Header | Setting | Default |
 |---|---|---|
@@ -676,11 +676,34 @@ Every page sent through `PublicPageBase` (public views and, through `PublicPage`
 | `X-Permitted-Cross-Domain-Policies: none` | always sent | — |
 | `X-Frame-Options: SAMEORIGIN` | `enable_x_frame_options` | on |
 | `Referrer-Policy: strict-origin-when-cross-origin` | `enable_referrer_policy` | on |
-| `Content-Security-Policy` | `enable_csp`, `csp_report_only` | on, enforced |
+| `Content-Security-Policy` | `enable_csp`, `csp_report_only`, `csp_strict_scripts` | on, enforced; strict policy off |
 
 **Content-Security-Policy** names the hosts that may supply scripts, styles, fonts, frames and fetches, so an injected script or a leak to an unlisted host is stopped by the browser itself. The policy is `PublicPageBase::csp_policy()`: `'self'` plus the single-purpose vendors the platform itself embeds — Stripe and PayPal (scripts, checkout frames, their API calls, the PayPal redirect form), hCaptcha and reCAPTCHA, YouTube and Vimeo players, Google Fonts, the Cloudflare Web Analytics beacon (injected at the edge by a zone that has it on, so the tree never shows it), and in `frame-src` only the embeddable products an operator pastes into content (Wistia, Loom, Twitch, Spotify, SoundCloud, Calendly, Typeform, Google Docs, Forms and Calendar, Eventbrite, OpenStreetMap, CodePen; Google Maps rides on the reCAPTCHA host) — with `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'self'`, and a `form-action` that names the payment redirects and every OAuth provider's consent page (Chrome holds a redirect after a POST to `form-action`). Images and media may come from any https host, because operator content and the mail reader load them from everywhere. A frame is walled off from the page, which is why an embed host can be listed and a script host cannot: an embed snippet that is a script tag plus a placeholder (X, Instagram, Facebook, tag managers, chat widgets) runs that vendor's code on every visitor's page and stays out. There is no general-purpose script CDN in the list: allowing one would let an injected tag load any library that CDN hosts, including the ones written to defeat a CSP. Every library the platform uses ships under `assets/vendor` or the theme, and plugins load every asset locally. The policy keeps `'unsafe-inline'` for scripts and styles: FormWriter output, the views and the plugins rely on inline handlers and style blocks throughout, and removing them is a separate project.
 
 Both settings ship on and enforcing. `csp_report_only` on sends the same policy as `Content-Security-Policy-Report-Only`, which blocks nothing and reports every violation to the browser console — the way to see what a page would lose before deciding. A page that needs a host the policy lacks is a platform change to `csp_policy()`, pinned by `tests/security/csp_header_test.php`, which also fails on any script CDN or a bare `https:` in `connect-src`.
+
+### The strict script policy
+
+`csp_strict_scripts` (off, report, enforce) controls a second policy under which the browser runs no inline script at all: only script files from the site itself and the vendor hosts the standard policy lists. Its `script-src` is the standard one without `'unsafe-inline'`, with no nonce and no hash, so an inline `<script>`, an inline event handler (`onclick="..."`) and a `javascript:` link are all refused, whoever wrote them, including a script that turns up inside stored content. Page code lives in files under `assets/` or the plugin or theme, and data reaches it through a `<script type="application/json">` block or `data-` attributes, which the browser never runs.
+
+- **report:** the standard policy is sent unchanged, and the strict one goes beside it as `Content-Security-Policy-Report-Only`. Nothing more is blocked.
+- **enforce:** the strict policy replaces the standard one. While `csp_report_only` is on, it is still sent report-only.
+
+In both modes the strict policy carries `'report-sample'` and `report-uri /api/v1/csp-report`. The browser posts each refusal there, with no sign-in, and `CspReport` records it as a Warning row in the error list, for example *"Strict script policy would refuse an inline handler on /profile/security: doThing(1)"*. The address is its own channel with its own limit (3,000 requests an hour per network; a refused one leaves no trace), so a page full of refused handlers never spends the general API budget that sign-up and password reset share. Anyone can post to it, so it keeps little:
+- only pages on the site's own host, by path;
+- the blocked item as an origin at most, and a 40-character sample with no markup or quote characters;
+- one row per page, directive, file and line an hour;
+- at most 20 rows an hour from one network, and 100 an hour in total.
+
+A report row never becomes an automatic problem report, since anyone can write one.
+
+The site's own pages write no inline script and no inline handler, so under `enforce` every page works as it does under `off`. How a page passes code and data without them, and the `data-jy-*` attributes that cover the common cases, is in [Admin Pages § No inline script](admin_pages.md). A page the static cache holds is served with the headers it was built with; a deploy flushes the cache, and so does changing any of the settings above.
+
+Two tests hold the tree to that:
+- **The source sweep** in `tests/security/csp_header_test.php` fails on any inline handler, handler option passed to a writer (`'onclick' => ...`), inline script with no `src`, or `javascript:` URL, in PHP and JS outside vendor, tests and docs. Its ceilings file (`tests/security/inline_script_sweep_ceilings.json`) lists no file. A line that matches the patterns but isn't inline script says so with `jy-allow-script: why`. The same test checks that the enforced `script-src` holds only `'self'`, the vendor hosts, `'wasm-unsafe-eval'` and `'report-sample'`.
+- **The page walk**, `tests/security/inline_script_walk_test.php`, does the same for each page as sent: it signs in as a member and as a superadmin and fails on any page that sends one (`inline_script_walk_ceilings.json` lists none). The pages it can't read (they need a record id, or redirect) are listed there too, and that list may only shrink; the sweep covers their source. It also checks that no response names a nonce in any CSP header.
+
+The ceilings files stay: a file or page that gains an item fails, and a ceiling only goes down (run the test directly with `--lower`). A missing ceilings file fails; only `--baseline` makes a new one.
 
 ## Troubleshooting
 

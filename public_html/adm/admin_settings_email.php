@@ -1,5 +1,8 @@
 <?php
 /** @joinery-admin class=config */
+/**
+ * @version 1.1 - the provider sections' show/hide is assets/js/admin-settings-email.js (no inline script)
+ */
 	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
 	require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -260,16 +263,9 @@
 			echo '<div style="margin: 50px 0;"></div>';
 			echo '</div>';
 		}
-		$formwriter->addReadyScript('(function () {
-			var pickers = [document.getElementById("email_service"), document.getElementById("email_fallback_service")];
-			function showChosenEmailServices() {
-				var chosen = pickers.map(function (p) { return p ? p.value : ""; });
-				document.querySelectorAll(".email-provider-section").forEach(function (section) {
-					section.style.display = chosen.indexOf(section.getAttribute("data-provider")) !== -1 ? "" : "none";
-				});
-			}
-			pickers.forEach(function (p) { if (p) p.addEventListener("change", showChosenEmailServices); });
-		})();');
+		// Each provider's section shows while it is the sender or the fallback.
+		echo '<script defer src="/assets/js/admin-settings-email.js?v='
+			. (@filemtime(PathHelper::getIncludePath('assets/js/admin-settings-email.js')) ?: '1') . '"></script>';
 
 		echo '<div style="margin: 30px 0;"></div>';
 

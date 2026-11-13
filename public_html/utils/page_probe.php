@@ -175,7 +175,7 @@ try {
 	// wrote, and this runs as root (specs/parser_jail.md).
 	if ($body !== '') {
 		// Comments, and the bodies of scripts and styles, are not structure.
-		$markup = preg_replace(array('#<!--.*?-->#s', '#(<script\b[^>]*>).*?(</script>)#is', '#(<style\b[^>]*>).*?(</style>)#is'),
+		$markup = preg_replace(array('#<!--.*?-->#s', '#(<script\b[^>]*>).*?(</script>)#is', '#(<style\b[^>]*>).*?(</style>)#is'), // jy-allow-script: a pattern or a held-back tag, not a script the page runs
 			array('', '$1$2', '$1$2'), $body);
 		preg_match_all('#<(/?)([a-zA-Z][a-zA-Z0-9-]{0,30})\b([^>]*)>#', (string)$markup, $tags, PREG_SET_ORDER);
 		$shape = '';

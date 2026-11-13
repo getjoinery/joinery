@@ -61,27 +61,7 @@
 </div>
 
 <?php if (!empty($page_vars['has_passkey']) && $passkeys_enabled): ?>
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script defer>
-document.addEventListener('DOMContentLoaded', function () {
-    if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
-    var btn = document.getElementById('pwreset-2fa-passkey-btn');
-    if (!btn) return;
-    btn.addEventListener('click', async function () {
-        btn.disabled = true;
-        try {
-            var data = await JoineryPasskeys.runFlow(
-                '/api/v1/action/password_reset_2fa_passkey_options',
-                '/api/v1/action/password_reset_2fa_passkey_verify'
-            );
-            window.location.href = data.redirect || '/password-reset-1';
-        } catch (e) {
-            alert(e.message || 'Passkey confirmation was not completed.');
-            btn.disabled = false;
-        }
-    });
-});
-</script>
+<?php echo PageScript::src('assets/js/passkeys.js'), PageScript::src('assets/js/passkey-pages.js'); ?>
 <?php endif; ?>
 
 <?php

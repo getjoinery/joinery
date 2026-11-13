@@ -6,6 +6,7 @@
  * here; their provisions and setup progress are shown below. The Connect
  * button is a single-button action form (no user-entered fields).
  *
+ * @version 1.3 - the reload is data-jy-reload-after
  * @version 1.2 - not found where this site does not sell hosting (SmHosting)
  * @version 1.1 - an expired grant renders as expired with a Reconnect button, never as connected
  * @version 1.0
@@ -106,10 +107,8 @@ echo PublicPage::BeginPage('Your Server Account', $hoptions);
 </style>
 
 <?php if ($in_progress): ?>
-<script>
-/* Follow setup progress while a provision is mid-pipeline. */
-setTimeout(function () { window.location.reload(); }, 30000);
-</script>
+<?php /* Follow setup progress while a provision is mid-pipeline. */ ?>
+<span hidden data-jy-reload-after="30"></span>
 <?php endif; ?>
 
 <?php

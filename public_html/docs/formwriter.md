@@ -11,7 +11,7 @@ The FormWriter system provides a structured, consistent way to build forms in th
 3. [Field Types](#3-field-types)
 4. [Model Form Helpers](#4-model-form-helpers)
 5. [Deferred Output Mode](#5-deferred-output-mode)
-6. [Field Visibility & Custom Scripts](#6-field-visibility--custom-scripts)
+6. [Field Visibility](#6-field-visibility)
 7. [Validation Integration](#7-validation-integration)
 8. [Best Practices](#8-best-practices)
 9. [Advanced Features](#9-advanced-features)
@@ -602,7 +602,8 @@ $formwriter->radioinput('subscription', 'Subscription Plan', [
         'basic' => 'Basic ($9.99/mo)',
         'premium' => 'Premium ($19.99/mo)'
     ],
-    'value' => 'free'  // Default selected
+    'value' => 'free',  // Default selected
+    'disabled_values' => ['premium'],  // Shown, but cannot be picked
 ]);
 ```
 
@@ -764,6 +765,9 @@ $formwriter = new FormWriterV2HTML5('upload_form', [
 
 ```php
 $formwriter->hiddeninput('user_id', '', ['value' => $user_id]);
+
+// Filled in the browser with the visitor's time zone, e.g. America/Chicago
+$formwriter->hiddeninput('invitee_timezone', '', ['value' => '', 'browser_timezone' => true]);
 ```
 
 **Important:** Always use the three-argument form with an empty string as the second parameter (label),
@@ -859,7 +863,7 @@ if ($_POST) {
 ```
 
 **JavaScript:**
-Repeater JavaScript is automatically included when you use a repeater field. It handles:
+The repeater's script (`assets/js/joinery-forms.js`) is included when you use a repeater field, ahead of its rows, so a field script a row needs is loaded too. It handles:
 - Adding new rows (clones template, replaces index placeholders)
 - Removing rows (via delegated click handler)
 - Works with dynamically added repeaters
@@ -1147,13 +1151,13 @@ Works with all field types, validation, visibility rules, and custom scripts in 
 
 ---
 
-## 6. Field Visibility & Custom Scripts
+## 6. Field Visibility
 
-**Feature:** FormWriter supports dynamic field visibility with smooth fade transitions and custom JavaScript logic.
+**Feature:** FormWriter shows and hides fields from another field's value, with smooth fade transitions.
 
 ### Level 1: Convenience Rules (Auto-Generated)
 
-**For simple show/hide based on select field values**, define rules and FormWriter generates JavaScript automatically:
+**For show/hide based on another field's value**, define rules. FormWriter writes them as a JSON block beside the field, and `assets/js/joinery-forms.js` applies them:
 
 ```php
 // Example: Show different fields based on question type
@@ -1235,97 +1239,22 @@ $formwriter->radioinput('rec_ends', 'Ends', [
 
 **A malformed rules array throws `InvalidArgumentException` while the field renders**, rather than emitting a script that misbehaves in the browser. Three things are rejected: keying a checkbox on anything other than `checked`/`unchecked`/`default`; listing the same field under both `show` and `hide` for one value; and a field reference that is not a string. The message names the field and what was wrong with it. These are mistakes in the calling code, so the exception is meant to surface during development — catch it only if you are deliberately probing a form definition.
 
-### Level 2: Field-Level Custom Scripts
+### Anything else: the page's own script file
 
-**For custom logic on a specific field**, provide the event handler body - FormWriter wraps it with `addEventListener`:
-
-```php
-// Example: Update price based on size selection
-$formwriter->dropinput('product_size', 'Size', [
-    'options' => ['small' => 'Small', 'medium' => 'Medium', 'large' => 'Large'],
-    'custom_script' => '
-        const size = this.value;
-        const priceField = document.getElementById("price");
-        const bulkWarning = document.getElementById("bulk_warning");
-
-        if (size === "small") {
-            priceField.value = "9.99";
-            if (bulkWarning) bulkWarning.style.display = "none";
-        } else if (size === "medium") {
-            priceField.value = "19.99";
-            if (bulkWarning) bulkWarning.style.display = "none";
-        } else if (size === "large") {
-            priceField.value = "29.99";
-            if (bulkWarning) bulkWarning.style.display = "";
-        }
-    '
-]);
-
-$formwriter->textinput('price', 'Price', ['readonly' => true]);
-$formwriter->textinput('bulk_warning', 'Bulk orders require manager approval', [
-    'readonly' => true
-]);
-```
-
-**Notes:**
-- `this` refers to the select element
-- Wrapped in `DOMContentLoaded` automatically
-- `change` event attached automatically
-- Full JavaScript access for complex logic
-
-### Level 3: Form-Level Scripts
-
-**For cross-field logic**, add raw JavaScript to run when the form loads:
+FormWriter writes no inline script: the strict script policy (`csp_strict_scripts`, see [Settings § The strict script policy](settings.md#the-strict-script-policy)) refuses it, so behaviour that `visibility_rules` can't express goes in a script file the page loads, which finds its fields by id. A field id is the field name unless `id` is given, and every field's wrapper is `{name}_container`, so hiding the wrapper hides the label too.
 
 ```php
-// Example: Country selection changes field labels and visibility
-$formwriter->addReadyScript('
-    const countryField = document.getElementById("country");
-    if (countryField) {
-        countryField.addEventListener("change", function() {
-            const country = this.value;
-            // Use field IDs only - container detection is automatic!
-            const stateContainer = document.getElementById("state_container");
-            const zipContainer = document.getElementById("zip_container");
-            const customContainer = document.getElementById("custom_location_container");
-
-            // Get input elements for setting placeholders
-            const stateField = document.getElementById("state");
-            const zipField = document.getElementById("zip");
-
-            if (country === "us") {
-                stateContainer.style.display = "";
-                zipContainer.style.display = "";
-                customContainer.style.display = "none";
-                if (stateField) stateField.placeholder = "State";
-                if (zipField) zipField.placeholder = "ZIP Code (5 digits)";
-            } else if (country === "ca") {
-                stateContainer.style.display = "";
-                zipContainer.style.display = "";
-                customContainer.style.display = "none";
-                if (stateField) stateField.placeholder = "Province";
-                if (zipField) zipField.placeholder = "Postal Code";
-            } else {
-                stateContainer.style.display = "none";
-                zipContainer.style.display = "none";
-                customContainer.style.display = "";
-            }
-        });
-
-        // Trigger on load
-        countryField.dispatchEvent(new Event("change"));
-    }
-');
+// adm/admin_settings_email.php: two pickers decide one section
+echo '<script defer src="/assets/js/admin-settings-email.js?v='
+    . (@filemtime(PathHelper::getIncludePath('assets/js/admin-settings-email.js')) ?: '1') . '"></script>';
 ```
 
-**Notes:**
-- Multiple scripts can be added (they all run in order)
-- Wrapped in `DOMContentLoaded` automatically
-- Full control - no framework limitations
-- **Container auto-detection** - When hiding/showing fields, target the `field_id_container` divs
-- Runs just before form closing tag
+Two common needs have options of their own:
+- **A confirm on a submit button:** `'confirm' => 'Delete this row?'`, with `confirm_label` and `confirm_style` for the modal's confirm button. The button draws as `type="button"`, so it posts nothing until `assets/js/base.js` has checked the form's fields and the person has said yes; then it submits as itself, so its name and its `value` (an option too) are sent. A handler that must know the person confirmed can read that name and value: nothing else posts them.
+- **A button that cannot be pressed twice:** `'busy' => 'Publishing…'`. Once its form is on its way, the button shows those words and is disabled (`data-jy-busy`).
+- **A select that opens the chosen page:** `'navigate_on_change' => true` on a `dropinput` whose option values are paths on this site (`data-jy-navigate`). A value that isn't a path on this site is ignored.
 
-**Pro Tip:** When hiding fields in form-level scripts, target `field_id_container` elements rather than field IDs directly. This hides the entire field wrapper (label + input) instead of just the input.
+`onclick`, `onchange` and `custom_script` are not options: passing one throws, naming what to use instead.
 
 ### Fade Effects
 
@@ -1632,14 +1561,12 @@ try {
 
 ### Performance
 
-1. **Use visibility_rules over custom_script** when possible
+1. **Use visibility_rules** for every show/hide
    - Less code to maintain
    - Automatic validation of rules
    - Consistent behavior
 
-2. **Avoid complex logic in custom_script**
-   - Keep event handlers simple
-   - Use form-level scripts for complex interactions
+2. **Put anything else in the page's own script file** (§ 6), never in the form
 
 ### Labels, Help Text, and Option Values Are Always HTML-Escaped
 
@@ -1941,7 +1868,7 @@ FormWriter provides:
 - Automatic value filling
 - Automatic timezone conversion
 - Dynamic field visibility with smooth transitions
-- Custom JavaScript support at three levels
+- No inline script: field scripts are files, their settings are data on the page
 - Theme-aware styling
 - Accessibility features
 - Model Form Helpers - Reusable form field sets from data models
@@ -2005,19 +1932,19 @@ class FormWriterV2MyTheme extends FormWriterV2Base {
 
 | Method | Key fields in `$data` |
 |--------|----------------------|
-| `renderTextInput` | `name, label, id, value, type, placeholder, class, readonly, disabled, autofocus, required, autocomplete, onchange, pattern, min, max, step, minlength, maxlength, prepend, has_errors, errors, helptext` |
+| `renderTextInput` | `name, label, id, value, type, placeholder, class, readonly, disabled, autofocus, required, autocomplete, pattern, min, max, step, minlength, maxlength, prepend, has_errors, errors, helptext` |
 | `renderPasswordInput` | Same as textInput + `strength_meter`, `rows` (textarea), `stored` / `resettable` / `stored_required` (the locked stored-credential field) |
 | `renderNumberInput` | Same as textInput (type='number') |
-| `renderDropInput` | `name, label, id, value, options_list ([value=>label]), empty_option, class, multiple, disabled, required, onchange, ajaxendpoint, has_errors, errors, helptext, visibility_rules, custom_script` |
-| `renderCheckboxInput` | `name, label, id, checked_value, is_checked, class, disabled, required, onchange, has_errors, errors, helptext, visibility_rules, custom_script` |
-| `renderRadioInput` | `name, label, value, options_list, class, disabled, required, onchange, has_errors, errors, helptext` |
-| `renderDateInput` | `name, label, id, value (YYYY-MM-DD), class, min, max, readonly, disabled, required, onchange, has_errors, errors, helptext` |
+| `renderDropInput` | `name, label, id, value, options_list ([value=>label]), empty_option, class, multiple, disabled, required, navigate_on_change, ajaxendpoint, has_errors, errors, helptext, visibility_rules` |
+| `renderCheckboxInput` | `name, label, id, checked_value, is_checked, class, disabled, required, has_errors, errors, helptext, visibility_rules` |
+| `renderRadioInput` | `name, label, value, options_list, class, disabled, required, has_errors, errors, helptext` |
+| `renderDateInput` | `name, label, id, value (YYYY-MM-DD), class, min, max, readonly, disabled, required, has_errors, errors, helptext` |
 | `renderTimeInput` | `name, label, id, value, hour, minute, ampm, class, readonly, disabled, has_errors, errors, helptext` |
 | `renderDateTimeInput` | `name, label, date_name, time_name, date_value, time_value, hour, minute, ampm, class, readonly, disabled, date_errors, time_errors, helptext` |
-| `renderFileInput` | `name, label, id, class, accept, multiple, disabled, required, onchange, has_errors, errors, helptext` |
+| `renderFileInput` | `name, label, id, class, accept, multiple, disabled, required, has_errors, errors, helptext` |
 | `renderHiddenInput` | `name, id, value` |
-| `renderSubmitButton` | `name, label, id, class, disabled, onclick` |
-| `renderTextarea` | `name, label, id, value, placeholder, class, rows, cols, readonly, disabled, required, minlength, maxlength, onchange, has_errors, errors, helptext` |
+| `renderSubmitButton` | `name, label, id, class, disabled, confirm, formnovalidate` |
+| `renderTextarea` | `name, label, id, value, placeholder, class, rows, cols, readonly, disabled, required, minlength, maxlength, has_errors, errors, helptext` |
 | `renderCheckboxList` | `name, label, id, options_list, checked (array), disabled (array), readonly (array), type, has_errors, errors, helptext` |
 | `renderTextbox` | `name, label, id, value, class, rows, htmlmode, editor_view, editor_cleanup, readonly, disabled, has_errors, errors, helptext` |
 | `renderImageInput` | `name, label, id, value, images, preview_size, class, disabled, has_errors, errors, helptext` |
@@ -2106,7 +2033,7 @@ Call before adding fields — fields capture their value when created. Both appl
 
 - `schema_version` is an integer; changes within a version are additive-only. Renderers seeing a higher version than they support fall back per form ("update the app or use the website").
 - Keys whose value is empty/false are omitted — absence of a flag means false.
-- Common keys: `type`, `name`, `label`, `value`, `required`, `readonly`, `disabled`, `helptext`, `placeholder`, `validation` (rule-name object, same rules the web JS receives; the server-only `unique` rule is never serialized), `visibility_rules` (verbatim — see [Field Visibility](#6-field-visibility--custom-scripts)).
+- Common keys: `type`, `name`, `label`, `value`, `required`, `readonly`, `disabled`, `helptext`, `placeholder`, `validation` (rule-name object, same rules the web JS receives; the server-only `unique` rule is never serialized), `visibility_rules` (verbatim — see [Field Visibility](#6-field-visibility)).
 - Purely cosmetic HTML keys (`class`, `id`, `autofocus`) are not serialized.
 - Submissions go to the normal action endpoint (`POST /api/v1/action/{action}`) as a JSON body whose keys and value shapes are identical to the web form's POST. Validation failures come back as the action API's 422 `validation_errors` map, keyed by field name.
 
@@ -2120,7 +2047,7 @@ Call before adding fields — fields capture their value when created. Both appl
 | `textarea` | `textarea` | |
 | `dropinput` | `drop` | `options`, `empty_option`, `multiple`; `ajaxendpoint` serializes as `search_endpoint` |
 | `checkboxinput` | `checkbox` | `checked_value`, `is_checked`, `visibility_rules` |
-| `radioinput` | `radio` | `options`, `visibility_rules` |
+| `radioinput` | `radio` | `options`, `disabled_values`, `visibility_rules` |
 | `checkboxList` | `checkbox_list` | `options`, `checked`, `disabled_values`, `readonly_values`, `list_type`, `visibility_rules` (`list_type='radio'` only); submits an array under the field name |
 | `dateinput` | `date` | submits `name` => `YYYY-MM-DD` |
 | `timeinput` | `time` | submits `name` => `HH:MM` (24-hour), same as the web widget's hidden input |
@@ -2141,9 +2068,9 @@ Call before adding fields — fields capture their value when created. Both appl
 
 Values are in the user's timezone, exactly as on the web.
 
-**Visibility-trigger read semantics (native parity).** `visibility_rules` serialize verbatim on `drop`, `checkbox`, `radio`, and radio `checkbox_list` fields. The generic native renderer must read the current rule key the same way the web does, by the trigger's type: a `drop`/`radio` keys on the selected option value, and a `checkbox` keys on `checked` / `unchecked`. Targets resolve by field name, exactly as in [Field Visibility](#6-field-visibility--custom-scripts). This keeps web and native forms in lockstep with no schema change.
+**Visibility-trigger read semantics (native parity).** `visibility_rules` serialize verbatim on `drop`, `checkbox`, `radio`, and radio `checkbox_list` fields. The generic native renderer must read the current rule key the same way the web does, by the trigger's type: a `drop`/`radio` keys on the selected option value, and a `checkbox` keys on `checked` / `unchecked`. Targets resolve by field name, exactly as in [Field Visibility](#6-field-visibility). This keeps web and native forms in lockstep with no schema change.
 
-**Unsupported — throws at definition time.** `fileinput`, `imageinput`, `textbox` (rich text), `repeater`, `imageselector`, `colorpicker`, and anything carrying JavaScript (`custom_script`, `onchange`) throw in JSON mode, so a non-serializable builder is caught in development rather than silently degraded in production. `visibility_rules` are fine — they are declarative data and serialize verbatim.
+**Unsupported — throws at definition time.** `fileinput`, `imageinput`, `textbox` (rich text), `repeater`, `imageselector`, `colorpicker`, and a field handed a script option (`onclick`, `onchange`, `custom_script`, which no writer accepts) throw in JSON mode, so a non-serializable builder is caught in development rather than silently degraded in production. `visibility_rules` are fine — they are declarative data and serialize verbatim.
 
 **CSRF is forced off** in JSON mode: API requests authenticate via key headers, which browsers never attach cross-origin, and the CSRF token is bound to a web session API clients do not have.
 

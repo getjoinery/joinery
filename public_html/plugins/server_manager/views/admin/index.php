@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.65 - no inline script: the row click and status refresh are assets/js/admin-dashboard.js
  * @version 1.64 - the Discard test site confirmation asks for the domain once (confirmTyped adds the request)
  * @version 1.63 - a provision whose server is in the test cloud account offers Discard test site (TestSiteDiscard):
  *                 its server, DNS, mail subaccount, backups, test subscription and records, in one click
@@ -695,9 +696,10 @@ $node_links = function (array $cands): string {
 	}
 	return implode(', ', $out);
 };
+// A button's attributes for the kit's confirm (base.js): asks $message, then
+// submits the form with id $form_id. No inline handler.
 $confirm_submit = function (string $form_id, string $message): string {
-	return 'JoineryModal.confirm(' . htmlspecialchars(json_encode($message), ENT_QUOTES)
-		. ', function(){ document.getElementById(\'' . $form_id . '\').submit(); })';
+	return 'data-jy-confirm="' . htmlspecialchars($message, ENT_QUOTES) . '" data-jy-submit="' . htmlspecialchars($form_id, ENT_QUOTES) . '"';
 };
 ?>
 
@@ -901,7 +903,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 										<input type="hidden" name="mgh_managed_host_id" value="<?php echo (int)$host->key; ?>">
 										<?php echo SmAdminCsrf::field(); ?>
 										<button type="button" role="menuitem"
-											onclick="<?php echo $confirm_submit('upgrade_host_' . (int)$host->key, 'Queue an upgrade job for every enabled site on ' . $host->get('mgh_name') . '? Each site upgrades independently; disable a site first to skip it.'); ?>">Upgrade all host sites</button>
+											<?php echo $confirm_submit('upgrade_host_' . (int)$host->key, 'Queue an upgrade job for every enabled site on ' . $host->get('mgh_name') . '? Each site upgrades independently; disable a site first to skip it.'); ?>>Upgrade all host sites</button>
 									</form>
 									<?php endif; ?>
 								</div>
@@ -977,14 +979,14 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 								<?php endforeach; ?>
 							</select>
 							<button type="button" class="btn btn-sm btn-primary"
-								onclick="<?php echo $confirm_submit('escrow_approve_' . (int)$pe->key, 'Hold the key of ' . $pe->get('dre_hostname') . '? Confirm the fingerprint ' . $pe->fingerprint() . ' matches what the machine printed first.'); ?>">Approve</button>
+								<?php echo $confirm_submit('escrow_approve_' . (int)$pe->key, 'Hold the key of ' . $pe->get('dre_hostname') . '? Confirm the fingerprint ' . $pe->fingerprint() . ' matches what the machine printed first.'); ?>>Approve</button>
 						</form>
 						<form method="post" action="/admin/server_manager" id="escrow_refuse_<?php echo (int)$pe->key; ?>" class="svm-inline-form">
 							<input type="hidden" name="action" value="escrow_refuse">
 							<input type="hidden" name="dre_data_root_escrow_id" value="<?php echo (int)$pe->key; ?>">
 							<?php echo SmAdminCsrf::field(); ?>
 							<button type="button" class="btn btn-sm btn-outline-danger"
-								onclick="<?php echo $confirm_submit('escrow_refuse_' . (int)$pe->key, 'Refuse to hold the key of ' . $pe->get('dre_hostname') . '?'); ?>">Refuse</button>
+								<?php echo $confirm_submit('escrow_refuse_' . (int)$pe->key, 'Refuse to hold the key of ' . $pe->get('dre_hostname') . '?'); ?>>Refuse</button>
 						</form>
 					</div>
 				</div>
@@ -1053,14 +1055,14 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 							<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
 							<?php echo SmAdminCsrf::field(); ?>
 							<button type="button" class="btn btn-sm btn-primary"
-								onclick="<?php echo $confirm_submit('adopt_join_' . (int)$jr->key, ($jr_self ? 'Connect this management node\'s own agent' : 'Connect ' . $jr_name) . '? Confirm the key ' . $jr_fpr . ' matches what the machine printed first.'); ?>">Approve</button>
+								<?php echo $confirm_submit('adopt_join_' . (int)$jr->key, ($jr_self ? 'Connect this management node\'s own agent' : 'Connect ' . $jr_name) . '? Confirm the key ' . $jr_fpr . ' matches what the machine printed first.'); ?>>Approve</button>
 						</form>
 						<form method="post" action="/admin/server_manager" id="reject_join_<?php echo (int)$jr->key; ?>" class="svm-inline-form">
 							<input type="hidden" name="action" value="reject_join">
 							<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
 							<?php echo SmAdminCsrf::field(); ?>
 							<button type="button" class="btn btn-sm btn-outline-danger"
-								onclick="<?php echo $confirm_submit('reject_join_' . (int)$jr->key, 'Reject the join request from ' . $jr_name . '?'); ?>">Reject</button>
+								<?php echo $confirm_submit('reject_join_' . (int)$jr->key, 'Reject the join request from ' . $jr_name . '?'); ?>>Reject</button>
 						</form>
 					</div>
 				</div>
@@ -1128,7 +1130,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 							<input type="hidden" name="scope" value="requested">
 							<?php echo SmAdminCsrf::field(); ?>
 							<button type="button" class="btn btn-sm btn-outline-secondary"
-								onclick="<?php echo $confirm_submit('bg_retire_requested', 'Retire the ' . $bg_requested . ' kept root ' . ($bg_requested === 1 ? 'password whose owner' : 'passwords whose owners') . ' asked? Each machine then stops accepting it. This cannot be undone.'); ?>">Retire all requested (<?php echo $bg_requested; ?>)</button>
+								<?php echo $confirm_submit('bg_retire_requested', 'Retire the ' . $bg_requested . ' kept root ' . ($bg_requested === 1 ? 'password whose owner' : 'passwords whose owners') . ' asked? Each machine then stops accepting it. This cannot be undone.'); ?>>Retire all requested (<?php echo $bg_requested; ?>)</button>
 						</form>
 					<?php endif; ?>
 					<form method="post" action="/admin/server_manager" id="bg_retire_all" class="svm-inline-form">
@@ -1136,7 +1138,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 						<input type="hidden" name="scope" value="all">
 						<?php echo SmAdminCsrf::field(); ?>
 						<button type="button" class="btn btn-sm btn-outline-secondary"
-							onclick="<?php echo $confirm_submit('bg_retire_all', 'Retire every kept root password you hold (' . count($bg_mine) . ')? Each machine then stops accepting it. This cannot be undone.'); ?>">Retire all kept</button>
+							<?php echo $confirm_submit('bg_retire_all', 'Retire every kept root password you hold (' . count($bg_mine) . ')? Each machine then stops accepting it. This cannot be undone.'); ?>>Retire all kept</button>
 					</form>
 					<?php endif; ?>
 				</div>
@@ -1176,14 +1178,14 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 								<?php echo SmAdminCsrf::field(); ?>
 								<button type="button" class="btn btn-sm btn-outline-secondary"
-									onclick="<?php echo $confirm_submit('approve_held_' . (int)$prov->key, 'Approve ' . $prov->get('cvp_domain') . '? It is past the per-buyer limit; approving builds it (and registers its domain) as any paid order.'); ?>">Approve</button>
+									<?php echo $confirm_submit('approve_held_' . (int)$prov->key, 'Approve ' . $prov->get('cvp_domain') . '? It is past the per-buyer limit; approving builds it (and registers its domain) as any paid order.'); ?>>Approve</button>
 							</form>
 							<form method="post" action="/admin/server_manager" id="refuse_held_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
 								<input type="hidden" name="action" value="refuse_held_provision">
 								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 								<?php echo SmAdminCsrf::field(); ?>
 								<button type="button" class="btn btn-sm btn-outline-danger"
-									onclick="<?php echo $confirm_submit('refuse_held_' . (int)$prov->key, 'Refuse ' . $prov->get('cvp_domain') . '? Refund the payment and cancel the subscription on its order page first: refusing moves no money, it only takes the order off this board.'); ?>">Refuse</button>
+									<?php echo $confirm_submit('refuse_held_' . (int)$prov->key, 'Refuse ' . $prov->get('cvp_domain') . '? Refund the payment and cancel the subscription on its order page first: refusing moves no money, it only takes the order off this board.'); ?>>Refuse</button>
 							</form>
 							<?php if ($held_order_id): ?><a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $held_order_id; ?>" class="svm-host-jump">order</a><?php endif; ?>
 						<?php endif; ?>
@@ -1191,14 +1193,14 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 							$discard_why = TestSiteDiscard::refusal($prov); ?>
 							<?php if ($discard_why !== ''): ?>
 								<button type="button" class="btn btn-sm btn-outline-secondary"
-									onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Discard is not possible yet. ' . $discard_why), ENT_QUOTES); ?>)">Discard test site&hellip;</button>
+									data-jy-alert="<?php echo htmlspecialchars('Discard is not possible yet. ' . $discard_why, ENT_QUOTES); ?>">Discard test site&hellip;</button>
 							<?php else: ?>
 								<form method="post" action="/admin/server_manager" id="discard_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
 									<input type="hidden" name="action" value="discard_test_provision">
 									<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 									<?php echo SmAdminCsrf::field(); ?>
 									<button type="button" class="btn btn-sm btn-outline-danger"
-										onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode('Discard the test site ' . $prov->get('cvp_domain') . '? This deletes its server at the test account, its DNS records in the test zone, its mail subaccount, its backups and its test subscription, then removes it from the dashboard. This cannot be undone.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode((string)$prov->get('cvp_domain')), ENT_QUOTES); ?>, function(){ document.getElementById('discard_prov_<?php echo (int)$prov->key; ?>').submit(); })">Discard test site&hellip;</button>
+										data-jy-confirm="<?php echo htmlspecialchars('Discard the test site ' . $prov->get('cvp_domain') . '? This deletes its server at the test account, its DNS records in the test zone, its mail subaccount, its backups and its test subscription, then removes it from the dashboard. This cannot be undone.', ENT_QUOTES); ?>" data-jy-confirm-typed="<?php echo htmlspecialchars((string)$prov->get('cvp_domain'), ENT_QUOTES); ?>" data-jy-submit="discard_prov_<?php echo (int)$prov->key; ?>">Discard test site&hellip;</button>
 								</form>
 							<?php endif; ?>
 						<?php endif; ?>
@@ -1208,7 +1210,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 								<?php echo SmAdminCsrf::field(); ?>
 								<button type="button" class="btn btn-sm btn-outline-secondary"
-									onclick="<?php echo $confirm_submit('dismiss_prov_' . (int)$prov->key, 'Dismiss ' . $prov->get('cvp_domain') . '? It created nothing, so this only clears the record off this board.'); ?>">Dismiss</button>
+									<?php echo $confirm_submit('dismiss_prov_' . (int)$prov->key, 'Dismiss ' . $prov->get('cvp_domain') . '? It created nothing, so this only clears the record off this board.'); ?>>Dismiss</button>
 							</form>
 						<?php endif; ?>
 					</div>
@@ -1227,7 +1229,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 									<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 									<?php echo SmAdminCsrf::field(); ?>
 									<button type="button" class="btn btn-sm btn-outline-secondary"
-										onclick="<?php echo $confirm_submit('bg_retire_' . (int)$prov->key, 'Retire the kept root password for ' . $prov->get('cvp_domain') . '? The machine then stops accepting it. This cannot be undone.'); ?>">Retire</button>
+										<?php echo $confirm_submit('bg_retire_' . (int)$prov->key, 'Retire the kept root password for ' . $prov->get('cvp_domain') . '? The machine then stops accepting it. This cannot be undone.'); ?>>Retire</button>
 								</form>
 							</div>
 						<?php endif; ?>
@@ -1426,7 +1428,7 @@ function render_node_row($node, $db, $session, $role_badge = '', $show_ip = fals
 		data-node-id="<?php echo $node->key; ?>"
 		data-filter-text="<?php echo htmlspecialchars(strtolower($name . ' ' . $url . ' ' . $node->get('mgn_host'))); ?>"
 		data-api-refreshable="<?php echo $api_refreshable ? '1' : '0'; ?>"
-		onclick="if(!event.target.closest('form,button,input,a')) window.location=this.dataset.href">
+>
 		<span class="svm-dot svm-dot-<?php echo htmlspecialchars($status_color); ?> js-status-badge"></span>
 		<span class="svm-node-name"><?php echo htmlspecialchars($name); ?></span>
 		<?php if ($role_badge !== ''): ?>
@@ -1492,75 +1494,7 @@ function render_node_row($node, $db, $session, $role_badge = '', $show_ip = fals
 
 <?php echo SmAssets::script_tag(); ?>
 <?php echo SmAssets::script_tag('server_manager_board.js'); ?>
-<script>
-// Auto-refresh status for nodes with API credentials. Fires once on page load
-// in parallel, bypassing the agent/job pipeline. Silent on failure — the
-// pre-rendered dot (from last stored status) stays as the fallback.
-(function() {
-	var rows = document.querySelectorAll('.node-row[data-api-refreshable="1"]');
-	if (!rows.length) return;
-
-	var colors = ['secondary','success','warning','danger','info','primary'];
-
-	// A host's dot follows its nodes: red if any is red, amber if any is amber, green only if all are green.
-	function refreshHostDot(row) {
-		var group = row.closest('.svm-group');
-		var hostDot = group && group.querySelector('.svm-host-dot');
-		if (!hostDot) return;
-		var seen = [];
-		group.querySelectorAll('.svm-node:not([data-removed]) .svm-dot').forEach(function(d) {
-			colors.forEach(function(c) { if (d.classList.contains('svm-dot-' + c)) seen.push(c); });
-		});
-		var color = seen.indexOf('danger') !== -1 ? 'danger'
-			: (seen.indexOf('warning') !== -1 ? 'warning'
-			: (seen.length && seen.every(function(c) { return c === 'success'; }) ? 'success' : 'secondary'));
-		colors.forEach(function(c) { hostDot.classList.remove('svm-dot-' + c); });
-		hostDot.classList.add('svm-dot-' + color);
-	}
-
-	rows.forEach(function(row) {
-		var nodeId = row.getAttribute('data-node-id');
-		var dot = row.querySelector('.js-status-badge');
-		var versionSpan = row.querySelector('.js-version-indicator');
-		var lastCheckSpan = row.querySelector('.js-last-check');
-		if (dot) dot.style.opacity = '0.4';
-
-		smApiPost('refresh_node_status', { node_id: nodeId })
-			.then(function(j) {
-				if (dot) dot.style.opacity = '';
-				if (!j.ok) return;
-
-				if (dot && j.status_color) {
-					colors.forEach(function(c) { dot.classList.remove('svm-dot-' + c); });
-					dot.classList.add('svm-dot-' + j.status_color);
-				}
-
-				// Only update the version badge when the response includes definitive
-				// version data. HTTP-only checks omit version_cmp entirely; API checks
-				// without a joinery_version return null. In both cases, preserve the
-				// server-rendered badge rather than clearing it.
-				if (versionSpan && 'version_cmp' in j && j.version_cmp !== null) {
-					versionSpan.innerHTML = '';
-					if (j.version_cmp === -1) {
-						versionSpan.innerHTML = '<span class="badge badge-warning" title="Management node is at ' +
-							smEsc(j.cp_version || '') + '">upgrade available</span>';
-					} else if (j.version_cmp === 1) {
-						versionSpan.innerHTML = '<span class="badge badge-danger" title="Management node is at ' +
-							smEsc(j.cp_version || '') + '">ahead of management node</span>';
-					}
-				}
-
-				if (lastCheckSpan && j.last_check) {
-					lastCheckSpan.textContent = '(' + j.last_check + ')';
-				}
-				refreshHostDot(row);
-			})
-			.catch(function() {
-				if (dot) dot.style.opacity = '';
-			});
-	});
-})();
-</script>
+<?php echo PageScript::src('plugins/server_manager/assets/js/admin-dashboard.js'); ?>
 
 <?php
 $page->admin_footer();

@@ -58,7 +58,7 @@ $page->public_header([
 
             <!-- Mobile Dropdown for Categories -->
             <div class="mobile-category-select">
-                <select class="form-select jy-events-mobile-select" onchange="window.location.href=this.value;">
+                <select class="form-select jy-events-mobile-select" data-jy-navigate>
                     <?php
                     foreach ($page_vars['tab_menus'] as $id => $name) {
                         $selected = ($id == ($_REQUEST['type'] ?? '')) ? 'selected' : '';

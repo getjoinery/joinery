@@ -368,7 +368,7 @@ check(($built_old['level'] ?? '') === AiConversation::LEVEL_PRIVATE
 // web endpoint remains beside it.
 section('Chat control CSRF');
 require_once(PathHelper::getIncludePath('tests/lib/http.php'));
-$view_src = file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/includes/chat_view_body.php'));
+$view_src = file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/assets/js/chat.js'));
 check(strpos($view_src, "'chat_set_capabilities'") === false
 	&& strpos($view_src, "joaiApiV1('joinery_ai/chat_set_capabilities'") !== false,
 	'the chat page sets controls only through the /api/v1 action');

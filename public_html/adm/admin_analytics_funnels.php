@@ -50,31 +50,10 @@ $formwriter->submitbutton('btn_submit', 'Submit');
 echo $formwriter->end_form();
 
 ?>
-<script>
-// Toggle the step's value dropdown when the step's type changes.
-// Page list vs Event list comes from the logic payload so the UI stays in sync.
-(function(){
-	var pageOptions  = <?php echo json_encode($page_vars['page_optionvals']); ?>;
-	var eventOptions = <?php echo json_encode($page_vars['event_optionvals']); ?>;
-	for (var i = 1; i <= 5; i++) {
-		(function(n){
-			var typeSel = document.querySelector('[name="step_' + n + '_type"]');
-			var valSel  = document.querySelector('[name="step_' + n + '"]');
-			if (!typeSel || !valSel) return;
-			typeSel.addEventListener('change', function(){
-				var opts = this.value === 'event' ? eventOptions : pageOptions;
-				valSel.innerHTML = '';
-				Object.keys(opts).forEach(function(k){
-					var o = document.createElement('option');
-					o.value = k;
-					o.textContent = opts[k];
-					valSel.appendChild(o);
-				});
-			});
-		})(i);
-	}
-})();
-</script>
+<?php echo PageScript::json('funnel-step-options', array(
+	'page'  => (object)$page_vars['page_optionvals'],
+	'event' => (object)$page_vars['event_optionvals'],
+)), PageScript::src('assets/js/admin-analytics.js'); ?>
 <?php
 
 echo '<br />';

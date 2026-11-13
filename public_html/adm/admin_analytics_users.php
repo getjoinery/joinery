@@ -21,32 +21,7 @@ array(
 );
 ?>
 
-<script type="text/javascript">
-(function() {
-	'use strict';
-
-	document.addEventListener('DOMContentLoaded', function() {
-		var sqlElement = document.getElementById('sql');
-		var sqlBtn = document.getElementById('sqlbtn');
-
-		if (!sqlBtn || !sqlElement) return;
-
-		// Initially hide SQL element
-		sqlElement.style.display = 'none';
-
-		// Toggle visibility on button click
-		sqlBtn.addEventListener('click', function(e) {
-			e.preventDefault();
-
-			if (sqlElement.style.display === 'none') {
-				sqlElement.style.display = '';
-			} else {
-				sqlElement.style.display = 'none';
-			}
-		});
-	});
-})();
-</script>
+<?php echo PageScript::src('assets/js/admin-analytics.js'); ?>
 
 <?php
 

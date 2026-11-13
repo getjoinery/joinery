@@ -48,7 +48,7 @@ if ($view === 'orphans') {
 			echo '<form method="POST" action="/admin/admin_seo_pages" style="display:inline;">';
 			echo '<input type="hidden" name="action" value="soft_delete">';
 			echo '<input type="hidden" name="spm_id" value="' . (int)$orphan['id'] . '">';
-			echo '<button type="submit" class="btn btn-sm btn-danger" onclick="return confirm(\'Soft-delete this row?\');">Soft-delete</button>';
+			echo '<button type="button" class="btn btn-sm btn-danger" data-jy-confirm="Soft-delete this row?" data-jy-submit="" data-jy-submit-self>Soft-delete</button>';
 			echo '</form>';
 			echo '</td>';
 			echo '</tr>';
@@ -64,7 +64,7 @@ if ($view === 'orphans') {
 echo '<div style="margin-bottom: 12px; display:flex; gap:8px; flex-wrap:wrap;">';
 echo '<form method="POST" action="/admin/admin_seo_pages" style="display:inline;">';
 echo '<input type="hidden" name="action" value="scan_now">';
-echo '<button type="submit" class="btn btn-sm btn-primary" onclick="return confirm(\'Run full enumeration scan now? Idempotent.\');">Scan now</button>';
+echo '<button type="button" class="btn btn-sm btn-primary" data-jy-confirm="Run full enumeration scan now? Idempotent." data-jy-submit="" data-jy-submit-self>Scan now</button>';
 echo '</form>';
 echo '<a class="btn btn-sm btn-secondary" href="/admin/admin_seo_pages?view=orphans">Find orphans</a>';
 echo '<a class="btn btn-sm btn-secondary" href="/admin/admin_seo_page_edit">+ Add path</a>';

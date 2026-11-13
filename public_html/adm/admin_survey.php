@@ -222,21 +222,7 @@ foreach ($remove_forms as $form_html) {
 
 // Script to move forms into their placeholder divs
 ?>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Move each deferred form into its table cell placeholder
-    var forms = document.querySelectorAll('form[id^="remove_form_"]');
-    forms.forEach(function(form) {
-        var formId = form.getAttribute('id');
-        var placeholder = document.getElementById(formId);
-        // The form and placeholder have the same ID, but the placeholder is a div in the table
-        // and the form is output after the table. We need to find the div and replace it with the form.
-        if (placeholder && placeholder.tagName === 'DIV') {
-            placeholder.parentNode.replaceChild(form, placeholder);
-        }
-    });
-});
-</script>
+<?php echo PageScript::src('assets/js/admin-survey.js'); ?>
 <?php
 
 $page->admin_footer();

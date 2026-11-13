@@ -3,6 +3,7 @@
      * Second-factor step-up page. The visitor is always signed in, so it uses
      * the member page layout (site header and menu), not the bare sign-in card.
      *
+     * @version 1.2 - the passkey button's script is assets/js/passkey-pages.js (no inline script)
      * @version 1.1
      */
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -39,7 +40,7 @@
 
         <?php if (!empty($has_passkey)) { ?>
         <div class="jy-form-actions">
-            <button type="button" id="stepup-passkey-btn" class="btn btn-primary">Confirm with a passkey</button>
+            <button type="button" id="stepup-passkey-btn" class="btn btn-primary" data-jy-next="<?php echo htmlspecialchars($return); ?>">Confirm with a passkey</button>
         </div>
         <div id="stepup-passkey-error" class="jy-auth-hint" role="alert"></div>
         <?php } ?>
@@ -76,30 +77,7 @@
 </div>
 
 <?php if (!empty($has_passkey)) { ?>
-<script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script>
-(function () {
-    var btn = document.getElementById('stepup-passkey-btn');
-    if (!btn) return;
-    var errEl = document.getElementById('stepup-passkey-error');
-    var RETURN = <?php echo json_encode($return); ?>;
-    btn.addEventListener('click', async function () {
-        errEl.textContent = '';
-        btn.disabled = true;
-        try {
-            await JoineryPasskeys.stepUp();
-            // The passkey step-up stamped the shared marker server-side — return.
-            window.location = RETURN;
-        } catch (e) {
-            btn.disabled = false;
-            // Include the error name: a bare WebAuthn message is ambiguous
-            // about which layer refused (browser vs server vs helper).
-            errEl.textContent = ((e && e.name && e.name !== 'Error') ? e.name + ': ' : '')
-                + ((e && e.message) || 'Could not confirm with your passkey.');
-        }
-    });
-})();
-</script>
+<?php echo PageScript::src('assets/js/passkeys.js'), PageScript::src('assets/js/passkey-pages.js'); ?>
 <?php } ?>
 
 <?php

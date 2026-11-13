@@ -108,7 +108,7 @@ AbstractProductRequirement::register('MyCustomRequirement', __FILE__);
 | `post_purchase($data, $order_item, $user, $order)` | Side effects after successful payment. Runs for `pri_`-attached requirements only |
 | `extra_cart_lines($form_data, $product)` | Return `['product_id' => int, 'form_data' => array]` entries — companion cart lines this requirement contributes |
 | `get_validation_info()` | Return client-side validation rules for JoineryValidation |
-| `get_javascript()` | Return custom JS string (without `<script>` tags) |
+| `get_script_files()` | Return the script files the fields need, as paths from the site root; each loads once by `src` (a page runs no inline script) |
 | `getFormGroup()` | Return `'info'`, `'address'`, or `'questions'` for card grouping |
 
 Override only what you need; every method has a no-op default.

@@ -1,0 +1,1374 @@
+/*
+ * The AI chat (includes/chat_view_body.php), on the admin and profile pages.
+ * The page's #joai-chat-config carries what PHP knows: the endpoint base,
+ * the conversation open, the defaults for a new chat, attachment limits, the
+ * private-content consent and whether this site restricts outbound calls.
+ * Loaded after passkeys.js, not deferred, where the inline script stood.
+ *
+ * @version 1.0
+ */
+(function () {
+    // Endpoint + link base for this surface (admin vs profile). Every fetch and
+    // thread link is built from it, so this one value is the only difference.
+    var CHAT = (window.joineryPageData && joineryPageData('joai-chat-config')) || {};
+    var JOAI_BASE = CHAT.base;
+
+    // --- Vault unlock (protected chats) -----------------------------------
+    // Mirrors the mailbox reader: a protected chat's content actions prompt a
+    // one-tap passkey unlock, then re-run. The unlock ceremony hits the shared
+    // /api/v1 vault endpoints (session cookie + X-Joinery-Csrf), so unlocking
+    // here also opens mail's window and vice versa (one vault window per user).
+    function joaiCsrf() {
+        var meta = document.querySelector('meta[name="joinery-api-csrf"]');
+        if (meta && meta.content) return meta.content;
+        var m = document.cookie.match(/(?:^|;\s*)joinery_api_csrf=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : '';
+    }
+    function joaiApiV1(action, payload) {
+        return fetch('/api/v1/action/' + action, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': joaiCsrf() },
+            body: JSON.stringify(payload || {})
+        }).then(function (r) { return r.json(); });
+    }
+    // Set one control on an existing chat through the /api/v1 action (session
+    // cookie + X-Joinery-Csrf). Resolves to {success, locked, message}.
+    function joaiSetControl(payload) {
+        payload.conversation_id = currentConversationId;
+        return joaiApiV1('joinery_ai/chat_set_capabilities', payload).then(function (d) {
+            var data = (d && d.data) || {};
+            return { success: !(d && d.error), locked: !!data.locked,
+                     requires_stepup: !!data.requires_stepup, remaining: data.remaining | 0,
+                     message: (d && d.error) || data.message || '' };
+        });
+    }
+    // A privacy-level change asks the owner to confirm it is them. A passkey
+    // confirms in place (resolves true); without one — or when it is dismissed —
+    // the confirmation page, which also takes an authenticator code, brings them
+    // back here.
+    function joaiStepUp() {
+        var viaPage = function () {
+            window.location = '/profile/verify-stepup?return=' + encodeURIComponent(location.pathname + location.search);
+            return new Promise(function () {});
+        };
+        if (!window.JoineryPasskeys || !window.JoineryPasskeys.stepUp) return viaPage();
+        return window.JoineryPasskeys.stepUp().then(function () { return true; }, viaPage);
+    }
+    // The level flips at once; the stored turns catch up in bounded batches.
+    // Resolves when nothing remains (or a pass can make no progress).
+    // A pass that converts nothing while rows remain stops and says how many
+    // were left; they are retried by the next pass (and in the background).
+    // Resolves to what is left. `quiet` (the resume on page load) says nothing.
+    function joaiConvergeLevel(remaining, quiet) {
+        if (!remaining) return Promise.resolve(0);
+        return joaiApiV1('joinery_ai/chat_level_batch', { conversation_id: currentConversationId }).then(function (d) {
+            var data = (d && d.data) || {};
+            if (d && d.error) { if (!quiet) alert(d.error); return remaining; }
+            var left = data.remaining | 0;
+            if (left > 0 && (data.converted | 0) > 0) return joaiConvergeLevel(left, quiet);
+            if (left > 0 && !quiet) {
+                alert(left + ' turn' + (left === 1 ? '' : 's') + ' of this chat could not be converted yet. '
+                    + 'They are tried again the next time the chat opens with your vault unlocked.');
+            }
+            return left;
+        });
+    }
+    var joaiLevelRemaining = CHAT.level_remaining | 0;
+    // Runs the unlock ceremony. Resolves to true on success. The platform's
+    // one unlock (the lock chip's) opens every vault from one touch
+    // (specs/one_vault_experience.md § R3); the inline passkey ceremony is the
+    // fallback for a page without the chip.
+    function unlockVault() {
+        if (window.JoineryVaultLock) { return JoineryVaultLock.unlock(); }
+        if (!window.JoineryPasskeys) { alert('Unlock is unavailable on this page.'); return Promise.resolve(false); }
+        return joaiApiV1('vault_unlock_options', {}).then(function (opt) {
+            var options = opt && opt.data ? opt.data.options : null;
+            if (!options) throw new Error('no unlock options');
+            return window.JoineryPasskeys.derive(options);
+        }).then(function (res) {
+            return joaiApiV1('vault_unlock_passkey', { credential: res.response });
+        }).then(function (res) {
+            return !!(res && res.data && res.data.unlocked);
+        }).catch(function () { return false; });
+    }
+    var unlockBtn = document.getElementById('joai-unlock-btn');
+    if (unlockBtn) {
+        unlockBtn.addEventListener('click', function () {
+            unlockBtn.disabled = true;
+            unlockVault().then(function (ok) {
+                if (ok) { location.reload(); }
+                else { unlockBtn.disabled = false; alert('Could not unlock the vault. Try again, or unlock from your security settings.'); }
+            });
+        });
+    }
+
+    var transcript = document.getElementById('joai-transcript');
+    var input = document.getElementById('joai-input');
+    var sendBtn = document.getElementById('joai-send');
+    var thinking = document.getElementById('joai-thinking');
+    var threads = document.getElementById('joai-threads');
+    var newChatBtn = document.getElementById('joai-new-chat');
+    var dataToggle = document.getElementById('joai-toggle-data');
+    var webToggle = document.getElementById('joai-toggle-web');
+    var historyToggle = document.getElementById('joai-toggle-history');
+    var memoryToggle = document.getElementById('joai-toggle-memory');
+    var modelSelect = document.getElementById('joai-model');
+    var thinkingSelect = document.getElementById('joai-thinking-level');
+    var sensitiveNotice = document.getElementById('joai-sensitive-notice');
+    var currentConversationId = CHAT.selected_id || null;
+
+    // Mobile: the thread list is an off-canvas drawer below 767px. Tapping the
+    // "Conversations" toggle slides it in over the chat pane; tapping the
+    // backdrop, a thread, or "+ New chat" closes it again.
+    var chatWrap = document.querySelector('.joai-chat-wrap');
+    var listToggle = document.getElementById('joai-list-toggle');
+    var listBackdrop = document.getElementById('joai-list-backdrop');
+    function setListOpen(open) {
+        if (!chatWrap) return;
+        chatWrap.classList.toggle('list-open', open);
+        if (listBackdrop) listBackdrop.hidden = !open;
+        if (listToggle) listToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    if (listToggle) {
+        listToggle.addEventListener('click', function () {
+            setListOpen(!chatWrap.classList.contains('list-open'));
+        });
+    }
+    if (listBackdrop) listBackdrop.addEventListener('click', function () { setListOpen(false); });
+    // "+ New chat" resets the composer via AJAX (no reload), so close the drawer
+    // to reveal the fresh chat. Thread links navigate, closing the drawer anyway.
+    if (newChatBtn) newChatBtn.addEventListener('click', function () { setListOpen(false); });
+
+    // Mobile: maximize the chat to a full-viewport overlay (over the site header,
+    // page heading, and footer), and minimize it back into the page. The button
+    // toggles a class on the wrap; CSS pins it to the viewport and locks the
+    // background scroll. Esc also exits.
+    var fullscreenToggle = document.getElementById('joai-fullscreen-toggle');
+    function setFullscreen(on) {
+        if (!chatWrap) return;
+        chatWrap.classList.toggle('joai-fullscreen', on);
+        document.body.classList.toggle('joai-fullscreen-lock', on);
+        if (fullscreenToggle) {
+            fullscreenToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+            fullscreenToggle.setAttribute('aria-label', on ? 'Minimize chat' : 'Maximize chat');
+            fullscreenToggle.setAttribute('title', on ? 'Minimize chat' : 'Maximize chat');
+        }
+        if (on) scrollToBottom();
+    }
+    if (fullscreenToggle) {
+        fullscreenToggle.addEventListener('click', function () {
+            setFullscreen(!chatWrap.classList.contains('joai-fullscreen'));
+        });
+    }
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && chatWrap && chatWrap.classList.contains('joai-fullscreen')) {
+            setFullscreen(false);
+        }
+    });
+
+    // New-chat defaults the composer resets to.
+    var DEFAULT_MODEL = CHAT.default_model;
+    var DEFAULT_THINKING = CHAT.default_thinking;
+    var DEFAULT_WEB = !!CHAT.default_web;
+    var DEFAULT_MEMORY = !!CHAT.default_memory;
+    var DEFAULT_LOCAL_ONLY = !!CHAT.default_local_only;
+    var DEFAULT_ATTACH_MODE = CHAT.default_attach_mode;
+
+    // Attachment composer config: how many files a message accepts. Type/size and
+    // model-capability policy are enforced authoritatively server-side (ingress
+    // fails loud), so the client only bounds the count and previews selections.
+    var ATTACH_MAX_FILES = CHAT.attach_max_files | 0;
+
+    function scrollToBottom() { transcript.scrollTop = transcript.scrollHeight; }
+    scrollToBottom();
+
+    // A turn runs off the request: the send/confirm endpoints return a poll
+    // handle (message_id + status:"running") and finish the turn in the
+    // background. We poll until the assistant row is complete or failed, and
+    // while it runs we show the answer text as it streams (partial_text).
+    var POLL_INTERVAL_MS = 600;          // brisk while a turn is active
+    var POLL_GIVE_UP_MS = 3600 * 1000;   // beyond the server-side stale ceiling
+
+    function pollMessage(messageId, onPartial, onComplete, onFailed) {
+        JoineryChatTranscript.poll({
+            interval: POLL_INTERVAL_MS,
+            giveUp: POLL_GIVE_UP_MS,
+            fetch: function () {
+                return fetch(JOAI_BASE + 'chat_poll?message_id=' + encodeURIComponent(messageId))
+                    .then(function (r) { return r.json(); });
+            },
+            onData: function (data, resume) {
+                if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return false; }
+                // Vault locked mid-turn (idle close, or a lock from another
+                // tab): one-tap unlock, then resume polling where we left off.
+                if (data.locked) {
+                    unlockVault().then(function (ok) {
+                        if (ok) { resume(); return; }
+                        onFailed(data.message || 'Unlock your vault to view this reply.');
+                    });
+                    return false;
+                }
+                // Cancelled settles like complete: the server renders the kept
+                // partial answer with its own "Cancelled" marker, so the same
+                // handler swaps the final bubble in and unlocks the composer.
+                if (data.status === 'complete' || data.status === 'cancelled') { onComplete(data.assistant_html, data.conversation_usage); return false; }
+                if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return false; }
+                if (typeof data.partial_text === 'string') onPartial(data.partial_text, data);
+                return true;
+            },
+            onGiveUp: onFailed
+        });
+    }
+
+    // A live assistant bubble that streamed partial text fills, then the final
+    // server-rendered (markdown) bubble replaces. Reuses an existing bubble with
+    // the same id (the confirm flow reuses the pending bubble).
+    function ensureLiveBubble(messageId) {
+        var el = JoineryChatTranscript.liveBubble(transcript, messageId);
+        scrollToBottom();
+        return el;
+    }
+
+    // Show a live bubble for messageId and stream into it until the turn lands.
+    // While it runs, the runner's stage label + elapsed time render under the
+    // streaming text ("Waiting for glm-5p2… · 2m 40s") so the quiet stretch
+    // before the first token is legible instead of an anonymous indicator.
+    function streamInto(messageId) {
+        inflightMessageId = messageId;   // now the Cancel button has a target
+        var bubble = ensureLiveBubble(messageId);
+        pollMessage(messageId,
+            function (text, data) {
+                JoineryChatTranscript.showPartial(bubble, text, data);
+                scrollToBottom();
+            },
+            function (html, usage) {
+                replaceBubble(messageId, html);
+                updateUsage(usage);
+                // The finished turn may have queued a proposed action.
+                refreshQueuedCards();
+            },
+            function (err) { renderFailedBubble(messageId, err); });
+    }
+
+    // Capability toggles. On an existing chat, persist immediately; on a new
+    // chat (no id yet) the state rides along with the first send.
+    function wireToggle(el) {
+        if (!el) return;
+        el.addEventListener('change', function () {
+            if (!currentConversationId) return;
+            joaiSetControl({ capability: el.getAttribute('data-capability'), enabled: el.checked })
+                .then(function (data) { if (!data.success) { alert(data.message || 'Could not update.'); el.checked = !el.checked; } })
+                .catch(function () { el.checked = !el.checked; });
+        });
+    }
+    wireToggle(dataToggle);
+    wireToggle(webToggle);
+    wireToggle(historyToggle);
+    wireToggle(memoryToggle);
+
+    // Model controls (model, thinking level, temperature, top_p, max tokens,
+    // instructions). On an existing chat each persists immediately; on a new chat
+    // their values ride the first send. Same endpoint, generic {field, value}.
+    var controls = Array.prototype.slice.call(document.querySelectorAll('.joai-chat-control'));
+    function wireField(el) {
+        el.addEventListener('change', function () {
+            if (!currentConversationId) return; // new chat: seeded on first send
+            var field = el.getAttribute('data-field');
+            function send(retried, confirmed) {
+                joaiSetControl({ field: field, value: el.value })
+                    .then(function (data) {
+                        if (data.requires_stepup && !confirmed) {
+                            joaiStepUp().then(function () { send(retried, true); });
+                            return;
+                        }
+                        // Locked vault (a protected chat's instructions are sealed
+                        // content): one-tap unlock, then retry the same change.
+                        // A refused/failed unlock reloads so the control shows the
+                        // real stored value instead of an unsaved edit.
+                        if (data.locked && !retried) {
+                            unlockVault().then(function (ok) {
+                                if (ok) { send(true, confirmed); return; }
+                                alert(data.message || 'Unlock your vault to edit this protected chat.');
+                                location.reload();
+                            });
+                            return;
+                        }
+                        if (!data.success || data.locked) {
+                            alert(data.message || 'Could not update.');
+                            location.reload();
+                            return;
+                        }
+                        // Changing the privacy level reseals/reveals stored content and
+                        // may re-pin the model — converge what is left, then reload so
+                        // the whole page reflects it.
+                        if (field === 'security_level') {
+                            joaiConvergeLevel(data.remaining).then(function () { location.reload(); });
+                        }
+                    })
+                    .catch(function () {});
+            }
+            send(false, false);
+        });
+    }
+    controls.forEach(wireField);
+
+    // A privacy change that stopped part-way (the tab closed mid-way) carries on
+    // here; the page reloads once it has, so the thread reads as it now is.
+    if (currentConversationId && joaiLevelRemaining > 0) {
+        joaiConvergeLevel(joaiLevelRemaining, true).then(function (left) {
+            if (left === 0) location.reload();
+        }).catch(function () { /* the next visit, or the deferred work, carries on */ });
+    }
+
+    // ----- Local models only -----
+    // The add-on lives under Private: its switch shows only while Privacy =
+    // Private. A local-only chat pins inference to a local model, so while the
+    // add-on is in effect the picker's cloud options are disabled and a cloud
+    // selection moves to the first local model. On an existing chat switching it
+    // on persists immediately (one-way — the server refuses turning it off); on
+    // a new chat it rides the first send.
+    var levelSelect = document.getElementById('joai-security-level');
+    var localOnlyWrap = document.getElementById('joai-local-only-wrap');
+    var localOnlyToggle = document.getElementById('joai-toggle-local-only');
+    function localOnlyInEffect() {
+        return !!(levelSelect && levelSelect.value === 'private'
+            && localOnlyToggle && localOnlyToggle.checked);
+    }
+    // Where this member's private content may be read by AI
+    // (PrivateContentConsent): a chat holding private content — Private, or
+    // with a sealed-derived transcript — may only use models within it. The
+    // same comparison chat_send and the resolver make, shown before it bites.
+    var CONSENT_RANK = { local: 0, trusted: 1, cloud: 2 };
+    var JOAI_CONSENT = CHAT.consent;
+    var JOAI_EGRESS_RESTRICTED = !!CHAT.egress_restricted;
+    var consentNote = document.getElementById('joai-consent-note');
+    function consentGateInEffect() {
+        return JOAI_EGRESS_RESTRICTED || !!(levelSelect && levelSelect.value === 'private');
+    }
+    function consentAllows(opt) {
+        var trust = (opt.getAttribute('data-trust') || 'cloud').toLowerCase();
+        var rank = CONSENT_RANK.hasOwnProperty(trust) ? CONSENT_RANK[trust] : 2;
+        return rank <= CONSENT_RANK[JOAI_CONSENT];
+    }
+    function applyLocalOnlyModelGate() {
+        if (localOnlyWrap && levelSelect) localOnlyWrap.hidden = levelSelect.value !== 'private';
+        if (!modelSelect) { updateSettingsSummary(); return; }
+        var localOnly = localOnlyInEffect();
+        var gated = consentGateInEffect();
+        var anyGreyed = false;
+        var firstLocal = null;
+        Array.prototype.forEach.call(modelSelect.options, function (opt) {
+            var isLocal = opt.getAttribute('data-local') === '1';
+            var outsideConsent = gated && !consentAllows(opt);
+            opt.disabled = (localOnly && !isLocal) || outsideConsent;
+            if (outsideConsent) anyGreyed = true;
+            if (isLocal && firstLocal === null) firstLocal = opt.value;
+        });
+        if (consentNote) consentNote.hidden = !anyGreyed;
+        if (localOnly && modelSelect.selectedOptions[0]
+                && modelSelect.selectedOptions[0].getAttribute('data-local') !== '1'
+                && firstLocal !== null) {
+            modelSelect.value = firstLocal;
+        }
+        updateSettingsSummary();
+    }
+    if (levelSelect) levelSelect.addEventListener('change', applyLocalOnlyModelGate);
+    if (localOnlyToggle) {
+        localOnlyToggle.addEventListener('change', function () {
+            applyLocalOnlyModelGate();
+            if (!currentConversationId || !localOnlyToggle.checked) return;
+            joaiSetControl({ field: 'local_models_only', value: '1' })
+                .then(function (data) {
+                    if (!data.success) alert(data.message || 'Could not update.');
+                    // Turning it on pins the model and locks the switch — reload
+                    // so the whole page reflects the stored state.
+                    location.reload();
+                })
+                .catch(function () { location.reload(); });
+        });
+    }
+    applyLocalOnlyModelGate();
+
+    // --- File attachments ---------------------------------------------------
+    // Files chosen in the composer, held client-side until send() posts them as
+    // multipart `attachments[]`. The strip shows a removable chip per file.
+    var fileInput = document.getElementById('joai-file-input');
+    var attachBtn = document.getElementById('joai-attach-btn');
+    var attachStrip = document.getElementById('joai-attach-strip');
+    var pendingFiles = [];
+
+    function renderAttachStrip() {
+        if (!attachStrip) return;
+        if (!pendingFiles.length) { attachStrip.hidden = true; attachStrip.innerHTML = ''; return; }
+        attachStrip.hidden = false;
+        attachStrip.innerHTML = '';
+        pendingFiles.forEach(function (file, idx) {
+            var chip = document.createElement('span');
+            chip.className = 'joai-chat-attach joai-chat-attach-pending';
+            var name = document.createElement('span');
+            name.className = 'joai-chat-attach-name';
+            name.textContent = file.name;
+            chip.appendChild(name);
+            var rm = document.createElement('button');
+            rm.type = 'button';
+            rm.className = 'joai-chat-attach-remove';
+            rm.setAttribute('aria-label', 'Remove ' + file.name);
+            rm.textContent = '×';
+            rm.addEventListener('click', function () {
+                pendingFiles.splice(idx, 1);
+                renderAttachStrip();
+            });
+            chip.appendChild(rm);
+            attachStrip.appendChild(chip);
+        });
+    }
+
+    function addFiles(list) {
+        for (var i = 0; i < list.length; i++) {
+            if (pendingFiles.length >= ATTACH_MAX_FILES) {
+                alert('Up to ' + ATTACH_MAX_FILES + ' files per message.');
+                break;
+            }
+            pendingFiles.push(list[i]);
+        }
+        renderAttachStrip();
+    }
+
+    if (attachBtn && fileInput) {
+        attachBtn.addEventListener('click', function () { fileInput.click(); });
+        fileInput.addEventListener('change', function () {
+            if (fileInput.files && fileInput.files.length) addFiles(fileInput.files);
+            fileInput.value = ''; // allow re-selecting the same file
+        });
+    }
+
+    // Drag-and-drop onto the composer area.
+    var composer = document.querySelector('.joai-chat-composer');
+    if (composer) {
+        ['dragenter', 'dragover'].forEach(function (ev) {
+            composer.addEventListener(ev, function (e) {
+                e.preventDefault(); composer.classList.add('joai-chat-dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(function (ev) {
+            composer.addEventListener(ev, function (e) {
+                e.preventDefault(); composer.classList.remove('joai-chat-dragover');
+            });
+        });
+        composer.addEventListener('drop', function (e) {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+                addFiles(e.dataTransfer.files);
+            }
+        });
+    }
+
+    function clearPendingFiles() {
+        pendingFiles = [];
+        renderAttachStrip();
+    }
+
+    function clearBlankNotice() {
+        var blank = document.getElementById('joai-blank');
+        if (blank) blank.remove();
+    }
+
+    // Inline amber note above the composer for a rejected send (e.g. an attachment
+    // the current model can't read) — replaces a blocking popup.
+    function showSendNotice(msg) {
+        var n = document.getElementById('joai-send-notice');
+        if (!n) return;
+        n.textContent = '⚠ ' + (msg || 'Send failed.');
+        n.hidden = false;
+    }
+    function hideSendNotice() {
+        var n = document.getElementById('joai-send-notice');
+        if (n) { n.hidden = true; n.textContent = ''; }
+    }
+
+    // The RUNNING assistant message this composer is streaming, so the Send
+    // button (morphed to Cancel while busy) can post it. Set when a poll starts,
+    // cleared when the turn settles.
+    var inflightMessageId = null;
+
+    // While a turn runs the composer is locked and Send is idle — reuse that real
+    // estate: morph Send into an active Cancel, and revert on EVERY terminal path
+    // (complete / failed / cancelled all route through setBusy(false)).
+    function setBusy(busy) {
+        input.disabled = busy;
+        thinking.hidden = !busy;
+        if (busy) {
+            sendBtn.disabled = false;              // stays clickable — to cancel
+            sendBtn.textContent = 'Cancel';
+            sendBtn.classList.add('joai-chat-cancel-active');
+            sendBtn.classList.remove('joai-btn-primary');
+            scrollToBottom();
+        } else {
+            sendBtn.disabled = false;
+            sendBtn.textContent = 'Send';
+            sendBtn.classList.remove('joai-chat-cancel-active');
+            sendBtn.classList.add('joai-btn-primary');
+            inflightMessageId = null;
+        }
+    }
+
+    // Post a cancel for the in-flight turn. Leaves the poll running — the worker
+    // flips the row to cancelled and the poll renders the kept partial answer, so
+    // a turn that happens to finish first still lands correctly (no optimistic
+    // teardown). The button is disabled until the poll settles (revert via
+    // setBusy(false)) to prevent a double-post.
+    function cancelInflight() {
+        if (!inflightMessageId) return;            // nothing pollable to cancel yet
+        sendBtn.disabled = true;
+        var body = new FormData();
+        body.append('message_id', inflightMessageId);
+        fetch(JOAI_BASE + 'chat_cancel', { method: 'POST', body: body })
+            .then(function (r) { return r.json(); })
+            .catch(function () { sendBtn.disabled = false; }); // let them retry on a network error
+    }
+
+    // Conversation token/cost bar under the composer. The server is the source of
+    // truth (it rolls per-turn tokens into the thread total), so each completed
+    // turn hands back a fresh preformatted label and we just set it.
+    var usageMeta = document.getElementById('joai-chat-meta');
+    var usageValue = document.getElementById('joai-usage-value');
+    function updateUsage(usage) {
+        if (!usage || !usageValue) return;
+        if (typeof usage.label === 'string') usageValue.textContent = usage.label;
+        if (usageMeta) usageMeta.hidden = false;
+    }
+
+    // ----- Sensitivity notice -----
+    // A passive, real-time warning: while composing, if the text looks like it
+    // carries personal data AND the selected model's provider isn't private, show
+    // a banner. It never blocks sending and needs no confirmation; it shows/hides
+    // as the text and model change. Recipes are unaffected (this is chat-only).
+    function luhnValid(num) {
+        var sum = 0, alt = false;
+        for (var i = num.length - 1; i >= 0; i--) {
+            var d = parseInt(num.charAt(i), 10);
+            if (alt) { d *= 2; if (d > 9) d -= 9; }
+            sum += d; alt = !alt;
+        }
+        return sum % 10 === 0;
+    }
+    function cardPresent(text) {
+        var matches = text.match(/\b(?:\d[ -]?){13,16}\b/g);
+        if (!matches) return false;
+        for (var i = 0; i < matches.length; i++) {
+            var digits = matches[i].replace(/[ -]/g, '');
+            if (digits.length >= 13 && digits.length <= 16 && luhnValid(digits)) return true;
+        }
+        return false;
+    }
+    function looksSensitive(text) {
+        if (!text) return false;
+        // Strong signals — any one is enough.
+        if (/\b\d{3}-\d{2}-\d{4}\b/.test(text)) return true;          // SSN
+        if (/^\s*(from|to|subject|date)\s*:/im.test(text)) return true; // pasted email headers
+        if (cardPresent(text)) return true;                          // credit card
+        // Weak signals — require two together.
+        var weak = 0;
+        if (/[\w.+-]+@[\w-]+\.[\w.-]+/.test(text)) weak++;          // email address
+        if (/(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/.test(text)) weak++; // phone
+        if (/\b\d{1,6}\s+([A-Za-z0-9.'-]+\s+){1,4}(st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|ct|court|way|pl|place)\b/i.test(text)) weak++; // street address
+        return weak >= 2;
+    }
+    function selectedModelPrivate() {
+        if (!modelSelect) return true; // no selector -> don't nag
+        var opt = modelSelect.selectedOptions[0];
+        return !opt || opt.getAttribute('data-private') === '1';
+    }
+    function updateSensitivityNotice() {
+        if (!sensitiveNotice) return;
+        var show = !selectedModelPrivate() && looksSensitive(input.value);
+        sensitiveNotice.hidden = !show;
+    }
+    if (input) input.addEventListener('input', updateSensitivityNotice);
+    if (modelSelect) modelSelect.addEventListener('change', updateSensitivityNotice);
+    updateSensitivityNotice();
+
+    // ----- Settings summary -----
+    // The control bar is a single line summarizing the active settings; every
+    // control lives behind the ⚙ Settings disclosure. Keep the summary in sync
+    // as those controls change (and after a new-chat reset).
+    var settingsSummary = document.getElementById('joai-settings-summary');
+    function updateSettingsSummary() {
+        if (!settingsSummary) return;
+        var parts = [];
+        if (modelSelect && modelSelect.selectedOptions[0]) {
+            // Drop the parenthetical pricing/provider note for the one-liner.
+            parts.push(modelSelect.selectedOptions[0].textContent.trim().split(' (')[0]);
+        }
+        if (dataToggle && dataToggle.checked) parts.push('Data access');
+        if (webToggle && webToggle.checked) parts.push('Web search');
+        if (historyToggle && historyToggle.checked) parts.push('History search');
+        if (memoryToggle && memoryToggle.checked) parts.push('Memory');
+        if (localOnlyInEffect()) parts.push('Local models only');
+        if (thinkingSelect && thinkingSelect.value && thinkingSelect.value !== 'off') {
+            parts.push('Thinking: ' + thinkingSelect.selectedOptions[0].textContent.trim());
+        }
+        settingsSummary.textContent = parts.join('  ·  ');
+    }
+    [modelSelect, dataToggle, webToggle, historyToggle, memoryToggle, thinkingSelect].forEach(function (el) {
+        if (el) el.addEventListener('change', updateSettingsSummary);
+    });
+    updateSettingsSummary();
+
+    // The last message actually submitted, so an inline failed bubble can offer a
+    // Retry that replays it (the File objects stay valid — they aren't revoked).
+    var lastTurn = null;
+    function retryLastTurn() {
+        if (!lastTurn) return;
+        input.value = lastTurn.message;
+        pendingFiles = lastTurn.files.slice();
+        renderAttachStrip();
+        updateSensitivityNotice();
+        send();
+    }
+
+    function send() {
+        var message = input.value.trim();
+        var files = pendingFiles.slice();
+        // A turn needs either text or at least one attachment.
+        if (!message && !files.length) return;
+        clearBlankNotice();
+        hideSendNotice();
+        lastTurn = { message: message, files: files.slice() };
+
+        // Optimistically show the user's message (server returns canonical HTML
+        // on the next load; here we echo the text + any attachment names).
+        var mine = document.createElement('div');
+        mine.className = 'joai-chat-msg joai-chat-mine';
+        if (message) {
+            var mbody = document.createElement('div');
+            mbody.className = 'joai-chat-body';
+            mbody.textContent = message;
+            mine.appendChild(mbody);
+        }
+        if (files.length) {
+            var strip = document.createElement('div');
+            strip.className = 'joai-chat-attachments';
+            files.forEach(function (f) {
+                var chip = document.createElement('span');
+                chip.className = 'joai-chat-attach joai-chat-attach-file';
+                var nm = document.createElement('span');
+                nm.className = 'joai-chat-attach-name';
+                nm.textContent = f.name;
+                chip.appendChild(nm);
+                strip.appendChild(chip);
+            });
+            mine.appendChild(strip);
+        }
+        transcript.appendChild(mine);
+
+        input.value = '';
+        clearPendingFiles();
+        updateSensitivityNotice();
+        setBusy(true);
+
+        var body = new FormData();
+        body.append('message', message);
+        files.forEach(function (f) { body.append('attachments[]', f, f.name); });
+        if (currentConversationId) {
+            body.append('conversation_id', currentConversationId);
+        } else {
+            // New conversation — seed capability flags + model controls from the
+            // panel so the first turn already honors them.
+            if (dataToggle && dataToggle.checked) body.append('data_access', '1');
+            if (webToggle && webToggle.checked) body.append('web_search', '1');
+            if (historyToggle && historyToggle.checked) body.append('history_access', '1');
+            if (memoryToggle) body.append('memory_access', memoryToggle.checked ? '1' : '0');
+            if (localOnlyToggle) body.append('local_models_only', localOnlyInEffect() ? '1' : '0');
+            controls.forEach(function (el) {
+                var f = el.getAttribute('data-field');
+                if (f === 'model' || f === 'thinking_level' || f === 'attachment_mode') body.append(f, el.value);
+                else if (el.value !== '') body.append(f, el.value);
+            });
+        }
+
+        // Roll the optimistic echo back and surface an inline amber note (not a
+        // popup) when the send is rejected — e.g. an attachment the current model
+        // can't read. Restores the typed message and pending files to fix + resend.
+        function rejectSend(msg) {
+            setBusy(false);
+            if (mine && mine.parentNode) mine.parentNode.removeChild(mine);
+            input.value = message;
+            pendingFiles = files.slice();
+            renderAttachStrip();
+            updateSensitivityNotice();
+            showSendNotice(msg);
+        }
+
+        fetch(JOAI_BASE + 'chat_send', { method: 'POST', body: body })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (!data.success) { rejectSend(data.message); return; }
+
+                // Protected chat + locked vault: restore the composer, unlock, resend.
+                if (data.locked) {
+                    setBusy(false);
+                    if (mine && mine.parentNode) mine.parentNode.removeChild(mine);
+                    input.value = message; pendingFiles = files.slice(); renderAttachStrip(); updateSensitivityNotice();
+                    unlockVault().then(function (ok) {
+                        if (ok) send();
+                        else showSendNotice('Unlock your vault to send in this protected chat.');
+                    });
+                    return;
+                }
+
+                if (data.is_new) {
+                    currentConversationId = data.conversation_id;
+                    addThread(data.conversation_id, data.title);
+                    history.replaceState(null, '', JOAI_BASE + 'chat?aic_conversation_id=' + data.conversation_id);
+                }
+
+                // Message sent, but one or more attachments failed server-side and
+                // won't reach the model — surface it inline (the send itself stands).
+                if (data.attachment_warning) { showSendNotice(data.attachment_warning); }
+
+                // Non-fpm fallback may finish the turn inline.
+                if (data.status === 'complete') { appendReply(data.assistant_html); updateUsage(data.conversation_usage); return; }
+                if (data.status === 'failed') { renderFailedBubble(data.message_id, data.error || 'Send failed.'); return; }
+
+                // Async: stream the reply into a live bubble, then swap in the
+                // final markdown bubble on completion.
+                streamInto(data.message_id);
+            })
+            .catch(function () {
+                rejectSend('Send failed — please check your connection and try again.');
+            });
+    }
+
+    function appendReply(html) {
+        setBusy(false);
+        transcript.insertAdjacentHTML('beforeend', html);
+        scrollToBottom();
+        input.focus();
+    }
+
+    var PIN_SVG = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true">'
+        + '<path d="M16 3v2h-1v6l2 2v2h-4v6l-1 1-1-1v-6H7v-2l2-2V5H8V3z"/></svg>';
+
+    function buildThreadItem(id, title, pinned) {
+        var item = document.createElement('div');
+        item.className = 'joai-chat-item' + (pinned ? ' is-pinned' : '');
+        item.setAttribute('data-conversation-id', id);
+        item.setAttribute('data-pinned', pinned ? '1' : '0');
+
+        var a = document.createElement('a');
+        a.className = 'joai-chat-list-item';
+        a.href = JOAI_BASE + 'chat?aic_conversation_id=' + id;
+        a.innerHTML = '<span class="joai-chat-pin" aria-hidden="true">' + PIN_SVG + '</span>'
+            + '<span class="joai-chat-item-title"></span>';
+        a.querySelector('.joai-chat-item-title').textContent = title || 'Untitled';
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'joai-chat-item-menu-btn';
+        btn.setAttribute('aria-label', 'Thread actions');
+        btn.setAttribute('aria-haspopup', 'true');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.innerHTML = '&#8942;';
+
+        var menu = document.createElement('div');
+        menu.className = 'joai-chat-item-menu';
+        menu.setAttribute('role', 'menu');
+        menu.hidden = true;
+        menu.innerHTML =
+            '<button type="button" role="menuitem" data-action="pin">' + (pinned ? 'Unpin' : 'Pin') + '</button>'
+            + '<button type="button" role="menuitem" data-action="rename">Rename</button>'
+            + '<button type="button" role="menuitem" data-action="export">Export</button>'
+            + '<button type="button" role="menuitem" data-action="delete" class="joai-chat-menu-danger">Delete</button>';
+
+        item.appendChild(a);
+        item.appendChild(btn);
+        item.appendChild(menu);
+        return item;
+    }
+
+    function addThread(id, title) {
+        var noThreads = document.getElementById('joai-no-threads');
+        if (noThreads) noThreads.remove();
+        document.querySelectorAll('.joai-chat-list-item.is-active')
+            .forEach(function (a) { a.classList.remove('is-active'); });
+        var item = buildThreadItem(id, title, false);
+        item.querySelector('.joai-chat-list-item').classList.add('is-active');
+        threads.insertBefore(item, threads.firstChild);
+        resortThreads();
+    }
+
+    // Stable re-sort: pinned items first, original order preserved within each group.
+    function resortThreads() {
+        var items = Array.prototype.slice.call(threads.querySelectorAll('.joai-chat-item'));
+        items.sort(function (a, b) {
+            return (b.getAttribute('data-pinned') === '1' ? 1 : 0)
+                 - (a.getAttribute('data-pinned') === '1' ? 1 : 0);
+        });
+        items.forEach(function (it) { threads.appendChild(it); });
+    }
+
+    // ----- Thread actions menu (pin / rename / delete) -----
+    function closeAllMenus() {
+        threads.querySelectorAll('.joai-chat-item-menu').forEach(function (m) { m.hidden = true; });
+        threads.querySelectorAll('.joai-chat-item-menu-btn').forEach(function (b) {
+            b.setAttribute('aria-expanded', 'false');
+        });
+    }
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.joai-chat-item-menu') && !e.target.closest('.joai-chat-item-menu-btn')) {
+            closeAllMenus();
+        }
+    });
+
+    function threadAction(id, action, value) {
+        var body = new FormData();
+        body.append('conversation_id', id);
+        body.append('action', action);
+        if (value !== undefined) body.append('value', value);
+        return fetch(JOAI_BASE + 'chat_thread_action', { method: 'POST', body: body })
+            .then(function (r) { return r.json(); });
+    }
+
+    function startRename(item) {
+        var link = item.querySelector('.joai-chat-list-item');
+        var titleSpan = item.querySelector('.joai-chat-item-title');
+        if (item.querySelector('.joai-chat-rename')) return; // already editing
+        var current = titleSpan.textContent;
+
+        var edit = document.createElement('input');
+        edit.type = 'text';
+        edit.className = 'joai-chat-rename';
+        edit.maxLength = 255;
+        edit.value = current;
+        link.style.display = 'none';
+        item.insertBefore(edit, link);
+        edit.focus();
+        edit.select();
+
+        var done = false;
+        function finish(commit) {
+            if (done) return; done = true;
+            var next = edit.value.trim();
+            edit.remove();
+            link.style.display = '';
+            if (!commit || next === '' || next === current) return;
+            titleSpan.textContent = next; // optimistic
+            var id = item.getAttribute('data-conversation-id');
+            function revert(msg) { titleSpan.textContent = current; if (msg) alert(msg); }
+            threadAction(id, 'rename', next)
+                .then(function (data) {
+                    // Locked vault (a protected chat's title is sealed content):
+                    // one-tap unlock, then retry the rename.
+                    if (data.locked) {
+                        unlockVault().then(function (ok) {
+                            if (!ok) { revert(data.message || 'Unlock your vault to rename this protected chat.'); return; }
+                            threadAction(id, 'rename', next).then(function (d2) {
+                                if (!d2.success || d2.locked) revert(d2.message || 'Rename failed.');
+                            }).catch(function () { revert(); });
+                        });
+                        return;
+                    }
+                    if (!data.success) revert(data.message || 'Rename failed.');
+                })
+                .catch(function () { revert(); });
+        }
+        edit.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+            else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        });
+        edit.addEventListener('blur', function () { finish(true); });
+    }
+
+    function doDelete(item) {
+        var id = item.getAttribute('data-conversation-id');
+        var title = item.querySelector('.joai-chat-item-title').textContent;
+        JoineryModal.confirm(
+            'Delete the conversation "' + title + '"? It will be removed from your list.',
+            function () {
+                threadAction(id, 'delete')
+                    .then(function (data) {
+                        if (!data.success) { alert(data.message || 'Delete failed.'); return; }
+                        var wasActive = String(currentConversationId) === String(id);
+                        item.remove();
+                        if (!threads.querySelector('.joai-chat-item')) {
+                            threads.innerHTML = '<p class="joai-chat-empty" id="joai-no-threads">No conversations yet.</p>';
+                        }
+                        if (wasActive) resetToNewChat();
+                    })
+                    .catch(function () { alert('Delete failed.'); });
+            },
+            { confirmLabel: 'Delete', confirmStyle: 'danger' }
+        );
+    }
+
+    function doPin(item) {
+        var id = item.getAttribute('data-conversation-id');
+        var nowPinned = item.getAttribute('data-pinned') !== '1';
+        threadAction(id, 'pin', nowPinned ? '1' : '0')
+            .then(function (data) {
+                if (!data.success) { alert(data.message || 'Could not update.'); return; }
+                item.setAttribute('data-pinned', nowPinned ? '1' : '0');
+                item.classList.toggle('is-pinned', nowPinned);
+                var pinBtn = item.querySelector('[data-action="pin"]');
+                if (pinBtn) pinBtn.textContent = nowPinned ? 'Unpin' : 'Pin';
+                resortThreads();
+            })
+            .catch(function () { alert('Could not update.'); });
+    }
+
+    // ----- Export a thread (Markdown or plain text; Copy or Download) -----
+    function slugifyTitle(title) {
+        var s = (title || 'conversation').toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+        return s || 'conversation';
+    }
+    function downloadText(filename, text) {
+        var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+    function openExportDialog(data) {
+        var slug = slugifyTitle(data.title);
+        var wrap = document.createElement('div');
+        wrap.className = 'joai-export';
+        wrap.innerHTML =
+            '<p class="joai-export-title"></p>'
+            + '<fieldset class="joai-export-formats">'
+            + '<label><input type="radio" name="joai-export-format" value="markdown" checked>'
+            + ' Markdown <span class="joai-export-hint">source — paste where Markdown renders</span></label>'
+            + '<label><input type="radio" name="joai-export-format" value="text">'
+            + ' Plain text <span class="joai-export-hint">paste-ready for social media</span></label>'
+            + '</fieldset>';
+        wrap.querySelector('.joai-export-title').textContent =
+            'Export “' + (data.title || 'Untitled') + '”';
+
+        function chosen() {
+            var sel = wrap.querySelector('input[name="joai-export-format"]:checked');
+            var fmt = sel ? sel.value : 'markdown';
+            return fmt === 'text'
+                ? { content: data.text, ext: 'txt' }
+                : { content: data.markdown, ext: 'md' };
+        }
+
+        JoineryModal.open(wrap, {
+            buttons: [
+                { label: 'Cancel', style: 'secondary' },
+                { label: 'Download', style: 'secondary', onClick: function () {
+                    var c = chosen();
+                    downloadText(slug + '.' + c.ext, c.content);
+                } },
+                // Copy runs synchronously off this click (content is already in
+                // memory), so the clipboard write keeps the user-activation.
+                { label: 'Copy', style: 'primary', onClick: function () {
+                    var c = chosen();
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(c.content).catch(function () { fallbackCopy(c.content); });
+                    } else {
+                        fallbackCopy(c.content);
+                    }
+                } }
+            ]
+        });
+    }
+    function doExport(item, retried) {
+        var id = item.getAttribute('data-conversation-id');
+        fetch(JOAI_BASE + 'chat_export?conversation_id=' + encodeURIComponent(id))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                // Locked vault (an export is a content read): one-tap unlock,
+                // then retry the export.
+                if (data.locked && !retried) {
+                    unlockVault().then(function (ok) {
+                        if (ok) { doExport(item, true); return; }
+                        alert(data.message || 'Unlock your vault to export this chat.');
+                    });
+                    return;
+                }
+                if (!data.success) { alert(data.message || 'Export failed.'); return; }
+                openExportDialog(data);
+            })
+            .catch(function () { alert('Export failed.'); });
+    }
+
+    // ----- Thread search (debounced; title + message-content match) -----
+    var threadSearch = document.getElementById('joai-thread-search');
+    function renderThreadList(list) {
+        threads.innerHTML = '';
+        if (!list.length) {
+            threads.innerHTML = '<p class="joai-chat-empty" id="joai-no-threads">No conversations found.</p>';
+            return;
+        }
+        list.forEach(function (c) {
+            var item = buildThreadItem(c.id, c.title, c.pinned);
+            if (String(c.id) === String(currentConversationId)) {
+                item.querySelector('.joai-chat-list-item').classList.add('is-active');
+            }
+            threads.appendChild(item);
+        });
+    }
+    if (threadSearch) {
+        var searchTimer = null;
+        var searchSeq = 0;
+        threadSearch.addEventListener('input', function () {
+            var term = threadSearch.value.trim();
+            if (searchTimer) clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () {
+                var seq = ++searchSeq;
+                fetch(JOAI_BASE + 'chat_list?search=' + encodeURIComponent(term))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (seq !== searchSeq) return; // a newer query superseded this one
+                        if (!data || !data.success) return;
+                        renderThreadList(data.conversations || []);
+                        // Locked vault can't search sealed chats — offer to unlock.
+                        if (data.search_locked) {
+                            var b = document.createElement('button');
+                            b.type = 'button';
+                            b.className = 'joai-btn joai-chat-search-unlock';
+                            b.style.cssText = 'margin:8px;font-size:13px;';
+                            b.textContent = 'Unlock to search protected chats';
+                            b.addEventListener('click', function () {
+                                unlockVault().then(function (ok) {
+                                    if (ok) threadSearch.dispatchEvent(new Event('input'));
+                                });
+                            });
+                            threads.insertBefore(b, threads.firstChild);
+                        }
+                    })
+                    .catch(function () {});
+            }, 250);
+        });
+    }
+
+    threads.addEventListener('click', function (e) {
+        var trigger = e.target.closest('.joai-chat-item-menu-btn');
+        if (trigger) {
+            e.preventDefault();
+            var menu = trigger.parentNode.querySelector('.joai-chat-item-menu');
+            var isOpen = !menu.hidden;
+            closeAllMenus();
+            if (!isOpen) {
+                menu.hidden = false;
+                trigger.setAttribute('aria-expanded', 'true');
+                // Flip the menu above the trigger if it would spill past the
+                // bottom of the scrollable thread list.
+                menu.classList.remove('open-up');
+                var scroll = trigger.closest('.joai-chat-list');
+                if (scroll && menu.getBoundingClientRect().bottom > scroll.getBoundingClientRect().bottom) {
+                    menu.classList.add('open-up');
+                }
+            }
+            return;
+        }
+        var actionBtn = e.target.closest('.joai-chat-item-menu [data-action]');
+        if (actionBtn) {
+            e.preventDefault();
+            var item = actionBtn.closest('.joai-chat-item');
+            closeAllMenus();
+            var action = actionBtn.getAttribute('data-action');
+            if (action === 'pin') doPin(item);
+            else if (action === 'rename') startRename(item);
+            else if (action === 'export') doExport(item);
+            else if (action === 'delete') doDelete(item);
+        }
+    });
+
+    // ----- Per-turn actions (copy / delete) -----
+    // Event-delegated so it works for bubbles rendered on load and ones swapped
+    // in after a turn completes.
+    function fallbackCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (err) {}
+        ta.remove();
+    }
+    function copyTurn(bubble, btn) {
+        var text = bubble.getAttribute('data-raw') || '';
+        var prev = btn.textContent;
+        function flash() {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = prev; }, 1200);
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(flash, function () { fallbackCopy(text); flash(); });
+        } else {
+            fallbackCopy(text);
+            flash();
+        }
+    }
+    function deleteTurn(bubble) {
+        var id = bubble.getAttribute('data-message-id');
+        if (!id) return;
+        // Deleting a query (your bubble) takes its reply with it; deleting a
+        // standalone reply removes just that one.
+        var isUser = bubble.classList.contains('joai-chat-mine');
+        var prompt = isUser
+            ? 'Delete this message and the reply to it? It will be removed from the conversation.'
+            : 'Delete this message? It will be removed from the conversation.';
+        JoineryModal.confirm(
+            prompt,
+            function () {
+                var body = new FormData();
+                body.append('message_id', id);
+                body.append('action', 'delete');
+                fetch(JOAI_BASE + 'chat_turn_action', { method: 'POST', body: body })
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        if (!data.success) { alert(data.message || 'Delete failed.'); return; }
+                        var ids = (data.deleted_ids && data.deleted_ids.length) ? data.deleted_ids : [id];
+                        ids.forEach(function (mid) {
+                            var el = transcript.querySelector('.joai-chat-msg[data-message-id="' + mid + '"]');
+                            if (el) el.remove();
+                        });
+                    })
+                    .catch(function () { alert('Delete failed.'); });
+            },
+            { confirmLabel: 'Delete', confirmStyle: 'danger' }
+        );
+    }
+    transcript.addEventListener('click', function (e) {
+        var actionBtn = e.target.closest('.joai-chat-action');
+        if (!actionBtn) return;
+        var bubble = actionBtn.closest('.joai-chat-msg');
+        if (!bubble) return;
+        var action = actionBtn.getAttribute('data-action');
+        if (action === 'copy') copyTurn(bubble, actionBtn);
+        else if (action === 'delete') deleteTurn(bubble);
+    });
+
+    // ---- Waiting for you: this conversation's pending queued actions ----
+    // Cards are built from server-stated facts (ai_actions_list) — the client
+    // never interprets the stored arguments — and resolve through
+    // ai_action_resolve, the same path the AI panel's list uses.
+    var queuedBox = document.getElementById('joai-queued');
+
+    function refreshQueuedCards() {
+        if (!queuedBox) return;
+        if (!currentConversationId || !window.joineryApi) { queuedBox.hidden = true; return; }
+        joineryApi.post('joinery_ai/ai_actions_list',
+                { conversation_id: currentConversationId, status: 'pending' })
+            .then(function (data) { renderQueuedCards((data && data.actions) || []); })
+            .catch(function () { /* quiet — the cards refresh on the next turn */ });
+    }
+
+    function renderQueuedCards(actions) {
+        if (!queuedBox) return;
+        queuedBox.innerHTML = '';
+        if (!actions.length) { queuedBox.hidden = true; return; }
+        actions.forEach(function (a) {
+            var card = document.createElement('div');
+            card.className = 'joai-queued-card';
+            var head = document.createElement('div');
+            head.className = 'joai-queued-head';
+            head.textContent = 'Waiting for you';
+            card.appendChild(head);
+            if (a.locked) {
+                var lockedLine = document.createElement('p');
+                lockedLine.className = 'joai-queued-fact';
+                lockedLine.textContent = 'Sealed to your vault — unlock to view and resolve.';
+                card.appendChild(lockedLine);
+            } else {
+                if (a.fields) {
+                    queuedFields(card, a);
+                } else {
+                    (a.facts || []).forEach(function (line, i) {
+                        var p = document.createElement('p');
+                        p.className = 'joai-queued-fact' + (i === 0 ? ' joai-queued-headline' : '');
+                        p.textContent = line;
+                        card.appendChild(p);
+                    });
+                }
+                if (a.model_note) {
+                    var det = document.createElement('details');
+                    det.className = 'joai-queued-note';
+                    var sum = document.createElement('summary');
+                    sum.textContent = 'The assistant’s stated reason';
+                    det.appendChild(sum);
+                    var q = document.createElement('blockquote');
+                    q.textContent = a.model_note;
+                    det.appendChild(q);
+                    card.appendChild(det);
+                }
+                var actionsRow = document.createElement('div');
+                actionsRow.className = 'joai-queued-actions';
+                var approve = document.createElement('button');
+                approve.type = 'button';
+                approve.className = 'joai-btn joai-btn-primary';
+                approve.textContent = 'Approve';
+                var decline = document.createElement('button');
+                decline.type = 'button';
+                decline.className = 'joai-btn';
+                decline.textContent = 'Decline';
+                approve.addEventListener('click', function () { resolveQueued(a.action_id, 'approve', card); });
+                decline.addEventListener('click', function () { resolveQueued(a.action_id, 'decline', card); });
+                actionsRow.appendChild(approve);
+                actionsRow.appendChild(decline);
+                card.appendChild(actionsRow);
+            }
+            queuedBox.appendChild(card);
+        });
+        queuedBox.hidden = false;
+        scrollToBottom();
+    }
+
+    // A tool's labelled fields (the same server-stated facts, label beside
+    // value): a link on one line until clicked, a note's first three lines
+    // and a 'more' when it is cut.
+    function queuedFields(card, a) {
+        function node(tag, cls, text) {
+            var n = document.createElement(tag);
+            n.className = cls;
+            if (text != null) n.textContent = text;
+            return n;
+        }
+        if (a.kicker) card.appendChild(node('p', 'joai-queued-kicker', a.kicker));
+        card.appendChild(node('p', 'joai-queued-fact joai-queued-headline', a.headline || ''));
+        var dl = node('dl', 'joai-queued-fields');
+        a.fields.forEach(function (f) {
+            var row = node('div', 'joai-queued-field');
+            row.appendChild(node('dt', 'joai-queued-label', f.label));
+            var dd = node('dd', 'joai-queued-value');
+            if (f.display === 'line') {
+                var line = node('button', 'joai-queued-line', f.value);
+                line.type = 'button';
+                line.title = f.value;
+                line.addEventListener('click', function () { line.classList.toggle('is-open'); });
+                dd.appendChild(line);
+            } else if (f.display === 'clamp') {
+                var text = node('div', 'joai-queued-clamp', f.value);
+                var more = node('button', 'joai-queued-more', 'more');
+                more.type = 'button';
+                more.hidden = true;
+                more.addEventListener('click', function () {
+                    more.textContent = text.classList.toggle('is-open') ? 'less' : 'more';
+                });
+                dd.appendChild(text);
+                dd.appendChild(more);
+                requestAnimationFrame(function () {
+                    more.hidden = text.clientHeight > 0
+                        ? text.scrollHeight <= text.clientHeight + 1
+                        : !(f.value.length > 150 || f.value.split('\n').length > 3);
+                });
+            } else {
+                dd.textContent = f.value;
+            }
+            row.appendChild(dd);
+            dl.appendChild(row);
+        });
+        card.appendChild(dl);
+    }
+
+    function resolveQueued(actionId, resolution, card) {
+        card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+        joineryApi.post('joinery_ai/ai_action_resolve',
+                { action_id: actionId, resolution: resolution })
+            .then(function (data) {
+                var c = data && data.card;
+                var line = document.createElement('p');
+                line.className = 'joai-queued-fact';
+                if (c && c.status === 'approved') {
+                    line.textContent = 'Approved — done.' + (c.result ? ' ' + c.result : '');
+                } else if (c && c.status === 'failed') {
+                    line.textContent = 'Approved, but it failed: ' + (c.result || 'unknown error');
+                } else {
+                    line.textContent = 'Declined — nothing was run.';
+                }
+                card.innerHTML = '';
+                card.appendChild(line);
+                setTimeout(refreshQueuedCards, 4000);
+            })
+            .catch(function (err) {
+                alert(err && err.message ? err.message : 'Could not resolve the action.');
+                refreshQueuedCards();
+            });
+    }
+
+    refreshQueuedCards();
+
+    function replaceBubble(messageId, html) {
+        setBusy(false);
+        var bubble = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
+        if (bubble) bubble.outerHTML = html;
+        scrollToBottom();
+    }
+
+    // A failed turn renders inline in the transcript (never a popup): the live
+    // bubble for this message becomes an error card carrying the server's message
+    // text, with a Retry that replays the last submitted turn. The error string is
+    // set via textContent — provider error text is not trusted markup.
+    function renderFailedBubble(messageId, errorText) {
+        setBusy(false);
+        JoineryChatTranscript.failedBubble(transcript, messageId, errorText,
+            lastTurn ? retryLastTurn : null);
+        scrollToBottom();
+    }
+
+    function resetToNewChat() {
+        currentConversationId = null;
+        transcript.innerHTML = '<p class="joai-chat-empty" id="joai-blank">Start a new conversation below.</p>';
+        // A fresh thread has no usage yet — clear and hide the bar until a turn lands.
+        if (usageValue) usageValue.textContent = '';
+        if (usageMeta) usageMeta.hidden = true;
+        document.querySelectorAll('.joai-chat-list-item.is-active')
+            .forEach(function (a) { a.classList.remove('is-active'); });
+        // New chats reset to the configured defaults: model + thinking back to
+        // their defaults, web search on (when a search key is set), data access
+        // off, and per-chat numeric/instruction overrides cleared (blank =
+        // inherit the default).
+        if (dataToggle) dataToggle.checked = false;
+        if (webToggle && !webToggle.disabled) webToggle.checked = DEFAULT_WEB;
+        if (historyToggle) historyToggle.checked = false;
+        if (memoryToggle) memoryToggle.checked = DEFAULT_MEMORY;
+        // A new chat's add-on switch is free again (the one-way lock belongs to
+        // the chat that carried it) and starts at the configured default.
+        if (localOnlyToggle) {
+            localOnlyToggle.disabled = false;
+            localOnlyToggle.checked = DEFAULT_LOCAL_ONLY;
+            if (localOnlyToggle.parentNode) localOnlyToggle.parentNode.classList.remove('is-disabled');
+            applyLocalOnlyModelGate();
+        }
+        if (modelSelect) modelSelect.value = DEFAULT_MODEL;
+        if (thinkingSelect) thinkingSelect.value = DEFAULT_THINKING;
+        controls.forEach(function (el) {
+            var f = el.getAttribute('data-field');
+            if (f === 'temperature' || f === 'top_p' || f === 'max_tokens' || f === 'instructions') el.value = '';
+            if (f === 'attachment_mode') el.value = DEFAULT_ATTACH_MODE;
+        });
+        clearPendingFiles();
+        updateSettingsSummary();
+        history.replaceState(null, '', JOAI_BASE + 'chat');
+        input.focus();
+    }
+
+    newChatBtn.addEventListener('click', resetToNewChat);
+
+    // Close the settings panel when clicking outside it (popover behavior).
+    var settingsPanel = document.querySelector('.joai-chat-settings');
+    if (settingsPanel) {
+        document.addEventListener('click', function (e) {
+            if (settingsPanel.open && !e.target.closest('.joai-chat-settings')) {
+                settingsPanel.open = false;
+            }
+        });
+    }
+
+    // The Send button doubles as Cancel while a turn is in flight (setBusy morphs
+    // it), so the click is state-aware.
+    sendBtn.addEventListener('click', function () {
+        if (sendBtn.classList.contains('joai-chat-cancel-active')) cancelInflight();
+        else send();
+    });
+    input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+})();

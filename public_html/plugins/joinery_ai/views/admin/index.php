@@ -204,8 +204,7 @@ foreach ($recipes as $recipe) {
              . (int)$recipe->key . '">Edit</a> '
              . '<form method="post" action="/admin/joinery_ai/run_now" class="d-inline">'
              . '<input type="hidden" name="rcp_recipe_id" value="' . (int)$recipe->key . '">'
-             . '<button type="submit" class="btn btn-sm btn-outline-success" '
-             . 'onclick="this.disabled=true;this.innerHTML=\'Running…\';this.form.submit();">'
+             . '<button type="submit" class="btn btn-sm btn-outline-success" data-jy-busy="Running…">'
              . 'Run Now</button></form>';
 
     // Stop button — shown only when the latest run is in-flight. Sets
@@ -215,8 +214,8 @@ foreach ($recipes as $recipe) {
         $actions .= ' <form method="post" action="/admin/joinery_ai/stop_run" class="d-inline">'
                   . '<input type="hidden" name="rcr_recipe_run_id" value="' . (int)$latest['rcr_recipe_run_id'] . '">'
                   . '<input type="hidden" name="rcp_recipe_id" value="' . (int)$recipe->key . '">'
-                  . '<button type="submit" class="btn btn-sm btn-outline-danger" '
-                  . 'onclick="return confirm(\'Stop this run?\');">Stop</button>'
+                  . '<button type="button" class="btn btn-sm btn-outline-danger" '
+                  . 'data-jy-confirm="Stop this run?" data-jy-submit="" data-jy-submit-self>Stop</button>'
                   . '</form>';
     }
 

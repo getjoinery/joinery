@@ -21,6 +21,7 @@
  * The unproven state remains as the fallback screen: a session that died
  * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.7 - its config is the JSON block #rr-panel-config, not an inline script
  * @version 2.6 - the rotation box says restores wait for the change to be confirmed with the current key
  * @version 2.5 - loads vault-crypto.js, whose X-Wing the ceremony runs on (post_quantum_sealing WP2)
  * @version 2.4 - the command-line proof command comes from BackupRecoveryKey::cli_unseal_command()
@@ -262,15 +263,15 @@ class RecoveryKeySetupPanel {
 	}
 
 	/**
-	 * Load the shared script and hand it this panel's element ids. Both configs
-	 * go through window.rrPanel; recovery-readiness.js attaches whichever is
-	 * present on DOMContentLoaded.
+	 * Load the shared script and hand it this panel's element ids, as the
+	 * JSON block #rr-panel-config (no inline script); recovery-readiness.js
+	 * attaches whichever config it holds on DOMContentLoaded.
 	 */
 	private static function emitScript(array $config): void {
 		echo VaultCrypto::browserScriptTag();
 		echo '<script defer src="/assets/js/recovery-readiness.js?v='
 		   . (@filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1') . '"></script>';
-		echo '<script>window.rrPanel = ' . json_encode($config,
-			JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
+		echo '<script type="application/json" id="rr-panel-config">' . json_encode($config,
+			JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) . '</script>';
 	}
 }

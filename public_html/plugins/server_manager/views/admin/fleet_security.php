@@ -156,8 +156,7 @@ if (!$latest || !$latest->is_running()) {
 		. ' Nothing is rebooted. The run stops at the first failure.';
 	echo '<form id="fleetSecurityStart" method="post" action="' . $self_url . '" class="mb-3">' . SmAdminCsrf::field()
 		. '<input type="hidden" name="action" value="start_run">'
-		. '<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm(' . $h(json_encode($ask))
-		. ', function(){ document.getElementById(\'fleetSecurityStart\').submit(); })"'
+		. '<button type="button" class="btn btn-sm btn-primary" data-jy-confirm="' . $h($ask) . '" data-jy-submit="fleetSecurityStart"'
 		. ($plan['nodes'] ? '' : ' disabled') . '>Install security updates everywhere</button>';
 	echo '</form>';
 	if ($plan['left_out']) {

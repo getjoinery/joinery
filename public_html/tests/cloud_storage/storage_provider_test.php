@@ -148,11 +148,12 @@ BackupTargetForm::render($fw, null, array('files' => true));
 echo $fw->end_form();
 $html = ob_get_clean();
 $rules_of = function ($html) {
-	// The rules FormWriter's script carries for the picker.
-	if (!preg_match('/const visibilityRules\w+ = (\{.*?\});\n/', $html, $m)) {
+	// The rules FormWriter carries for the picker, in its visibility block.
+	if (!preg_match('/<script type="application\/json" data-jy-visibility>(.*?)<\/script>/s', $html, $m)) {
 		return null;
 	}
-	return json_decode($m[1], true);
+	$cfg = json_decode($m[1], true);
+	return is_array($cfg) && isset($cfg['rules']) ? $cfg['rules'] : null;
 };
 check(strpos($html, 'name="bkt_provider"') !== false && strpos($html, '<select') !== false, 'the picker draws as a select');
 check(strpos($html, 'value="b2"') !== false && strpos($html, 'value="r2"') !== false && strpos($html, 'value="generic"') !== false, 'the picker offers every provider');

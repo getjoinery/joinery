@@ -3,6 +3,8 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.29 - no inline script: the build's reload is data-jy-reload-after, the download button assets/js/admin-backups-download.js
+ * @version 1.28 - the data-root confirm is the submit button's 'confirm' option (no inline handler)
  * @version 1.27 - a site its management node backs up says where to verify a backup now
  * @version 1.26 - a build that had to step up through /profile/verify-stepup (authenticator codes, no passkey) resumes on return
  *                 instead of being forgotten; remembered in sessionStorage (which no other site can set) for 3 minutes,
@@ -107,7 +109,7 @@ $when = function ($utc) use ($tz) {
 // management node did.
 //
 // The page renders exactly one approval ceremony at a time —
-// recovery-readiness.js binds one window.rrApproval, and two key boxes on one
+// recovery-readiness.js binds one #rr-approval-config, and two key boxes on one
 // screen is how a person answers the wrong one. all_pending() is in precedence
 // order (a removal outranks a restore); any other waits and says so.
 if ($approvals) {
@@ -335,9 +337,7 @@ if ($dr !== null && (DataRootStatus::encrypted($dr) || $dr_offer['offered'])) {
 			$fw->hiddeninput($name, '', array('value' => $value));
 		}
 		$fw->submitbutton('btn_' . $action . $variant, $label, array('class' => 'btn btn-sm btn-outline-primary mt-1',
-			'onclick' => 'event.preventDefault(); var b=this, f=this.form; JoineryModal.confirm('
-				. json_encode($confirm, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
-				. ', function(){ f.requestSubmit(b); });'));
+			'confirm' => $confirm));
 		$fw->end_form();
 	};
 	echo '<tr id="data-root"><th>Data root</th><td>';
@@ -458,7 +458,7 @@ if ($download && $download['status'] === 'building') {
 	echo '<p class="mb-1"><strong>Building a backup to download</strong>, started '
 	   . htmlspecialchars($when(gmdate('Y-m-d H:i:s', (int)$download['started']))) . '. '
 	   . 'A Download button appears here when it is ready; this page checks every 30 seconds.</p>';
-	echo '<script>setTimeout(function () { window.location.reload(); }, 30000);</script>';
+	echo '<span hidden data-jy-reload-after="30"></span>';
 } elseif ($download && $download['status'] === 'ready') {
 	echo '<p class="mb-1"><strong>A backup is ready to download:</strong> '
 	   . htmlspecialchars(BackupDownload::download_name($download)) . ', '
@@ -505,67 +505,7 @@ echo '</div>';
 if ($download_offer !== null || ($download && $download['status'] === 'ready')) {
 	echo '<script defer src="/assets/js/passkeys.js?v=' . (@filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1') . '"></script>';
 	?>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-	function fail(e) {
-		JoineryModal.alert((e && e.message) || 'That did not work.');
-	}
-	var start = document.getElementById('btn_download_start');
-	// A build confirmed here that had to step up on /profile/verify-stepup (codes, no
-	// passkey) is remembered for the trip and resumed on return. sessionStorage
-	// is this site's own: a link from elsewhere cannot set it, as a URL could.
-	var RESUME = 'joinery_backup_download_resume';
-	function remembered() {
-		// Only the trip just made, landing where the step-up returns (#download):
-		// a step-up abandoned and a visit later starts nothing unconfirmed.
-		try {
-			var v = parseInt(sessionStorage.getItem(RESUME) || '0', 10);
-			sessionStorage.removeItem(RESUME);
-			return v > 0 && Date.now() - v < 180000 && location.hash === '#download';
-		} catch (x) { return false; }
-	}
-	// resumed: the build the person confirmed before stepping up. If it still
-	// asks for a step-up, it says so instead of sending them round again.
-	function build(resumed) {
-		start.disabled = true;
-		var call = function () { return joineryApi.post('backup_download_start', {}); };
-		// No return URL: without a usable passkey withStepUp hands the refusal
-		// back, so the trip to /profile/verify-stepup below is the one that remembers
-		// the build. Given a return URL it would leave for the page itself.
-		var run = window.JoineryPasskeys ? JoineryPasskeys.withStepUp(call) : call();
-		run.then(function () { window.location.reload(); })
-			.catch(function (e) {
-				start.disabled = false;
-				if (e && e.data && e.data.requires_stepup && !resumed) {
-					try { sessionStorage.setItem(RESUME, String(Date.now())); } catch (x) {}
-					window.location = '/profile/verify-stepup?return=' + encodeURIComponent('/admin/admin_backups#download');
-					return;
-				}
-				fail(e);
-			});
-	}
-	if (start) {
-		start.addEventListener('click', function () {
-			JoineryModal.confirm(start.getAttribute('data-confirm'), function () { build(false); }, { confirmLabel: 'Build the backup', confirmStyle: 'primary' });
-		});
-		if (remembered()) {
-			build(true);
-		}
-	} else {
-		remembered();
-	}
-	var del = document.getElementById('btn_download_delete');
-	if (del) {
-		del.addEventListener('click', function () {
-			JoineryModal.confirm('Delete the backup built for download from this server?', function () {
-				joineryApi.post('backup_download_delete', {})
-					.then(function () { window.location.reload(); })
-					.catch(fail);
-			}, { confirmLabel: 'Delete it' });
-		});
-	}
-});
-</script>
+<?php echo PageScript::src('assets/js/admin-backups-download.js'); ?>
 	<?php
 }
 $page->end_box();

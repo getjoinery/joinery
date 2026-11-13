@@ -13,6 +13,7 @@
  * Code that picks a test or live credential asks active(); nothing reads the
  * session key or the debug setting for this itself.
  *
+ * @version 1.2 - the banner is a <template> base.js inserts, not an inline script
  * @version 1.1 - on_test_side(): run one piece of work against the test side, whatever the session and
  *   the debug setting say, for a record made on the test side (a test-mode order's subscription)
  * @version 1.0
@@ -79,9 +80,9 @@ class TestMode {
 	}
 
 	/**
-	 * The banner every page carries while this session has it on: a script that
-	 * puts a bar at the top of the page once the body exists (this is printed
-	 * in the head). Nothing when it is off, or on only through debug, where
+	 * The banner every page carries while this session has it on: a template
+	 * that base.js puts at the top of the page once the body exists (this is
+	 * printed in the head). Nothing when it is off, or on only through debug, where
 	 * every page of the site is a test page anyway.
 	 */
 	public static function banner_html(): string {
@@ -94,13 +95,11 @@ class TestMode {
 			. '<span>Test mode is on in this browser: payments go to Stripe\'s and PayPal\'s test accounts, and nothing is charged.</span>'
 			. '<form method="post" action="/test_mode" style="margin:0">'
 			. '<input type="hidden" name="action" value="off">'
-			. '<input type="hidden" name="return" value="">'
+			. '<input type="hidden" name="return" value="" data-jy-current-path>'
 			. '<button type="submit" style="font:inherit;background:#fff;color:#b45309;border:0;border-radius:4px;padding:2px 10px;cursor:pointer">Turn off</button>'
 			. '</form></div>';
-		return '<script>document.addEventListener("DOMContentLoaded",function(){'
-			. 'if(document.getElementById("jy-test-mode-banner"))return;'
-			. 'var w=document.createElement("div");w.innerHTML=' . json_encode($bar, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';'
-			. 'var b=w.firstChild;b.querySelector("input[name=return]").value=location.pathname+location.search;'
-			. 'document.body.insertBefore(b,document.body.firstChild);});</script>' . "\n";
+		// base.js puts it at the top of <body> and fills in the page's own
+		// address for Turn off to come back to: no inline script.
+		return '<template data-jy-body-insert="afterbegin">' . $bar . '</template>' . "\n";
 	}
 }

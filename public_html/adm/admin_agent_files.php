@@ -138,7 +138,7 @@ foreach ($agent_files as $agent_file) {
 		echo '<strong>An updated agent template is available.</strong> ';
 		echo '<a class="btn btn-sm btn-outline-primary" href="/admin/admin_agent_file_compare?active_id=' . (int)$agent_file->key . '" style="margin-left:8px;">Compare</a> ';
 		echo '<form method="POST" action="/admin/admin_agent_files" style="display:inline; margin-left:8px;" '
-			. 'onsubmit="return confirm(\'Switch to the upgrade candidate? The current content will be preserved as an archived row.\');">';
+			. 'data-jy-confirm="Switch to the upgrade candidate? The current content will be preserved as an archived row.">';
 		echo '<input type="hidden" name="action" value="switch_to_candidate">';
 		echo '<input type="hidden" name="agf_agent_file_id" value="' . (int)$agent_file->key . '">';
 		echo '<button type="submit" class="btn btn-sm btn-primary">Switch to new version</button>';

@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.5 - output_javascript() writes a data-jy-validate block and the requirements' script files (no inline script)
  * @version 1.4 - buyer_amount(): an amount a buyer types is a well-formed amount above zero, or refused
  * @version 1.3 - prepare() holds the form's rules for the link's form, the fulfilment provider key and
  *                ownership vs subscription; open to content packs (specs/content_pack_feature.md)
@@ -680,17 +681,27 @@ public function get_requirement_info($output='text') {
 		return array($rules, $messages, $error_message_objects);
 	}
 
+	/**
+	 * The product form's browser side: its requirements' script files, and
+	 * its validation rules as a data-jy-validate block, which joinery-forms.js
+	 * hands to the form's validator (merged with FormWriter's own rules for
+	 * the same form). No inline script.
+	 */
 	function output_javascript($formwriter, $extra_data=array(), $form_id='product_form') {
 
 		$validation_info = array();
-
-		echo '<script type="text/javascript">';
+		$files = array();
 		foreach ($this->get_product_requirements() as $requirement) {
-			echo $requirement->get_javascript();
+			foreach ($requirement->get_script_files() as $file) {
+				$files[$file] = true;
+			}
 			$info = $requirement->get_validation_info();
 			if ($info) {
 				$validation_info[] = $info;
 			}
+		}
+		foreach (array_keys($files) as $file) {
+			echo PageScript::src($file);
 		}
 
 		if ($validation_info) {
@@ -704,61 +715,31 @@ public function get_requirement_info($output='text') {
 				}
 			}
 
-			// Generate JoineryValidation JavaScript (migrated from jQuery Validate)
-			echo "
-				document.addEventListener('DOMContentLoaded', function() {
-					const validationOptions = {
-						debug: false,
-						rules: {";
-
-			// Output rules
-			$first = true;
-			foreach ($rules as $fieldName => $fieldRules) {
-				if (!$first) echo ',';
-				$first = false;
-				echo "\n\t\t\t\t\t\t" . json_encode($fieldName) . ': {';
-				$firstRule = true;
-				foreach ($fieldRules as $ruleName => $ruleValue) {
-					if (!$firstRule) echo ', ';
-					$firstRule = false;
-					echo $ruleName . ': ';
-					// Handle boolean values
-					if ($ruleValue === 'true' || $ruleValue === 'false') {
-						echo $ruleValue;
-					} else {
-						echo json_encode($ruleValue);
+			// 'true' and 'false' arrive as words and mean the booleans.
+			foreach ($rules as $field_name => $field_rules) {
+				foreach ($field_rules as $rule_name => $rule_value) {
+					if ($rule_value === 'true' || $rule_value === 'false') {
+						$rules[$field_name][$rule_name] = ($rule_value === 'true');
 					}
 				}
-				echo '}';
 			}
-
-			echo "
-						},
-						messages: {";
-
-			// Output custom messages
-			$firstMsg = true;
-			foreach ($messages as $fieldName => $fieldMessages) {
-				foreach ($fieldMessages as $ruleName => $message) {
+			$kept_messages = array();
+			foreach ($messages as $field_name => $field_messages) {
+				foreach ($field_messages as $rule_name => $message) {
 					if (!empty($message)) {
-						if (!$firstMsg) echo ',';
-						$firstMsg = false;
-						echo "\n\t\t\t\t\t\t" . json_encode($fieldName) . ': {';
-						echo $ruleName . ': ' . json_encode($message);
-						echo '}';
+						$kept_messages[$field_name][$rule_name] = $message;
 					}
 				}
 			}
 
-			echo "
-						}
-					};
-
-					JoineryValidation.init('" . $form_id . "', validationOptions);
-				});
-			";
+			echo '<script type="application/json" data-jy-validate>' . PageScript::encode(array(
+				'form'     => $form_id,
+				'rules'    => (object)$rules,
+				'messages' => (object)$kept_messages,
+			)) . '</script>';
+			// The validator itself is in every page's footer.
+			echo FormWriterV2Base::scriptOnce('joinery-forms.js');
 		}
-		echo '</script>';
 	}
 
 	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL, $prefill_data=NULL) {

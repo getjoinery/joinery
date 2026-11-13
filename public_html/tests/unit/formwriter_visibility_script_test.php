@@ -7,7 +7,8 @@
  * needs: []
  */
 /**
- * PURPOSE: Pins the per-trigger-type JavaScript that FormWriter emits for
+ * PURPOSE: Pins the per-trigger-type data FormWriter emits (and what
+ * assets/js/joinery-forms.js reads from it) for
  * visibility_rules. A field can drive show/hide of other fields based on its
  * current value; how that "current value" is read out of the DOM differs by
  * trigger type, and getting it wrong silently breaks the form with no error.
@@ -28,6 +29,7 @@
  *
  * Run:  php tests/unit/formwriter_visibility_script_test.php
  *
+ * @version 2.0 - pins the visibility JSON block and what joinery-forms.js reads, not generated inline JS
  * @version 1.1
  */
 
@@ -40,6 +42,17 @@ function thrown(callable $fn) {
     try { $fn(); return null; }
     catch (Throwable $e) { return $e->getMessage(); }
 }
+
+/** The visibility block a rendered field carries, decoded, or null. */
+function vis_block($html) {
+    if (!preg_match('/<script type="application\/json" data-jy-visibility>(.*?)<\/script>/s', $html, $m)) {
+        return null;
+    }
+    return json_decode($m[1], true);
+}
+
+// The script that applies the blocks (WP3: FormWriter writes no inline script).
+$formsJs = (string)file_get_contents(PathHelper::getIncludePath('assets/js/joinery-forms.js'));
 
 /** Render one field through HTML5 and return the emitted markup+script. */
 function render_field($method, array $args) {
@@ -56,10 +69,13 @@ $selectHtml = render_field('dropinput', ['mode', 'Mode', [
     'value' => 'a',
     'visibility_rules' => ['a' => ['show' => ['x']], 'b' => ['hide' => ['x']]],
 ]]);
-ok('select trigger reads element .value',
-      strpos($selectHtml, 'const selected = el.value;') !== false);
-ok('select trigger does NOT read .checked',
-      strpos($selectHtml, '.checked') === false);
+$selectCfg = vis_block($selectHtml);
+ok('select trigger is a select block on its element, with its rules',
+      ($selectCfg['type'] ?? '') === 'select' && ($selectCfg['id'] ?? '') === 'mode'
+      && ($selectCfg['rules']['a']['show'] ?? null) === ['x']);
+ok('and the script reads a select by its .value',
+      strpos($formsJs, 'function() { return el.value; }') !== false);
+ok('the field carries no inline script', !preg_match('/<script(?![^>]*application\/json)(?![^>]*\ssrc=)/i', $selectHtml));
 
 // ── checkbox trigger: .checked read, checked/unchecked keys ────────────────
 
@@ -69,10 +85,11 @@ $checkboxHtml = render_field('checkboxinput', ['repeats', 'Repeats', [
         'unchecked' => ['hide' => ['interval']],
     ],
 ]]);
-ok('checkbox trigger reads .checked into checked/unchecked key',
-      strpos($checkboxHtml, 'el.checked ? "checked" : "unchecked"') !== false);
-ok('checkbox trigger listens on the checkbox via change',
-      strpos($checkboxHtml, 'el.addEventListener("change"') !== false);
+ok('checkbox trigger is a checkbox block on its element',
+      (vis_block($checkboxHtml)['type'] ?? '') === 'checkbox' && (vis_block($checkboxHtml)['id'] ?? '') === 'repeats');
+ok('and the script reads .checked into the checked/unchecked key, listening for change',
+      strpos($formsJs, 'el.checked ? "checked" : "unchecked"') !== false
+      && strpos($formsJs, 'el.addEventListener("change", run)') !== false);
 
 // ── radio trigger: :checked value read, listens on every radio ─────────────
 
@@ -84,11 +101,10 @@ $radioHtml = render_field('radioinput', ['ends', 'Ends', [
         'date'  => ['show' => ['end_date']],
     ],
 ]]);
-ok('radio trigger reads the :checked option value',
-      strpos($radioHtml, "document.querySelector(\"input[name='ends']:checked\")") !== false);
-ok('radio trigger wires a listener on every radio in the group',
-      strpos($radioHtml, "document.querySelectorAll(\"input[name='ends']\")") !== false
-      && strpos($radioHtml, 'radios.forEach(') !== false);
+ok('radio trigger is a radio block naming its group',
+      (vis_block($radioHtml)['type'] ?? '') === 'radio' && (vis_block($radioHtml)['group'] ?? '') === 'ends');
+ok('and the script reads the :checked option and wires every radio in the group',
+      strpos($formsJs, ":checked');") !== false && strpos($formsJs, 'radios.forEach(function(r) { r.addEventListener("change", update); });') !== false);
 
 // A card radio is the same trigger wearing different markup. The mailbox
 // domain editor picks a security level this way and hides the AI consent
@@ -103,9 +119,8 @@ $cardHtml = render_field('radioinput', ['level', 'Security level', [
         'private'  => ['show' => ['ai_on']],
     ],
 ]]);
-ok('a card radio emits the same trigger script as a plain one',
-      strpos($cardHtml, "document.querySelector(\"input[name='level']:checked\")") !== false
-      && strpos($cardHtml, 'radios.forEach(') !== false);
+ok('a card radio emits the same trigger block as a plain one',
+      (vis_block($cardHtml)['type'] ?? '') === 'radio' && (vis_block($cardHtml)['group'] ?? '') === 'level');
 
 // The other half of the contract, and the half nothing else pins: the script
 // hides `{id}_container`, so a target that renders no container element is
@@ -114,7 +129,7 @@ $targetHtml = render_field('checkboxinput', ['ai_on', 'Let AI read it', ['value'
 ok('a checkbox target renders the {id}_container the script looks for',
       strpos($targetHtml, 'id="ai_on_container"') !== false);
 ok('and the show/hide lookup asks for that container first',
-      strpos($radioHtml, 'document.getElementById(id + "_container") || document.getElementById(id)') !== false);
+      strpos($formsJs, 'document.getElementById(id + "_container") || document.getElementById(id)') !== false);
 
 // ── checkboxList radio: addresses the name="{name}[]" group ─────────────────
 
@@ -127,7 +142,7 @@ $listRadioHtml = render_field('checkboxList', ['picker', 'Picker', [
     ],
 ]]);
 ok('checkboxList radio addresses the name="{name}[]" group',
-      strpos($listRadioHtml, "input[name='picker[]']:checked") !== false);
+      (vis_block($listRadioHtml)['type'] ?? '') === 'radio' && (vis_block($listRadioHtml)['group'] ?? '') === 'picker[]');
 
 // ── validation: reject misuse ──────────────────────────────────────────────
 

@@ -28,6 +28,7 @@
  *   vault_gated  Writing it requires an open vault unlock window.
  *   managed      Machine-written. Never rendered on a form.
  *
+ * @version 1.5 - clearsPages ["/"] clears every cached page (a setting that changes a header every page sends)
  * @version 1.4 - type user: a user id, chosen with the user search picker
  * @version 1.3 - a sandboxed plugin's manifest settings are declarations too (SandboxSettings)
  * @version 1.2 - clearPagesFor(): a setting's declared clearsPages leave the static cache when any writer changes it
@@ -128,8 +129,8 @@ class SettingsDeclarations {
 		foreach ($changed as $name) {
 			$declaration = self::get((string)$name);
 			foreach ((array)($declaration['clearsPages'] ?? array()) as $path) {
-				// A plain same-site path: no "..", no "//".
-				if (is_string($path) && preg_match('#^/[A-Za-z0-9_\-.]+(/[A-Za-z0-9_\-.]+)*$#', $path)
+				// A plain same-site path: no "..", no "//". "/" alone is every page.
+				if (is_string($path) && preg_match('#^/([A-Za-z0-9_\-.]+(/[A-Za-z0-9_\-.]+)*)?$#', $path)
 						&& strpos($path, '..') === false) {
 					$paths[$path] = true;
 				}

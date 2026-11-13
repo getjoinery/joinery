@@ -16,6 +16,7 @@
  * The list is server-rendered (mailbox_contacts_page_logic); every change is a
  * call to the mailbox API actions from mailbox_contacts.js, then a reload.
  *
+ * @version 1.2 - the page's settings are a JSON block (no inline script)
  * @version 1.1 - Download vCard / Download CSV beside the list's heading
  * @version 1.0
  */
@@ -148,10 +149,10 @@ $pencil = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-wid
 </div>
 <?php
 if ($current) {
-	echo '<script>window.MAILBOX_CONTACTS = ' . json_encode(array(
+	echo PageScript::json('mailbox-contacts-config', array(
 		'alias_id' => intval($current['alias_id']),
 		'edit_id'  => intval($edit_id),
-	)) . ';</script>';
+	));
 	$css = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_contacts.css');
 	$js = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_contacts.js');
 	echo '<link rel="stylesheet" href="/plugins/mailbox/assets/mailbox_contacts.css?v=' . (is_file($css) ? filemtime($css) : '1') . '">';

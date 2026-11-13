@@ -30,12 +30,25 @@ function availability_logic(array $input): LogicResult {
     $page_vars['settings'] = $settings;
     $page_vars['session'] = $session;
 
+    // Viewing the page writes nothing: a member who has never saved
+    // availability sees an unsaved schedule in their own timezone, and the
+    // row is made by their first save.
     $subject = CalendarSubject::user($session->get_user_id());
-    $schedule = Schedule::get_or_create_for_subject($subject);
+    $schedule = Schedule::for_subject($subject);
+    if (!$schedule) {
+        $schedule = new Schedule(NULL);
+        $schedule->set('sch_subject_type', $subject->type);
+        $schedule->set('sch_subject_id', $subject->id);
+        $schedule->set('sch_timezone', $subject->getTimezone());
+    }
     $page_vars['schedule'] = $schedule;
     $page_vars['errors'] = array();
 
     if (isset($_POST['save_availability'])) {
+        if (!$schedule->key) {
+            $schedule = Schedule::get_or_create_for_subject($subject);
+            $page_vars['schedule'] = $schedule;
+        }
         // --- timezone ---
         $timezone = LibraryFunctions::fetch_variable_local($input, 'sch_timezone', $schedule->get('sch_timezone'), '', '', 'safemode', NULL);
         if (in_array($timezone, DateTimeZone::listIdentifiers(), true)) {
@@ -113,12 +126,14 @@ function availability_logic(array $input): LogicResult {
     }
 
     // --- load current state for display ---
-    $windows = new MultiScheduleWindow(['schedule_id' => $schedule->key, 'deleted' => false]);
+    // An unsaved schedule has no rows; a collection asked for schedule_id
+    // NULL would drop the filter and load everyone's.
+    $windows = new MultiScheduleWindow(['schedule_id' => $schedule->key ?: 0, 'deleted' => false]);
     $windows->order_by = ['scw_day_of_week' => 'ASC', 'scw_start_time' => 'ASC'];
     $windows->load();
     $page_vars['windows'] = $windows;
 
-    $overrides = new MultiScheduleOverride(['schedule_id' => $schedule->key, 'deleted' => false]);
+    $overrides = new MultiScheduleOverride(['schedule_id' => $schedule->key ?: 0, 'deleted' => false]);
     $overrides->order_by = ['sco_date' => 'ASC'];
     $overrides->load();
     $page_vars['overrides'] = $overrides;

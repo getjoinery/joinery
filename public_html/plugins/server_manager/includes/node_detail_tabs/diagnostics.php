@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.9 - Compare edge and direct is data-jy-busy (no inline handler)
  * @version 1.8 - Vault windows (24 h): the vault's unlock history through log_table_tail (agent 1.113.0)
  * @version 1.7 - Old key census removed with the v1 code
  * @version 1.6 - The machine: Old key census (v1_census, agent 1.103.0; TEMPORARY, removed with the v1 code)
@@ -58,7 +59,7 @@ if (JobCommandBuilder::has_primitive($node, 'install_report')) {
 if (EdgeOriginProbe::site($node) && EdgeOriginProbe::origins($node)) {
 	// Disabled on the first click: a run takes up to a minute, and a second
 	// click would start a second run beside it.
-	$tools_buttons['edge'] = '<button type="submit" form="nodeActionEdgeOrigin" onclick="var b=this;setTimeout(function(){b.disabled=true;b.textContent=\'Comparing…\';},0);" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Time the same requests through the site\'s public name (its edge, such as Cloudflare) and straight at this machine, side by side, and say which one stalls. Takes up to a minute.">Compare edge and direct</button>';
+	$tools_buttons['edge'] = '<button type="submit" form="nodeActionEdgeOrigin" data-jy-busy="Comparing…" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Time the same requests through the site\'s public name (its edge, such as Cloudflare) and straight at this machine, side by side, and say which one stalls. Takes up to a minute.">Compare edge and direct</button>';
 }
 
 if ($tools_buttons) {

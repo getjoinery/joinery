@@ -30,6 +30,8 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.12 - the checklist takes 'shown' (drawn visible, for a page with one target)
+ * @version 2.11 - a fix button's confirm is data-jy-confirm (no inline handler)
  * @version 2.10 - the no-relay step points at the Relay section on the Server tab
  * @version 2.9 - the raise and lowering receipts name the contact rows still to converge
  *   (MailboxContactConvergence::backlogCount), which move in each adding user's window
@@ -707,13 +709,12 @@ const MAILBOX_PROTECTION_FIX_FORM = 'protection-fix-form';
 function mailbox_protection_fix_button(string $label, string $editor_url, array $fields,
 		string $style, string $confirm = ''): string {
 	$target = $editor_url . (strpos($editor_url, '?') === false ? '?' : '&') . http_build_query($fields);
-	$onclick = ($confirm !== '')
-		? ' onclick="' . htmlspecialchars('return confirm(' . json_encode($confirm, JSON_HEX_TAG | JSON_HEX_AMP
-			| JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) . ');', ENT_QUOTES) . '"'
-		: '';
+	// A submit button with data-jy-confirm asks in the kit's modal, then
+	// submits as itself, so its formaction still names the target (base.js).
+	$ask = ($confirm !== '') ? ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '"' : '';
 	return ' <button type="submit" form="' . MAILBOX_PROTECTION_FIX_FORM . '" formaction="'
 		. htmlspecialchars($target) . '" class="btn btn-sm ' . $style . '" style="margin-left:.5rem;"'
-		. $onclick . '>' . htmlspecialchars($label) . '</button>';
+		. $ask . '>' . htmlspecialchars($label) . '</button>';
 }
 
 /**
@@ -733,6 +734,8 @@ function mailbox_protection_fix_form(?string $csrf_token): string {
  * editor's own URL (for the remove-grant forms and vault/passkey returns):
  *   editor_url — this domain's editor page (absolute path)
  *   alias_url  — the alias editor base
+ *   shown      — true to draw it visible; otherwise it ships hidden for the
+ *                domain editor to reveal when a higher card is picked
  * $target names the destination level so the heading reads as the sentence the
  * receipt later resolves ("Before this domain can be Private"). $scope_label
  * replaces "this domain" when the checklist is for ONE mailbox — saying the
@@ -757,7 +760,7 @@ function mailbox_protection_render(array $rows, InboundEmailDomain $domain, arra
 		}
 	}
 
-	$html = '<div id="protection-ceremony" class="d-none" data-required-ok="';
+	$html = '<div id="protection-ceremony"' . (empty($urls['shown']) ? ' class="d-none"' : '') . ' data-required-ok="';
 	$html .= mailbox_protection_required_ok($rows) ? '1' : '0';
 	$html .= '" data-all-green="' . ($all_green ? '1' : '0') . '">';
 	$destination = $target !== '' ? ucfirst($target) : 'protected';

@@ -75,33 +75,7 @@
 </div>
 
 <?php if ($settings->get_setting('passkeys_enabled')): ?>
-<script defer src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script defer>
-document.addEventListener('DOMContentLoaded', function () {
-    if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) return;
-    var wrap = document.getElementById('passkey-signin');
-    var btn = document.getElementById('passkey-signin-btn');
-    wrap.classList.remove('d-none');
-
-    btn.addEventListener('click', async function () {
-        btn.disabled = true;
-        try {
-            var emailField = document.querySelector('input[name="email"]');
-            var email = emailField ? emailField.value.trim() : '';
-
-            var data = await JoineryPasskeys.runFlow(
-                '/api/v1/action/passkey_login_options',
-                '/api/v1/action/passkey_login_verify',
-                { email: email }
-            );
-            window.location.href = data.redirect || '/profile';
-        } catch (e) {
-            alert(e.message || 'Passkey sign-in was not completed.');
-            btn.disabled = false;
-        }
-    });
-});
-</script>
+<?php echo PageScript::src('assets/js/passkeys.js'), PageScript::src('assets/js/passkey-pages.js'); ?>
 <?php endif; ?>
 
 <?php

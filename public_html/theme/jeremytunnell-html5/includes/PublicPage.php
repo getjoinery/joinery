@@ -4,6 +4,7 @@
  * seeded profile menu store via get_menu_data() — themes style the markup
  * but do not own the list (docs/plugin_developer_guide.md § Plugin Menus).
  *
+ * @version 1.2.3 - the sidebar's script is assets/js/sidebar.js (no inline script)
  * @version 1.2.2 - the theme tail (the applied look's stylesheets) after the theme stylesheet; Custom CSS gone (specs/style_themes.md WP3)
  * @version 1.2.1 - the footer loads joinery-validate.js, which every FormWriter form's
  *   inline script expects; without it each form page logged a ReferenceError and
@@ -199,18 +200,7 @@ class PublicPage extends PublicPageBase {
     </div>
     <?php endif; ?>
 
-    <script>
-        const toggle = document.getElementById('sidebarToggle');
-        const overlay = document.getElementById('sidebarOverlay');
-        const panel = document.getElementById('sidebarPanel');
-        const close = document.getElementById('sidebarClose');
-        function openSidebar() { overlay.classList.add('active'); panel.classList.add('active'); }
-        function closeSidebar() { overlay.classList.remove('active'); panel.classList.remove('active'); }
-        if (toggle) toggle.addEventListener('click', openSidebar);
-        if (overlay) overlay.addEventListener('click', closeSidebar);
-        if (close) close.addEventListener('click', closeSidebar);
-        document.addEventListener('keydown', e => { if (e.key === 'Escape' && overlay) closeSidebar(); });
-    </script>
+    <?php echo PageScript::src('theme/jeremytunnell-html5/assets/js/sidebar.js'); ?>
     <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
 
 </body>

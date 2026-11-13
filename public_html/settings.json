@@ -331,6 +331,7 @@
     },
     {
       "name": "enable_hsts",
+      "clearsPages": ["/"],
       "default": "1",
       "group": "protocol",
       "label": "Send Strict-Transport-Security",
@@ -1228,6 +1229,7 @@
     },
     {
       "name": "protocol_mode",
+      "clearsPages": ["/"],
       "default": "auto",
       "group": "protocol",
       "label": "Protocol mode",
@@ -2890,6 +2892,7 @@
     },
     {
       "name": "enable_x_frame_options",
+      "clearsPages": ["/"],
       "default": "1",
       "group": "protocol",
       "label": "Send X-Frame-Options",
@@ -2898,6 +2901,7 @@
     },
     {
       "name": "enable_referrer_policy",
+      "clearsPages": ["/"],
       "default": "1",
       "group": "protocol",
       "label": "Send Referrer-Policy",
@@ -2906,6 +2910,7 @@
     },
     {
       "name": "enable_csp",
+      "clearsPages": ["/"],
       "default": "1",
       "group": "protocol",
       "label": "Send Content-Security-Policy",
@@ -2913,7 +2918,22 @@
       "helptext": "Tells browsers which hosts may supply scripts, styles, fonts and frames on this site, so an injected script or a leak to an unlisted host is blocked by the browser. On by default. The allowed hosts are the vendors the platform itself embeds (payments, captcha, video players, Google Fonts); every library ships locally. Turn off only while diagnosing a page the browser console says the policy is blocking."
     },
     {
+      "name": "csp_strict_scripts",
+      "clearsPages": ["/"],
+      "default": "off",
+      "group": "protocol",
+      "label": "Strict script policy",
+      "type": "select",
+      "options": {
+        "off": "Off",
+        "report": "Report what it would block",
+        "enforce": "Enforce"
+      },
+      "helptext": "The strict policy lets the browser run only the scripts the site itself wrote into a page, so a script that turns up inside stored content, or one a bug lets in, does not run. Report sends it beside the standard policy: nothing more is blocked, and every inline script or handler it would refuse is recorded in the error log. Enforce makes it the policy. Has no effect until Send Content-Security-Policy is on."
+    },
+    {
       "name": "csp_report_only",
+      "clearsPages": ["/"],
       "default": "0",
       "group": "protocol",
       "label": "Content-Security-Policy is report-only",

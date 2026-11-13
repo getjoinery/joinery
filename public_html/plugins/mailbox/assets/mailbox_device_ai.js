@@ -22,7 +22,7 @@
  * with navigator.permissions.query), the model refusing this site, the key,
  * the model name, or a context too small (the model's own words).
  *
- * The page contract: window.MAILBOX_DEVICE_AI = {origin, user_id,
+ * The page contract: the page's #mailbox-device-ai-config JSON block = {origin, user_id,
  * settings_url}; MailboxDeviceAi.section() returns the element the AI panel
  * docks (JoineryAiPanel.mount hostSection). The section is empty while all
  * is well and says one line, with the fix, when the person has something to
@@ -55,6 +55,7 @@
  * computer with nothing saved yet for that address, the form starts filled
  * with it.
  *
+ * @version 1.12 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * Vanilla JS, jy-ui classes, no framework. @version 1.11 - no check on page load: the
  *   model is called only when the drain has a message to judge
  * @version 1.10 - the panel section speaks only
@@ -291,7 +292,7 @@
 	// ---- this browser's settings ---------------------------------------------
 
 	function storeKey() {
-		var cfg = window.MAILBOX_DEVICE_AI || {};
+		var cfg = window.MAILBOX_DEVICE_AI || (window.MAILBOX_DEVICE_AI = (window.joineryPageData && joineryPageData('mailbox-device-ai-config')) || null) || {};
 		return STORE_PREFIX + String(cfg.user_id || 0);
 	}
 	function loadSaved() {
@@ -356,7 +357,7 @@
 	 */
 	function render() {
 		if (!root) return;
-		var cfg = window.MAILBOX_DEVICE_AI || {};
+		var cfg = window.MAILBOX_DEVICE_AI || (window.MAILBOX_DEVICE_AI = (window.joineryPageData && joineryPageData('mailbox-device-ai-config')) || null) || {};
 		var fortress = !!(window.MailboxReader && window.MailboxReader.currentIsFortress && window.MailboxReader.currentIsFortress());
 		var st = sectionState({ origin: cfg.origin || null, fortress: fortress }, loadSaved());
 		root.dataset.state = st.state;
@@ -404,7 +405,7 @@
 	}
 
 	function settingsLink(text) {
-		var cfg = window.MAILBOX_DEVICE_AI || {};
+		var cfg = window.MAILBOX_DEVICE_AI || (window.MAILBOX_DEVICE_AI = (window.joineryPageData && joineryPageData('mailbox-device-ai-config')) || null) || {};
 		var a = el('a', null, text);
 		a.href = cfg.settings_url || '/profile/mailbox/settings#your-model';
 		return a;
@@ -506,7 +507,7 @@
 	}
 
 	function ready() {
-		var cfg = window.MAILBOX_DEVICE_AI || {};
+		var cfg = window.MAILBOX_DEVICE_AI || (window.MAILBOX_DEVICE_AI = (window.joineryPageData && joineryPageData('mailbox-device-ai-config')) || null) || {};
 		var fortress = !!(window.MailboxReader && window.MailboxReader.currentIsFortress && window.MailboxReader.currentIsFortress());
 		var st = sectionState({ origin: cfg.origin || null, fortress: fortress }, loadSaved());
 		if (st.state !== 'ready') return null;
@@ -601,7 +602,7 @@
 	 * this browser has no model set up.
 	 */
 	function messageActions(m) {
-		var cfg = window.MAILBOX_DEVICE_AI || {};
+		var cfg = window.MAILBOX_DEVICE_AI || (window.MAILBOX_DEVICE_AI = (window.joineryPageData && joineryPageData('mailbox-device-ai-config')) || null) || {};
 		var st = sectionState({ origin: cfg.origin || null, fortress: true }, loadSaved());
 		if (st.state !== 'ready' || !window.MailboxFortress || !window.MailboxFortress.judgeEntry) return null;
 		var url = callUrl(cfg.origin, st.usable.path);
@@ -713,7 +714,7 @@
  * it, in [data-device-ai-test-note]. The page names the registered origin in
  * its CSP, as the mail page does.
  *
- * Page contract: window.MAILBOX_DEVICE_AI = {origin, user_id, site_model};
+ * Page contract: the page's #mailbox-device-ai-config JSON block = {origin, user_id, site_model};
  * the form #device-ai-host-form with its device_ai_address, device_ai_key and
  * device_ai_model fields inside [data-device-ai-form] (hidden until
  * [data-device-ai-enter] opens it, where the site's model is the primary
@@ -732,7 +733,7 @@
 	// Loaded under node by the panel's tests, with no page at all.
 	if (typeof document === 'undefined' || typeof window === 'undefined') return;
 
-	var cfg = window.MAILBOX_DEVICE_AI || {};
+	var cfg = window.MAILBOX_DEVICE_AI || (window.MAILBOX_DEVICE_AI = (window.joineryPageData && joineryPageData('mailbox-device-ai-config')) || null) || {};
 	var STORE = 'jy_device_ai:' + String(cfg.user_id || 0);
 	var RETURN = '/profile/mailbox/settings#your-model';
 

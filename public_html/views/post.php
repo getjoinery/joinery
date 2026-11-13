@@ -138,16 +138,7 @@
                     <h4 class="mb-0">Comments (<?php echo $page_vars['numcomments']; ?>)</h4>
                 </div>
                 <div class="card-body p-0">
-                    <script>
-                    document.addEventListener('DOMContentLoaded', function() {
-                        document.querySelectorAll('.commentbutton').forEach(function(btn) {
-                            btn.addEventListener('click', function() {
-                                var container = document.getElementById(this.id + 'container');
-                                if (container) container.hidden = !container.hidden;
-                            });
-                        });
-                    });
-                    </script>
+                    <?php echo PageScript::src('assets/js/blog-page.js'); ?>
 
                     <?php foreach ($page_vars['comments'] as $comment): ?>
                     <div class="border-bottom p-4">

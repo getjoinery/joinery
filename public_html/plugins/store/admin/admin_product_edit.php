@@ -136,7 +136,7 @@ $advanced_style = $is_new_product ? 'display: none;' : '';
 $toggle_style = $is_new_product ? '' : 'display: none;';
 
 echo '<div id="advanced-toggle" class="mb-3" style="' . $toggle_style . '">
-	<a href="#" onclick="document.getElementById(\'advanced-fields\').style.display=\'block\'; document.getElementById(\'advanced-toggle\').style.display=\'none\'; return false;" class="btn btn-outline-secondary btn-sm">
+	<a href="#advanced-fields" data-jy-reveal="advanced-fields" data-jy-reveal-hide="advanced-toggle" class="btn btn-outline-secondary btn-sm">
 		Show Advanced Options
 	</a>
 </div>';

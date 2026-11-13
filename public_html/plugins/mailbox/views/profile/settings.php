@@ -20,6 +20,7 @@
  * confirmation. The key and model name are kept in the browser, and Test
  * sends the model a real-sized judgement from here.
  *
+ * @version 2.8 - the device AI settings are a JSON block (no inline script)
  * @version 2.7 - "Who has looked at your mail": reads of each mailbox by someone holding no grant on it
  * @version 2.6 - More links Contacts
  * @version 2.5 - "Your AI model" tests the model saved in this browser, and the page may
@@ -225,7 +226,7 @@ $sig_asset = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_signatur
 <script src="/plugins/mailbox/assets/mailbox_signature.js?v=<?php echo is_file($sig_asset) ? filemtime($sig_asset) : '1'; ?>"></script>
 <?php if (!empty($page_vars['has_fortress'])): ?>
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
-<script>window.MAILBOX_DEVICE_AI = <?php echo json_encode(array('origin' => ($page_vars['device_ai_origin'] ?? null) ?: null, 'user_id' => (int)$page_vars['session']->get_user_id(), 'site_model' => $page_vars['device_ai_site_model'] ?? null)); ?>;</script>
+<?php echo PageScript::json('mailbox-device-ai-config', array('origin' => ($page_vars['device_ai_origin'] ?? null) ?: null, 'user_id' => (int)$page_vars['session']->get_user_id(), 'site_model' => $page_vars['device_ai_site_model'] ?? null)); ?>
 <?php $dai_panel = PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_device_ai.js'); ?>
 <script src="/plugins/mailbox/assets/mailbox_device_ai.js?v=<?php echo is_file($dai_panel) ? filemtime($dai_panel) : '1'; ?>"></script>
 <?php endif; ?>

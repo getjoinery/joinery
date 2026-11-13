@@ -2,6 +2,7 @@
 /**
  * Drive — member file storage page.
  *
+ * @version 1.7 - the first listing and the settings are JSON blocks (no inline script)
  * @version 1.6 - New file dialog for the New menu's plugin creators
  * @changelog 1.5 - loads zip-writer.js for a Fortress folder's Download as zip
  * @changelog 1.4 - unlock and setup are the core vault ceremony; no dialog of its own
@@ -343,10 +344,7 @@ $new_file_fw   = $page->getFormWriter('drive_new_file', array('action' => '/driv
 @media(max-width:720px){.drv-app{flex-direction:column}.drv-rail{position:static;width:100%;flex-basis:auto}.drv-nav{flex-direction:row;flex-wrap:wrap}}
 </style>
 
-<script>
-window.DRIVE_INITIAL = <?php echo json_encode($initial, JSON_UNESCAPED_SLASHES); ?>;
-window.DRIVE_CONFIG = <?php echo json_encode($config, JSON_UNESCAPED_SLASHES); ?>;
-</script>
+<?php echo PageScript::json('drive-initial', $initial), PageScript::json('drive-config', $config); ?>
 <script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/zip-writer.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/zip-writer.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>

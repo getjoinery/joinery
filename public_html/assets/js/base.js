@@ -104,10 +104,11 @@ document.addEventListener('click', function (e) {
     if (!btn) return;
     const text = btn.getAttribute('data-jy-copy') || '';
     const done = () => {
-        const prev = btn.textContent;
+        // The button's own markup comes back, icon and all.
+        const prev = btn.innerHTML;
         btn.textContent = 'Copied';
         btn.disabled = true;
-        setTimeout(() => { btn.textContent = prev; btn.disabled = false; }, 1200);
+        setTimeout(() => { btn.innerHTML = prev; btn.disabled = false; }, 1200);
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, done);
@@ -315,6 +316,258 @@ document.addEventListener('click', function (e) {
     JoineryModal.open(tpl.content.cloneNode(true), {
         buttons: [{ label: 'Done', style: 'primary' }],
     });
+});
+
+// Kit confirm on a button or link, with no inline handler (the strict script
+// policy refuses onclick=):
+//   <button type="button" data-jy-confirm="Delete it?" data-jy-submit="delete_form">
+//     asks, then submits the form with that id (submit(), as the inline
+//     handlers did, so the form's own data-jy-confirm is not asked again);
+//   <button type="button" data-jy-confirm="Delete it?" data-jy-submit=""
+//     data-jy-submit-self> checks the form's fields, asks, then submits its
+//     own form (requestSubmit) with the button's name and value in a hidden
+//     input, so they are posted as if it had been the submit button. It is
+//     not the submitter, so it may carry no formaction/formmethod (a test
+//     holds the tree to that): put those on the form.
+//     FormWriter's submitbutton 'confirm' writes it: a type="button" posts
+//     nothing before this file has run and the person has said yes;
+//   <button type="submit" data-jy-confirm="Delete it?"> asks, then submits as
+//     that button too;
+//   <a href="/x" data-jy-confirm="Leave?"> asks, then follows the link;
+//   data-jy-confirm-typed="DELETE" also asks the person to type that word
+//     (JoineryModal.confirmTyped);
+//   data-jy-confirm-label="Remove" and data-jy-confirm-style="primary" set
+//     the confirm button's words and style;
+//   <button type="button" data-jy-alert="Saved."> just shows the message.
+document.addEventListener('click', function (e) {
+    const el = e.target.closest
+        ? e.target.closest('[data-jy-submit], [data-jy-alert], a[data-jy-confirm], button[data-jy-confirm], input[data-jy-confirm]')
+        : null;
+    if (!el || el.tagName === 'FORM') return;
+    e.preventDefault();
+    if (el.hasAttribute('data-jy-alert')) {
+        JoineryModal.alert(el.getAttribute('data-jy-alert'));
+        return;
+    }
+    let go;
+    if (el.tagName === 'A' && !el.hasAttribute('data-jy-submit')) {
+        const href = el.getAttribute('href');
+        go = function () { if (href) window.location.href = href; };
+    } else {
+        const id = el.getAttribute('data-jy-submit');
+        const form = id ? document.getElementById(id) : (el.form || el.closest('form'));
+        if (!form) return;
+        const self = !id && el.hasAttribute('data-jy-submit-self');
+        if (self && !el.hasAttribute('formnovalidate') && form.reportValidity && !form.reportValidity()) return;
+        const asSubmitter = !id && el.type === 'submit' && form.requestSubmit;
+        go = function () {
+            if (asSubmitter) { form.requestSubmit(el); return; }
+            if (!self) { form.submit(); return; }
+            // A type="button" that asks first is not a submit button, so it
+            // cannot be the submitter: its name and value ride in one hidden
+            // input instead (the marker joinery-validate.js uses for the same
+            // job), and the form is submitted natively so its submit handlers
+            // (the validator, step-up) still run. A button that skips
+            // validation tells the validator to stand aside once.
+            if (el.name) {
+                let carried = form.querySelector('input[type="hidden"][data-joinery-submitter]');
+                if (!carried) {
+                    carried = document.createElement('input');
+                    carried.type = 'hidden';
+                    carried.setAttribute('data-joinery-submitter', '1');
+                    form.appendChild(carried);
+                }
+                carried.name = el.name;
+                carried.value = el.value || '';
+            }
+            if (el.hasAttribute('formnovalidate')) form.dataset.jyValidated = '1';
+            // Not the submitter, so the data-jy-busy listener cannot see it:
+            // mark it here, once the submit has not been stopped.
+            // It stays until a submit goes through: the validator stops the
+            // first one and submits again once the fields pass.
+            // One listener per button, and only a submit this button made
+            // (it is never the submitter, so none other is named) marks it.
+            if (el.hasAttribute('data-jy-busy') && !el.dataset.jyBusyArmed) {
+                el.dataset.jyBusyArmed = '1';
+                const markBusy = function (ev) {
+                    if (ev.submitter && ev.submitter !== el) return;
+                    setTimeout(function () {
+                        if (ev.defaultPrevented) return;
+                        form.removeEventListener('submit', markBusy);
+                        delete el.dataset.jyBusyArmed;
+                        el.disabled = true;
+                        el.textContent = el.getAttribute('data-jy-busy') || 'Working…';
+                    }, 0);
+                };
+                form.addEventListener('submit', markBusy);
+            }
+            if (form.requestSubmit) form.requestSubmit(); else form.submit();
+        };
+    }
+    const message = el.getAttribute('data-jy-confirm');
+    const typed = el.getAttribute('data-jy-confirm-typed');
+    const opts = {};
+    if (el.getAttribute('data-jy-confirm-label')) opts.confirmLabel = el.getAttribute('data-jy-confirm-label');
+    if (el.getAttribute('data-jy-confirm-style')) opts.confirmStyle = el.getAttribute('data-jy-confirm-style');
+    if (typed) {
+        JoineryModal.confirmTyped(message || '', typed, go, opts);
+    } else if (message) {
+        JoineryModal.confirm(message, go, opts);
+    } else {
+        go();
+    }
+});
+
+// Page-level kit hooks the server writes as data, so no page needs an inline
+// script for them (the strict script policy refuses one):
+//   <meta name="joinery-body-class" content="jy-app-mode"> adds that class to
+//     <body>;
+//   <template data-jy-body-insert="beforeend"> (or "afterbegin") puts its
+//     content into <body> there: the admin chip, a notice every theme shows;
+//   <input data-jy-select-all> selects its whole value when clicked;
+//   <button data-jy-dismiss> hides its [data-jy-dismissible] notice;
+//   [data-jy-reveal="id"] shows that element; <select data-jy-autosubmit>
+//   submits its form on change; a submit button's data-jy-busy="text" shows
+//   while its form posts;
+//   <input data-jy-current-path> is given this page's path and query, for a
+//     form that comes back here (TestMode's Turn off);
+//   <input data-jy-browser-timezone> is given the browser's time zone;
+//   an element with data-jy-reload-after="30" reloads the page after that
+//     many seconds, or, with data-jy-reload-to="/path", goes there instead.
+//     The address must be a path on this site ("/x", never "//host"); the
+//     first such element on the page sets the timer.
+function joinerySameSitePath(to) {
+    // A browser drops tabs and line breaks from an address and reads "\" as
+    // "/", so "/\t/evil.example" would leave the site: none of those, no
+    // spaces or control characters at all, and the address must resolve to
+    // this page's own origin.
+    if (typeof to !== 'string' || to.charAt(0) !== '/' || /[\x00-\x20\x7f\\]/.test(to) || to.charAt(1) === '/') return false;
+    try {
+        return new URL(to, window.location.href).origin === window.location.origin;
+    } catch (e) {
+        return false;
+    }
+}
+// The data a page hands its script file: the JSON block
+// <script type="application/json" id="..."> that PageScript::json() writes.
+// null when the block is missing or is not JSON.
+function joineryPageData(id) {
+    const el = document.getElementById(id);
+    if (!el || el.tagName !== 'SCRIPT' || el.type !== 'application/json') return null;
+    try { return JSON.parse(el.textContent); } catch (e) { return null; }
+}
+// Whether DOMContentLoaded has fired: base.js loads in the head, before any
+// other file, so a file that must run after every deferred file (they all
+// run before that event) can tell "wait for it" from "it has passed".
+window.joineryDomReady = document.readyState !== 'loading' && document.readyState !== 'interactive';
+document.addEventListener('DOMContentLoaded', function () { window.joineryDomReady = true; });
+function joineryApplyPageHooks() {
+    const timer = document.querySelector('[data-jy-reload-after]');
+    if (timer) {
+        const secs = parseFloat(timer.getAttribute('data-jy-reload-after'));
+        const to = timer.getAttribute('data-jy-reload-to');
+        if (secs >= 0 && isFinite(secs) && (to === null || joinerySameSitePath(to))) {
+            setTimeout(function () {
+                if (to === null) window.location.reload(); else window.location.href = to;
+            }, secs * 1000);
+        }
+    }
+    document.querySelectorAll('meta[name="joinery-body-class"]').forEach(function (m) {
+        (m.getAttribute('content') || '').split(/\s+/).forEach(function (c) { if (c) document.body.classList.add(c); });
+    });
+    document.querySelectorAll('template[data-jy-body-insert]').forEach(function (t) {
+        const where = t.getAttribute('data-jy-body-insert') === 'afterbegin' ? 'afterbegin' : 'beforeend';
+        document.body.insertAdjacentHTML(where, t.innerHTML);
+        t.remove();
+    });
+    document.querySelectorAll('input[data-jy-current-path]').forEach(function (i) {
+        i.value = window.location.pathname + window.location.search;
+    });
+    let tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { tz = ''; }
+    document.querySelectorAll('input[data-jy-browser-timezone]').forEach(function (i) {
+        i.value = tz || 'UTC';
+    });
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', joineryApplyPageHooks);
+} else {
+    joineryApplyPageHooks();
+}
+document.addEventListener('click', function (e) {
+    const el = e.target;
+    if (el && el.tagName === 'INPUT' && el.hasAttribute('data-jy-select-all')) el.select();
+});
+// <a href="#x" data-jy-reveal="x"> shows the element with that id and hides
+// itself, or the element named by data-jy-reveal-hide ("Show advanced options").
+document.addEventListener('click', function (e) {
+    const el = e.target.closest ? e.target.closest('[data-jy-reveal]') : null;
+    if (!el) return;
+    e.preventDefault();
+    const target = document.getElementById(el.getAttribute('data-jy-reveal'));
+    if (!target) return;
+    target.hidden = false;
+    target.style.display = '';
+    const hide = el.getAttribute('data-jy-reveal-hide');
+    const gone = hide ? document.getElementById(hide) : el;
+    if (gone) gone.style.display = 'none';
+});
+// <button type="button" data-jy-prompt="Why?" data-jy-prompt-form="form_id"
+//   data-jy-prompt-field="reason"> asks in the modal (an answer is required),
+//   puts the answer in that field of that form, and submits it.
+//   data-jy-confirm-label / -style word and colour the confirm button.
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest ? e.target.closest('[data-jy-prompt]') : null;
+    if (!btn || !window.JoineryModal) return;
+    e.preventDefault();
+    const form = document.getElementById(btn.getAttribute('data-jy-prompt-form') || '');
+    const field = form && form.elements[btn.getAttribute('data-jy-prompt-field') || ''];
+    if (!form || !field) return;
+    const opts = { required: true };
+    if (btn.getAttribute('data-jy-confirm-label')) opts.confirmLabel = btn.getAttribute('data-jy-confirm-label');
+    if (btn.getAttribute('data-jy-confirm-style')) opts.confirmStyle = btn.getAttribute('data-jy-confirm-style');
+    JoineryModal.prompt(btn.getAttribute('data-jy-prompt'), function (answer) {
+        field.value = answer;
+        form.submit();
+    }, opts);
+});
+// <select data-jy-autosubmit> submits its form when changed (a filter).
+document.addEventListener('change', function (e) {
+    const el = e.target;
+    if (!el || !el.hasAttribute || !el.hasAttribute('data-jy-autosubmit') || !el.form) return;
+    if (el.form.requestSubmit) el.form.requestSubmit(); else el.form.submit();
+});
+// <button type="submit" data-jy-busy="Running…">: once its form is on its way,
+// the button says so and cannot be pressed again. Done after the submit
+// event, so the button's own name and value still go with the form.
+document.addEventListener('submit', function (e) {
+    const btn = e.submitter;
+    if (!btn || !btn.hasAttribute('data-jy-busy') || e.defaultPrevented) return;
+    // Checked again once dispatch is over: a later listener (the kit's form
+    // confirm, say) may have cancelled it, and then nothing is on its way.
+    setTimeout(function () {
+        if (e.defaultPrevented) return;
+        btn.disabled = true;
+        btn.textContent = btn.getAttribute('data-jy-busy') || 'Working…';
+    }, 0);
+});
+// <button data-jy-dismiss> hides the notice it sits in: its nearest
+// [data-jy-dismissible] ancestor, or its parent when it has none.
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest ? e.target.closest('[data-jy-dismiss]') : null;
+    if (!btn) return;
+    e.preventDefault();
+    const box = btn.closest('[data-jy-dismissible]') || btn.parentElement;
+    if (box) box.hidden = true;
+});
+
+// <select data-jy-navigate>: choosing an option opens its value, which must be
+// a path on this site ("/x", never "//host" or "javascript:"). FormWriter's
+// dropinput writes it for navigate_on_change.
+document.addEventListener('change', function (e) {
+    const el = e.target;
+    if (!el || el.tagName !== 'SELECT' || !el.hasAttribute('data-jy-navigate')) return;
+    if (joinerySameSitePath(el.value)) window.location.href = el.value;
 });
 
 // Kit confirm for plain forms: <form data-jy-confirm="Are you sure?"> shows

@@ -12,6 +12,7 @@
  * views/, so a partial is never reachable as a standalone URL that would bypass
  * this file's node loading and the router's level.
  *
+ * @version 2.8 - smNodeName is gone (nothing read it)
  * @version 2.7 - Diagnostics tab: Install Report, Compare edge and direct, Logs, Diagnose and repair
  * @version 2.6 - opens at 7 (its header); each POST action needs its own level; below 8 only the reading tabs
  * @version 2.5 - a node whose agent moved away says so above every tab: managed elsewhere, nothing here reaches it
@@ -123,12 +124,6 @@ $page->admin_header([
 ]);
 
 echo SmAssets::script_tag();
-// The node name as a JS string literal (HTML/JS-safe), shared by every tab's
-// confirm() dialogs so a quote or markup in the name cannot break out of an
-// onclick attribute (S-3). Defined once here rather than per tab.
-echo '<script>var smNodeName = '
-	. json_encode($node->get('mgn_name'), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP)
-	. ';</script>' . "\n";
 
 // Flash messages are rendered by admin_header (AdminPage::renderFlashMessages)
 // — rendering them here as well showed every one twice.

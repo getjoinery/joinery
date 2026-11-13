@@ -11,6 +11,7 @@
  * Everything is FormWriter, and every mutation is a POST: Edit is the one GET,
  * because it only opens the form.
  *
+ * @version 1.3 - the mailbox switcher navigates by navigate_on_change and Delete confirms by the button's 'confirm' option (no inline handlers)
  * @version 1.2 - a domain-wide filter shows "Apply the label" disabled, saying why
  * @version 1.1 - "Never send it to Spam" says what it cannot lift (mail the sender's domain disowned)
  * @version 1.0
@@ -319,7 +320,7 @@ function mailbox_render_filter_list($page, array $vars, string $base, array $pag
 	$scopeForm->dropinput('scope_nav', 'Mailbox', array(
 		'options' => $scope_url_options,
 		'value' => $base . '?scope=' . urlencode($active_scope),
-		'onchange' => 'window.location.href=this.value;',
+		'navigate_on_change' => true,
 		'helptext' => $operator
 			? 'Filters apply to this mailbox. "All mailboxes in …" is a domain-wide rule.'
 			: 'Filters apply to this mailbox as its mail arrives.',
@@ -389,7 +390,7 @@ function mailbox_render_filter_list($page, array $vars, string $base, array $pag
 		$del->hiddeninput('scope', '', array('value' => $active_scope));
 		$del->submitbutton('delete_btn', 'Delete', array(
 			'class' => 'jy-action-danger',
-			'onclick' => "return confirm('Delete this filter?');",
+			'confirm' => 'Delete this filter?',
 		));
 		echo $del->end_form();
 

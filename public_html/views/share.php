@@ -2,6 +2,7 @@
 /**
  * Public share page for /s/{token}. Anonymous-safe.
  *
+ * @version 1.3 - the encrypted file's details are a JSON block (no inline script)
  * @version 1.2 - a Fortress share declares needs_vault_client() instead of pasting vault-crypto.js
  */
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -57,13 +58,11 @@ function share_human_bytes($n) {
 				<p><button type="button" class="btn btn-primary" id="shareEncDownload" disabled>Decrypt &amp; download</button></p>
 				<p id="shareEncError" style="color:#e0533d;" hidden></p>
 			</div>
-			<script>
-			window.SHARE_ENC = {
-				downloadUrl: <?php echo json_encode($f['download_url'], JSON_UNESCAPED_SLASHES); ?>,
-				metadata: <?php echo json_encode($f['encrypted_metadata'], JSON_UNESCAPED_SLASHES); ?>,
-				size: <?php echo (int)$f['size']; ?>
-			};
-			</script>
+			<?php echo PageScript::json('share-enc-config', array(
+				'downloadUrl' => $f['download_url'],
+				'metadata'    => $f['encrypted_metadata'],
+				'size'        => (int)$f['size'],
+			)); ?>
 			<script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
 			<script defer src="/assets/js/share-decrypt.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/share-decrypt.js')) ?: '1'; ?>"></script>
 

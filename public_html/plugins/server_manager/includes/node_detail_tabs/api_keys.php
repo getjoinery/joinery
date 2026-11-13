@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.11 - the API probe is assets/js/api-probe.js
  * @version 1.10 - the silence note is for a node being deleted: no agent is switched off by its operator
  * @version 1.9 - a join for a site in a container on a provisioned machine is not called refused (B102)
  * @version 1.8 - Move to another management node: the agent asks the other one to adopt the machine (move_to_plane)
@@ -130,12 +131,10 @@
 			echo '<form method="post" action="' . $base_url . '" id="restart_agent_form" class="mb-3">'
 			   . '<input type="hidden" name="action" value="restart_agent">'
 			   . SmAdminCsrf::field()
-			   . '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="JoineryModal.confirm('
-			   . htmlspecialchars(json_encode('Restart the agent on ' . $node->get('mgn_name') . '? '
+			   . '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="' . htmlspecialchars('Restart the agent on ' . $node->get('mgn_name') . '? '
 				. 'It finishes reporting this job first, then stops, and its supervisor starts it again — '
 				. 'within seconds under systemd, within a minute under the cron keepalive. '
-				. 'The node will refuse if nothing there would start it back up.'), ENT_QUOTES)
-			   . ', function(){ document.getElementById(\'restart_agent_form\').submit(); })">Restart the agent</button>'
+				. 'The node will refuse if nothing there would start it back up.', ENT_QUOTES) . '" data-jy-submit="restart_agent_form">Restart the agent</button>'
 			   . ' <span class="text-muted small ms-1">For an agent that is running but stuck — holding a stale lock, or running a replaced binary.</span>'
 			   . '</form>';
 		}
@@ -188,18 +187,14 @@
 				   . '<input type="hidden" name="action" value="approve_join">'
 				   . '<input type="hidden" name="ajr_agent_join_request_id" value="' . $jr_id . '">'
 				   . SmAdminCsrf::field()
-				   . '<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm('
-				   . htmlspecialchars(json_encode('Connect this agent as ' . $node->get('mgn_name')
-					. '? Confirm the fingerprint ' . $fpr . ' matches the node\'s own page first.'), ENT_QUOTES)
-				   . ', function(){ document.getElementById(\'approve_join_' . $jr_id . '\').submit(); })">Approve</button>'
+				   . '<button type="button" class="btn btn-sm btn-primary" data-jy-confirm="' . htmlspecialchars('Connect this agent as ' . $node->get('mgn_name')
+					. '? Confirm the fingerprint ' . $fpr . ' matches the node\'s own page first.', ENT_QUOTES) . '" data-jy-submit="approve_join_' . $jr_id . '">Approve</button>'
 				   . '</form>';
 				echo '<form method="post" action="' . $base_url . '" id="reject_join_' . $jr_id . '" style="display:inline;">'
 				   . '<input type="hidden" name="action" value="reject_join">'
 				   . '<input type="hidden" name="ajr_agent_join_request_id" value="' . $jr_id . '">'
 				   . SmAdminCsrf::field()
-				   . '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('
-				   . htmlspecialchars(json_encode('Reject this join request?'), ENT_QUOTES)
-				   . ', function(){ document.getElementById(\'reject_join_' . $jr_id . '\').submit(); })">Reject</button>'
+				   . '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="' . htmlspecialchars('Reject this join request?', ENT_QUOTES) . '" data-jy-submit="reject_join_' . $jr_id . '">Reject</button>'
 				   . '</form>';
 			} else {
 				echo '<div class="text-muted small">Approving a join request is superadmin-only.</div>';
@@ -212,7 +207,7 @@
 		echo '<p class="text-muted small">Everything the agent can do runs through it; operations it cannot do yet use the API and SSH.</p>';
 
 		echo '<button type="button" class="btn btn-sm btn-outline-danger" '
-		   . 'onclick="JoineryModal.confirm(\'Forget this node\\\'s agent key? Its work goes back to the API and SSH, and reconnecting starts over from the node\\\'s Management Node page.\', function(){ document.getElementById(\'agent_unpair_form\').submit(); })">Disconnect</button>';
+		   . 'data-jy-confirm="Forget this node\'s agent key? Its work goes back to the API and SSH, and reconnecting starts over from the node\'s Management Node page." data-jy-submit="agent_unpair_form">Disconnect</button>';
 
 		$fw_unpair = $page->getFormWriter('agent_unpair_form');
 		$fw_unpair->begin_form();
@@ -248,31 +243,7 @@
 	// Async API probe — populates #apiProbeIndicator when credentials exist.
 	if ($has_api_pub && $has_api_sec):
 	?>
-	<script>
-	(function() {
-		var el = document.getElementById('apiProbeIndicator');
-		if (!el) return;
-		var nodeId = el.getAttribute('data-node-id');
-		joineryApi.post('server_manager/probe_api', { node_id: nodeId })
-			.then(function(j) {
-				if (j.ok) {
-					el.className = 'ms-2 small text-success';
-					el.textContent = 'API healthy (' + j.elapsed_ms + 'ms)';
-				} else {
-					el.className = 'ms-2 small text-danger';
-					var label = j.reason === 'auth' ? 'auth failed'
-					          : j.reason === 'transport' ? 'unreachable'
-					          : j.reason === 'status' ? 'bad response'
-					          : 'failed';
-					el.textContent = 'API ' + label + (j.message ? ': ' + j.message : '');
-				}
-			})
-			.catch(function() {
-				el.className = 'ms-2 small text-danger';
-				el.textContent = 'API probe failed';
-			});
-	})();
-	</script>
+	<?php echo PageScript::src('plugins/server_manager/assets/js/api-probe.js'); ?>
 	<?php
 	endif;
 

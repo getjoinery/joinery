@@ -1238,18 +1238,16 @@ class RouteHelper {
                     // Continue with normal processing to regenerate
                     ob_start();
                     $cache_buffer_started = true;
-                } else {
-                    // Serve the cached version
-                    header('Content-Type: text/html; charset=utf-8');
-                    header('Content-Length: ' . filesize($cache_result));
-                    header('X-Cache: HIT');
-                    $cache_meta = StaticPageCache::getCacheMetadata($request_path, $cache_params);
-                    if ($cache_meta) {
-                        header('X-Cache-Created: ' . gmdate('c', $cache_meta['time']));
-                        header('X-Cache-Age: ' . (time() - $cache_meta['time']));
-                    }
-                    readfile($cache_result);
+                } elseif (StaticPageCache::serve($cache_result, $request_path, $cache_params)) {
+                    // Served from the cache, with the security headers the page was built with.
                     exit();
+                } else {
+                    // The cache can't answer this one (an entry saved without its
+                    // headers, or plain HTTP on a site that redirects to HTTPS):
+                    // build the page, and save it again.
+                    $cache_result = false;
+                    ob_start();
+                    $cache_buffer_started = true;
                 }
             } else {
                 // Not cached yet - start buffering for potential caching

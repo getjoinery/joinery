@@ -15,6 +15,7 @@
  * factor. Linked from the mail page's Settings menu and the admin mailbox
  * list (?mailbox=).
  *
+ * @version 1.3 - the page's settings are JSON blocks (no inline script)
  * @version 1.2 - loads mailbox_mime.js before mailbox_fortress.js, which decides inline parts with it (B5)
  * @version 1.1 - doc names the Status and X-Mozilla-Status headers
  */
@@ -101,18 +102,18 @@ if ($current) {
 		$path = PathHelper::getIncludePath($rel);
 		return '/' . $rel . '?v=' . (is_file($path) ? filemtime($path) : '1');
 	};
-	echo '<script>window.MAILBOX_EXPORT = ' . json_encode(array(
+	echo PageScript::json('mailbox-export-config', array(
 		'alias_id' => intval($current['alias_id']),
 		'address'  => (string)$current['address'],
 		'level'    => (string)$current['level'],
 		'exports'  => $exports,
-	), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
+	));
 	echo '<link rel="stylesheet" href="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_export.css')) . '">';
 	echo '<script src="' . htmlspecialchars($asset('assets/js/passkeys.js')) . '"></script>';
 	if ($fortress) {
 		// The reader's Fortress module opens each message here; it reads its
 		// part URL from the reader's config.
-		echo '<script>window.MAILBOX_READER = ' . json_encode(array('attachmentUrlBase' => '/profile/mailbox/attachment')) . ';</script>';
+		echo PageScript::json('mailbox-reader-config', array('attachmentUrlBase' => '/profile/mailbox/attachment'));
 		echo '<script src="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_mime.js')) . '"></script>';
 		echo '<script src="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_fortress.js')) . '"></script>';
 		echo '<script src="' . htmlspecialchars($asset('plugins/mailbox/assets/mailbox_mime_build.js')) . '"></script>';

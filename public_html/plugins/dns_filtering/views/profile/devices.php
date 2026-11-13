@@ -158,7 +158,7 @@ else{
 									</div>
 									<div class="dnsf-row6">
 										<a class="th-btn style5" href="/profile/dns_filtering/scheduled_block_edit?device_id='.$device->key.'&block_id='.$sblock->key.'">Edit</a>
-										<form method="POST" action="/profile/dns_filtering/scheduled_block_edit" class="dnsf-inline" onsubmit="return confirm(\'Delete this scheduled filter?\')">
+										<form method="POST" action="/profile/dns_filtering/scheduled_block_edit" class="dnsf-inline" data-jy-confirm="Delete this scheduled filter?">
 											<input type="hidden" name="action" value="delete">
 											<input type="hidden" name="block_id" value="'.$sblock->key.'">
 											<button type="submit" class="th-btn style5 dnsf-btn-danger">Delete</button>
@@ -260,23 +260,7 @@ else{
 
 	echo PublicPage::EndPage();
 ?>
-<script>
-(function () {
-	document.addEventListener('click', function (e) {
-		var btn = e.target.closest('.scd-actions-btn');
-		// Close all open menus first
-		document.querySelectorAll('.scd-actions-menu.is-open').forEach(function (m) {
-			m.classList.remove('is-open');
-			m.previousElementSibling.setAttribute('aria-expanded', 'false');
-		});
-		if (btn) {
-			var menu = btn.nextElementSibling;
-			menu.classList.add('is-open');
-			btn.setAttribute('aria-expanded', 'true');
-		}
-	});
-})();
-</script>
+<?php echo PageScript::src('plugins/dns_filtering/assets/js/devices.js'); ?>
 <?php
 	$page->public_footer($foptions=array('track'=>TRUE, 'show_survey'=>TRUE));
 ?>

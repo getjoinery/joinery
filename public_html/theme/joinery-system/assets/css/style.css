@@ -1762,3 +1762,8 @@ dialog::backdrop {
 @media (max-width: 700px) {
     .jy-files-browse { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* The header's app launcher: an item lights up under the pointer. */
+.jy-launcher-item:hover {
+  background: var(--lighter);
+}

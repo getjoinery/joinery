@@ -115,7 +115,7 @@
 
         <!-- Mobile Order Summary (shown on desktop via media query) -->
         <div id="mobile-order-summary" class="jy-checkout-mobilesummary">
-            <div class="jy-checkout-mobilecard" onclick="this.classList.toggle('is-open');">
+            <div class="jy-checkout-mobilecard" data-co-toggle>
                 <div class="jy-checkout-mobilerow">
                     <span class="jy-fw-600">Order: <?php
                         $first_item = reset($cart->items);
@@ -153,8 +153,7 @@
                         id="header-<?php echo $section_key; ?>"
                         aria-expanded="<?php echo ($section['state'] == 'active') ? 'true' : 'false'; ?>"
                         aria-controls="body-<?php echo $section_key; ?>"
-                        <?php if ($section['state'] == 'completed'): ?>onclick="openSection('<?php echo $section_key; ?>')"<?php endif; ?>
-                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();if(this.parentElement.dataset.state==='completed')openSection('<?php echo $section_key; ?>');}">
+                        data-co-open="<?php echo htmlspecialchars($section_key); ?>">
                         <div class="jy-checkout-headleft">
                             <span aria-hidden="true" class="section-badge">
                                 <?php if ($section['state'] == 'completed'): ?>&#10003;<?php else: echo $section['number']; endif; ?>
@@ -229,7 +228,7 @@
                                        class="jy-checkout-input"
                                        required autocomplete="email" placeholder="your@email.com">
                                 <div id="contact_email_exists" class="jy-checkout-emailexists" hidden>
-                                    Welcome back! <a href="#" onclick="showLoginModal(); return false;">Log in</a> for faster checkout, or continue as guest.
+                                    Welcome back! <a href="#" data-co-action="login">Log in</a> for faster checkout, or continue as guest.
                                 </div>
                             </div>
 
@@ -256,9 +255,9 @@
 
                         <div class="jy-checkout-actions">
                             <?php if ($cart->get_total() <= 0): ?>
-                            <button type="button" class="btn btn-primary jy-w-full" onclick="submitBillingAndComplete()">Complete Order</button>
+                            <button type="button" class="btn btn-primary jy-w-full" data-co-action="complete">Complete Order</button>
                             <?php else: ?>
-                            <button type="button" class="btn btn-primary jy-w-full" onclick="validateAndContinue('billing')">Continue</button>
+                            <button type="button" class="btn btn-primary jy-w-full" data-co-continue="billing">Continue</button>
                             <?php endif; ?>
                             <?php $consent_copy = LibraryFunctions::consent_copy('continuing'); if ($consent_copy): ?>
                             <p class="jy-checkout-consent">
@@ -382,7 +381,7 @@
                             <?php foreach ($cart->coupon_codes as $coupon_code): ?>
                             <span class="jy-checkout-chip">
                                 <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>
-                                <a href="#" onclick="removeCoupon('<?php echo addslashes($coupon_code); ?>'); return false;" class="jy-checkout-chip-x">&times;</a>
+                                <a href="#" data-co-remove-coupon="<?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>" class="jy-checkout-chip-x">&times;</a>
                             </span>
                             <?php endforeach; ?>
                         </div>
@@ -391,7 +390,7 @@
                         <div class="jy-checkout-coupon-test">
                             Test:
                             <?php foreach ($page_vars['all_coupons'] as $coupon): ?>
-                            <a href="#" onclick="applyCouponCode('<?php echo addslashes($coupon->get('ccd_code')); ?>'); return false;" class="jy-checkout-coupon-testlink">
+                            <a href="#" data-co-apply-coupon="<?php echo htmlspecialchars($coupon->get('ccd_code'), ENT_QUOTES, 'UTF-8'); ?>" class="jy-checkout-coupon-testlink">
                                 <?php echo htmlspecialchars($coupon->get('ccd_code'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                             <?php endforeach; ?>
@@ -399,7 +398,7 @@
                         <?php endif; ?>
                         <div class="jy-checkout-coupon-row">
                             <input type="text" id="coupon_code_input" placeholder="Coupon code" class="jy-checkout-coupon-input">
-                            <button type="button" class="btn btn-outline jy-checkout-coupon-apply" onclick="applyCoupon()">Apply</button>
+                            <button type="button" class="btn btn-outline jy-checkout-coupon-apply" data-co-action="apply-coupon">Apply</button>
                         </div>
                         <div id="coupon_error" class="jy-checkout-coupon-error" hidden></div>
                         <?php if (!empty($page_vars['coupon_error'])): ?>
@@ -458,7 +457,7 @@
 <!-- Login Modal -->
 <div id="login-modal" class="jy-checkout-modal" hidden>
     <div class="jy-checkout-modal-box">
-        <button onclick="closeLoginModal()" class="jy-checkout-modal-close">&times;</button>
+        <button type="button" data-co-action="close-login" class="jy-checkout-modal-close">&times;</button>
         <h3 class="jy-checkout-modal-title">Log In</h3>
         <div id="login-modal-error" class="jy-checkout-modal-error" hidden></div>
         <div class="jy-checkout-modal-field">
@@ -469,302 +468,14 @@
             <label for="login_modal_password" class="jy-checkout-modal-label">Password</label>
             <input type="password" id="login_modal_password" name="password" class="jy-checkout-input" autocomplete="current-password">
         </div>
-        <button onclick="submitLogin()" class="btn btn-primary jy-w-full">Log In</button>
+        <button type="button" data-co-action="login-submit" class="btn btn-primary jy-w-full">Log In</button>
         <div class="jy-checkout-modal-foot">
             <a href="/forgot_password" class="jy-checkout-modal-forgot">Forgot password?</a>
         </div>
     </div>
 </div>
 
-<script>
-(function() {
-    function openSection(sectionKey) {
-        var sections = document.querySelectorAll('.checkout-section');
-        sections.forEach(function(el) {
-            var body = el.querySelector('.section-body');
-            var header = el.querySelector('.section-header');
-            if (el.dataset.section === sectionKey) {
-                el.dataset.state = 'active';
-                header.setAttribute('aria-expanded', 'true');
-                body.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                // Focus first input in the section
-                var firstInput = body.querySelector('input, select, textarea, button');
-                if (firstInput) setTimeout(function() { firstInput.focus(); }, 300);
-                // Announce to screen readers
-                var statusEl = document.getElementById('checkout-status');
-                if (statusEl) statusEl.textContent = header.querySelector('strong').textContent + ' section is now active';
-            } else if (el.dataset.state === 'active') {
-                el.dataset.state = 'pending';
-                header.setAttribute('aria-expanded', 'false');
-            }
-        });
-    }
-
-    function markCompleted(sectionKey, summary) {
-        var el = document.querySelector('[data-section="' + sectionKey + '"]');
-        if (!el) return;
-        el.dataset.state = 'completed';
-        var header = el.querySelector('.section-header');
-        header.onclick = function() { openSection(sectionKey); };
-
-        // Update number badge to checkmark
-        var badge = header.querySelector('.section-badge');
-        if (badge) badge.innerHTML = '&#10003;';
-
-        // Show summary
-        var existing = header.querySelector('.section-summary');
-        if (existing) existing.remove();
-        if (summary) {
-            var sumDiv = document.createElement('div');
-            sumDiv.className = 'section-summary';
-            sumDiv.innerHTML = '<span class="jy-checkout-sumtext">' + summary + '</span><span class="jy-checkout-sumedit">Edit</span>';
-            header.appendChild(sumDiv);
-        }
-        updateProgress();
-    }
-
-    function getNextSection(currentKey) {
-        var keys = [];
-        document.querySelectorAll('.checkout-section').forEach(function(el) {
-            keys.push(el.dataset.section);
-        });
-        var idx = keys.indexOf(currentKey);
-        return (idx >= 0 && idx < keys.length - 1) ? keys[idx + 1] : null;
-    }
-
-    function validateAndContinue(sectionKey) {
-        if (sectionKey === 'billing') {
-            submitBilling(false);
-            return;
-        }
-    }
-
-    function submitBilling(andComplete) {
-        var form = document.createElement('form');
-        form.method = 'POST';
-        // A free order completes at /cart_charge as a POST; the billing step
-        // alone goes back to /checkout.
-        form.action = andComplete ? '/cart_charge' : '/checkout';
-
-        var email = document.getElementById('contact_email') ? document.getElementById('contact_email').value.trim() : '';
-        var firstName = document.getElementById('billing_first_name') ? document.getElementById('billing_first_name').value.trim() : '';
-        var lastName = document.getElementById('billing_last_name') ? document.getElementById('billing_last_name').value.trim() : '';
-
-        var errors = [];
-        if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) errors.push('A valid email address is required.');
-        if (!firstName) errors.push('First name is required.');
-        if (!lastName) errors.push('Last name is required.');
-
-        if (errors.length > 0) {
-            var errDiv = document.getElementById('billing_errors');
-            if (errDiv) { errDiv.innerHTML = errors.join('<br>'); errDiv.style.display = 'block'; }
-            return;
-        }
-
-        var fields = {
-            'billing_email': email,
-            'billing_first_name': firstName,
-            'billing_last_name': lastName
-        };
-        if (andComplete) {
-            fields['complete_order'] = '1';
-        }
-        for (var key in fields) {
-            var input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = key;
-            input.value = fields[key];
-            form.appendChild(input);
-        }
-        document.body.appendChild(form);
-        form.submit();
-    }
-
-    function submitBillingAndComplete() {
-        submitBilling(true);
-    }
-
-    function applyCoupon() {
-        var code = document.getElementById('coupon_code_input').value.trim();
-        if (!code) return;
-        applyCouponCode(code);
-    }
-
-    // Shared transport (joineryApi), normalized back to this page's
-    // { ok, payload } shape.
-    function jyApiAction(action, body) {
-        return joineryApi.post(action, body).then(
-            function(data) { return { ok: true, payload: { data: data } }; },
-            function(err) { return { ok: false, payload: { error: err.message } }; }
-        );
-    }
-
-    function applyCouponCode(code) {
-        var errorEl = document.getElementById('coupon_error');
-        if (errorEl) errorEl.style.display = 'none';
-
-        jyApiAction('store/checkout_apply_coupon', { coupon_code: code })
-            .then(function(res) {
-                if (res.ok) {
-                    // Reload to reflect updated prices in order summary
-                    window.location.reload();
-                } else {
-                    if (errorEl) { errorEl.textContent = res.payload.error || 'Unable to apply coupon.'; errorEl.style.display = 'block'; }
-                }
-            })
-            .catch(function() {
-                if (errorEl) { errorEl.textContent = 'An error occurred. Please try again.'; errorEl.style.display = 'block'; }
-            });
-    }
-
-    function removeCoupon(code) {
-        jyApiAction('store/checkout_remove_coupon', { coupon_code: code })
-            .then(function(res) {
-                if (res.ok) {
-                    window.location.reload();
-                }
-            });
-    }
-
-    // Email check on blur
-    var contactEmail = document.getElementById('contact_email');
-    if (contactEmail && contactEmail.type === 'email') {
-        contactEmail.addEventListener('blur', function() {
-            var email = this.value.trim();
-            var existsEl = document.getElementById('contact_email_exists');
-            if (!email || !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-                if (existsEl) existsEl.style.display = 'none';
-                return;
-            }
-            jyApiAction('store/checkout_check_email', { email: email })
-                .then(function(res) {
-                    if (res.ok && res.payload.data && res.payload.data.exists && existsEl) {
-                        existsEl.style.display = 'block';
-                    } else if (existsEl) {
-                        existsEl.style.display = 'none';
-                    }
-                });
-        });
-    }
-
-    // Login modal
-    function showLoginModal() {
-        var modal = document.getElementById('login-modal');
-        modal.style.display = 'flex';
-        var emailInput = document.getElementById('login_modal_email');
-        var contactVal = document.getElementById('contact_email');
-        if (emailInput && contactVal) emailInput.value = contactVal.value;
-        document.getElementById('login_modal_password').focus();
-    }
-
-    function closeLoginModal() {
-        document.getElementById('login-modal').style.display = 'none';
-    }
-
-    function submitLogin() {
-        var email = document.getElementById('login_modal_email').value.trim();
-        var password = document.getElementById('login_modal_password').value;
-        var errorEl = document.getElementById('login-modal-error');
-
-        if (!email || !password) {
-            if (errorEl) { errorEl.textContent = 'Please enter email and password.'; errorEl.style.display = 'block'; }
-            return;
-        }
-
-        // Submit as a real form POST to /login with redirect back to /cart
-        var form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '/login';
-
-        var fields = {
-            'email': email,
-            'password': password,
-            'redirect': '/checkout'
-        };
-        for (var key in fields) {
-            var input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = key;
-            input.value = fields[key];
-            form.appendChild(input);
-        }
-        document.body.appendChild(form);
-        form.submit();
-    }
-
-    // Progress bar update
-    function updateProgress() {
-        var sections = document.querySelectorAll('.checkout-section');
-        var total = sections.length;
-        var completed = 0;
-        sections.forEach(function(el) {
-            if (el.dataset.state === 'completed') completed++;
-        });
-        var bar = document.getElementById('progress-bar');
-        if (bar) bar.style.width = Math.round((completed / total) * 100) + '%';
-    }
-
-    // Expose to global scope for onclick handlers
-    window.openSection = openSection;
-    window.validateAndContinue = validateAndContinue;
-    window.submitBillingAndComplete = submitBillingAndComplete;
-    window.applyCoupon = applyCoupon;
-    window.applyCouponCode = applyCouponCode;
-    window.removeCoupon = removeCoupon;
-    window.showLoginModal = showLoginModal;
-    window.closeLoginModal = closeLoginModal;
-    window.submitLogin = submitLogin;
-
-    // Disable submit buttons on form submission
-    document.addEventListener('submit', function(e) {
-        var form = e.target;
-        var buttons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
-        buttons.forEach(function(btn) {
-            btn.disabled = true;
-            btn.dataset.originalText = btn.innerHTML;
-            btn.innerHTML = 'Processing...';
-        });
-        setTimeout(function() {
-            buttons.forEach(function(btn) {
-                btn.disabled = false;
-                if (btn.dataset.originalText) btn.innerHTML = btn.dataset.originalText;
-            });
-        }, 10000);
-    });
-
-    // Back button: restore accordion state from URL hash
-    function saveState() {
-        var active = document.querySelector('.checkout-section[data-state="active"]');
-        if (active) {
-            history.replaceState({ section: active.dataset.section }, '', '#' + active.dataset.section);
-        }
-    }
-
-    window.addEventListener('popstate', function(e) {
-        if (e.state && e.state.section) {
-            openSection(e.state.section);
-        }
-    });
-
-    // On page load, check hash for section to open
-    if (window.location.hash) {
-        var hashSection = window.location.hash.substring(1);
-        var el = document.querySelector('[data-section="' + hashSection + '"]');
-        if (el && (el.dataset.state === 'completed' || el.dataset.state === 'active')) {
-            openSection(hashSection);
-        }
-    }
-
-    // Save state when sections change
-    var origOpen = openSection;
-    openSection = function(key) {
-        origOpen(key);
-        history.pushState({ section: key }, '', '#' + key);
-    };
-    // Re-expose
-    window.openSection = openSection;
-})();
-</script>
+<?php echo PageScript::src('plugins/store/assets/js/checkout.js'); ?>
 
 </div>
 <?php

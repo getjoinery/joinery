@@ -20,17 +20,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	echo PublicPage::BeginPage('Log In');
 
 ?>
-	<script type="text/javascript">
-	document.addEventListener('DOMContentLoaded', function() {
-		<?php if (!$email) { ?>
-			var f = document.getElementById('email');
-		<?php } else { ?>
-			var f = document.getElementById('password');
-		<?php } ?>
-		if (f) f.focus();
-	});
-	</script>
-
 <div class="w-full flex flex-col sm:justify-center items-center ">
   <div class="w-full sm:max-w-md p-5 mx-auto">
 	<?php 
@@ -42,11 +31,11 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 		echo $formwriter->begin_form();
 	?>
       <div class="mb-4">
-		<?php echo $formwriter->textinput('email', 'Email or username', ['maxlength' => 255, 'autocomplete' => 'username', 'value' => (string)($page_vars['email'] ?? '')]); ?>
+		<?php echo $formwriter->textinput('email', 'Email or username', ['maxlength' => 255, 'autocomplete' => 'username', 'value' => (string)($page_vars['email'] ?? ''), 'autofocus' => !$email]); ?>
 
       </div>
       <div class="mb-4">
-		<?php echo $formwriter->passwordinput('password', 'Password', ['maxlength' => 255]); ?>
+		<?php echo $formwriter->passwordinput('password', 'Password', ['maxlength' => 255, 'autofocus' => (bool)$email]); ?>
       </div>
       <div class="mt-6 flex items-center justify-between">
         <div class="flex items-center">

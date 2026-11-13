@@ -6,6 +6,7 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.20 - the Delete buttons are kit confirms (data-jy-confirm, -typed, data-jy-submit)
  * @version 2.19 - backup key states: no 'pending' (old epochs are not reported)
  * @version 2.18 - the Stored Backups Delete and Delete all buttons work: their scripts are attribute-escaped (the
  *                 json_encoded message's double quotes ended the onclick attribute, so a click did nothing)
@@ -448,7 +449,7 @@ if ($target !== null) {
 		echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $target->key . '" id="delete_target_form" style="display:inline;">';
 		echo '<input type="hidden" name="action" value="delete_target">';
 		echo SmAdminCsrf::field();
-		echo '<button type="button" class="btn btn-outline-danger ms-2" onclick="JoineryModal.confirm(\'Delete this target?\', function(){ document.getElementById(\'delete_target_form\').submit(); })">Delete</button>';
+		echo '<button type="button" class="btn btn-outline-danger ms-2" data-jy-confirm="Delete this target?" data-jy-submit="delete_target_form">Delete</button>';
 		echo '</form>';
 	}
 
@@ -571,10 +572,8 @@ if ($target !== null) {
 						echo '<input type="hidden" name="key" value="' . htmlspecialchars($obj['key']) . '">';
 						echo SmAdminCsrf::field();
 						$obj_msg = 'Delete backup file ' . $fname . '? This cannot be undone.';
-						// The script is attribute-escaped: json_encode's double quotes
-						// would otherwise end the onclick attribute and the button do nothing.
-						$obj_js = 'JoineryModal.confirm(' . json_encode($obj_msg) . ', function(){ document.getElementById(' . json_encode($oid) . ').submit(); })';
-						echo '<button type="button" class="btn btn-sm btn-outline-danger" onclick="' . htmlspecialchars($obj_js, ENT_QUOTES) . '">Delete</button>';
+						echo '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="' . htmlspecialchars($obj_msg, ENT_QUOTES)
+							. '" data-jy-submit="' . htmlspecialchars($oid, ENT_QUOTES) . '">Delete</button>';
 						echo '</form>';
 						echo '</td></tr>';
 					}
@@ -592,9 +591,8 @@ if ($target !== null) {
 						echo SmAdminCsrf::field();
 						$pfx_msg = 'Delete all ' . $g['count'] . ' backup object' . ($g['count'] === 1 ? '' : 's')
 							. ' for this site? This cannot be undone.';
-						$pfx_js = 'JoineryModal.confirmTyped(' . json_encode($pfx_msg) . ', ' . json_encode($slug)
-							. ', function(){ document.getElementById(' . json_encode($pid) . ').submit(); })';
-						echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="' . htmlspecialchars($pfx_js, ENT_QUOTES) . '">Delete all</button>';
+						echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" data-jy-confirm="' . htmlspecialchars($pfx_msg, ENT_QUOTES)
+							. '" data-jy-confirm-typed="' . htmlspecialchars($slug, ENT_QUOTES) . '" data-jy-submit="' . htmlspecialchars($pid, ENT_QUOTES) . '">Delete all</button>';
 						echo '</form>';
 					}
 

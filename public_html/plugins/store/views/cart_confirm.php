@@ -129,7 +129,7 @@ $page->public_header([
                     }
                     ?>
                     <div class="jy-cc-actions">
-                        <button type="button" class="btn btn-primary jy-w-full" onclick="submitConfirmSurvey(<?php echo $survey_info['survey_id']; ?>, <?php echo $survey_info['event_id']; ?>)">Submit Feedback</button>
+                        <button type="button" class="btn btn-primary jy-w-full" data-cc-survey="<?php echo (int)$survey_info['survey_id']; ?>" data-cc-event="<?php echo (int)$survey_info['event_id']; ?>">Submit Feedback</button>
                     </div>
                 </div>
                 <div id="survey-thanks-<?php echo $survey_info['survey_id']; ?>" hidden class="jy-cc-thanks">
@@ -183,43 +183,7 @@ $page->public_header([
     </div>
 </section>
 
-<script>
-function submitConfirmSurvey(surveyId, eventId) {
-    var form = document.getElementById('survey-form-' + surveyId);
-    if (!form) return;
-
-    // Collect all question answers from the form. Inputs named "field[]"
-    // (checkbox lists) accumulate into a JSON array under "field" — the same
-    // shape PHP produced when this was a form-encoded POST.
-    var inputs = form.querySelectorAll('input, select, textarea');
-    var payload = { survey_id: surveyId, event_id: eventId };
-
-    inputs.forEach(function(input) {
-        if (!input.name) return;
-        var isList = input.name.slice(-2) === '[]';
-        var key = isList ? input.name.slice(0, -2) : input.name;
-        if (isList) {
-            if (!(key in payload)) payload[key] = [];
-            if ((input.type !== 'checkbox' && input.type !== 'radio') || input.checked) {
-                payload[key].push(input.value);
-            }
-        } else if (input.type === 'checkbox') {
-            payload[key] = input.checked ? (input.value || '1') : '';
-        } else if (input.type === 'radio') {
-            if (input.checked) payload[key] = input.value;
-        } else {
-            payload[key] = input.value;
-        }
-    });
-
-    joineryApi.post('event_manager/checkout_submit_survey', payload)
-        .then(function() {
-            document.getElementById('survey-form-' + surveyId).hidden = true;
-            document.getElementById('survey-thanks-' + surveyId).hidden = false;
-        })
-        .catch(function() {});
-}
-</script>
+<?php echo PageScript::src('plugins/store/assets/js/cart-confirm.js'); ?>
 
 </div>
 <?php

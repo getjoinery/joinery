@@ -5,12 +5,13 @@
  * and turns the editor's postMessage notices into the bar's Saved / Saving…
  * line. Close asks the editor to save, then goes back to the folder.
  *
+ * @version 0.1.1 - its settings are the page's #office-editor-config JSON block
  * @version 0.1.0
  */
 (function () {
 	'use strict';
 
-	var CFG = window.OFFICE_EDITOR || {};
+	var CFG = (window.joineryPageData && joineryPageData('office-editor-config')) || {};
 	var api = window.joineryApi;
 	var frame, statusEl, messageEl;
 	var startedAt = Date.now();

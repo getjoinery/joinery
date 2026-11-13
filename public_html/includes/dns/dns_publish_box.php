@@ -18,6 +18,7 @@
  * whose API is open to everyone. The gated hosts are also named as such in the
  * provider list — a fact about the vendor, not a tier label.
  *
+ * @version 1.12 - the Apply gate's records are a JSON block and its script is assets/js/dns-boxes.js (no inline script)
  * @version 1.11 - the move offer only renders for a domain that serves nothing
  *                but this deployment (move_veto); a lived-in domain gets the
  *                gate note with by-hand guidance instead
@@ -289,29 +290,15 @@ function dns_publish_box_apply_gate(array $rows): void {
 		return;   // something publishes whatever is ticked; no gate needed
 	}
 
-	$payload = json_encode($gated);
-	echo '<script>(function(){'
-		. 'var gated=' . $payload . ';'
-		. 'var form=document.getElementById("dns_apply_form")||document.querySelector("form");'
-		. 'if(!form)return;'
-		. 'var btn=form.querySelector("[name=btn_dns_apply]")||form.querySelector("[type=submit]");'
-		. 'if(!btn)return;'
-		. 'var note=document.createElement("p");'
-		. 'note.className="text-muted small mb-0";'
-		. 'note.textContent="Tick a confirmation above — with none ticked this would publish nothing.";'
-		. 'btn.parentNode.insertBefore(note,btn.nextSibling);'
-		. 'function ticked(name){var out={};'
-		. 'form.querySelectorAll("input[name=\'"+name+"[]\']:checked").forEach(function(el){out[el.value]=true;});'
-		. 'return out;}'
-		. 'function sync(){'
-		. 'var c=ticked("dns_cutover"),a=ticked("dns_adopt"),r=ticked("dns_remove");'
-		. 'var any=gated.some(function(g){'
-		. 'return (!g.cutover||c[g.key])&&(!g.adopt||a[g.key])&&(!g.remove||r[g.key]);});'
-		. 'btn.disabled=!any;note.style.display=any?"none":"";}'
-		. 'form.addEventListener("change",function(e){'
-		. 'if(e.target&&e.target.type==="checkbox")sync();});'
-		. 'sync();'
-		. '})();</script>';
+	// The records as data; assets/js/dns-boxes.js keeps Apply disabled until
+	// one of them can publish (no inline script).
+	echo '<script type="application/json" id="dns-publish-gated">'
+		. json_encode($gated, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE) . '</script>';
+	if (!defined('JY_DNS_BOXES_JS')) {   // one tag, whichever box asks first
+		define('JY_DNS_BOXES_JS', true);
+		echo '<script defer src="/assets/js/dns-boxes.js?v='
+			. (@filemtime(PathHelper::getIncludePath('assets/js/dns-boxes.js')) ?: '1') . '"></script>';
+	}
 }
 
 /** The diff: four outcomes, cutovers called out, then Apply. */

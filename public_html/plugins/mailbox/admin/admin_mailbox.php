@@ -96,7 +96,7 @@ foreach ($aliases as $alias) {
 		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
 		. '<button type="submit" class="btn btn-sm btn-outline-secondary">' . ($alias->get('iea_is_enabled') ? 'Disable' : 'Enable') . '</button>'
 		. '</form> '
-		. '<form method="post" class="iem-inline-form" onsubmit="return confirm(\'Delete this alias?\')">'
+		. '<form method="post" class="iem-inline-form" data-jy-confirm="Delete this alias?">'
 		. '<input type="hidden" name="action" value="delete">'
 		. '<input type="hidden" name="iea_inbound_email_alias_id" value="' . $alias->key . '">'
 		. '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>'

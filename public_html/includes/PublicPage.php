@@ -120,7 +120,7 @@ class PublicPage extends PublicPageBase {
 <?php if ($this->show_site_chrome()): ?>
 <header class="jy-site-header header-light" style="border-bottom: 1px solid var(--jy-color-border);">
     <div class="jy-header-inner" style="justify-content: center; position: relative;">
-        <a href="/" class="jy-logo" style="position: absolute; left: 1.5rem;" onclick="return confirm('Leave checkout? Your cart will be saved.');">
+        <a href="/" class="jy-logo" style="position: absolute; left: 1.5rem;" data-jy-confirm="Leave checkout? Your cart will be saved.">
             <?php $this->get_logo(); ?>
         </a>
         <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.0625rem;">

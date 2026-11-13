@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.103 - no inline script or handlers: confirms are kit attributes, Hold stopped is data-jy-prompt, the rest assets/js/node-overview.js
  * @version 1.102 - Recovery key box: a decline past its day says a confirmation waits; Recorded only when the keys match
  * @version 1.101 - the Recovery key box says a proven key not yet recorded is recorded within a minute, not that there is none,
  *                  and a declined change says it was declined
@@ -408,7 +409,7 @@
 	}
 	?>
 	<div class="btn-group svm-relative">
-		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" onclick="var m=this.nextElementSibling;m.style.display=m.style.display==='block'?'none':'block'">Actions</button>
+		<button type="button" class="btn btn-sm btn-primary dropdown-toggle" data-sm-menu-toggle>Actions</button>
 		<ul class="dropdown-menu dropdown-menu-end svm-dropdown-menu">
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php
@@ -416,7 +417,7 @@
 			// so nothing for this to run; the action would fail closed at the
 			// runner. Its host-scope twin, Run Host Housekeeping, stays.
 			if (JobCommandBuilder::has_primitive($node, 'run_plugin_installers') && trim((string)$node->get('mgn_web_root')) !== ''): ?>
-				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
+				<li><a class="dropdown-item" href="#" data-jy-confirm="Run every active plugin's host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack." data-jy-submit="run_plugin_installers_form">Run Plugin Installers</a></li>
 			<?php endif; ?>
 			<?php
 			// fail2ban housekeeping now, through the host runner: the host_converge
@@ -424,7 +425,7 @@
 			// the job's transcript says what it did, and a host_report follows so
 			// the Health box shows the machine after the run.
 			if (JobCommandBuilder::has_primitive($node, 'host_converge')): ?>
-				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run fail2ban housekeeping on this machine now, as root, through the host runner? Idempotent: it is what the host timer runs daily, and the transcript shows what it did.', function(){ document.getElementById('host_converge_form').submit(); }); return false;">Run Host Housekeeping</a></li>
+				<li><a class="dropdown-item" href="#" data-jy-confirm="Run fail2ban housekeeping on this machine now, as root, through the host runner? Idempotent: it is what the host timer runs daily, and the transcript shows what it did." data-jy-submit="host_converge_form">Run Host Housekeeping</a></li>
 			<?php endif; ?>
 			<?php if (Access::permits(10, $session) && !$node->get('mgn_agent_public_key') && $node->agent_moved_away() === null):
 				$overview_pending_joins = class_exists('AgentJoinRequest') ? count(AgentJoinRequest::pending()) : 0; ?>
@@ -462,25 +463,25 @@
 					<form method="post" action="<?php echo $base_url; ?>" id="delete_node_form" style="margin:0;">
 						<input type="hidden" name="action" value="delete_node">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item" onclick="JoineryModal.confirm('Hide this site from the dashboard? The site keeps running on its host and every record is kept; Restore to Dashboard brings it back. Hiding stops the work on it: unfinished jobs are cancelled, its backup storage takes no new backups, any provisioning record and hosted trial from its hosting order are removed (its cloud server stays recorded), and a domain bought for it is parked for its buyer.', function(){ document.getElementById('delete_node_form').submit(); })">Hide from Dashboard</button>
+						<button type="button" class="dropdown-item" data-jy-confirm="Hide this site from the dashboard? The site keeps running on its host and every record is kept; Restore to Dashboard brings it back. Hiding stops the work on it: unfinished jobs are cancelled, its backup storage takes no new backups, any provisioning record and hosted trial from its hosting order are removed (its cloud server stays recorded), and a domain bought for it is parked for its buyer." data-jy-submit="delete_node_form">Hide from Dashboard</button>
 					</form>
 				</li>
 			<?php else: ?>
 				<li>
 					<?php if ($restore_block !== ''): ?>
-						<button type="button" class="dropdown-item" onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Restore not allowed. ' . $restore_block), ENT_QUOTES); ?>)">Restore to Dashboard</button>
+						<button type="button" class="dropdown-item" data-jy-alert="<?php echo htmlspecialchars('Restore not allowed. ' . $restore_block, ENT_QUOTES); ?>">Restore to Dashboard</button>
 					<?php else: ?>
 						<form method="post" action="<?php echo $base_url; ?>" id="restore_node_form" style="margin:0;">
 							<input type="hidden" name="action" value="restore_node">
 							<?php echo SmAdminCsrf::field(); ?>
-							<button type="button" class="dropdown-item" onclick="JoineryModal.confirm('Restore this site to the dashboard? Its agent is accepted again and monitoring resumes. Jobs cancelled when it was hidden stay cancelled, a removed provisioning record stays removed, and a parked domain stays parked.', function(){ document.getElementById('restore_node_form').submit(); })">Restore to Dashboard</button>
+							<button type="button" class="dropdown-item" data-jy-confirm="Restore this site to the dashboard? Its agent is accepted again and monitoring resumes. Jobs cancelled when it was hidden stay cancelled, a removed provisioning record stays removed, and a parked domain stays parked." data-jy-submit="restore_node_form">Restore to Dashboard</button>
 						</form>
 					<?php endif; ?>
 				</li>
 			<?php endif; ?>
 			<li>
 				<?php if ($remove_block !== ''): ?>
-					<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Removal not allowed. ' . $remove_block), ENT_QUOTES); ?>)">Remove Permanently&hellip;</button>
+					<button type="button" class="dropdown-item text-danger" data-jy-alert="<?php echo htmlspecialchars('Removal not allowed. ' . $remove_block, ENT_QUOTES); ?>">Remove Permanently&hellip;</button>
 				<?php else: ?>
 					<form method="post" action="<?php echo $base_url; ?>" id="purge_node_form" style="margin:0;">
 						<input type="hidden" name="action" value="purge_node">
@@ -488,9 +489,13 @@
 						<input type="hidden" name="confirm_machine" value="">
 						<?php echo SmAdminCsrf::field(); ?>
 						<?php if ($remove_attest !== ''): ?>
-							<button type="button" class="dropdown-item text-danger" onclick="var f=document.getElementById('purge_node_form'); JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($attest_message . ' I deleted ' . $attest_machine . ' at ' . $remove_hosted_at . '. Its ' . ($attest_is_id ? 'instance ID' : 'IP address') . ' is ' . $remove_attest . '.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>, function(){ f.elements['confirm_machine'].value = <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>; f.submit(); }, {confirmLabel: 'I deleted it'}); })">Remove Permanently&hellip;</button>
+							<button type="button" class="dropdown-item text-danger" data-sm-remove-node
+								data-message="<?php echo htmlspecialchars($remove_message, ENT_QUOTES); ?>"
+								data-typed="<?php echo htmlspecialchars($node->get('mgn_slug'), ENT_QUOTES); ?>"
+								data-attest-message="<?php echo htmlspecialchars($attest_message . ' I deleted ' . $attest_machine . ' at ' . $remove_hosted_at . '. Its ' . ($attest_is_id ? 'instance ID' : 'IP address') . ' is ' . $remove_attest . '.', ENT_QUOTES); ?>"
+								data-attest="<?php echo htmlspecialchars($remove_attest, ENT_QUOTES); ?>">Remove Permanently&hellip;</button>
 						<?php else: ?>
-							<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ document.getElementById('purge_node_form').submit(); })">Remove Permanently&hellip;</button>
+							<button type="button" class="dropdown-item text-danger" data-jy-confirm="<?php echo htmlspecialchars($remove_message, ENT_QUOTES); ?>" data-jy-confirm-typed="<?php echo htmlspecialchars($node->get('mgn_slug'), ENT_QUOTES); ?>" data-jy-submit="purge_node_form">Remove Permanently&hellip;</button>
 						<?php endif; ?>
 					</form>
 				<?php endif; ?>
@@ -501,7 +506,7 @@
 						<input type="hidden" name="action" value="decommission_node">
 						<input type="hidden" name="confirm_site_name" value="<?php echo htmlspecialchars($decommission_site); ?>">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode(JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? It needs a check from the last ten minutes that the domain reaches the new server, and the host checks again that the domain no longer reaches this container. Otherwise nothing is removed. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.')), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($decommission_site), ENT_QUOTES); ?>, function(){ document.getElementById('decommission_node_form').submit(); })">Permanently Delete Site&hellip;</button>
+						<button type="button" class="dropdown-item text-danger" data-jy-confirm="<?php echo htmlspecialchars(JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? It needs a check from the last ten minutes that the domain reaches the new server, and the host checks again that the domain no longer reaches this container. Otherwise nothing is removed. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.'), ENT_QUOTES); ?>" data-jy-confirm-typed="<?php echo htmlspecialchars($decommission_site, ENT_QUOTES); ?>" data-jy-submit="decommission_node_form">Permanently Delete Site&hellip;</button>
 					</form>
 				</li>
 			<?php elseif ($decommission_site !== null && $is_removed): ?>
@@ -589,40 +594,6 @@
 		$fact('Site', $site_html);
 		if (MovedSiteCheck::applies($node)) {
 			?>
-<script>
-(function () {
-	var box = document.getElementById('movedCheck');
-	var label = document.getElementById('movedCheckLabel');
-	var again = document.getElementById('movedCheckAgain');
-	var polls = 0;
-	// The host's check takes seconds; poll while it runs, for about three minutes.
-	function ask(force) {
-		again.disabled = true;
-		joineryApi.post('server_manager/moved_site_check', { node_id: parseInt(box.dataset.node, 10), force: force ? 1 : 0 })
-			.then(function (data) {
-				if (!data || !data.ok) {
-					label.insertAdjacentHTML('beforeend', '<div class="text-warning"></div>');
-					label.lastChild.textContent = (data && data.message) || 'The check could not run.';
-					again.disabled = false;
-					return;
-				}
-				label.innerHTML = data.html;
-				if (data.checking && polls++ < 60) {
-					setTimeout(function () { ask(false); }, 3000);
-				} else {
-					again.disabled = false;
-				}
-			})
-			.catch(function (err) {
-				label.insertAdjacentHTML('beforeend', '<div class="text-warning"></div>');
-				label.lastChild.textContent = (err && err.message) || 'The check could not run.';
-				again.disabled = false;
-			});
-	}
-	again.addEventListener('click', function () { polls = 0; ask(true); });
-	if (box.dataset.ask === '1' || box.dataset.checking === '1') { ask(false); }
-})();
-</script>
 			<?php
 		}
 	} elseif ($node->hosts_site()) {
@@ -729,7 +700,7 @@
 		echo '<div class="mt-2"><form method="post" class="svm-inline-form" id="retry_install_form">';
 		echo '<input type="hidden" name="action" value="retry_install">';
 		echo SmAdminCsrf::field();
-		echo '<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm(\'Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?\', function(){ document.getElementById(\'retry_install_form\').submit(); })">Retry Install</button></form></div>';
+		echo '<button type="button" class="btn btn-sm btn-warning" data-jy-confirm="Before retrying: SSH to the target and remove any partial install (e.g. rm -rf /var/www/html/SITENAME, drop the DB). install.sh will refuse if the site directory already exists. Continue?" data-jy-submit="retry_install_form">Retry Install</button></form></div>';
 		echo '</div></div>';
 	} elseif ($install_state === 'copy') {
 		echo '<div class="alert alert-info"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
@@ -980,7 +951,7 @@
 			$gauge('Data root', null, '', '<span class="text-muted fs-6">none</span>',
 				'This host keeps its data on the root disk.',
 				'<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-				. ' onclick="JoineryModal.confirm(\'Move this host\\\'s data onto a data root, /srv/joinery? Its sites, database and mail stop for as long as one copy of the data takes, then start again. A move that does not finish puts everything back. The copies from before stay on the host until it has rebooted with the data root working, so reboot it afterwards.\', function(){ document.getElementById(\'data_root_migrate_form\').submit(); })">'
+				. ' data-jy-confirm="Move this host\'s data onto a data root, /srv/joinery? Its sites, database and mail stop for as long as one copy of the data takes, then start again. A move that does not finish puts everything back. The copies from before stay on the host until it has rebooted with the data root working, so reboot it afterwards." data-jy-submit="data_root_migrate_form">'
 				. 'Move its data onto the data root</button></div>');
 		}
 
@@ -1228,8 +1199,7 @@
 					$confirm = 'Restart ' . JobCommandBuilder::RESTART_UNIT_UNITS[$unit] . ' on this machine now? '
 						. 'Connections it holds are dropped; nothing stored is lost.';
 					echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-						. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-							. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+						. ' data-jy-confirm="' . $hr_str($confirm) . '" data-jy-submit="' . $hr_str($form_id) . '">Restart</button>';
 					echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
 						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 						. '<input type="hidden" name="action" value="restart_unit">'
@@ -1276,8 +1246,7 @@
 					$form_id = 'nodeActionRestartUnit_mail_gateway';
 					$confirm = 'Restart the mail apps gateway on this machine now? Mail programs connected to it reconnect; nothing stored is lost.';
 					echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-						. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-							. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+						. ' data-jy-confirm="' . $hr_str($confirm) . '" data-jy-submit="' . $hr_str($form_id) . '">Restart</button>';
 					echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
 						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 						. '<input type="hidden" name="action" value="restart_unit">'
@@ -1339,16 +1308,15 @@
 						$form_id = 'nodeActionStartContainer_' . $c['name'];
 						$confirm = 'Start ' . $c['name'] . ' again? It is a working site from then on: Docker restarts it, and it is watched, backed up and upgraded like any other.';
 						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })') . '">Start</button>';
+							. ' data-jy-confirm="' . $hr_str($confirm) . '" data-jy-submit="' . $hr_str($form_id) . '">Start</button>';
 						echo $container_form($form_id, ['action' => 'hold_container', 'op' => 'start', 'name' => $c['name']]);
 					} elseif ($can_hold_c && $c['state'] === 'running') {
 						$form_id = 'nodeActionHoldContainer_' . $c['name'];
 						$ask = 'Hold ' . $c['name'] . ' stopped? The site goes down and stays down, through reboots, until it is started here; '
 							. 'its data and volumes are kept. Nothing watches, backs up or upgrades it meanwhile. Why is it held? (shown on its page)';
 						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075 me-1"'
-							. ' onclick="' . $hr_str('JoineryModal.prompt(' . json_encode($ask) . ', function(why){ var f = document.getElementById('
-								. json_encode($form_id) . '); f.elements.reason.value = why; f.submit(); }, {required: true, confirmLabel: ' . json_encode('Hold stopped') . ', confirmStyle: ' . json_encode('danger') . '})') . '">Hold stopped</button>';
+							. ' data-jy-prompt="' . $hr_str($ask) . '" data-jy-prompt-form="' . $hr_str($form_id) . '" data-jy-prompt-field="reason"'
+							. ' data-jy-confirm-label="Hold stopped" data-jy-confirm-style="danger">Hold stopped</button>';
 						echo $container_form($form_id, ['action' => 'hold_container', 'op' => 'stop', 'name' => $c['name'], 'reason' => '']);
 					}
 					if ($can_recreate_c && !$c_held && empty($c['replacing']) && $c['state'] === 'running') {
@@ -1358,16 +1326,14 @@
 							. 'Its code, data and volumes are kept. If the new container does not come up, the old image is put back.';
 						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075 me-1"'
 							. ' title="Build a new container for this site from the host\'s current base image (its OS, with Ubuntu\'s fixes) and swap it in"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })') . '">Replace</button>';
+							. ' data-jy-confirm="' . $hr_str($confirm) . '" data-jy-submit="' . $hr_str($form_id) . '">Replace</button>';
 						echo $container_form($form_id, ['action' => 'recreate_site', 'name' => $c['name']]);
 					}
 					if ($can_restart_c && !$c_held) {
 						$form_id = 'nodeActionRestartContainer_' . $c['name'];
 						$confirm = 'Restart the container ' . $c['name'] . '? The site is down while it restarts; its data and volumes are kept.';
 						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+							. ' data-jy-confirm="' . $hr_str($confirm) . '" data-jy-submit="' . $hr_str($form_id) . '">Restart</button>';
 						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
 							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 							. '<input type="hidden" name="action" value="restart_container">'
@@ -1599,8 +1565,7 @@
 						. (is_array($enc) ? ' Its encrypted data root opens through its escrow holder.' : '')
 						. ' The reboot starts twenty seconds after the node takes the job.';
 					$mb_buttons[] = '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
-						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($reboot_ask), ENT_QUOTES, 'UTF-8')
-						. ', function(){ document.getElementById(\'nodeActionRebootMachine\').submit(); })">Reboot</button>';
+						. ' data-jy-confirm="' . htmlspecialchars($reboot_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionRebootMachine">Reboot</button>';
 				} else {
 					$mb_buttons[] = '<span class="small text-muted">Not rebooted from here: ' . htmlspecialchars($reboot_why) . '</span>';
 				}
@@ -1645,8 +1610,7 @@
 							. 'and this page names it again.';
 						echo ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 							. ' title="Clear systemd\'s record that this unit failed"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })') . '">Clear</button>';
+							. ' data-jy-confirm="' . $hr_str($confirm) . '" data-jy-submit="' . $hr_str($form_id) . '">Clear</button>';
 						echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
 							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 							. '<input type="hidden" name="action" value="reset_failed_unit">'
@@ -1723,8 +1687,7 @@
 						. ' one at a time; each is down for about ten to twenty seconds. A site that does not come up is put back on its previous image.';
 					$sr_button = ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 						. ' title="Run the nightly replacement of this host\'s site containers now"'
-						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($sr_ask), ENT_QUOTES, 'UTF-8')
-						. ', function(){ document.getElementById(\'nodeActionRefreshSiteContainers\').submit(); })">Refresh now</button>';
+						. ' data-jy-confirm="' . htmlspecialchars($sr_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionRefreshSiteContainers">Refresh now</button>';
 				} else {
 					$sr_need = AgentVocabulary::needs_newer_agent_html($node, ['refresh_site_containers']);
 				}
@@ -1847,8 +1810,7 @@
 							? 'Turn the outbound limits off on this machine? Its sites can then open connections freely, send UDP, and send as fast as the link allows: a hacked site can run up the provider\'s bill and draw abuse reports. They stay off until turned on here or on the machine.'
 							: 'Turn the outbound limits on for this machine? Each site gets the speed ceiling and the connection limits at the figures shown.';
 						echo '<div class="mt-1"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($ol_confirm) . ', function(){ document.getElementById('
-								. json_encode($ol_form_id) . ').submit(); })') . '">' . ($ol_on ? 'Turn limits off' : 'Turn limits on') . '</button></div>';
+							. ' data-jy-confirm="' . $hr_str($ol_confirm) . '" data-jy-submit="' . $hr_str($ol_form_id) . '">' . ($ol_on ? 'Turn limits off' : 'Turn limits on') . '</button></div>';
 						echo '<form id="' . $hr_str($ol_form_id) . '" method="post" action="'
 							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 							. '<input type="hidden" name="action" value="outbound_limits">'
@@ -1888,8 +1850,7 @@
 					. ' if an update asks for a reboot, this page says so.';
 				$su_button = ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 					. ' title="Run the machine\'s automatic security updates now instead of waiting for the nightly run"'
-					. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($su_ask), ENT_QUOTES, 'UTF-8')
-					. ', function(){ document.getElementById(\'nodeActionInstallSecurityUpdates\').submit(); })">Install security updates now</button>';
+					. ' data-jy-confirm="' . htmlspecialchars($su_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionInstallSecurityUpdates">Install security updates now</button>';
 			}
 			echo '<div class="small text-muted mt-1">Security updates last ran ' . $hr_str($hr_when($hr['unattended_upgrades_last_run'])) . $su_button . '</div>';
 			// The security fixes it waits for, from its hourly check, and what still runs code an update
@@ -2105,8 +2066,7 @@
 					. ' replaces the container on a fresh base, which it does on its own the night a fix ships.';
 				echo '<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
 					. ' title="Run the container\'s automatic security updates now"'
-					. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($csu_ask), ENT_QUOTES, 'UTF-8')
-					. ', function(){ document.getElementById(\'nodeActionInstallSecurityUpdates\').submit(); })">Install security updates now</button></div>';
+					. ' data-jy-confirm="' . htmlspecialchars($csu_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionInstallSecurityUpdates">Install security updates now</button></div>';
 			}
 			// The versions are reference (Details); old code still serving is a
 			// problem, and a container site's updates button lives here, so
@@ -2235,8 +2195,7 @@
 						. 'Each file now on the node is kept for inspection. Nothing else is changed.';
 					echo '<div class="small mt-2">'
 						. '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
-						. ' onclick="' . htmlspecialchars('JoineryModal.confirm(' . json_encode($confirm_all) . ', function(){ document.getElementById('
-							. json_encode('nodeActionRepairFiles') . ').submit(); })', ENT_QUOTES, 'UTF-8') . '">Put them all back</button>'
+						. ' data-jy-confirm="' . htmlspecialchars($confirm_all, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="' . htmlspecialchars('nodeActionRepairFiles', ENT_QUOTES, 'UTF-8') . '">Put them all back</button>'
 						. ' <span class="text-muted">The node also does this itself within about twenty minutes (recipe release_files).</span>'
 						. '<form id="nodeActionRepairFiles" method="post" action="' . htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 						. '<input type="hidden" name="action" value="repair_release_files">'
@@ -2250,8 +2209,7 @@
 							. 'The file now on the node is kept for inspection. Nothing else is changed.';
 						echo '<li>' . htmlspecialchars($tf)
 							. ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-							. ' onclick="' . htmlspecialchars('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
-								. json_encode($form_id) . ').submit(); })', ENT_QUOTES, 'UTF-8') . '">Restore signed copy</button>'
+							. ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="' . htmlspecialchars($form_id, ENT_QUOTES, 'UTF-8') . '">Restore signed copy</button>'
 							. '<form id="' . htmlspecialchars($form_id, ENT_QUOTES, 'UTF-8') . '" method="post" action="'
 							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
 							. '<input type="hidden" name="action" value="restore_release_file">'
@@ -2461,8 +2419,7 @@
 				$drl_ask = 'Turn off root login on ' . (string)$node->get('mgn_name') . '? Root can no longer log in over SSH, with a password or a key, '
 					. 'and nothing turns it back on. Other accounts and open sessions are not affected; the provider\'s console still logs in.';
 				echo '<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
-					. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($drl_ask), ENT_QUOTES, 'UTF-8')
-					. ', function(){ document.getElementById(\'nodeActionDisableRootLogin\').submit(); })">Turn off root login</button></div>';
+					. ' data-jy-confirm="' . htmlspecialchars($drl_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionDisableRootLogin">Turn off root login</button></div>';
 			} else {
 				echo '<div class="small text-muted mt-2">Root login is not turned off from here: ' . htmlspecialchars($drl_why) . '</div>';
 			}
@@ -2522,8 +2479,7 @@
 						. 'Each stays quiet until its content changes, and the incident clears. '
 						. 'If you did not make them, do not mark them safe: treat the machine as broken into.';
 					echo '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 svm-fs-075"'
-						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($nd_ask), ENT_QUOTES, 'UTF-8')
-						. ', function(){ document.getElementById(\'nodeActionNeverDoAccept\').submit(); })">Mark safe</button>';
+						. ' data-jy-confirm="' . htmlspecialchars($nd_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionNeverDoAccept">Mark safe</button>';
 				} else {
 					echo '<div>No alarm.</div>';
 				}
@@ -2534,8 +2490,7 @@
 					$nd_list($nd_review);
 					$nd_clear = 'Clear the list? What the machine last reported becomes what is expected. Clear it once you know where each change came from.';
 					echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
-						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($nd_clear), ENT_QUOTES, 'UTF-8')
-						. ', function(){ document.getElementById(\'nodeActionNeverDoClear\').submit(); })">Clear</button>';
+						. ' data-jy-confirm="' . htmlspecialchars($nd_clear, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionNeverDoClear">Clear</button>';
 				} else {
 					echo '<span class="text-muted small">: nothing.</span>';
 				}
@@ -2602,9 +2557,7 @@
 					. '<form method="post" action="/admin/server_manager" class="d-inline"><input type="hidden" name="action" value="break_glass_reveal">' . $bg_fields
 					. '<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075" title="Shown once, on a page of its own. Every view is recorded.">Reveal root password</button></form>'
 					. '<form method="post" action="/admin/server_manager" class="d-inline" id="bg_node_retire"><input type="hidden" name="action" value="break_glass_retire">' . $bg_fields
-					. '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075" onclick="JoineryModal.confirm('
-					. htmlspecialchars(json_encode('Retire the kept root password for ' . $bg_provision->get('cvp_domain') . '? The machine then stops accepting it. This cannot be undone.'), ENT_QUOTES, 'UTF-8')
-					. ', function(){ document.getElementById(\'bg_node_retire\').submit(); })">Retire</button></form>'
+					. '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075" data-jy-confirm="' . htmlspecialchars('Retire the kept root password for ' . $bg_provision->get('cvp_domain') . '? The machine then stops accepting it. This cannot be undone.', ENT_QUOTES, 'UTF-8') . '" data-jy-submit="bg_node_retire">Retire</button></form>'
 					. '</div>';
 			} elseif ($bg_kept) {
 				echo '<div class="small text-muted mt-1">Only its holder can reveal or retire it.</div>';
@@ -2955,56 +2908,6 @@
 			}
 			echo '<p id="xferNotice" class="small mt-2 mb-0" role="status" aria-live="polite"></p>';
 			?>
-<script>
-(function () {
-	var list = document.getElementById('xferCheck');
-	var start = document.getElementById('xferStart');
-	var notice = document.getElementById('xferNotice');
-	var provision = parseInt(list.dataset.provision, 10);
-	var marks = { pass: '✓', warning: '!', blocker: '✗' };
-	var colours = { pass: 'text-success', warning: 'text-warning', blocker: 'text-danger' };
-	function show(check) {
-		list.textContent = '';
-		(check.items || []).forEach(function (item) {
-			if (item.result === 'pass') { return; }
-			var li = document.createElement('li');
-			li.className = colours[item.result] || '';
-			li.textContent = marks[item.result] + ' ' + item.label + (item.detail ? ' — ' + item.detail : '') + (item.fix ? ' ' + item.fix : '');
-			list.appendChild(li);
-		});
-		var summary = document.createElement('li');
-		summary.className = check.blockers ? 'text-danger' : 'text-success';
-		summary.textContent = check.blockers ? check.blockers + ' thing(s) to fix before it can start.'
-			: 'Ready to hand over' + (check.warnings ? ' (' + check.warnings + ' warning(s) above).' : '.');
-		list.insertBefore(summary, list.firstChild);
-		if (start) { start.disabled = check.blockers > 0; }
-	}
-	function run(what) {
-		notice.textContent = '';
-		return joineryApi.post('server_manager/transfer_operator', { 'do': what, provision_id: provision });
-	}
-	function check() {
-		list.innerHTML = '<li class="text-muted">Checking…</li>';
-		run('check').then(function (data) { show(data.check); }).catch(function (err) {
-			list.innerHTML = '';
-			notice.className = 'small mt-2 mb-0 text-danger';
-			notice.textContent = err && err.message ? err.message : 'The check could not run.';
-		});
-	}
-	document.getElementById('xferRecheck').addEventListener('click', check);
-	if (start) {
-		start.addEventListener('click', function () {
-			if (!window.confirm(start.dataset.confirm)) { return; }
-			start.disabled = true;
-			run('start').then(function () { window.location.reload(); }).catch(function (err) {
-				notice.className = 'small mt-2 mb-0 text-danger';
-				notice.textContent = err && err.message ? err.message : 'It could not start.';
-			});
-		});
-	}
-	check();
-})();
-</script>
 			<?php
 		}
 		$page->end_box();
@@ -3130,7 +3033,7 @@
 			<input type="hidden" name="action" value="adopt_cloud_server">
 			<input type="hidden" name="expect_instance" value="<?php echo htmlspecialchars($adopt_seen ? (string)$adopt_seen->get('mtr_instance_id') : ''); ?>">
 			<?php echo SmAdminCsrf::field(); ?>
-			<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode($adopt_question), ENT_QUOTES); ?>, function(){ document.getElementById('adopt_cloud_server_form').submit(); })">Adopt cloud server</button>
+			<button type="button" class="btn btn-sm btn-outline-primary" data-jy-confirm="<?php echo htmlspecialchars($adopt_question, ENT_QUOTES); ?>" data-jy-submit="adopt_cloud_server_form">Adopt cloud server</button>
 		</form>
 		<?php
 		$detail_rows[] = array('title' => 'Cloud server', 'tone' => 'info',
@@ -3302,3 +3205,5 @@
 	$page->end_box();
 	echo '</div>'; // end connectionSettings
 
+// The tab's script: its Actions menu, Remove and live checks.
+echo PageScript::src('plugins/server_manager/assets/js/node-overview.js');

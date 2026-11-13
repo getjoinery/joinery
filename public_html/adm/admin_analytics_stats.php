@@ -49,29 +49,18 @@ if (!empty($page_vars['rollup_notice'])) {
 ?>
 <div style="width: 1000px; height: 500px;">
 <script src="/assets/vendor/chart.js-2.8.0/Chart.min.js"></script>
-<canvas id="myChart" ></canvas>
+<canvas id="myChart" data-jy-chart="analytics-stats-chart"></canvas>
 </div>
-<script>
-var ctx = document.getElementById('myChart').getContext('2d');
-var chart = new Chart(ctx, {
-    // The type of chart we want to create
-    type: 'line',
-
-    // The data for our dataset
-    data: {
-        labels: <?php echo json_encode($page_vars['xvals']); ?>,
-        datasets: [{
-            label: 'Daily Unique Visitors',
-            backgroundColor: 'rgb(51, 153, 255)',
-            borderColor: 'rgb(0, 0, 204)',
-            data: <?php echo json_encode($page_vars['yvals']); ?>
-        }]
-    },
-
-    // Configuration options go here
-    options: {}
-});
-</script>
+<?php echo PageScript::json('analytics-stats-chart', array(
+	'type'     => 'line',
+	'labels'   => $page_vars['xvals'],
+	'datasets' => array(array(
+		'label'           => 'Daily Unique Visitors',
+		'backgroundColor' => 'rgb(51, 153, 255)',
+		'borderColor'     => 'rgb(0, 0, 204)',
+		'data'            => $page_vars['yvals'],
+	)),
+)), PageScript::src('assets/js/admin-analytics.js'); ?>
 
 <?php
 

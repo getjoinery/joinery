@@ -8,6 +8,7 @@
  * Core classes are registered at the bottom of this file.
  * Plugin classes register themselves via AbstractProductRequirement::register().
  *
+ * @version 2.3 - get_script_files() names the files a requirement's fields need; get_javascript() (inline) is gone
  * @version 2.2 - purchase_path_heading(): a requirement may put a heading above the cart and checkout
  * @version 2.1 - extra_cart_lines(): a requirement may contribute a server-priced companion line
  */
@@ -203,8 +204,14 @@ abstract class AbstractProductRequirement {
     /** Client-side validation rules for JoineryValidation. */
     public function get_validation_info() { return null; }
 
-    /** Custom JavaScript for form fields (without script tags). */
-    public function get_javascript(): string { return ''; }
+    /**
+     * Script files the requirement's fields need, as paths from the site root
+     * (e.g. 'plugins/store/assets/js/address-requirement.js'). Loaded once per
+     * page by src: a page runs no inline script.
+     *
+     * @return string[]
+     */
+    public function get_script_files(): array { return array(); }
 
     /** Post-purchase hook — called after successful payment. */
     public function post_purchase($data, $order_item, $user, $order) {}

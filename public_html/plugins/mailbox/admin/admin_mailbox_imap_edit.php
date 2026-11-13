@@ -11,6 +11,7 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
+ * @version 1.6.3 - no inline script: the checklist is drawn shown, the receipt title and unseal loop are assets/admin_imap_edit.js
  * @version 1.6.2 - the checklist's fix buttons post through a form outside the account form
  * @version 1.6.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.6
@@ -286,11 +287,9 @@ if ($ceremony !== null && $mailbox_level === InboundEmailDomain::LEVEL_STANDARD)
 	echo mailbox_protection_render($ceremony['rows_private'], $domain, array(
 		'editor_url' => $ceremony['editor_url'],
 		'alias_url'  => '/plugins/mailbox/admin/admin_mailbox_alias',
+		// One target here, so the checklist is drawn shown.
+		'shown'      => true,
 	), InboundEmailDomain::LEVEL_PRIVATE, $ceremony['address']);
-	// The checklist ships hidden (the domain editor reveals it when a higher card
-	// is picked); here there is one target, so it is simply shown.
-	echo '<script>(function(){var c=document.getElementById("protection-ceremony");'
-		. 'if(c){c.classList.remove("d-none");}})();</script>';
 }
 
 $formwriter->submitbutton('btn_submit', $combined ? 'Save Mailbox' : 'Save Account');
@@ -302,6 +301,9 @@ if ($ceremony !== null && $mailbox_level === InboundEmailDomain::LEVEL_STANDARD)
 }
 
 $page->end_box();
+
+// What the page's script (assets/admin_imap_edit.js) is to do, filled below.
+$mbx_imap_cfg = array();
 
 // Raise receipt (specs/mailbox_raise_receipt.md), scoped to this mailbox: the
 // card carries the shared batch driver's configuration, which runs bounded
@@ -320,13 +322,7 @@ if ($ceremony !== null && !empty($ceremony['sealing_active'])) {
 	if ($ceremony['backlog'] > 0) {
 		?>
 		<script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>
-		<script>
-		document.addEventListener('ceremony:done', function () {
-			var card = document.getElementById('raise-receipt');
-			var title = document.getElementById('receipt-title');
-			if (card && title && card.dataset.titleDone) { title.textContent = card.dataset.titleDone; }
-		});
-		</script>
+		<?php $mbx_imap_cfg['receipt_title'] = true; ?>
 		<?php
 	}
 }
@@ -346,26 +342,13 @@ if ($ceremony !== null && !empty($ceremony['unseal_active'])) {
 	));
 	if (($ceremony['unseal_own_backlog'] ?? 0) > 0 && !empty($ceremony['window_open'])) {
 		?>
-		<script>
-		(function () {
-			var card = document.getElementById('lowering-receipt');
-			if (!card || card.dataset.windowOpen !== '1') return;
-			var aliasId = parseInt(card.dataset.aliasId, 10) || 0;
-			function pass() {
-				joineryApi.post('mailbox/unseal_batch', { alias_id: aliasId }).then(function (d) {
-					d = d || {};
-					if (d.locked || !d.unsealed || !(d.own_remaining > 0)) {
-						window.location.reload();
-						return;
-					}
-					pass();
-				}).catch(function () { /* the next visit resumes */ });
-			}
-			pass();
-		})();
-		</script>
+		<?php $mbx_imap_cfg['unseal_loop'] = true; ?>
 		<?php
 	}
+}
+if (!empty($mbx_imap_cfg)) {
+	echo PageScript::json('mailbox-imap-config', $mbx_imap_cfg);
+	echo PageScript::src('plugins/mailbox/assets/admin_imap_edit.js');
 }
 
 $page->admin_footer();

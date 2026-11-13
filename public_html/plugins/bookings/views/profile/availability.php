@@ -80,13 +80,13 @@ foreach ($windows as $w) {
     echo av_time_select("win_start[$i]", $w->get('scw_start_time'), $time_options);
     echo '<span>to</span>';
     echo av_time_select("win_end[$i]", $w->get('scw_end_time'), $time_options);
-    echo '<button type="button" class="av-remove" onclick="this.parentNode.remove()">Remove</button>';
+    echo '<button type="button" class="av-remove">Remove</button>';
     echo '</div>';
     $i++;
 }
 ?>
     </div>
-    <button type="button" class="av-add" onclick="avAddWindow()">+ Add hours</button>
+    <button type="button" class="av-add" data-av-add="window">+ Add hours</button>
 
     <h2>Date overrides</h2>
     <p class="av-muted">Override a specific date — set different hours, or mark it fully unavailable. Overrides replace your weekly hours for that date.</p>
@@ -97,19 +97,19 @@ foreach ($overrides as $o) {
     $is_unavail = (!$o->get('sco_start_time') && !$o->get('sco_end_time'));
     echo '<div class="av-row">';
     echo '<input type="date" name="ovr_date[' . $j . ']" value="' . htmlspecialchars(substr($o->get('sco_date'), 0, 10)) . '">';
-    echo '<label><input type="checkbox" name="ovr_unavailable[' . $j . ']" value="1" onchange="avToggleOvr(this)"' . ($is_unavail ? ' checked' : '') . '> Unavailable</label>';
+    echo '<label><input type="checkbox" name="ovr_unavailable[' . $j . ']" value="1" data-av-unavailable' . ($is_unavail ? ' checked' : '') . '> Unavailable</label>';
     echo '<span class="av-ovr-times' . ($is_unavail ? ' is-unavailable' : '') . '">';
     echo av_time_select("ovr_start[$j]", $o->get('sco_start_time'), $time_options);
     echo ' <span>to</span> ';
     echo av_time_select("ovr_end[$j]", $o->get('sco_end_time'), $time_options);
     echo '</span>';
-    echo '<button type="button" class="av-remove" onclick="this.parentNode.remove()">Remove</button>';
+    echo '<button type="button" class="av-remove">Remove</button>';
     echo '</div>';
     $j++;
 }
 ?>
     </div>
-    <button type="button" class="av-add" onclick="avAddOverride()">+ Add override</button>
+    <button type="button" class="av-add" data-av-add="override">+ Add override</button>
 
     <div class="av-actions">
 <?php $formwriter->submitbutton('btn_submit', 'Save availability'); ?>
@@ -127,47 +127,10 @@ echo ComponentRenderer::render(null, 'calendar_grid', [
 ?>
 </div>
 
-<script>
-// New rows use a high index base so they never collide with the server-rendered
-// indices; parallel field arrays stay aligned by their explicit [n] keys.
-var avIdx = 1000;
-var AV_TIME_OPTIONS = <?php echo json_encode($time_options); ?>;
-var AV_DAY_OPTIONS = <?php echo json_encode($day_options); ?>;
-
-function avTimeSelect(name) {
-    var h = '<select name="' + name + '"><option value="">--</option>';
-    for (var v in AV_TIME_OPTIONS) { h += '<option value="' + v + '">' + AV_TIME_OPTIONS[v] + '</option>'; }
-    return h + '</select>';
-}
-function avDaySelect(name) {
-    var h = '<select name="' + name + '">';
-    for (var v in AV_DAY_OPTIONS) { h += '<option value="' + v + '">' + AV_DAY_OPTIONS[v] + '</option>'; }
-    return h + '</select>';
-}
-function avAddWindow() {
-    var n = avIdx++;
-    var div = document.createElement('div');
-    div.className = 'av-row';
-    div.innerHTML = avDaySelect('win_day[' + n + ']') + avTimeSelect('win_start[' + n + ']') +
-        '<span>to</span>' + avTimeSelect('win_end[' + n + ']') +
-        '<button type="button" class="av-remove" onclick="this.parentNode.remove()">Remove</button>';
-    document.getElementById('av-windows').appendChild(div);
-}
-function avAddOverride() {
-    var n = avIdx++;
-    var div = document.createElement('div');
-    div.className = 'av-row';
-    div.innerHTML = '<input type="date" name="ovr_date[' + n + ']">' +
-        '<label><input type="checkbox" name="ovr_unavailable[' + n + ']" value="1" onchange="avToggleOvr(this)"> Unavailable</label>' +
-        '<span class="av-ovr-times">' + avTimeSelect('ovr_start[' + n + ']') + ' <span>to</span> ' + avTimeSelect('ovr_end[' + n + ']') + '</span>' +
-        '<button type="button" class="av-remove" onclick="this.parentNode.remove()">Remove</button>';
-    document.getElementById('av-overrides').appendChild(div);
-}
-function avToggleOvr(cb) {
-    var times = cb.closest('.av-row').querySelector('.av-ovr-times');
-    if (times) { times.classList.toggle('is-unavailable', cb.checked); }
-}
-</script>
+<?php echo PageScript::json('availability-config', array(
+    'time_options' => array_map(function ($k, $v) { return array((string)$k, (string)$v); }, array_keys($time_options), array_values($time_options)),
+    'day_options'  => array_map(function ($k, $v) { return array((string)$k, (string)$v); }, array_keys($day_options), array_values($day_options)),
+)), PageScript::src('plugins/bookings/assets/js/availability.js'); ?>
 </div>
 
 <?php

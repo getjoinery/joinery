@@ -3,12 +3,18 @@
  *
  * Views: 'mine' (folder browse), 'shared', 'starred', 'trash', and 'source' —
  * the member's own files another feature stored (mail attachments, chat
- * uploads, photos), listed read-only from the rail's "Also in your account". */
+ * uploads, photos), listed read-only from the rail's "Also in your account".
+ *
+ * The page's #drive-config and #drive-initial JSON blocks carry its settings and
+ * first listing.
+ *
+ * @version 1.1 - settings and first listing from JSON blocks (no inline script) */
 (function () {
 	'use strict';
 
 	var api = window.joineryApi;
-	var CFG = window.DRIVE_CONFIG || {};
+	var CFG = (window.joineryPageData && joineryPageData('drive-config')) || {};
+	var INITIAL = window.joineryPageData ? joineryPageData('drive-initial') : null;
 	var DC = window.DriveCrypto;
 	var SCOPE = CFG.vaultScope || 'drive';
 	var state = {
@@ -1509,8 +1515,8 @@
 		if (!api) { console.error('joineryApi missing'); return; }
 		wire();
 		if (window.JoinerySealed) JoinerySealed.onLock(SCOPE, wipeDecrypted);
-		if (window.DRIVE_INITIAL && window.DRIVE_INITIAL.items) {
-			render(window.DRIVE_INITIAL);
+		if (INITIAL && INITIAL.items) {
+			render(INITIAL);
 		} else {
 			load();
 		}

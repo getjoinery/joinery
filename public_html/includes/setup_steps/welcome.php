@@ -3,6 +3,7 @@
  * Setup wizard step: Welcome (specs/setup_wizard.md § Step 0).
  * Included by views/setup.php with $page, $viewer, $permission, $settings in scope.
  *
+ * @version 1.4 - the timezone prefill is assets/js/setup/welcome.js (no inline script)
  * @version 1.3
  * @changelog 1.3 - The site name is the declared field (SettingsFieldRenderer),
  *   not a hand-drawn textinput: FormWriter refuses a page's own copy of a
@@ -77,25 +78,4 @@ if (Access::permits(10)) {
 <?php
 $formwriter->end_form();
 ?>
-<script>
-// Prefill the timezone from the browser when the account still carries the
-// factory default — a wrong timezone silently skews every reminder and
-// summary send hour.
-(function () {
-	var select = document.getElementById('usr_timezone');
-	if (!select) { return; }
-	var current = <?php echo json_encode($setup_tz_current); ?>;
-	var untouched = (current === '' || current === 'America/New_York');
-	if (!untouched) { return; }
-	try {
-		var detected = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-		if (!detected) { return; }
-		for (var i = 0; i < select.options.length; i++) {
-			if (select.options[i].value === detected) {
-				select.value = detected;
-				break;
-			}
-		}
-	} catch (e) { /* keep the current value */ }
-})();
-</script>
+<span id="setup-tz-current" data-current="<?php echo htmlspecialchars($setup_tz_current); ?>" hidden></span>

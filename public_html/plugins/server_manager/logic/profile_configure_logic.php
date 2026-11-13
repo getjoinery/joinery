@@ -135,7 +135,7 @@ function profile_configure_logic(array $input): LogicResult {
 		'domain_sentence'  => $row ? ManagedSiteDraft::domain_sentence($row) : '',
 		'payment_form'     => ($row && $mode === 'summary') ? ManagedSiteDraft::payment_form($row, $product) : '',
 		'in_cart'          => ($row && $mode === 'summary') ? ManagedSiteDraft::in_cart($row) : false,
-		'availability_js'  => ManagedDomainIntake::availabilityScript('cvp_domain', 'managed_domain_status',
+		'availability_html'  => ManagedDomainIntake::availabilityScript('cvp_domain', 'managed_domain_status',
 			'cvp_domain_source', 'register', 'md_registrant'),
 		// The form is step 2; the summary, whose one button is Continue to
 		// payment, is the start of step 3.

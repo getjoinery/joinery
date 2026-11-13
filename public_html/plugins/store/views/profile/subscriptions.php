@@ -77,13 +77,13 @@
                                 $action = '<span class="muted text-sm">' . htmlspecialchars($blocker) . '</span>';
                             } else {
                                 // A POST, never a link: a link is a GET any site can send
-                                // this browser to. The browser's own confirm, so it works
-                                // under every theme.
+                                // this browser to. The kit's confirm (base.js), which every
+                                // theme loads.
                                 $confirm = $subscription->get_payment_source() === 'paypal'
                                     ? 'Cancel this subscription? PayPal ends it now.'
                                     : 'Cancel this subscription? It stays active until the end of the period you have paid for.';
                                 $action = '<form method="post" action="/profile/orders_recurring_action" class="jy-inline"'
-                                    . ' onsubmit="return confirm(' . htmlspecialchars(json_encode($confirm), ENT_QUOTES) . ');">'
+                                    . ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '">'
                                     . '<input type="hidden" name="order_item_id" value="' . (int)$subscription->key . '">'
                                     . '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars((string)$cancel_token) . '">'
                                     . '<button type="submit" class="btn btn-ghost btn-sm jy-subs-cancel">Cancel</button>'

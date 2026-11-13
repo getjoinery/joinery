@@ -232,13 +232,15 @@ ok('set_model rejects objects without export_as_array()',
 ok('custom_script on dropinput throws',
       thrown(function () {
           $fw = new FormWriterV2JSON('f');
-          $fw->dropinput('x', 'X', ['options' => ['a' => 'A'], 'custom_script' => 'alert(1);']);
+          $hook = 'custom_script';   // a removed option, passed on purpose
+          $fw->dropinput('x', 'X', ['options' => ['a' => 'A'], $hook => 'alert(1);']);
       }) !== null);
 
 ok('onchange on textinput throws',
       thrown(function () {
           $fw = new FormWriterV2JSON('f');
-          $fw->textinput('x', 'X', ['onchange' => 'doThing()']);
+          $hook = 'onchange';   // a removed option, passed on purpose
+          $fw->textinput('x', 'X', [$hook => 'doThing()']);
       }) !== null);
 
 ok('fileinput throws',

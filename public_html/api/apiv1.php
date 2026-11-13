@@ -2,6 +2,7 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.35 - /api/v1/csp-report: the strict script policy's report channel, its own bucket
  * @version 2.34
  * @changelog 2.34 - A logic action's refusal may name its HTTP status (data.http_status, 400-599) in place
  *   of 422; the read budget's pause on a program's credential is 429 (mail_access_hardening WP2)
@@ -470,6 +471,17 @@ if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH
 		api_error('Not found', 'ActionError', 404);
 	}
 	BrokerEndpoint::dispatchPreAuth(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/')));
+	// dispatchPreAuth() always exits.
+}
+
+// Strict script policy reports (/api/v1/csp-report): a browser posts what the
+// strict policy refused, with no sign-in and no CSRF header
+// (specs/strict_script_policy.md WP2). One report per refused item, so they go
+// to their own bucket here, before the general limiter: an operator browsing
+// in report mode would otherwise spend the address's budget that sign-up and
+// password reset share. CspReport keeps little from each.
+if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'csp-report') {
+	CspReport::dispatchPreAuth();
 	// dispatchPreAuth() always exits.
 }
 

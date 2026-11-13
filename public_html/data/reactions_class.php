@@ -6,7 +6,7 @@
  * Supports likes, favorites, bookmarks, passes, and any other reaction type.
  * Uses entity_type + entity_id pattern (same as EntityPhoto, ChangeTracking).
  *
- * @version 1.1
+ * @version 1.2 - the reaction button script is assets/js/reactions.js (no inline script)
  * @see /specs/implemented/reaction_system_spec.md
  * @see /docs/social_features.md
  */
@@ -200,38 +200,12 @@ class Reaction extends SystemBase {
 
 		echo $html;
 
-		// Inline JS -- only output once per page
+		// Its script (a file, no inline script), once per page
 		static $js_output = false;
 		if (!$js_output) {
 			$js_output = true;
-			echo '<script>
-document.addEventListener("click", function(e) {
-	var btn = e.target.closest(".btn-reaction");
-	if (!btn) return;
-	e.preventDefault();
-	btn.disabled = true;
-	joineryApi.post("reaction_toggle", {
-		entity_type: btn.dataset.entityType,
-		entity_id: btn.dataset.entityId,
-		reaction_type: btn.dataset.reactionType
-	})
-	.then(function(data) {
-		if (data.action !== undefined) {
-			var isActive = (data.action === "reacted");
-			btn.dataset.active = isActive ? "true" : "false";
-			var icon = btn.querySelector("i");
-			if (icon) {
-				icon.className = isActive ? btn.dataset.iconActive : btn.dataset.iconInactive;
-			}
-			if (isActive) { btn.classList.add("active"); } else { btn.classList.remove("active"); }
-			var countEl = btn.querySelector(".reaction-count");
-			if (countEl && data.count !== undefined) { countEl.textContent = data.count; }
-		}
-		btn.disabled = false;
-	})
-	.catch(function() { btn.disabled = false; });
-});
-</script>';
+			echo '<script defer src="/assets/js/reactions.js?v='
+				. (@filemtime(PathHelper::getIncludePath('assets/js/reactions.js')) ?: '1') . '"></script>';
 		}
 	}
 }

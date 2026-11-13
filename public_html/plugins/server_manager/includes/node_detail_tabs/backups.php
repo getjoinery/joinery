@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.25 - no inline script or handlers: buttons name a tab function in data-sm-do, the code is
+ *                 assets/js/node-backups.js with #node-backups-config
  * @version 1.24 - Backup Files is Other backup files, below the backups, saying what belongs in it; ledger
  *                 receipts and offloaded-file objects are never listed there (BackupListHelper)
  * @version 1.23 - Verify the newest backup beside the backed-up line at the top: it opens the newest run's own Verify
@@ -66,6 +68,15 @@
  *                explained rather than failing at job creation
  * @version 1.0
  */
+
+// A button that calls one of the tab's own functions (assets/js/node-backups.js),
+// named in data-sm-do with its arguments as JSON; with $btn_last the button
+// itself is passed last. No inline handler (strict script policy).
+$sm_do = function (string $fn, array $args = array(), bool $btn_last = false): string {
+	return ' data-sm-do="' . htmlspecialchars($fn, ENT_QUOTES) . '"'
+		. ' data-sm-args="' . htmlspecialchars(json_encode(array_values($args)), ENT_QUOTES) . '"'
+		. ($btn_last ? ' data-sm-this' : '');
+};
 
 	// Where this node's backups go: its active storage space, and nothing
 	// else (specs/storage_targets.md R6). A switched-off target still holds
@@ -255,13 +266,12 @@
 		       ? ' <a href="/admin/server_manager/job_detail?job_id=' . (int)$health['job_id'] . '">See the failed job.</a>'
 		       : '')
 		   . ' <button type="button" class="btn btn-outline-primary btn-sm ms-1" id="verifyNewestTop" hidden'
-		   . ' onclick="var b=document.getElementById(\'verifyNewestBtn\'); if (b) { b.scrollIntoView({block:\'center\'}); b.click(); }">'
+		   . ' data-sm-do="verifyNewest">'
 		   . 'Verify the newest backup</button>'
 		   . '</p>';
 		// Shown once the backup list below has a run to verify: it opens that
 		// run's own Verify dialog, so there is one verify path, near the top.
-		echo '<script>document.addEventListener(\'DOMContentLoaded\', function () {'
-		   . ' if (document.getElementById(\'verifyNewestBtn\')) { document.getElementById(\'verifyNewestTop\').hidden = false; } });</script>';
+		// (node-backups.js reveals it.)
 
 		// The runs this plane dispatched, with the level and size each one
 		// printed. The storage listing below says what is kept; this says what
@@ -411,7 +421,7 @@
 	} else {
 		echo '<small class="text-muted">No scan performed yet</small>';
 	}
-	echo '<button type="button" class="btn btn-sm btn-outline-primary" id="refreshBackupsBtn" onclick="refreshBackupList()">Scan for Backups</button>';
+	echo '<button type="button" class="btn btn-sm btn-outline-primary" id="refreshBackupsBtn" data-sm-do="refreshBackupList">Scan for Backups</button>';
 	echo '</div>';
 
 	echo '<table class="table table-striped table-sm" id="backupFilesTable">';
@@ -450,11 +460,7 @@
 			$restore_type = BackupNaming::restore_type($f['filename']);
 
 			if ($restore_type) {
-				$ra = htmlspecialchars(json_encode($restore_type)) . ', '
-				    . htmlspecialchars(json_encode($fn)) . ', '
-				    . htmlspecialchars(json_encode($local_path)) . ', '
-				    . htmlspecialchars(json_encode($cloud_path));
-				echo '<button type="button" class="btn btn-outline-warning btn-sm me-1" onclick="openRestoreModal(' . $ra . ')">Restore</button>';
+				echo '<button type="button" class="btn btn-outline-warning btn-sm me-1"' . $sm_do('openRestoreModal', array($restore_type, $fn, $local_path, $cloud_path)) . '>Restore</button>';
 			}
 
 			// A backup that exists ONLY in the cloud cannot be restored — the
@@ -465,26 +471,18 @@
 			// object is signed here and the node checks what arrives against its
 			// own upload ledger before it lands.
 			if ($has_cloud && !$has_local) {
-				$da = htmlspecialchars(json_encode($fn)) . ', '
-				    . htmlspecialchars(json_encode($cloud_path)) . ', this';
-				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="downloadBackup(' . $da . ')">Bring back to node</button>';
+				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1"' . $sm_do('downloadBackup', array($fn, $cloud_path), true) . '>Bring back to node</button>';
 			}
 
 			// A backup that exists only on the node is one disk failure from gone —
 			// which is the state an upload interrupted by a transient provider error
 			// leaves behind. Offer the push whenever there is somewhere to push to.
 			if ($has_local && !$has_cloud && $cloud_target) {
-				$ua = htmlspecialchars(json_encode($fn)) . ', '
-				    . htmlspecialchars(json_encode($local_path)) . ', this';
-				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="uploadBackup(' . $ua . ')">Upload to cloud</button>';
+				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1"' . $sm_do('uploadBackup', array($fn, $local_path), true) . '>Upload to cloud</button>';
 			}
 
 			if ($target) {
-				$args = htmlspecialchars(json_encode($target)) . ', '
-				      . htmlspecialchars(json_encode($fn)) . ', '
-				      . htmlspecialchars(json_encode($local_path)) . ', '
-				      . htmlspecialchars(json_encode($cloud_path));
-				echo '<button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteBackup(' . $args . ')">Delete</button>';
+				echo '<button type="button" class="btn btn-outline-danger btn-sm"' . $sm_do('deleteBackup', array($target, $fn, $local_path, $cloud_path)) . '>Delete</button>';
 			}
 
 			echo '</td>';
@@ -586,10 +584,8 @@
 				   ? '; last indexed at the run of ' . htmlspecialchars($run_when($objects_run['run']))
 				   : '; <span class="text-muted">not indexed by any run in backup storage</span>';
 				if ($objects_run !== null) {
-					$oa = htmlspecialchars(json_encode($objects_run['chain']['chain_id'])) . ', '
-					    . htmlspecialchars(json_encode($objects_run['chain']['profile'])) . ', ' . (int)$objects_run['run']['seq'] . ', '
-					    . htmlspecialchars(json_encode($run_when($objects_run['run']))) . ', this';
-					echo ' <button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="bringBackObjects(' . $oa . ')">Bring them back</button>';
+					echo ' <button type="button" class="btn btn-outline-primary btn-sm ms-2"' . $sm_do('bringBackObjects', array($objects_run['chain']['chain_id'],
+						$objects_run['chain']['profile'], (int)$objects_run['run']['seq'], $run_when($objects_run['run'])), true) . '>Bring them back</button>';
 				}
 				echo ''
 				   . '<div class="text-muted small mt-1">Files the site moved to its cloud file store are in no archive; each is in this backup storage once. '
@@ -641,18 +637,15 @@
 					  . ' <span class="text-muted small">' . htmlspecialchars($v['when']) . ' UTC'
 					  . ($v['level'] !== '' ? ' &middot; ' . htmlspecialchars($v['level']) : '') . '</span>') . '</td>';
 				echo '<td>';
-				$ca = htmlspecialchars(json_encode($c['chain_id'])) . ', '
-				    . htmlspecialchars(json_encode($c['profile'])) . ', '
-				    . htmlspecialchars(json_encode(array_map(function ($x) {
+				$ca = array($c['chain_id'], $c['profile'], array_map(function ($x) {
 						return ['seq' => $x['seq'], 'level' => $x['level'], 'time' => substr((string)$x['time'], 0, 16)];
-					}, $c['runs']))) . ', ' . (int)$r['seq'];
+					}, $c['runs']), (int)$r['seq']);
 				// Prepare, then restore. Two buttons rather than one, because
 				// they are genuinely two decisions: preparing downloads this
 				// backup and the runs it depends on and recovers their data key
 				// from this machine's own key, and destroys nothing; the restore
 				// replays them over live data and has to be approved on the node.
-				$sa = htmlspecialchars(json_encode($c['chain_id'])) . ', '
-				    . htmlspecialchars(json_encode($c['profile'])) . ', ' . (int)$r['seq'] . ', this';
+				$sa = array($c['chain_id'], $c['profile'], (int)$r['seq']);
 				$is_staged = in_array((int)$r['seq'], $staged_runs[$c['chain_id']] ?? array(), true);
 				$restore_id = 'restore_' . preg_replace('/[^A-Za-z0-9_-]/', '', (string)$c['chain_id']) . '_' . (int)$r['seq'];
 				// Verify: prove this run restorable on the node without restoring
@@ -670,17 +663,14 @@
 				}
 				try { $needs = BackupVerifier::disk_needed($pseudo, (int)$r['seq'], BackupVerifier::LEVEL_REHEARSE); }
 				catch (Throwable $e) { $needs = 0; }
-				$va = htmlspecialchars(json_encode($c['chain_id'])) . ', '
-				    . htmlspecialchars(json_encode($c['profile'])) . ', ' . (int)$r['seq'] . ', '
-				    . htmlspecialchars(json_encode($run_when($r))) . ', '
-				    . htmlspecialchars(json_encode(BackupChainListHelper::format_size($needs))) . ', this';
-				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="stageChain(' . $sa . ')">Prepare</button>';
+				$va = array($c['chain_id'], $c['profile'], (int)$r['seq'], $run_when($r), BackupChainListHelper::format_size($needs));
+				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1"' . $sm_do('stageChain', $sa, true) . '>Prepare</button>';
 				echo '<button type="button" class="btn btn-outline-secondary btn-sm me-1"'
 				   . ($entry === $shelf_runs[0] ? ' id="verifyNewestBtn"' : '')
-				   . ' onclick="openVerifyModal(' . $va . ')">Verify</button>';
+				   . $sm_do('openVerifyModal', $va, true) . '>Verify</button>';
 				echo '<button type="button" class="btn btn-outline-warning btn-sm" id="' . $restore_id . '"'
 				   . ($is_staged ? '' : ' disabled title="Prepare this backup first: it downloads what restoring this run needs onto the node."')
-				   . ' onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
+				   . $sm_do('openChainRestoreModal', $ca) . '>Restore</button>';
 				echo '</td></tr>';
 			}
 			echo '</tbody></table>';
@@ -718,23 +708,23 @@
 	<dialog id="verifyModal">
 		<div class="svm-modal-head">
 			<h5 class="svm-m0">Verify the backup of <span id="vm_title"></span></h5>
-			<button type="button" aria-label="Close" onclick="closeVerifyModal();" class="svm-modal-close">&times;</button>
+			<button type="button" aria-label="Close" data-sm-do="closeVerifyModal" class="svm-modal-close">&times;</button>
 		</div>
 		<p class="text-muted small">Nothing on the site is touched. The node downloads what a restore of this
 			backup would need, then removes it when it is done.</p>
 		<div class="mb-2">
-			<button type="button" class="btn btn-outline-primary btn-sm" onclick="submitVerifyModal(2);">Open and read</button>
+			<button type="button" class="btn btn-outline-primary btn-sm" data-sm-do="submitVerifyModal" data-sm-args="[2]">Open and read</button>
 			<div class="text-muted small mt-1">Every archive is decrypted with the node's own key and read to the end.
 				A minute or three; downloads the whole set once.</div>
 		</div>
 		<div class="mb-2">
-			<button type="button" class="btn btn-outline-primary btn-sm" onclick="submitVerifyModal(3);">Rehearse a restore
+			<button type="button" class="btn btn-outline-primary btn-sm" data-sm-do="submitVerifyModal" data-sm-args="[3]">Rehearse a restore
 				(needs about <span id="vm_needs"></span> free on the node)</button>
 			<div class="text-muted small mt-1">Opens and reads, then replays the files into a scratch directory and loads
 				the database into a throwaway one on the node, counts what came back, and deletes both.</div>
 		</div>
 		<div class="dialog-actions">
-			<button type="button" class="dialog-btn-cancel" onclick="closeVerifyModal();">Cancel</button>
+			<button type="button" class="dialog-btn-cancel" data-sm-do="closeVerifyModal">Cancel</button>
 		</div>
 	</dialog>
 
@@ -753,7 +743,7 @@
 		?>
 		<div class="svm-modal-head">
 			<h5 class="svm-m0">Restore from <code id="rm_title"></code></h5>
-			<button type="button" aria-label="Close" onclick="closeRestoreModal();" class="svm-modal-close">&times;</button>
+			<button type="button" aria-label="Close" data-sm-do="closeRestoreModal" class="svm-modal-close">&times;</button>
 		</div>
 		<p class="text-muted small">
 			<strong>Nothing is saved first.</strong> The current site files and database are
@@ -792,8 +782,8 @@
 		</p>
 		<div id="rm_component_error" class="text-danger small mt-2" hidden>Select at least one component.</div>
 		<div class="dialog-actions">
-			<button type="button" class="dialog-btn-cancel" onclick="closeRestoreModal();">Cancel</button>
-			<button type="button" class="dialog-btn-confirm dialog-btn-danger" onclick="submitRestoreModal();">Restore</button>
+			<button type="button" class="dialog-btn-cancel" data-sm-do="closeRestoreModal">Cancel</button>
+			<button type="button" class="dialog-btn-confirm dialog-btn-danger" data-sm-do="submitRestoreModal">Restore</button>
 		</div>
 		<?php $fw_restore->end_form(); ?>
 	</dialog>
@@ -809,7 +799,7 @@
 		?>
 		<div class="svm-modal-head">
 			<h5 class="svm-m0">Restore from <code id="cm_title"></code></h5>
-			<button type="button" aria-label="Close" onclick="closeChainRestoreModal();" class="svm-modal-close">&times;</button>
+			<button type="button" aria-label="Close" data-sm-do="closeChainRestoreModal" class="svm-modal-close">&times;</button>
 		</div>
 		<p class="text-muted small">
 			Every artifact is checked against its recorded size and hash before anything is written.
@@ -828,33 +818,18 @@
 		$fw_chain->checkboxinput('restore_database', 'Database', ['checked' => true, 'id' => 'cm_database']);
 		?>
 		<div class="dialog-actions">
-			<button type="button" class="dialog-btn-cancel" onclick="closeChainRestoreModal();">Cancel</button>
-			<button type="button" class="dialog-btn-confirm dialog-btn-danger" onclick="submitChainRestoreModal();">Restore</button>
+			<button type="button" class="dialog-btn-cancel" data-sm-do="closeChainRestoreModal">Cancel</button>
+			<button type="button" class="dialog-btn-confirm dialog-btn-danger" data-sm-do="submitChainRestoreModal">Restore</button>
 		</div>
 		<?php $fw_chain->end_form(); ?>
 	</dialog>
 
-<script>
-var backupNodeId = <?php echo $node->key; ?>;
-var backupLastScanAge = <?php echo $last_scan ? (time() - strtotime($last_scan)) : 99999; ?>;
-var BACKUP_STALE_SECONDS = 60;
-// The node name as a proper JS string literal (json_encode, HTML/JS-safe). Used
-// in confirm() dialogs so an apostrophe or markup in a discovery-supplied name
-// cannot break out of an onclick attribute (S-3).
-// smApiPost / smEsc come from the shared server_manager.js asset; smNodeName is
-// defined once by the shell.
 <?php
 // Suppress auto-refresh if the most recent list_backups attempt (any status) failed.
 // Without this guard, every page load triggers a new scan that also fails, creating
 // an infinite loop of failed jobs whenever the remote endpoint is unavailable.
 $bk_last = ManagementJob::latestForNode($node->key, 'list_backups');
 $backup_last_attempt_failed = ($bk_last && $bk_last->get('mjb_status') === 'failed');
-?>
-var backupLastAttemptFailed = <?php echo $backup_last_attempt_failed ? 'true' : 'false'; ?>;
-// The storage space each listed backup is in, so every action reaches the
-// bucket that holds it (a node moved to another target keeps its older
-// backups where they were).
-<?php
 $space_of_path = [];
 foreach (($files ?? []) as $f) {
 	if (!empty($f['cloud_path']) && !empty($f['space_id'])) { $space_of_path[(string)$f['cloud_path']] = (int)$f['space_id']; }
@@ -863,454 +838,15 @@ $space_of_chain = [];
 foreach ((($chain_list ?? [])['chains'] ?? []) as $c) {
 	$space_of_chain[(string)$c['chain_id']] = (int)($c['space_id'] ?? 0);
 }
+echo PageScript::json('node-backups-config', array(
+	'node_id'             => (int)$node->key,
+	'last_scan_age'       => $last_scan ? (time() - strtotime($last_scan)) : 99999,
+	'last_attempt_failed' => (bool)$backup_last_attempt_failed,
+	'space_of_path'       => (object)$space_of_path,
+	'space_of_chain'      => (object)$space_of_chain,
+	'staged_runs'         => (object)($staged_runs ?? array()),
+)), PageScript::src('plugins/server_manager/assets/js/node-backups.js');
 ?>
-var backupSpaceOfPath = <?php echo json_encode((object)$space_of_path); ?>;
-var backupSpaceOfChain = <?php echo json_encode((object)$space_of_chain); ?>;
-// The runs prepared on the node, by chain: only those are offered for restore.
-var backupStagedRuns = <?php echo json_encode((object)($staged_runs ?? array())); ?>;
-// Cap on how many times polling retries after a transport error before it gives
-// up and shows a reload notice — without this the poll retried forever, and a
-// {}-swallowed error looked like "complete" and reloaded, minting a new scan job.
-var BACKUP_POLL_MAX_RETRIES = 5;
-
-function refreshBackupList() {
-	var btn = document.getElementById('refreshBackupsBtn');
-	var status = document.getElementById('backupScanStatus');
-	btn.disabled = true;
-	btn.textContent = 'Scanning...';
-	status.style.display = 'block';
-	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Scanning backup files...</span>';
-
-	smApiPost('backup_list', { action: 'refresh_list', node_id: backupNodeId })
-		.then(function(data) {
-			if (!data.success) {
-				btn.disabled = false;
-				btn.textContent = 'Scan for Backups';
-				status.innerHTML = '<span class="text-danger">' + smEsc(data.message) + '</span>';
-				return;
-			}
-			pollBackupList(data.job_id);
-		})
-		.catch(function(err) {
-			btn.disabled = false;
-			btn.textContent = 'Scan for Backups';
-			status.innerHTML = '<span class="text-danger">Request failed</span>';
-		});
-}
-
-// Auto-refresh local listing on page load if stale — but not if the last attempt
-// failed, to avoid an infinite loop of failing jobs on every page load.
-if (backupLastScanAge > BACKUP_STALE_SECONDS && !backupLastAttemptFailed) {
-	window.addEventListener('DOMContentLoaded', refreshBackupList);
-}
-
-function pollBackupList(jobId, retries) {
-	retries = retries || 0;
-	var btn = document.getElementById('refreshBackupsBtn');
-	var status = document.getElementById('backupScanStatus');
-
-	smApiPost('backup_list', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
-		.then(function(data) {
-			if (data.status === 'pending' || data.status === 'running') {
-				setTimeout(function() { pollBackupList(jobId, 0); }, 2000);
-				return;
-			}
-			btn.disabled = false;
-			btn.textContent = 'Scan for Backups';
-			// The scan often starts on its own at page load, so the operator may
-			// already be in a restore or verify dialog: reloading under it would
-			// throw that away. Offer the reload instead.
-			if (document.querySelector('dialog[open]')) {
-				status.innerHTML = '<span class="text-success">Scan complete.</span> '
-					+ '<a href="" onclick="location.reload();return false;">Reload</a> to see the new list.';
-				return;
-			}
-			status.innerHTML = '<span class="text-success">Scan complete</span>';
-			setTimeout(function() { status.style.display = 'none'; }, 2000);
-			// Reload page to show updated file list
-			window.location.reload();
-		})
-		.catch(function() {
-			// Transport/HTTP error (smApiPost rejects — it never fakes success).
-			// Retry a bounded number of times, then stop and tell the user to
-			// reload rather than silently loop or fake a completed scan.
-			if (retries >= BACKUP_POLL_MAX_RETRIES) {
-				btn.disabled = false;
-				btn.textContent = 'Scan for Backups';
-				status.innerHTML = '<span class="text-danger">Polling stopped — the scan status could not be reached. '
-					+ '<a href="" onclick="location.reload();return false;">Reload</a> to try again.</span>';
-				return;
-			}
-			setTimeout(function() { pollBackupList(jobId, retries + 1); }, 3000);
-		});
-}
-
-function openRestoreModal(type, filename, localPath, cloudPath) {
-	document.getElementById('rm_filename').value = filename;
-	document.getElementById('rm_local_path').value = localPath || '';
-	document.getElementById('rm_cloud_path').value = cloudPath || '';
-	document.getElementById('rm_title').textContent = filename;
-	document.getElementById('rm_component_error').style.display = 'none';
-
-	var isProject = (type === 'project');
-	document.getElementById('rm_action').value = isProject ? 'restore_project' : 'restore_database';
-
-	// Show/hide components based on backup type
-	document.getElementById('rm_files_wrap').style.display  = isProject ? '' : 'none';
-	// The domain is a property of the SITE, so it is only settled by a project
-	// restore. A database-only restore leaves the machine's identity alone.
-	document.getElementById('rm_domain_wrap').style.display = isProject ? '' : 'none';
-	// Database is always available
-	document.getElementById('rm_files').checked    = isProject;
-	document.getElementById('rm_database').checked = true;
-
-	document.getElementById('restoreModal').showModal();
-}
-
-function closeRestoreModal() {
-	document.getElementById('restoreModal').close();
-}
-
-// Restore of a run held in a chain. The runs come from the chain's own
-// manifest, so the picker can only ever offer backups that exist; the row's
-// own run is preselected.
-function openChainRestoreModal(chainId, profile, runs, chosenSeq) {
-	document.getElementById('cm_chain_id').value = chainId;
-	document.getElementById('cm_profile').value = profile;
-
-	var sel = document.getElementById('cm_seq');
-	sel.innerHTML = '';
-	var chosenTime = '';
-	var staged = backupStagedRuns[chainId] || [];
-	for (var i = runs.length - 1; i >= 0; i--) {
-		var r = runs[i];
-		// Only a run prepared on the node: the node refuses any other.
-		if (staged.indexOf(r.seq) === -1) { continue; }
-		var opt = document.createElement('option');
-		opt.value = r.seq;
-		opt.textContent = (r.time || 'unknown time') + ' UTC'
-			+ (r.level === 0 ? ' — full' : ' — incremental')
-			+ (i === runs.length - 1 ? ' — newest' : '');
-		if (chosenSeq !== undefined && r.seq === chosenSeq) { opt.selected = true; chosenTime = r.time || ''; }
-		sel.appendChild(opt);
-	}
-	document.getElementById('cm_title').textContent = chosenTime ? 'Backup of ' + chosenTime + ' UTC' : chainId;
-
-	document.getElementById('chainRestoreModal').showModal();
-}
-
-function closeChainRestoreModal() {
-	document.getElementById('chainRestoreModal').close();
-}
-
-function submitChainRestoreModal() {
-	var chainId = document.getElementById('cm_chain_id').value;
-	var seq     = document.getElementById('cm_seq').value;
-	var domain  = (document.getElementById('cm_domain').value || '').trim();
-	if (!domain) {
-		alert('Enter the domain the restored site is to answer to.');
-		return;
-	}
-	var chosen = document.getElementById('cm_seq');
-	var label  = chosen.options[chosen.selectedIndex] ? chosen.options[chosen.selectedIndex].textContent : ('run ' + seq);
-	JoineryModal.confirm('Restore the backup of ' + label + ', serving ' + domain
-		+ '? Files deleted since the full backup are deleted here too, and nothing is saved first.',
-		function() {
-			document.getElementById('chainRestoreForm').submit();
-		});
-}
-
-function submitRestoreModal() {
-	var action = document.getElementById('rm_action').value;
-	var fn = document.getElementById('rm_filename').value || 'the selected backup';
-
-	if (action === 'restore_project') {
-		var boxes = document.querySelectorAll('#restoreForm input[type=checkbox]:checked');
-		var err = document.getElementById('rm_component_error');
-		if (boxes.length === 0) {
-			err.style.display = 'block';
-			return;
-		}
-		err.style.display = 'none';
-		var domain = (document.getElementById('rm_domain').value || '').trim();
-		if (!domain) {
-			alert('Enter the domain the restored site is to answer to.');
-			return;
-		}
-		var parts = [];
-		if (document.getElementById('rm_files').checked)    parts.push('project files');
-		if (document.getElementById('rm_database').checked) parts.push('database');
-		JoineryModal.confirm('Restore ' + parts.join(', ') + ' from ' + fn + ', serving ' + domain
-			+ '? This will overwrite the current site, and nothing is saved first.', function() {
-			document.getElementById('restoreForm').submit();
-		});
-		return;
-	}
-
-	// restore_database
-	JoineryModal.confirm('Restore database from ' + fn + '? This will overwrite the current database, and nothing is saved first.', function() {
-		document.getElementById('restoreForm').submit();
-	});
-}
-
-// Push a local-only backup to the node's cloud target. Non-destructive, so no
-// confirm — but it can be a multi-hundred-MB transfer, so it reports progress and
-// waits for the job's real verdict rather than assuming it worked.
-function uploadBackup(filename, localPath, btn) {
-	var status = document.getElementById('backupScanStatus');
-	if (btn) { btn.disabled = true; btn.textContent = 'Uploading...'; }
-	status.style.display = 'block';
-	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Uploading '
-		+ smEsc(filename) + ' to cloud storage...</span>';
-
-	smApiPost('backup_actions', { action: 'upload_file', node_id: backupNodeId, local_path: localPath })
-		.then(function(data) {
-			if (!data.success) {
-				uploadBackupFailed(btn, smEsc(data.message));
-				return;
-			}
-			pollUploadJob(data.job_id, btn, 0);
-		})
-		.catch(function() {
-			uploadBackupFailed(btn, 'Upload request failed');
-		});
-}
-
-// Bring one cloud-only backup back onto the node, so a restore has something to
-// restore from. Deliberately shares pollUploadJob's shape rather than
-// pollBackupList's: a transfer can genuinely fail, and a failed transfer
-// reported as done is the exact thing that would send someone into a restore
-// with nothing there.
-function downloadBackup(filename, cloudPath, btn) {
-	var status = document.getElementById('backupScanStatus');
-	if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
-	status.style.display = 'block';
-	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Bringing '
-		+ smEsc(filename) + ' back onto the node...</span>';
-
-	smApiPost('backup_actions', { action: 'download_file', node_id: backupNodeId,
-			filename: filename, cloud_path: cloudPath, space_id: backupSpaceOfPath[cloudPath] || 0 })
-		.then(function(data) {
-			if (!data.success) {
-				downloadBackupFailed(btn, smEsc(data.message));
-				return;
-			}
-			// Re-scan when it lands. Without it the archive is on the node and
-			// the row still says cloud-only, so Restore stays hidden and the
-			// operator has to guess that a manual scan is what unblocks them.
-			pollTransferJob(data.job_id, btn, 'Bring back to node',
-				'On the node now — rescanning so Restore becomes available...', refreshBackupList);
-		})
-		.catch(function() {
-			downloadBackupFailed(btn, 'Request failed');
-		});
-}
-
-function downloadBackupFailed(btn, html) {
-	if (btn) { btn.disabled = false; btn.textContent = 'Bring back to node'; }
-	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
-}
-
-// Download a whole chain onto the node and recover its data key there. Nothing
-// is destroyed by this, which is why it is a separate button from Restore.
-function stageChain(chainId, profile, seq, btn) {
-	var status = document.getElementById('backupScanStatus');
-	if (btn) { btn.disabled = true; btn.textContent = 'Preparing...'; }
-	status.style.display = 'block';
-	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Downloading '
-		+ smEsc(chainId) + ' onto the node and recovering its key there...</span>';
-
-	smApiPost('backup_actions', { action: 'stage_chain', node_id: backupNodeId,
-			chain_id: chainId, profile: profile, seq: seq, space_id: backupSpaceOfChain[chainId] || 0 })
-		.then(function(data) {
-			if (!data.success) {
-				stageChainFailed(btn, smEsc(data.message));
-				return;
-			}
-			pollTransferJob(data.job_id, btn, 'Prepare',
-				'Ready on the node. Restore now, and approve it on the node\'s own Backups page.', function() {
-					(backupStagedRuns[chainId] = backupStagedRuns[chainId] || []).push(seq);
-					var restoreBtn = document.getElementById('restore_' + chainId.replace(/[^A-Za-z0-9_-]/g, '') + '_' + seq);
-					if (restoreBtn) { restoreBtn.disabled = false; restoreBtn.removeAttribute('title'); }
-				});
-		})
-		.catch(function() {
-			stageChainFailed(btn, 'Request failed');
-		});
-}
-
-function stageChainFailed(btn, html) {
-	if (btn) { btn.disabled = false; btn.textContent = 'Prepare'; }
-	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
-}
-
-// Prove a backup restorable on the node without restoring it. Two levels, both
-// non-destructive: the dialog asks which, then the job runs on the node and
-// the poller reports what it said.
-var verifyPending = null;
-function openVerifyModal(chainId, profile, seq, when, needs, btn) {
-	verifyPending = { chainId: chainId, profile: profile, seq: seq, btn: btn };
-	document.getElementById('vm_title').textContent = when;
-	document.getElementById('vm_needs').textContent = needs;
-	document.getElementById('verifyModal').showModal();
-}
-function closeVerifyModal() {
-	document.getElementById('verifyModal').close();
-}
-function submitVerifyModal(level) {
-	var v = verifyPending;
-	closeVerifyModal();
-	if (!v) { return; }
-	var status = document.getElementById('backupScanStatus');
-	var btn = v.btn;
-	if (btn) { btn.disabled = true; btn.textContent = 'Verifying...'; }
-	status.style.display = 'block';
-	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> '
-		+ (level === 3 ? 'Rehearsing a restore of ' : 'Opening and reading ') + 'the backup on the node...</span>';
-
-	smApiPost('backup_actions', { action: 'verify_backup', node_id: backupNodeId,
-			chain_id: v.chainId, profile: v.profile, seq: v.seq, level: level, space_id: backupSpaceOfChain[v.chainId] || 0 })
-		.then(function(data) {
-			if (!data.success) {
-				verifyBackupFailed(btn, smEsc(data.message));
-				return;
-			}
-			pollTransferJob(data.job_id, btn, 'Verify',
-				(level === 3 ? 'Rehearsed on the node.' : 'Opened and read on the node.')
-				+ ' Reload this page to see the result above and on the node\'s card.');
-		})
-		.catch(function() {
-			verifyBackupFailed(btn, 'Request failed');
-		});
-}
-// Bring the node's offloaded files the file store has lost home from the
-// shelf. The first job is a survey: the node names what its file store cannot
-// serve, and this plane signs a page of links per answer (FleetObjectRestore).
-// The poller follows the survey; the pages are their own jobs in the list.
-function bringBackObjects(chainId, profile, seq, when, btn) {
-	JoineryModal.confirm('Bring back the offloaded files the node\'s file store can no longer serve, from the backup of '
-		+ when + '? Only files the file store cannot serve are touched; nothing on the node is overwritten and nothing in any bucket is deleted.', function() {
-		var status = document.getElementById('backupScanStatus');
-		if (btn) { btn.disabled = true; btn.textContent = 'Asking the node...'; }
-		status.style.display = 'block';
-		status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> '
-			+ 'Asking the node which offloaded files its file store cannot serve...</span>';
-		smApiPost('backup_actions', { action: 'restore_objects', node_id: backupNodeId,
-				chain_id: chainId, profile: profile, seq: seq, mode: 'missing', space_id: backupSpaceOfChain[chainId] || 0 })
-			.then(function(data) {
-				if (!data.success) {
-					if (btn) { btn.disabled = false; btn.textContent = 'Bring them back'; }
-					status.innerHTML = '<span class="text-danger">' + smEsc(data.message) + '</span>';
-					return;
-				}
-				pollTransferJob(data.job_id, btn, 'Bring them back',
-					'The node has answered. Each page of files comes home as its own job; '
-					+ 'the job list shows them, and the node\'s Backups page shows what is still missing.');
-			})
-			.catch(function() {
-				if (btn) { btn.disabled = false; btn.textContent = 'Bring them back'; }
-				status.innerHTML = '<span class="text-danger">Request failed</span>';
-			});
-	});
-}
-function verifyBackupFailed(btn, html) {
-	if (btn) { btn.disabled = false; btn.textContent = 'Verify'; }
-	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
-}
-
-// One poller for both directions of transfer. Like pollUploadJob it distinguishes
-// "finished" from "succeeded"; unlike it, it does not reload the page — a
-// prepared chain has nothing new to show in the list, and a reload would throw
-// away the message that says what to do next.
-function pollTransferJob(jobId, btn, label, doneMessage, onDone) {
-	var status = document.getElementById('backupScanStatus');
-
-	smApiPost('backup_list', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
-		.then(function(data) {
-			if (data.status === 'pending' || data.status === 'running') {
-				setTimeout(function() { pollTransferJob(jobId, btn, label, doneMessage, onDone); }, 3000);
-				return;
-			}
-			if (btn) { btn.disabled = false; btn.textContent = label; }
-			if (data.job_status !== 'completed') {
-				status.innerHTML = '<span class="text-danger">Did not finish. '
-					+ '<a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(jobId)
-					+ '">See the job output</a> for what the node said.</span>';
-				return;
-			}
-			status.innerHTML = '<span class="text-success">' + smEsc(doneMessage) + '</span>';
-			if (typeof onDone === 'function') { onDone(); }
-		})
-		.catch(function() {
-			if (btn) { btn.disabled = false; btn.textContent = label; }
-			status.innerHTML = '<span class="text-danger">Lost track of the job. '
-				+ '<a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(jobId)
-				+ '">Check it here</a>.</span>';
-		});
-}
-
-function uploadBackupFailed(btn, html) {
-	if (btn) { btn.disabled = false; btn.textContent = 'Upload to cloud'; }
-	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
-}
-
-// Deliberately not pollBackupList: that one treats any terminal job as success.
-// An upload can genuinely fail, and reporting a failed transfer as done is the
-// exact failure mode this button exists to fix.
-function pollUploadJob(jobId, btn, retries) {
-	retries = retries || 0;
-	var status = document.getElementById('backupScanStatus');
-
-	smApiPost('backup_list', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
-		.then(function(data) {
-			if (data.status === 'pending' || data.status === 'running') {
-				setTimeout(function() { pollUploadJob(jobId, btn, 0); }, 3000);
-				return;
-			}
-			if (data.job_status !== 'completed') {
-				uploadBackupFailed(btn, 'Upload failed. <a href="/admin/server_manager/job_detail?job_id='
-					+ encodeURIComponent(jobId) + '">See the job output</a> for the provider error.');
-				return;
-			}
-			status.innerHTML = '<span class="text-success">Uploaded to cloud storage</span>';
-			window.location.reload();
-		})
-		.catch(function() {
-			if (retries >= BACKUP_POLL_MAX_RETRIES) {
-				uploadBackupFailed(btn, 'Lost contact while the upload was running. '
-					+ '<a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(jobId)
-					+ '">Check the job</a> before retrying.');
-				return;
-			}
-			setTimeout(function() { pollUploadJob(jobId, btn, retries + 1); }, 3000);
-		});
-}
-
-function deleteBackup(target, filename, localPath, cloudPath) {
-	var locations;
-	if (target === 'both')       locations = 'BOTH the local copy and the cloud copy';
-	else if (target === 'local') locations = 'the local copy';
-	else                         locations = 'the cloud copy';
-
-	JoineryModal.confirm('Delete ' + filename + '? This will remove ' + locations + '. This cannot be undone.', function() {
-		smApiPost('backup_actions', {
-			action: 'delete_file', node_id: backupNodeId, target: target,
-			local_path: localPath, cloud_path: cloudPath, space_id: backupSpaceOfPath[cloudPath] || 0
-		})
-			.then(function(data) {
-				if (!data.success) {
-					alert('Delete failed: ' + data.message);
-					return;
-				}
-				// Refresh the backup list after deletion
-				refreshBackupList();
-			})
-			.catch(function() {
-				alert('Delete request failed');
-			});
-	});
-}
-</script>
 
 <?php
 

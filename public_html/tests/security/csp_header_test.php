@@ -23,6 +23,13 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.11 - the enforced strict script-src holds only 'self', hosts, 'wasm-unsafe-eval' and 'report-sample'
+ * @version 1.10 - the option patterns name event handlers only, so an array of names ("onedrive") is not counted
+ * @version 1.9 - the sweep also counts a handler or custom_script set by assignment ($opts['onclick'] = ...)
+ * @version 1.8 - the strict policy names no nonce (Q5); the sweep counts nonced script tags
+ * @version 1.7 - the sweep counts handler options; a missing ceilings file fails (--baseline makes one)
+ * @version 1.6 - the strict policy (csp_strict_scripts): CspNonce, csp_headers() in its three modes, the live check takes both headers
+ * @version 1.5 - the inline-script ratchet: every file held to its count of inline handlers, scripts and javascript: URLs
  * @version 1.4 - a page may add one origin to form-action (allow_form_action_origin), for a POST answered by a redirect
  * @version 1.3 - a page may add one origin to connect-src (allow_connect_origin)
  * @version 1.2 - 'wasm-unsafe-eval' in script-src, never 'unsafe-eval'
@@ -91,6 +98,61 @@ check(strpos($value, 'http:') === false, 'no plain-http source anywhere');
 check(!preg_match('/\*(?![.-])/', str_replace("'", '', $value)) || strpos($value, ' * ') === false, "no bare wildcard source");
 check(substr_count($value, ';') === count($policy) - 1 && strpos($value, 'default-src ') === 0, 'serialized as "directive sources; ..." starting with default-src');
 check(!preg_match('/[\r\n]/', $value), 'single header line');
+
+section('The strict policy: no inline script at all, beside the standard one or instead of it');
+// specs/strict_script_policy.md WP2 (Q5: no nonce).
+$strict = PublicPageBase::csp_policy(array(), array(), true);
+check(!in_array("'unsafe-inline'", $strict['script-src'], true), "strict script-src drops 'unsafe-inline'");
+check(preg_grep("/^'nonce-/", $strict['script-src']) === array() && preg_grep("/^'(?:sha256|sha384|sha512)-/", $strict['script-src']) === array(),
+	'and names no nonce and no hash: no inline script runs, whoever wrote it');
+check(in_array("'report-sample'", $strict['script-src'], true), 'and asks for a sample of what it refuses');
+check(!in_array("'strict-dynamic'", $strict['script-src'], true) && !in_array("'unsafe-eval'", $strict['script-src'], true),
+	"no 'strict-dynamic' and no 'unsafe-eval'");
+check(in_array("'unsafe-inline'", $strict['style-src'], true), 'styles keep unsafe-inline (out of scope)');
+$rest_same = true;
+foreach ($policy_base = PublicPageBase::csp_policy() as $d => $sources) {
+	if ($d !== 'script-src' && $strict[$d] !== $sources) $rest_same = false;
+}
+check($rest_same && array_values(array_diff($policy_base['script-src'], array("'unsafe-inline'"))) === array_values(array_diff($strict['script-src'], array("'report-sample'"))),
+	'nothing else in the policy moves: the same hosts, the same directives');
+
+check(PublicPageBase::csp_headers(false, false, 'enforce') === array(), 'enable_csp off: nothing, whatever the strict setting');
+check(PublicPageBase::csp_headers(true, false, 'off') === array(PublicPageBase::csp_header(true, false)), 'off: the standard header alone');
+check(PublicPageBase::csp_headers(true, false, 'nonsense') === array(PublicPageBase::csp_header(true, false)), 'an unknown value is off');
+$rep = PublicPageBase::csp_headers(true, false, 'report');
+check(count($rep) === 2 && $rep[0] === PublicPageBase::csp_header(true, false) && $rep[1][0] === 'Content-Security-Policy-Report-Only',
+	'report: the standard header unchanged, the strict one beside it, report-only');
+$strict_script_src = preg_match('/(?:^|;\s*)script-src ([^;]*)/', $rep[1][1], $sm) ? $sm[1] : '';
+check($strict_script_src !== '' && strpos($strict_script_src, "'unsafe-inline'") === false
+	&& strpos($rep[1][1], 'report-uri ' . PublicPageBase::CSP_REPORT_PATH) !== false,
+	"the strict header's script-src has no 'unsafe-inline', and it says where to report", $strict_script_src);
+foreach (array('off', 'report', 'enforce') as $mode) {
+	foreach (PublicPageBase::csp_headers(true, false, $mode) as $h) {
+		check(strpos($h[1], "'nonce-") === false, "$mode: no CSP header names a nonce ({$h[0]})");
+	}
+}
+$enf = PublicPageBase::csp_headers(true, false, 'enforce');
+check(count($enf) === 1 && $enf[0][0] === 'Content-Security-Policy' && $enf[0][1] === $rep[1][1],
+	'enforce: the strict policy in place of the standard one');
+// With every inline block and handler gone from the tree (the sweep's
+// ceilings file is empty), the enforced script-src holds only the site,
+// hosts, and the two keywords that let nothing inline run: no
+// 'unsafe-inline', no 'unsafe-eval', no nonce, no hash (WP6).
+$enf_script = preg_match('/(?:^|;\s*)script-src ([^;]*)/', $enf[0][1], $em) ? preg_split('/\s+/', trim($em[1])) : array();
+$keywords = array_values(array_filter($enf_script, function ($src) { return strpos($src, "'") === 0; }));
+sort($keywords);
+$hosts_ok = true;
+foreach ($enf_script as $src) {
+	if (strpos($src, "'") === 0) continue;
+	if (!preg_match('#^https://[a-z0-9.*-]+(?::\d+)?(?:/[^\s]*)?$#i', $src)) $hosts_ok = false;
+}
+check($keywords === array("'report-sample'", "'self'", "'wasm-unsafe-eval'") && $hosts_ok,
+	"enforced script-src: 'self', https hosts, 'wasm-unsafe-eval' and 'report-sample', nothing else", implode(' ', $enf_script));
+$enf_ro = PublicPageBase::csp_headers(true, true, 'enforce');
+check(count($enf_ro) === 1 && $enf_ro[0][0] === 'Content-Security-Policy-Report-Only', 'enforce stays report-only while csp_report_only is on');
+$with_extra = PublicPageBase::csp_headers(true, false, 'report', array('https://models.example.test'));
+check(strpos($with_extra[0][1], 'https://models.example.test') !== false && strpos($with_extra[1][1], 'https://models.example.test') !== false,
+	"a page's own connect origin reaches both policies");
 
 section('A page may add one origin to connect-src, and nothing else moves');
 // The mailbox reader names the model host its owner registered
@@ -192,26 +254,113 @@ foreach (glob($root . '/includes/oauth/providers/*OAuthProvider.php') as $pf) {
 }
 check(count(glob($root . '/includes/oauth/providers/*OAuthProvider.php')) >= 3, 'the provider sweep saw the provider catalog');
 
+section('No new inline script in the tree (the ratchet toward a strict policy)');
+// specs/strict_script_policy.md WP6. What a script-src without 'unsafe-inline'
+// refuses, counted in the source the same way the page walk
+// (inline_script_walk_test.php) counts it in rendered pages: an inline event
+// handler attribute, a <script> with no src that is not a data block, and a
+// javascript: URL, and a handler passed to a writer as an option
+// ('onclick' => ...). The walk sees only pages it can open with no record id;
+// this sees every file. Each file is held to its line in
+// inline_script_sweep_ceilings.json (no line means none); over it fails, and
+// a file under it is lowered by running this test directly with --lower
+// (--baseline alone makes the first ceilings; a missing file fails). A
+// line that matches but is no inline script (a parser's pattern, a doc
+// string) says so with "jy-allow-script: why" and is not counted.
+$sweep_ceilings_file = __DIR__ . '/inline_script_sweep_ceilings.json';
+// Only --baseline takes every file's count as its ceiling. A missing file
+// fails: deleting it must not reset the ratchet.
+$sweep_first = in_array('--baseline', (array)$argv, true);
+$sweep_doc = is_file($sweep_ceilings_file) ? json_decode((string)file_get_contents($sweep_ceilings_file), true) : null;
+check($sweep_first || is_array($sweep_doc), 'the sweep\'s ceilings file is there to hold the files to',
+	"$sweep_ceilings_file is missing or unreadable; only --baseline makes a new one");
+$sweep_ceilings = $sweep_first ? array() : (array)($sweep_doc['files'] ?? array());
+$sweep_res = array(
+	'handler' => '/(?<![\w.$-])on[a-z]{3,}\s*=\s*\\\\?["\']/i',
+	'script'  => '/<script\b(?![^>]*\bsrc\s*=)(?![^>]*type\s*=\s*\\\\?["\']?(?:application\/(?:ld\+)?json|text\/template|text\/html|text\/x-))[^>]*>/i',
+	'url'     => '/(?:href|src|action|formaction)\s*=\s*\\\\?["\']\s*javascript:/i',
+	// A handler handed to a writer as an option ('onclick' => '...'), which
+	// the writer prints as an attribute.
+	// Event handler names only: an array of app names ("onedrive" => ...) is data.
+	'option'  => '/["\'](?:on(?:click|dblclick|change|input|submit|reset|focus|blur|key(?:down|up|press)|mouse[a-z]+|pointer[a-z]+|touch[a-z]+|load|unload|error|select|scroll|wheel|drag[a-z]*|drop|contextmenu|toggle|invalid|beforeunload|paste|copy|cut)|custom_script)["\']\s*=>/i',
+	// The same handed over by assignment ($opts['onclick'] = '...'), which
+	// the pattern above never saw (reviewer2 B2: the Server Manager copy tab).
+	'assign'  => '/\[\s*["\'](?:on(?:click|dblclick|change|input|submit|reset|focus|blur|key(?:down|up|press)|mouse[a-z]+|pointer[a-z]+|touch[a-z]+|load|unload|error|select|scroll|wheel|drag[a-z]*|drop|contextmenu|toggle|invalid|beforeunload|paste|copy|cut)|custom_script)["\']\s*\]\s*=(?![=>])/i',
+);
+$sweep_counts = array();
+$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+foreach ($it as $file) {
+	$path = $file->getPathname();
+	if (preg_match($skip, $path) || !preg_match('#\.(php|js)$#', $path) || preg_match('#\.min\.js$#', $path)) continue;
+	$src = @file_get_contents($path);
+	if ($src === false) continue;
+	$n = 0;
+	foreach (explode("\n", $src) as $line) {
+		if (strpos($line, 'jy-allow-script:') !== false) continue;
+		foreach ($sweep_res as $re) {
+			$n += preg_match_all($re, $line);
+		}
+	}
+	if ($n > 0) {
+		$sweep_counts[substr($path, strlen($root) + 1)] = $n;
+	}
+}
+ksort($sweep_counts);
+$sweep_over = array();
+$sweep_under = array();
+foreach ($sweep_counts as $rel => $n) {
+	$ceiling = (int)($sweep_ceilings[$rel] ?? 0);
+	if ($n > $ceiling) $sweep_over[] = "$rel: $n, ceiling $ceiling";
+}
+foreach ($sweep_ceilings as $rel => $ceiling) {
+	$n = (int)($sweep_counts[$rel] ?? 0);
+	if ($n < (int)$ceiling) $sweep_under[] = "$rel: $n, ceiling $ceiling";
+}
+check($sweep_first || (is_array($sweep_doc) && $sweep_over === array()),
+	count($sweep_counts) . ' files still carry inline script (' . array_sum($sweep_counts) . ' items), none above its ceiling',
+	"move the new handler or block into a script file (see the spec), or mark a line that is not inline script with jy-allow-script:\n" . implode("\n", $sweep_over));
+check(!preg_grep('#\.js$#', array_keys($sweep_counts)),
+	'no JS file builds an inline handler or script into HTML', implode(', ', preg_grep('#\.js$#', array_keys($sweep_counts))));
+if ($sweep_under && !in_array('--lower', (array)$argv, true) && php_sapi_name() === 'cli' && !harness_wants_json()) {
+	echo '  NOTE: ' . count($sweep_under) . " files are under their ceiling; lower them with --lower:\n    " . implode("\n    ", $sweep_under) . "\n";
+}
+if (in_array('--lower', (array)$argv, true) || $sweep_first) {
+	$next = array();
+	foreach ($sweep_first ? $sweep_counts : $sweep_ceilings as $rel => $ceiling) {
+		$n = (int)($sweep_counts[$rel] ?? 0);
+		if ($n > 0) $next[$rel] = min($n, (int)$ceiling);
+	}
+	ksort($next);
+	file_put_contents($sweep_ceilings_file, json_encode(array(
+		'about' => 'Ceilings for the inline-script sweep in tests/security/csp_header_test.php: per file, how many inline handlers, inline scripts with no src and javascript: URLs it may still hold. Only ever lowered (run the test with --lower). A file not listed must hold none.',
+		'files' => $next,
+	), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+	echo 'Wrote ' . count($next) . " ceilings to $sweep_ceilings_file\n";
+}
+
 section('The live site sends what the builder says, for the settings it has');
 $settings = Globalvars::get_instance();
-$expected = PublicPageBase::csp_header(
+$strict_mode = (string)$settings->get_setting('csp_strict_scripts', false, true);
+$expected_all = PublicPageBase::csp_headers(
 	(bool)$settings->get_setting('enable_csp', false, true),
-	(bool)$settings->get_setting('csp_report_only', false, true)
+	(bool)$settings->get_setting('csp_report_only', false, true),
+	$strict_mode
 );
+$fold = function ($v) { return trim($v); };
 $r = harness_request('GET', '/', array('accept' => 'text/html', 'follow' => 3));
 check($r['status'] > 0 && $r['status'] < 500, 'homepage answers (' . $r['status'] . ')');
 $seen = array();
 foreach ((array)$r['headers'] as $line) {
 	if (preg_match('/^(Content-Security-Policy(?:-Report-Only)?):\s*(.*)$/i', $line, $m)) {
-		$seen[$m[1]] = $m[2];
+		$seen[] = array($m[1], $fold($m[2]));
 	}
 }
-if ($expected === null) {
-	check(empty($seen), 'enable_csp is off here and the site sends no CSP header', json_encode(array_keys($seen)));
+$want = array_map(function ($h) use ($fold) { return array($h[0], $fold($h[1])); }, $expected_all);
+if ($want === array()) {
+	check(empty($seen), 'enable_csp is off here and the site sends no CSP header', json_encode($seen));
 } else {
-	check(isset($seen[$expected[0]]) && trim($seen[$expected[0]]) === $expected[1],
-		'the site sends ' . $expected[0] . ' with the builder\'s policy', json_encode($seen));
-	check(count($seen) === 1, 'and only that one CSP header');
+	check($seen === $want, 'the site sends exactly the builder\'s CSP headers (strict policy: ' . ($strict_mode ?: 'off') . ')',
+		json_encode(array('sent' => $seen, 'expected' => $want)));
 }
 
 harness_finish();

@@ -67,7 +67,7 @@ if (!$device->get('sdd_is_active')) {
 			<form method="GET" action="/profile/dns_filtering/querylog" class="dnsf-ql-form">
 				<input type="hidden" name="device_id" value="' . $device_id . '">
 				<label for="scd-lines-select" class="dnsf-ql-label">Show:</label>
-				<select id="scd-lines-select" name="lines" onchange="this.form.submit()" class="dnsf-ql-select">
+				<select id="scd-lines-select" name="lines" data-jy-autosubmit class="dnsf-ql-select">
 					<option value="100"' . ($lines_requested == 100 ? ' selected' : '') . '>100 entries</option>
 					<option value="250"' . ($lines_requested == 250 ? ' selected' : '') . '>250 entries</option>
 					<option value="500"' . ($lines_requested == 500 ? ' selected' : '') . '>500 entries</option>
@@ -202,31 +202,7 @@ if (!$device->get('sdd_is_active')) {
 
 echo PublicPage::EndPage();
 ?>
-<script>
-(function () {
-	var clearBtn = document.getElementById('scd-clear-btn');
-	var statusEl = document.getElementById('scd-clear-status');
-	var deviceId = <?php echo $device_id; ?>;
-
-	if (!clearBtn) return;
-
-	clearBtn.addEventListener('click', function () {
-		if (!confirm('Are you sure you want to clear the query log for this device? This cannot be undone.')) {
-			return;
-		}
-		clearBtn.disabled = true;
-		statusEl.textContent = 'Clearing\u2026';
-
-		joineryApi.post('dns_filtering/purge_querylog', { device_id: deviceId })
-		.then(function () {
-			window.location.reload();
-		}).catch(function (err) {
-			statusEl.textContent = err.message || 'Error clearing log.';
-			clearBtn.disabled = false;
-		});
-	});
-})();
-</script>
+<?php echo PageScript::json('querylog-config', array('device_id' => (int)$device_id)), PageScript::src('plugins/dns_filtering/assets/js/querylog.js'); ?>
 <?php
 	$page->public_footer($foptions = array('track' => TRUE, 'show_survey' => TRUE));
 ?>

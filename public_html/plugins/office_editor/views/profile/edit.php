@@ -8,6 +8,7 @@
  * into the editor frame (the token never appears in an address the browser
  * shows). assets/office_editor.js does the work.
  *
+ * @version 0.1.1 - the editor's settings are a JSON block (no inline script)
  * @version 0.1.0
  */
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -82,7 +83,7 @@ $config = array(
 .oe-message .btn{margin:.8rem .3rem 0}
 @media(max-width:600px){.oe-path{display:none}}
 </style>
-<script>window.OFFICE_EDITOR = <?php echo json_encode($config, JSON_UNESCAPED_SLASHES); ?>;</script>
+<?php echo PageScript::json('office-editor-config', $config); ?>
 <script defer src="<?php echo htmlspecialchars($asset('office_editor.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php
 $page->public_footer();

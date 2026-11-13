@@ -166,6 +166,20 @@
 			if ($render_path !== '' && file_exists($render_path)) {
 				$step = $current_step;
 				include($render_path);
+				// The step's script, when it has one: assets/js/setup/{step}.js
+				// (the partials write no inline script).
+				// Keyed by the step file's own place: a core step
+				// (includes/setup_steps/x.php) has assets/js/setup/x.js, a
+				// plugin's (plugins/p/...) has plugins/p/assets/js/setup/x.js,
+				// so a plugin step named like a core one never loads core's.
+				$step_base = basename($render_file, '.php') . '.js';
+				$step_js = preg_match('#^plugins/([a-z0-9_]+)/#', $render_file, $pm)
+					? 'plugins/' . $pm[1] . '/assets/js/setup/' . $step_base
+					: 'assets/js/setup/' . $step_base;
+				$step_js_path = PathHelper::getIncludePath($step_js);
+				if (is_string($step_js_path) && is_file($step_js_path)) {
+					echo '<script defer src="/' . htmlspecialchars($step_js) . '?v=' . filemtime($step_js_path) . '"></script>';
+				}
 			} else {
 ?>
 			<p class="jy-muted">This step's controls are not available.</p>
@@ -216,19 +230,7 @@
 		</form>
 	</dialog>
 
-	<script>
-	(function () {
-		var dialog = document.getElementById('setup-dismiss');
-		var open = document.getElementById('setup-finish-later');
-		var cancel = document.getElementById('setup-dismiss-cancel');
-		if (open && dialog) {
-			open.addEventListener('click', function () { dialog.showModal(); });
-		}
-		if (cancel && dialog) {
-			cancel.addEventListener('click', function () { dialog.close(); });
-		}
-	})();
-	</script>
+	<script defer src="/assets/js/setup/setup.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/setup/setup.js')) ?: '1'; ?>"></script>
 </div>
 <?php
 	$page->public_footer(['header_only' => true]);

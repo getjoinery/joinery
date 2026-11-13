@@ -10,7 +10,7 @@
  * Compose attachment UX matches the AI chat composer (paperclip button, pending
  * chips with remove, drag-and-drop onto the open panel) — see
  * specs/implemented/inbound_email_compose_attachments.md. The caps advertised
- * in window.MAILBOX_READER (max_files/max_file_bytes/max_total_bytes) are read
+ * in the page's #mailbox-reader-config block (max_files/max_file_bytes/max_total_bytes) are read
  * from MailboxSender's constants so the client-side preflight can never drift
  * from the server's real policy.
  *
@@ -37,6 +37,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.33.0 - no inline script: the reader's settings are a JSON block, the unseal loop and the catch-up
+ *   button are assets/mailbox_reader_tasks.js
  * @version 1.32.0 - the AI catch-up button drains the long lane, where AI work runs
  * @version 1.31.0 - openMessage: the conversation a ?open=N link asks the reader to open
  * @version 1.30.0 - messageActions: the buttons other plugins declare (MailboxMessageActions)
@@ -259,7 +261,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			$config['relayPinMailboxes'] = array();
 		}
 	}
-	echo '<script>window.MAILBOX_READER = ' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
+	echo PageScript::json('mailbox-reader-config', $config);
 	?>
 <div id="mbx-reader" class="mbx-reader">
 	<aside class="mbx-rail" id="mbx-rail" aria-label="Mailboxes">
@@ -503,18 +505,8 @@ function mailbox_reader_emit_unseal_convergence(): void {
 		return; // a probe failure must never break the reader
 	}
 	?>
-<script>
-(function () {
-	function batch() {
-		joineryApi.post('mailbox/unseal_batch', {}).then(function (d) {
-			d = d || {};
-			if (d.locked || !d.unsealed || !(d.own_remaining > 0)) return;
-			batch();
-		}).catch(function () { /* silent — the next visit resumes */ });
-	}
-	batch();
-})();
-</script>
+<span hidden data-mbx-unseal-convergence></span>
+<?php echo mailbox_reader_tasks_script(); ?>
 	<?php
 }
 
@@ -572,65 +564,19 @@ function mailbox_reader_emit_ai_catchup(): void {
 	<span class="mbx-catchup-progress" role="status" aria-live="polite"></span>
 	<button type="button" class="mbx-catchup-btn">Catch up</button>
 </div>
-<script>
-(function () {
-	var box = document.querySelector('.mbx-catchup-banner');
-	if (!box) { return; }
-	var btn = box.querySelector('.mbx-catchup-btn');
-	var out = box.querySelector('.mbx-catchup-progress');
-	var done = 0, running = false, idlePasses = 0;
-	var IDLE_WAIT_MS = 5000, IDLE_MAX = 24;   // about two minutes of passes that finish nothing
-	var input = { lane: 'long' };
-
-	function pass() {
-		joineryApi.post('vault_deferred_work', input).then(function (d) {
-			d = d || {};
-			if (d.locked) {
-				out.textContent = 'Unlock your vault to continue.';
-				stop();
-				return;
-			}
-			var did = 0;
-			Object.keys(d.done || {}).forEach(function (k) { did += d.done[k]; });
-			done += did;
-			out.textContent = done ? ('Processed ' + done + '\u2026') : 'Working\u2026';
-			if (!d.long_more && !d.more) {
-				out.textContent = 'All caught up.';
-				stop();
-				return;
-			}
-			// AI work first; while parsing holds it off, parse.
-			input = d.long_more ? { lane: 'long' } : (d.foreground_more ? { foreground: 1 } : {});
-			if (did > 0) { idlePasses = 0; pass(); return; }
-			if (++idlePasses >= IDLE_MAX) {
-				out.textContent = 'Nothing more could be done right now \u2014 try again later.';
-				stop();
-				return;
-			}
-			setTimeout(pass, IDLE_WAIT_MS);
-		}).catch(function () {
-			out.textContent = 'Stopped \u2014 try again.';
-			stop();
-		});
-	}
-
-	function stop() {
-		running = false;
-		btn.disabled = false;
-		btn.textContent = 'Catch up';
-	}
-
-	btn.addEventListener('click', function () {
-		if (running) { return; }
-		running = true;
-		idlePasses = 0;
-		input = { lane: 'long' };
-		btn.disabled = true;
-		btn.textContent = 'Working';
-		out.textContent = 'Working\u2026';
-		pass();
-	});
-})();
-</script>
+<?php echo mailbox_reader_tasks_script(); ?>
 	<?php
+}
+
+/**
+ * The script for the reader's background tasks (the unseal loop and the AI
+ * catch-up button), once per page.
+ */
+function mailbox_reader_tasks_script(): string {
+	static $done = false;
+	if ($done) {
+		return '';
+	}
+	$done = true;
+	return PageScript::src('plugins/mailbox/assets/mailbox_reader_tasks.js');
 }

@@ -68,7 +68,7 @@ echo '</div>';
 echo '</div>';
 
 echo '<form method="POST" action="/admin/admin_agent_files" style="display:inline;" '
-	. 'onsubmit="return confirm(\'Switch to the upgrade candidate? The current content will be preserved as an archived row.\');">';
+	. 'data-jy-confirm="Switch to the upgrade candidate? The current content will be preserved as an archived row.">';
 echo '<input type="hidden" name="action" value="switch_to_candidate">';
 echo '<input type="hidden" name="agf_agent_file_id" value="' . (int)$active->key . '">';
 echo '<button type="submit" class="btn btn-primary">Switch to new version</button>';

@@ -982,7 +982,11 @@ abstract class PublicPageBase {
 	protected function render_base_assets() {
 		echo '<link rel="stylesheet" href="/assets/css/base.css?v=' . $this->asset_mtime('assets/css/base.css') . '">' . "\n";
 		echo '<link rel="stylesheet" href="/assets/css/joinery-styles.css?v=' . $this->asset_mtime('assets/css/joinery-styles.css') . '">' . "\n";
-		echo '<script defer src="/assets/js/base.js?v=' . $this->asset_mtime('assets/js/base.js') . '"></script>' . "\n";
+		// Not deferred: its confirm listeners are delegated from document, so
+		// loaded here they ask before any form on the page can post, even a
+		// press made while the page is still loading. Nothing in it needs
+		// <body> before DOMContentLoaded.
+		echo '<script src="/assets/js/base.js?v=' . $this->asset_mtime('assets/js/base.js') . '"></script>' . "\n";
 	}
 
 	/**
@@ -1152,16 +1156,23 @@ abstract class PublicPageBase {
 			header('Referrer-Policy: strict-origin-when-cross-origin');
 		}
 
-		// Content-Security-Policy: off by factory default, report-only when
-		// first switched on. See csp_header().
-		$csp = self::csp_header(
+		// Content-Security-Policy, and with csp_strict_scripts the strict one
+		// beside it or in its place. See csp_headers().
+		$csp_headers = self::csp_headers(
 			(bool)$settings->get_setting('enable_csp', false, true),
 			(bool)$settings->get_setting('csp_report_only', false, true),
+			(string)$settings->get_setting('csp_strict_scripts', false, true),
 			$this->csp_connect_origins,
 			$this->csp_form_origins
 		);
-		if ($csp !== null) {
-			header($csp[0] . ': ' . $csp[1]);
+		// This runs twice for some pages, so whatever an earlier call sent
+		// goes first. Then each is added without replacing: two Report-Only
+		// headers (csp_report_only with the strict one in report mode) are two
+		// policies, and both are kept.
+		header_remove('Content-Security-Policy');
+		header_remove('Content-Security-Policy-Report-Only');
+		foreach ($csp_headers as $csp) {
+			header($csp[0] . ': ' . $csp[1], false);
 		}
 	}
 
@@ -1172,9 +1183,9 @@ abstract class PublicPageBase {
 	 * from, so an injected script or an exfiltration to an unlisted host is
 	 * stopped by the browser itself. 'unsafe-inline' stays for scripts and
 	 * styles because FormWriter output, the views and the plugins rely on
-	 * inline handlers and style blocks throughout — removing them is the
-	 * strict-CSP project (specs/content_security_policy.md, Future), not this
-	 * policy. What it does close: scripts, styles, fonts, frames and fetches
+	 * inline handlers and style blocks throughout. The strict policy, which
+	 * drops it for scripts, is this one called with $strict (csp_headers(),
+	 * csp_strict_scripts). What the standard policy does close: scripts, styles, fonts, frames and fetches
 	 * from any host not listed here, plugins and objects entirely, and framing
 	 * by other sites.
 	 *
@@ -1203,10 +1214,16 @@ abstract class PublicPageBase {
 	 * too, so without it the browser blocks the hop (the services Connect
 	 * approval, which hands the linking site its key at the site's own address).
 	 *
+	 * With $strict, the strict policy (specs/strict_script_policy.md):
+	 * script-src loses 'unsafe-inline' and names no nonce, so the browser runs
+	 * no inline script and no inline handler at all, only files from the site
+	 * and the vendor hosts. Every script the site sends lives in a file.
+	 *
 	 * @param string[] $extra_connect origins (scheme://host[:port]) this render adds to connect-src
 	 * @param string[] $extra_form    origins this render adds to form-action
+	 * @param bool     $strict        the strict policy: no inline script at all
 	 */
-	public static function csp_policy(array $extra_connect = array(), array $extra_form = array()) {
+	public static function csp_policy(array $extra_connect = array(), array $extra_form = array(), bool $strict = false) {
 		$policy = array(
 			'default-src'     => array("'self'"),
 			'script-src'      => array("'self'", "'unsafe-inline'",
@@ -1264,6 +1281,12 @@ abstract class PublicPageBase {
 				'https://cloud.digitalocean.com', 'https://dnsimple.com'),
 			'frame-ancestors' => array("'self'"),
 		);
+		if ($strict) {
+			$policy['script-src'] = array_values(array_diff($policy['script-src'], array("'unsafe-inline'")));
+			// The first 40 characters of a refused script or handler come with
+			// its report, so the report says which one it was.
+			$policy['script-src'][] = "'report-sample'";
+		}
 		foreach ($extra_connect as $origin) {
 			$origin = self::normalize_connect_origin((string)$origin);
 			if ($origin !== null && !in_array($origin, $policy['connect-src'], true)) {
@@ -1352,6 +1375,49 @@ abstract class PublicPageBase {
 		);
 	}
 
+	/** Where a browser sends what the strict policy refused (CspReport::dispatchPreAuth()). */
+	const CSP_REPORT_PATH = '/api/v1/csp-report';
+
+	/**
+	 * Every CSP header to send, as [name, value] pairs.
+	 *
+	 * csp_strict_scripts says what becomes of the strict policy
+	 * (csp_policy() with $strict):
+	 *   off     - not sent; the standard policy alone, as csp_header() says.
+	 *   report  - the standard policy stays as it is, and the strict one goes
+	 *             beside it as Content-Security-Policy-Report-Only: nothing
+	 *             more is blocked, and the browser reports every inline script
+	 *             and handler the strict one would refuse.
+	 *   enforce - the strict policy in place of the standard one, still
+	 *             report-only while csp_report_only is on.
+	 * The strict policy names CSP_REPORT_PATH, so its refusals reach the
+	 * site in both modes. Nothing is sent while enable_csp is off.
+	 *
+	 * @param string $strict csp_strict_scripts: off, report or enforce (anything else is off)
+	 * @return array<int, array{0: string, 1: string}>
+	 */
+	public static function csp_headers($enabled, $report_only, string $strict, array $extra_connect = array(), array $extra_form = array()) {
+		if (!$enabled) {
+			return array();
+		}
+		if ($strict !== 'report' && $strict !== 'enforce') {
+			return array(self::csp_header(true, $report_only, $extra_connect, $extra_form));
+		}
+		$parts = array();
+		foreach (self::csp_policy($extra_connect, $extra_form, true) as $directive => $sources) {
+			$parts[] = $directive . ' ' . implode(' ', $sources);
+		}
+		$parts[] = 'report-uri ' . self::CSP_REPORT_PATH;
+		$strict_value = implode('; ', $parts);
+		if ($strict === 'report') {
+			return array(
+				self::csp_header(true, $report_only, $extra_connect, $extra_form),
+				array('Content-Security-Policy-Report-Only', $strict_value),
+			);
+		}
+		return array(array($report_only ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy', $strict_value));
+	}
+
 	/**
 	 * Whether a brand-token value is safe to emit inside a <style> declaration.
 	 * Allows only the conservative CSS value charset used by colours, lengths,
@@ -1376,7 +1442,7 @@ abstract class PublicPageBase {
 		$settings = Globalvars::get_instance();
 		
 		// SECURITY HEADERS — must run before ANY output below (the admin-bar
-		// <style>/<script> echoed for admins), or header() warns "headers already sent".
+		// style or script tags echoed for admins), or header() warns "headers already sent".
 		// Check protocol_mode for HTTPS redirect (duplicate check for safety)
 		$this->send_transport_headers($settings);
 
@@ -1384,7 +1450,7 @@ abstract class PublicPageBase {
 		// rendering (the jy-app-mode hook). Themes omit the chrome server-side
 		// via show_site_chrome(); this class is the styling hook.
 		if (!$this->show_site_chrome()) {
-			echo '<script>document.addEventListener("DOMContentLoaded",function(){document.body.classList.add("jy-app-mode");});</script>' . "\n";
+			echo '<meta name="joinery-body-class" content="jy-app-mode">' . "\n";   // base.js adds it
 		}
 
 		// Floating Admin chip: gives a permission-5+ user browsing the public
@@ -1393,9 +1459,8 @@ abstract class PublicPageBase {
 		// neither shows the chip (see should_show_admin_chip()).
 		if ($this->should_show_admin_chip()) {
 			$this->render_admin_chip_css();
-			echo '<script>document.addEventListener("DOMContentLoaded", function() {'
-				. 'document.body.insertAdjacentHTML("beforeend", ' . json_encode($this->get_admin_chip_html()) . ');'
-				. '});</script>';
+			// base.js moves it to the end of <body>
+			echo '<template data-jy-body-insert="beforeend">' . $this->get_admin_chip_html() . '</template>';
 		}
 
 		// Managed-domain take-ownership notice: a deployment whose domain was
@@ -1409,9 +1474,8 @@ abstract class PublicPageBase {
 				&& ManagedDomainNotice::applies() && !$this->on_admin_path()) {
 			$notice = ManagedDomainNotice::render();
 			if ($notice !== '') {
-				echo '<script>document.addEventListener("DOMContentLoaded", function() {'
-					. 'document.body.insertAdjacentHTML("afterbegin", ' . json_encode($notice) . ');'
-					. '});</script>';
+				// base.js moves it to the top of <body>
+				echo '<template data-jy-body-insert="afterbegin">' . $notice . '</template>';
 			}
 		}
 
@@ -1535,7 +1599,7 @@ abstract class PublicPageBase {
 	static function copy_field($value) {
 		$esc = htmlspecialchars($value);
 		return '<span class="jy-copyfield">'
-			. '<input type="text" class="form-control form-control-sm" readonly value="' . $esc . '" onclick="this.select()">'
+			. '<input type="text" class="form-control form-control-sm" readonly value="' . $esc . '" data-jy-select-all>'
 			. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-copy="' . $esc . '">Copy</button>'
 			. '</span>';
 	}
@@ -1668,29 +1732,22 @@ abstract class PublicPageBase {
 		$confirm_msg   = isset($options['confirm']) ? $options['confirm'] : '';
 		$typed_phrase  = isset($options['confirm_typed']) ? $options['confirm_typed'] : '';
 		$extra_class   = isset($options['class'])   ? ' ' . $options['class'] : '';
-		$modal_opts    = array();
-		if (!empty($options['confirm_label'])) { $modal_opts['confirmLabel'] = (string)$options['confirm_label']; }
-		if (!empty($options['confirm_style'])) { $modal_opts['confirmStyle'] = (string)$options['confirm_style']; }
-		$modal_arg     = $modal_opts ? ', ' . json_encode($modal_opts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : '';
 
-		// The confirm text becomes a JavaScript string literal inside an HTML
-		// attribute, so it is encoded in that order: json_encode makes it a
-		// JS literal (an apostrophe or a quote in the text — a sender called
-		// O'Brien, a title with quotes — can never end the string), and the
-		// whole handler is then attribute-escaped. The browser undoes the
-		// attribute escaping before the JS parser sees the literal.
-		$btn_onclick = '';
-		if ($confirm_msg && $typed_phrase) {
-			// Irreversible action: the modal demands the exact phrase be typed
-			// before the confirm button enables.
-			$js = 'var f=this.closest(\'form\'); JoineryModal.confirmTyped('
-				. self::js_literal($confirm_msg) . ', ' . self::js_literal($typed_phrase)
-				. ', function(){ f.submit(); }' . $modal_arg . ');';
-			$btn_onclick = ' onclick="' . htmlspecialchars($js, ENT_QUOTES) . '"';
-		} else if ($confirm_msg) {
-			$js = 'var f=this.closest(\'form\'); JoineryModal.confirm('
-				. self::js_literal($confirm_msg) . ', function(){ f.submit(); }' . $modal_arg . ');';
-			$btn_onclick = ' onclick="' . htmlspecialchars($js, ENT_QUOTES) . '"';
+		// The kit's confirm (base.js, data-jy-confirm): no inline handler, so
+		// the strict script policy runs it. The button submits its own form
+		// (an empty data-jy-submit) once the person confirms.
+		$btn_confirm = '';
+		if ($confirm_msg) {
+			$btn_confirm = ' data-jy-confirm="' . htmlspecialchars($confirm_msg, ENT_QUOTES) . '" data-jy-submit=""';
+			if ($typed_phrase) {
+				$btn_confirm .= ' data-jy-confirm-typed="' . htmlspecialchars($typed_phrase, ENT_QUOTES) . '"';
+			}
+			if (!empty($options['confirm_label'])) {
+				$btn_confirm .= ' data-jy-confirm-label="' . htmlspecialchars((string)$options['confirm_label'], ENT_QUOTES) . '"';
+			}
+			if (!empty($options['confirm_style'])) {
+				$btn_confirm .= ' data-jy-confirm-style="' . htmlspecialchars((string)$options['confirm_style'], ENT_QUOTES) . '"';
+			}
 		}
 
 		$html = '<form method="POST" action="' . htmlspecialchars($url) . '" style="display:inline;">';
@@ -1699,15 +1756,10 @@ abstract class PublicPageBase {
 		}
 		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-soft-default btn-sm';
 		$btn_type  = $confirm_msg ? 'button' : 'submit';
-		$html .= '<button type="' . $btn_type . '" class="' . $btn_class . '"' . $btn_onclick . '>' . htmlspecialchars($label) . '</button>';
+		$html .= '<button type="' . $btn_type . '" class="' . htmlspecialchars($btn_class) . '"' . $btn_confirm . '>' . htmlspecialchars($label) . '</button>';
 		$html .= '</form>';
 
 		return $html;
-	}
-
-	/** A PHP string as a JavaScript string literal, safe to place inside markup. */
-	private static function js_literal($text) {
-		return json_encode((string)$text, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 	}
 
 	public function public_footer($options=array()) {
@@ -2227,20 +2279,17 @@ abstract class PublicPageBase {
 		$hidden  = isset($entry['hidden']) && is_array($entry['hidden']) ? $entry['hidden'] : array();
 		$confirm = isset($entry['confirm']) ? (string)$entry['confirm'] : '';
 
-		$onclick = '';
-		if ($confirm !== '') {
-			$escaped = addslashes(htmlspecialchars($confirm, ENT_QUOTES));
-			$onclick = ' onclick="var f=this.closest(\'form\');'
-				. ' JoineryModal.confirm(\'' . $escaped . '\', function(){ f.submit(); });'
-				. ' return false;"';
-		}
+		// The kit's confirm (base.js, data-jy-confirm): no inline handler,
+		// which the strict script policy would refuse. A button that asks is
+		// type="button", so it posts nothing before base.js has asked.
+		$onclick = $confirm !== '' ? ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '" data-jy-submit=""' : '';
 
 		$html = '<form method="POST" action="' . htmlspecialchars($action) . '" style="display:inline;">';
 		foreach ($hidden as $name => $value) {
 			$html .= '<input type="hidden" name="' . htmlspecialchars($name)
 				. '" value="' . htmlspecialchars((string)$value) . '">';
 		}
-		$html .= '<button type="submit" class="' . htmlspecialchars($class) . '"' . $onclick . '>'
+		$html .= '<button type="' . ($confirm !== '' ? 'button' : 'submit') . '" class="' . htmlspecialchars($class) . '"' . $onclick . '>'
 			. htmlspecialchars($label) . '</button>';
 		$html .= '</form>';
 		return $html;

@@ -135,7 +135,7 @@ $has_html = !$locked && $body_html !== '' && $body_html !== null;
 if ($has_html) {
 	echo '<a class="btn btn-sm ' . ($show_html ? 'btn-primary' : 'btn-outline-primary') . '" href="' . $base . '&amp;view=html">HTML (sandboxed)</a> ';
 }
-echo '<form method="post" action="' . $base . '" class="iem-inline-form" onsubmit="return confirm(\'Delete this message?\')">';
+echo '<form method="post" action="' . $base . '" class="iem-inline-form" data-jy-confirm="Delete this message?">';
 echo '<input type="hidden" name="action" value="delete">';
 echo '<button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>';
 echo '</form>';

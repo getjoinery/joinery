@@ -25,6 +25,7 @@
  * builds at once; a search meanwhile answers over what is indexed. Locking the
  * vault ends the worker; the saved index stays sealed.
  *
+ * @version 1.5 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * @version 1.4 - a sealed key in any frame but v2.edgeseal. is refused (v1_key_retirement WP2)
  * @version 1.3 - the search key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
  * @version 1.2 - a status notice comes only from a save or a build that ends or fails, never from
@@ -48,7 +49,7 @@ window.MailboxSearch = (function () {
 		return sealed.slice(EDGE_SEAL.length);
 	}
 
-	function cfg() { return window.MAILBOX_READER || {}; }
+	function cfg() { return window.MAILBOX_READER || (window.MAILBOX_READER = (window.joineryPageData && joineryPageData('mailbox-reader-config')) || null) || {}; }
 
 	// What an instance reaches the outside world through. The page's instance
 	// uses the real ones; selfCheck() hands in stand-ins.
