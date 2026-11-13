@@ -2920,7 +2920,7 @@
     {
       "name": "csp_strict_scripts",
       "clearsPages": ["/"],
-      "default": "off",
+      "default": "report",
       "group": "protocol",
       "label": "Strict script policy",
       "type": "select",

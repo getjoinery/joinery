@@ -1978,3 +1978,14 @@
 	$migration['migration_file'] = 'copy_direct_messages_to_history.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The strict script policy (csp_strict_scripts) goes out in report mode on
+	// every site: nothing more is blocked, and the browser reports what the
+	// strict policy would refuse. A site still at the old factory default, off,
+	// moves to report; one set to report or enforce is left as it is.
+	$migration = array();
+	$migration['database_version'] = '234';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'csp_strict_scripts' AND stg_value = 'off') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'report', stg_update_time = now() WHERE stg_name = 'csp_strict_scripts' AND stg_value = 'off';";
+	$migrations[] = $migration;
