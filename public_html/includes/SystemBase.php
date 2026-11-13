@@ -2294,6 +2294,9 @@ abstract class SystemBase {
 	 * next batch starts, 0 when there are no more. A row a batch fails on is
 	 * passed by the next one rather than tried again.
 	 *
+	 * Only the columns resealSelectColumns() names are read, never the sealed
+	 * content: a re-seal moves the wrapping and leaves the ciphertext alone.
+	 *
 	 * @return array{attempted:int, failed:int, skipped:int, last_id:int}
 	 */
 	public static function resealRows(int $user_id, VaultKey $old_key, int $old_generation,
@@ -2328,7 +2331,8 @@ abstract class SystemBase {
 		}
 
 		$db = DbConnector::get_instance()->get_db_link();
-		$select = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . implode(' AND ', $where) . $batch);
+		$select = $db->prepare('SELECT ' . implode(', ', static::resealSelectColumns()) . ' FROM '
+			. static::$tablename . ' WHERE ' . implode(' AND ', $where) . $batch);
 		$select->execute($params);
 		$rows = $select->fetchAll(PDO::FETCH_ASSOC);
 
@@ -2369,6 +2373,36 @@ abstract class SystemBase {
 		$last_id = ($limit > 0 && count($rows) === $limit)
 			? intval($rows[count($rows) - 1][static::$pkey_column] ?? 0) : 0;
 		return array('attempted' => $attempted, 'failed' => $failed, 'skipped' => $skipped, 'last_id' => $last_id);
+	}
+
+	/**
+	 * The columns resealRows() reads. The key, flag, generation and owner
+	 * columns, plus every other declared column that is not sealed content and
+	 * not a large type (text, bytea, json): an owner override
+	 * (sealedOwnerUserIdFor) looks at ids and short strings such as a subject
+	 * type or an alias id, and these stay small however much a member holds.
+	 *
+	 * @return string[]
+	 */
+	public static function resealSelectColumns(): array {
+		$must = array(static::$pkey_column, static::sealFlagColumn(), static::sealedKeyColumn(),
+			static::sealedGenerationColumn(), static::sealedOwnerColumn());
+		$columns = array();
+		foreach (static::$field_specifications as $name => $spec) {
+			if (in_array($name, $must, true)) {
+				$columns[] = $name;
+				continue;
+			}
+			if (in_array($name, static::$sealed_fields, true)) {
+				continue;
+			}
+			$type = strtolower((string)($spec['type'] ?? ''));
+			if ($type === 'text' || $type === 'bytea' || str_starts_with($type, 'json')) {
+				continue;
+			}
+			$columns[] = $name;
+		}
+		return $columns;
 	}
 
 	/**

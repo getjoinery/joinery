@@ -149,6 +149,83 @@ check($threw, 'a failure THROWS, so the ceremony refuses to retire the old wrapp
 check(strpos($message, 'MailboxContact') !== false, 'and the message names the model that failed');
 
 // ---------------------------------------------------------------------------
+section('modelReseal() pages through more rows than one batch');
+// ---------------------------------------------------------------------------
+// A rotation once read every sealed row a member had in one query, which a
+// large consumer could not fit in memory (security_weak_spots_2026_11 WP2).
+$many = array();
+for ($i = 0; $i < VaultChainSweep::BATCH + 5; $i++) {
+	$many[] = mr_contact($owner, 'many' . $i . '@example.com', 9);
+}
+$callback($owner['user_id'], $owner['key'], 9, $new_public, 10);
+$ids = implode(',', array_map('intval', $many));
+$left = (int)DbConnector::get_instance()->get_db_link()->query(
+	'SELECT COUNT(*) FROM imc_mailbox_contacts WHERE imc_key_generation = 9 AND imc_mailbox_contact_id IN (' . $ids . ')')
+	->fetchColumn();
+check($left === 0, 'every one of ' . count($many) . ' rows moved, past the ' . VaultChainSweep::BATCH . '-row batch');
+$last = mr_raw($many[count($many) - 1]);
+$dek = $crypto->openItemDek((string)$last['imc_sealed_key'], $new_secret);
+check($crypto->openField((string)$last['imc_address'], $dek,
+	MailboxContact::sealAd($many[count($many) - 1], 'imc_address')) === 'many' . (count($many) - 1) . '@example.com',
+	'and the last row, in the second batch, opens under the new key');
+
+// ---------------------------------------------------------------------------
+section('The re-seal reads the wrapping columns, not the sealed content');
+// ---------------------------------------------------------------------------
+$cols = MailboxContact::resealSelectColumns();
+check(in_array('imc_sealed_key', $cols, true) && in_array('imc_key_generation', $cols, true)
+	&& in_array('imc_mailbox_contact_id', $cols, true), 'the key, generation and id columns are read');
+check(!in_array('imc_address', $cols, true), 'a sealed content column is not');
+
+$cols = InboundEmailMessage::resealSelectColumns();
+check(!in_array('iem_body_html', $cols, true) && !in_array('iem_raw_message', $cols, true),
+	'a message re-seal reads neither its sealed body nor its large raw-message column');
+// Each owner override must still see the columns it resolves the owner from.
+// Found by scanning, not listed by hand: a new override, or a column the type
+// rule drops, would otherwise resolve no owner, be passed over as another
+// member's row, and stay on a generation the rotation then retires.
+$root = PathHelper::getIncludePath('');
+$override_files = array_merge(glob($root . 'data/*_class.php') ?: array(), glob($root . 'plugins/*/data/*_class.php') ?: array());
+$overrides = 0;
+foreach ($override_files as $file) {
+	$src = (string)file_get_contents($file);
+	if (strpos($src, 'function sealedOwnerUserIdFor(') === false) {
+		continue;
+	}
+	if (!preg_match_all('/^class\s+(\w+)\s+extends\s+SystemBase\b/m', $src, $m)) {
+		continue;
+	}
+	foreach ($m[1] as $class) {
+		if (!class_exists($class)) {
+			continue;   // an inactive plugin's model
+		}
+		$method = new ReflectionMethod($class, 'sealedOwnerUserIdFor');
+		if ($method->getDeclaringClass()->getName() !== $class) {
+			continue;
+		}
+		$overrides++;
+		$lines = file($method->getFileName());
+		$body = implode('', array_slice($lines, $method->getStartLine() - 1, $method->getEndLine() - $method->getStartLine() + 1));
+		// One level of helpers the override hands $row to (conversationRow($row)).
+		if (preg_match_all('/(?:self|static)::(\w+)\(\s*\$row\b/', $body, $calls)) {
+			foreach (array_unique($calls[1]) as $helper) {
+				if (method_exists($class, $helper)) {
+					$h = new ReflectionMethod($class, $helper);
+					$body .= implode('', array_slice($lines, $h->getStartLine() - 1, $h->getEndLine() - $h->getStartLine() + 1));
+				}
+			}
+		}
+		preg_match_all('/\$row\[\'(\w+)\'\]/', $body, $keys);
+		$read = array_values(array_intersect(array_unique($keys[1]), array_keys($class::$field_specifications)));
+		$missing = array_diff($read, $class::resealSelectColumns());
+		check(count($read) > 0 && count($missing) === 0,
+			$class . '\'s owner override reads ' . implode(', ', $read) . ', all in its re-seal select',
+			$missing ? 'missing: ' . implode(', ', $missing) : '');
+	}
+}
+check($overrides >= 3, 'the scan found the owner overrides (' . $overrides . ')');
+
+// ---------------------------------------------------------------------------
 section('A model with no sealing columns is refused rather than half-rotated');
 // ---------------------------------------------------------------------------
 $threw = false;

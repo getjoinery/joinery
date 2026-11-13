@@ -54,6 +54,7 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.31 - modelReseal() re-seals each model in batches (security_weak_spots_2026_11 WP2)
  * @version 1.30 - a window lock() ends for this request's own session sends X-Joinery-Vault: locked, so the page
  *   announces the lock at once rather than at the next presence beat (the partly-locked gap)
  * @version 1.29 - a window a later arm of the same slot replaces is closed in the audit log (replaced)
@@ -1626,11 +1627,19 @@ class VaultUnlock {
 			$failed = 0;
 			$names = array();
 			foreach ($model_classes as $class) {
-				$result = $class::resealRows($user_id, $old_key, $old_key_generation,
-					$new_public_key, $new_key_generation);
-				$attempted += $result['attempted'];
-				$failed += $result['failed'];
-				if ($result['failed'] > 0) {
+				// In batches, as the chain sweep does: one query over every row a
+				// member holds does not fit in memory for a large consumer.
+				$after = 0;
+				$class_failed = 0;
+				do {
+					$result = $class::resealRows($user_id, $old_key, $old_key_generation,
+						$new_public_key, $new_key_generation, VaultChainSweep::BATCH, $after);
+					$attempted += $result['attempted'];
+					$class_failed += $result['failed'];
+					$after = $result['last_id'];
+				} while ($after > 0);
+				$failed += $class_failed;
+				if ($class_failed > 0) {
 					$names[] = $class;
 				}
 			}

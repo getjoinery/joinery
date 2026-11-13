@@ -26,6 +26,9 @@
  * reference, so core never names a plugin symbol (the discipline
  * `MailIdentityGuard` already sets).
  *
+ * @version 1.2 - ensureCustody(): a key whose custody no longer matches its domain moves
+ *   into the right one in place, keeping its key id (security_weak_spots_2026_11 WP1);
+ *   rotate() erases a retired key's secret
  * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1 - mint() refuses a domain the deployment is not authoritative
  *   for, via a registered resolver (specs/imap_source_domain_boundaries.md)
@@ -45,6 +48,12 @@ class DirectSigningIdentity {
 
 	/** @var callable|null fn(string $domain): bool — may this deployment sign for the domain at all? */
 	private static $authority_resolver = null;
+
+	/** @var callable|null fn(string $domain): ?int — the domain's owner, whatever its level */
+	private static $domain_owner_resolver = null;
+
+	/** @var array<string,bool> domains whose custody sign() has checked this request */
+	private static $custody_checked = array();
 
 	/** @var array<string,DirectIdentity|null> request-scoped; signing runs per message */
 	private static $cache = array();
@@ -67,6 +76,15 @@ class DirectSigningIdentity {
 	 */
 	public static function registerAuthorityResolver(callable $fn): void {
 		self::$authority_resolver = $fn;
+	}
+
+	/**
+	 * Register "who owns this domain", whatever its level. ensureCustody() uses
+	 * it to tell a lowering (the holder still owns the domain and will be back)
+	 * from a change of owner (the old holder will not, so the key is replaced).
+	 */
+	public static function registerDomainOwnerResolver(callable $fn): void {
+		self::$domain_owner_resolver = $fn;
 	}
 
 	/** The owner whose vault should hold this domain's key, or null for box custody. */
@@ -112,7 +130,8 @@ class DirectSigningIdentity {
 	 *
 	 * Idempotent: a domain that already has an active identity keeps it, so
 	 * calling this from setup, from a provisioner, or from a first send never
-	 * rotates a key by accident — rotation is `rotate()`, which is explicit.
+	 * rotates a key by accident. A key in the wrong custody for its domain
+	 * today is moved there by ensureCustody().
 	 */
 	public static function ensureFor(string $domain): DirectIdentity {
 		$domain = strtolower(trim($domain));
@@ -121,11 +140,111 @@ class DirectSigningIdentity {
 		}
 		$existing = self::forDomain($domain);
 		if ($existing !== null) {
-			return $existing;
+			return self::ensureCustody($domain) ?? $existing;
 		}
 		// The site's own signing key, made the first time anything needs it:
 		// no person is its author, whoever's request got here first.
 		return SystemBase::server_initiated_write(function () use ($domain) { return self::mint($domain); });
+	}
+
+	/**
+	 * Keep an existing key in the custody its domain calls for today.
+	 *
+	 * Custody is chosen when a key is minted, and a domain can change after
+	 * that: raised to Private, lowered from it, given to another owner, or its
+	 * owner can set up a vault. A key left box-held after a raise could sign in
+	 * the domain's name with nobody signed in, which is what vault custody
+	 * exists to prevent; one left vault-held after a lowering makes every send
+	 * while the owner is signed out fall back to SMTP.
+	 *
+	 * The key moves in place, keeping its key id, so the published TXT record
+	 * stays right and nothing has to be republished in DNS:
+	 *   - box to vault (a raise): the box copy is sealed to the owner and then
+	 *     erased. Sealing needs only the owner's public key, so this happens at
+	 *     once, from any session.
+	 *   - vault to box (a lowering): the secret is opened with the holder's
+	 *     open window (or $secret, when sign() just opened it). With no window
+	 *     it stays where it is until one is open; nothing is lost meanwhile,
+	 *     sends fall back to SMTP.
+	 * A key whose holder no longer owns the domain, or whose vault is gone (its
+	 * owner was deleted), is replaced by a new key in the right custody: the
+	 * holder will not be back to move it. The domain's DNS plan then shows the
+	 * new TXT to publish.
+	 *
+	 * Lookups that fail throw rather than read as "no vault": a database error
+	 * must never move a Private domain's key to the box. A domain this
+	 * deployment is not authoritative for is left alone, since no key can be
+	 * minted for it.
+	 *
+	 * Returns the identity when it changed, null when nothing moved.
+	 */
+	public static function ensureCustody(string $domain, ?string $secret = null): ?DirectIdentity {
+		$domain = strtolower(trim($domain));
+		$active = ($domain === '') ? null : DirectIdentity::activeFor($domain);
+		if ($active === null) {
+			return null;
+		}
+		VaultUnlock::loadConsumerBootstraps();
+		if (self::$vault_owner_resolver === null) {
+			// Nothing can say whose vault should hold the key (the mailbox is
+			// not loaded): "could not ask" must not read as "box custody".
+			return null;
+		}
+		if (self::$authority_resolver !== null && !call_user_func(self::$authority_resolver, $domain)) {
+			return null;
+		}
+
+		$vault_held = ((string)$active->get('jdi_sealed_secret_key') !== '');
+		$held_by = $vault_held ? intval($active->get('jdi_owner_usr_user_id')) : null;
+		$owner_id = self::vaultOwnerFor($domain);
+		$owner_public = ($owner_id !== null) ? self::vaultPublicKey($owner_id) : null;
+		$wanted = ($owner_public !== null) ? $owner_id : null;
+		if ($held_by === $wanted) {
+			return null;
+		}
+
+		$replace = $vault_held && ($held_by <= 0 || self::vaultPublicKey($held_by) === null);   // its vault is gone
+		if ($vault_held && !$replace && self::$domain_owner_resolver !== null) {
+			// The holder no longer owns the domain: a former owner will not be
+			// signing in to move it, so waiting for their window would leave
+			// every send falling back to SMTP for good.
+			$domain_owner = call_user_func(self::$domain_owner_resolver, $domain);
+			$replace = (intval($domain_owner) !== $held_by);
+		}
+		if ($replace) {
+			return SystemBase::server_initiated_write(function () use ($domain) { return self::rotate($domain); });
+		}
+
+		if ($vault_held) {
+			if ($secret === null) {
+				$vault_key = VaultUnlock::secretKey($held_by);
+				if ($vault_key === null) {
+					return null;   // moved when the holder next has a window open
+				}
+				$secret = (new VaultCrypto())->openItemDek((string)$active->get('jdi_sealed_secret_key'), $vault_key);
+			}
+		} else {
+			$secret = self::openSecretKey($active);
+		}
+
+		try {
+			if ($wanted !== null) {
+				$active->set('jdi_sealed_secret_key', (new VaultCrypto())->sealItemDek($secret, $owner_public));
+				$active->set('jdi_owner_usr_user_id', $wanted);
+				$active->set('jdi_secret_key', null);
+			} else {
+				$active->set('jdi_secret_key', (new SecretBox())->seal('jdi_direct_identities.jdi_secret_key', base64_encode($secret)));
+				$active->set('jdi_sealed_secret_key', null);
+				$active->set('jdi_owner_usr_user_id', null);
+			}
+		} finally {
+			sodium_memzero($secret);
+		}
+		// The site's own key, moved because its domain changed: no person is
+		// its author, whoever saved the change.
+		SystemBase::server_initiated_write(function () use ($active) { $active->save(); });
+		unset(self::$cache[$domain]);
+		return new DirectIdentity(intval($active->key), TRUE);
 	}
 
 	/**
@@ -141,8 +260,13 @@ class DirectSigningIdentity {
 		$previous = self::forDomain($domain);
 		$fresh = self::mint($domain);
 		if ($previous !== null) {
+			// Only the active row signs (sign()), so a retired key keeps its
+			// public half for verifiers and loses its secret at once: a copy
+			// left behind could still sign under a key id DNS publishes.
 			$previous->set('jdi_is_active', false);
 			$previous->set('jdi_retire_time', gmdate('Y-m-d H:i:s'));
+			$previous->set('jdi_secret_key', null);
+			$previous->set('jdi_sealed_secret_key', null);
 			$previous->save();
 		}
 		unset(self::$cache[$domain]);
@@ -188,15 +312,14 @@ class DirectSigningIdentity {
 	/** The vault public key for a user, or null when they hold no vault. */
 	private static function vaultPublicKey(int $user_id): ?string {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		try {
-			$vault = UserEncryptionVault::loadForUser($user_id);
-		} catch (\Throwable $e) {
-			return null;
-		}
+		// A failed lookup throws: read as "no vault" it would pick box custody.
+		$vault = UserEncryptionVault::loadForUser($user_id);
 		if ($vault === null) {
 			return null;
 		}
-		$public = (string)$vault->get('uev_public_key');
+		// The key new material seals to: the pending one during a client-custody
+		// rotation, so nothing sealed now is left on the key it retires.
+		$public = $vault->sealingPublicKey();
 		return $public === '' ? null : $public;
 	}
 
@@ -221,6 +344,17 @@ class DirectSigningIdentity {
 		$secret = self::openSecretKey($identity);
 		try {
 			$signature = sodium_crypto_sign_detached($message, $secret);
+			if ((string)$identity->get('jdi_sealed_secret_key') !== '' && empty(self::$custody_checked[$domain])) {
+				// The secret is open now, which is the moment a vault-held key
+				// waiting to move (a lowered domain) can move. Once per domain
+				// per request, so a bulk send asks once.
+				self::$custody_checked[$domain] = true;
+				try {
+					self::ensureCustody($domain, $secret);
+				} catch (\Throwable $e) {
+					error_log('DirectSigningIdentity: could not move the key of ' . $domain . ': ' . $e->getMessage());
+				}
+			}
 		} finally {
 			sodium_memzero($secret);
 		}

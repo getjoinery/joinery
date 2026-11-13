@@ -14,6 +14,7 @@
  * one, both TXT values are published for as long as the old key id may still be
  * quoted, and a receiver matches the id on the envelope rather than guessing.
  *
+ * @version 1.1 - publishableFor() drops a key retired more than RETIRED_PUBLISH_SECONDS ago
  * @version 1.0.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.0
  */
@@ -83,7 +84,14 @@ class DirectIdentity extends SystemBase {
 		return null;
 	}
 
-	/** Every identity for a domain that is still publishable (active or retiring). */
+	/**
+	 * How long a retired key stays published: long enough for a message signed
+	 * just before the rotation, and for every receiver's cached record
+	 * (DirectCapability::POSITIVE_TTL_SECONDS), then its TXT leaves the plan.
+	 */
+	const RETIRED_PUBLISH_SECONDS = 7 * 86400;
+
+	/** Every identity for a domain that is still publishable: active, or retired within RETIRED_PUBLISH_SECONDS. */
 	public static function publishableFor(string $domain): array {
 		$domain = strtolower(trim($domain));
 		if ($domain === '') {
@@ -92,7 +100,13 @@ class DirectIdentity extends SystemBase {
 		$multi = new MultiDirectIdentity(array('domain' => $domain));
 		$multi->load();
 		$out = array();
+		$cutoff = time() - self::RETIRED_PUBLISH_SECONDS;
 		foreach ($multi as $row) {
+			$retired = (string)$row->get('jdi_retire_time');
+			$retired_at = ($retired === '') ? false : strtotime($retired . ' UTC');
+			if (!$row->get('jdi_is_active') && $retired_at !== false && $retired_at < $cutoff) {
+				continue;
+			}
 			$out[] = $row;
 		}
 		return $out;

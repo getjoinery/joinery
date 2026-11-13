@@ -321,9 +321,34 @@ Outbound Direct is signed by the **box**, with custody mirroring DKIM's:
   instead. A vault key rotation re-seals it alongside the message DEKs and the
   protected-domain DKIM keys.
 
-Rotation is explicit (`DirectSigningIdentity::rotate`): a new key id is minted and
-the old row stays publishable until it is retired, because a sender that cached the
-capability record may still be quoting the old id.
+Custody follows the domain (`DirectSigningIdentity::ensureCustody`). The key moves
+in place and keeps its key id, so the published TXT record stays right:
+
+- **Box to vault** (a raise to Private, or an owner who sets up a vault later): the
+  box copy is sealed to the owner and erased at once. Sealing needs only the owner's
+  public key, so no unlock window is needed.
+- **Vault to box** (a lowering): the secret is opened with the owner's window, at
+  the save if one is open, otherwise at the owner's next signed send. Until then
+  sends made while they are signed out fall back to SMTP.
+- **A key held by someone who no longer owns the domain**, or sealed to a vault that
+  is gone (its owner was deleted), is replaced by a new key in the right custody:
+  its holder will not be back to move it. The DNS plan then shows the new TXT to
+  publish.
+
+Every domain save checks, and so do the setup check's `ensureFor` and the first
+`sign` of a vault-held key in each request. A failed lookup throws rather than
+reading as "no vault", and with the mailbox not loaded nothing moves, so an error
+never moves a Private domain's key to the box.
+
+Moving in place keeps the key, so it protects against a break-in that comes after
+the move. A backup made while the domain was Standard still holds the box-held
+secret until it ages out of retention (about 30 days); a break-in that opens one
+of those can sign with the key. This is accepted.
+
+Rotation (`DirectSigningIdentity::rotate`) mints a new key id and erases the old
+row's secret, so a retired key can never sign. The old public key stays publishable
+for `DirectIdentity::RETIRED_PUBLISH_SECONDS` (a week), for messages signed just
+before the rotation and receivers' cached records, then its TXT leaves the plan.
 
 ## The relay as the endpoint
 

@@ -43,6 +43,7 @@
  * Either one hardens its holders (userHasHardenedDomain): short unlock-window
  * caps.
  *
+ * @version 1.16 - save() keeps the domain's Direct signing key in the custody its level calls for
  * @version 1.15 - permanent_delete(): the last row for a domain takes its Direct signing identities with it
  * @version 1.14 - forwarding_offered(): no forward off a Fortress domain or one sealed at the relay
  * @version 1.13 - Fortress is settable: ied_level_set_time marks a level set
@@ -82,6 +83,36 @@ class InboundEmailDomain extends SystemBase {
 	 * so with the row gone none of them can sign or be minted again, and
 	 * nothing else removes them: they name the domain by text, not by key.
 	 */
+	public function save($debug = false) {
+		$result = parent::save($debug);
+		if (!$debug) {
+			$this->keep_direct_key_custody();
+		}
+		return $result;
+	}
+
+	/**
+	 * After a save, the domain's Joinery Direct signing key moves into the
+	 * custody the domain now calls for (DirectSigningIdentity::ensureCustody()):
+	 * vault-held once the domain seals content and its owner holds a vault,
+	 * box-held otherwise. Done here so every path that changes the level or the
+	 * owner (the domain editor, the protection ceremony, the API) is covered.
+	 * The domain's save has already landed, so a failure is logged rather than
+	 * thrown; the setup check's ensureFor() tries again whenever it is viewed.
+	 */
+	private function keep_direct_key_custody(): void {
+		$domain = strtolower(trim((string)$this->get('ied_domain')));
+		if ($domain === '' || $this->get('ied_delete_time')) {
+			return;
+		}
+		try {
+			DirectSigningIdentity::ensureCustody($domain);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailDomain: could not move the Direct signing key of ' . $domain
+				. ' into its custody: ' . $e->getMessage());
+		}
+	}
+
 	public function permanent_delete($debug = false) {
 		$domain = strtolower(trim((string)$this->get('ied_domain')));
 		$result = $this->permanentDeleteNotifyingRelay($debug);

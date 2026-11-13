@@ -20,6 +20,7 @@
  *     question DKIM already asks, answered the same way, so a domain with the
  *     sending lock cannot sign in anyone's name from a locked box.
  *
+ * @version 1.4 - signingVaultOwner() throws on a failed vault lookup instead of reading it as no vault
  * @version 1.3.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
  * @version 1.3 - resolveAddress() refuses IMAP-source domains — not hosted here
  * @version 1.2
@@ -180,7 +181,9 @@ class MailboxDirectConsumer {
 		if ($owner_id <= 0) {
 			return null;
 		}
-		return self::vaultFor($owner_id) !== null ? $owner_id : null;
+		// Not vaultFor(), which reads a failed lookup as "no vault": here that
+		// would pick box custody and move a Private domain's key to the box.
+		return UserEncryptionVault::loadForUser($owner_id) !== null ? $owner_id : null;
 	}
 
 	private static function aliasFor(string $local_part, InboundEmailDomain $domain) {

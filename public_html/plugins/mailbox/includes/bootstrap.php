@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.33 - registers the Direct domain-owner resolver (DirectSigningIdentity::ensureCustody)
  * @version 1.32 - mail parsing registers as foreground work: the mail list waits on it after an unlock
  * @version 1.31 - InlineFlagBackfill: a sealed message's pre-B5 rows are decided by what its body shows, in-window
  * @version 1.30 - the rotation re-seal picks a message by the key it holds, not by iem_content_sealed: a sealed draft
@@ -674,6 +675,11 @@ DirectContactGate::registerLookup(function (int $user_id, int $alias_id, string 
 });
 DirectSigningIdentity::registerVaultOwnerResolver(function (string $domain): ?int {
 	return MailboxDirectConsumer::signingVaultOwner($domain);
+});
+DirectSigningIdentity::registerDomainOwnerResolver(function (string $domain): ?int {
+	$row = InboundEmailDomain::GetByDomain($domain);
+	$owner = $row ? intval($row->get('ied_owner_usr_user_id')) : 0;
+	return $owner > 0 ? $owner : null;
 });
 DirectSigningIdentity::registerAuthorityResolver(function (string $domain): bool {
 	$row = InboundEmailDomain::GetByDomain($domain);

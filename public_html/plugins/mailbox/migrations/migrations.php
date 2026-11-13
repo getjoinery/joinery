@@ -1712,4 +1712,39 @@ return [
 			return true;
 		},
 	],
+	[
+		// A Direct signing key kept the custody it was minted with, so a domain
+		// raised to Private after its key was made still has a box-held key, and
+		// one lowered from Private a vault-held one. Domain saves keep custody
+		// from 1.146.10 on; this moves the keys that were already wrong. A
+		// vault-held key waiting to go back to the box moves at its holder's
+		// next open window (DirectSigningIdentity::ensureCustody()).
+		'id' => 'jdi_002_direct_key_custody_follows_domain',
+		'version' => '1.146.10',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
+			$db = $dbconnector->get_db_link();
+			if (!$db->query("SELECT to_regclass('public.jdi_direct_identities') IS NOT NULL")->fetchColumn()) {
+				echo "jdi_002: no Direct identities table; nothing to move.\n";
+				return true;
+			}
+			$domains = $db->query("SELECT DISTINCT jdi_domain FROM jdi_direct_identities WHERE jdi_is_active = true")
+				->fetchAll(PDO::FETCH_COLUMN);
+			$moved = array();
+			$failed = 0;
+			foreach ($domains as $domain) {
+				try {
+					if (DirectSigningIdentity::ensureCustody((string)$domain) !== null) {
+						$moved[] = $domain;
+					}
+				} catch (\Throwable $e) {
+					$failed++;
+					echo "jdi_002: could not move the key of $domain: " . $e->getMessage() . "\n";
+				}
+			}
+			echo 'jdi_002: ' . count($domains) . ' domain(s) with a Direct key, ' . count($moved)
+				. ' moved to the custody their level calls for (or replaced, when sealed to a vault that is gone)' . ($moved ? ' (' . implode(', ', $moved) . ')' : '') . ".\n";
+			return $failed === 0;
+		},
+	],
 ];
