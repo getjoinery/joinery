@@ -106,7 +106,6 @@ class PublicPage extends PublicPageBase {
     $is_logged_in  = $session->is_logged_in();
     $user_items    = $menu_data['user_menu']['items'] ?? [];
     $display_name  = $menu_data['user_menu']['display_name'] ?: 'Account';
-    $register_link = $menu_data['user_menu']['register_link'] ?? null;
     $cart_count    = (int)($menu_data['cart']['count'] ?? 0);
     $cart_link     = $menu_data['cart']['link'] ?? '/cart';
 
@@ -193,9 +192,6 @@ class PublicPage extends PublicPageBase {
                     </div>
                 <?php else: ?>
                     <a href="/login" class="nav-signin<?php echo $request_path === '/login' ? ' active' : ''; ?>">Log in</a>
-                    <?php if ($register_link): ?>
-                    <a href="<?php echo htmlspecialchars($register_link, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm">Sign up</a>
-                    <?php endif; ?>
                 <?php endif; ?>
             </div>
 
