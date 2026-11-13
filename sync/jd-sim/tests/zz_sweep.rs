@@ -8410,3 +8410,51 @@ fn frozen_a_download_open_when_its_name_clashes_stands_down_on_windows_seed() {
         assert!(renamed.is_empty(), "{seed}: and the PC made no conflict copy of it: {renamed:?}");
     }
 }
+
+/// plat-three-hostile 42654, 42918 and 42933: two files with one body, traded
+/// through a conflict name here while a peer moved the other onto that same
+/// name. The peer's move landed on this file -- or its download adopted it --
+/// because the bytes matched, and the next scan read this file's record as
+/// deleted and trashed it on the server, a delete nobody made.
+#[test]
+fn frozen_a_move_onto_another_records_file_with_the_same_bytes_sets_it_aside_seed() {
+    for seed in [42_654, 42_918, 42_933] {
+        never_fires(&["no_file_trashed_without_a_delete_that_reached_it"], || {
+            workload_core(
+                seed,
+                30,
+                &[("linux", Platform::Linux), ("mac", Platform::MacOs), ("pc", Platform::Windows)],
+                true,
+                Vault::None,
+                false,
+                Names::Ordinary,
+            );
+        });
+    }
+}
+
+/// kill2 75102: the user moved a synced file into a vault this device holds
+/// no key for, so a new record was minted to claim it, replacing the old one,
+/// and its upload reached the server. Downloading that upload back, the file
+/// here still read as the old record's own -- sent and live -- and was set
+/// aside, so the same bytes went up a second time as a new file the user never
+/// made. The file is the replacement's: the download adopts it.
+#[test]
+fn frozen_a_download_of_a_replacements_own_upload_adopts_its_file_seed() {
+    SERVER_PATHS_HERE.with(|s| *s.borrow_mut() = Some(Vec::new()));
+    workload_core_with(
+        75_102,
+        30,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+        true,
+        Vault::FolderRings,
+        true,
+        Names::Ordinary,
+        Swaps::On,
+    );
+    let server = SERVER_PATHS_HERE.with(|s| s.borrow_mut().take()).unwrap_or_default();
+    // The vault's names are sealed on the server: count what stands in it.
+    // Two files: the moved one, once, and the PC's own conflict copy.
+    let in_vault: Vec<_> = server.iter().filter(|p| p.starts_with("ring-2/")).collect();
+    assert_eq!(in_vault.len(), 2, "the moved file stands once on the server, not uploaded a second time: {in_vault:?}");
+}

@@ -2821,7 +2821,10 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // Compared in the plaintext domain: the question is whether the file
         // already sitting there is this same file, and what is on disk is
         // plaintext whatever the server holds.
-        make_room(env, &path, Some(&arrived.plain.sha256), &op.idempotency_key)?;
+        // The same bytes are no reason to adopt another record's own file:
+        // set aside, its record follows it, and this download lands beside.
+        let incoming = (!anothers_sent_file_is_here(env, &entry, &path)?).then_some(arrived.plain.sha256.as_str());
+        make_room(env, &path, incoming, &op.idempotency_key)?;
     }
 
     // The last gate before bytes are destroyed, and the only one that cannot be
@@ -6540,6 +6543,11 @@ fn move_local(
         if env.vfs.is_a_fixed_mount_point(&from) {
             return Err(jd_vfs::VfsError::MountPoint { from, to: dest }.into());
         }
+        // The same bytes standing at the destination are no reason to land on
+        // them when the file there is another record's own: the rename would
+        // destroy that record's file. Set aside like any other occupant, its
+        // record follows it (`anothers_sent_file_is_here`).
+        let moving = if anothers_sent_file_is_here(env, &entry, &dest)? { None } else { moving };
         make_room(env, &dest, moving.as_deref(), &op.idempotency_key)?;
         match env.vfs.rename(&from, &dest) {
             Ok(()) => {}
@@ -6829,6 +6837,36 @@ pub(crate) fn owner_of(
         }
     }
     Ok(owners)
+}
+
+/// Is the file standing at `path` the own file of a record other than
+/// `entry` that has been sent and is live -- read by the disk's identity, on
+/// a volume whose ids name files? Such a file is that record's, whatever its
+/// bytes: a move or download landing on it, or adopting it because the
+/// bytes match, leaves its record with no file, and the next scan reads it
+/// as deleted here and trashes it on the server, a delete nobody made (plat3
+/// 42654, 42918). A record never sent at this slot, or one the server has
+/// deleted, is no such owner: its file is handed over by design. Nor is a
+/// record whose file another record here was minted to replace (`replaces`:
+/// the user moved it into a vault this device has no key for): the file is
+/// the replacement's now, and a download of the replacement's own upload
+/// adopting it is that create landing (kill2 75102).
+fn anothers_sent_file_is_here(env: &ExecEnv, entry: &Entry, path: &std::path::Path) -> Result<bool, ExecError> {
+    let p = env.vfs.personality();
+    if !p.stable_file_identity || p.positional_file_ids {
+        return Ok(false);
+    }
+    let Some(fp) = env.vfs.fingerprint(path)? else { return Ok(false) };
+    if fp.file_id == 0 {
+        return Ok(false);
+    }
+    let owners = owners_here(env, path, fp, true)?;
+    Ok(owners.iter().any(|o| {
+        o.id != entry.id
+            && !o.remote_deleted
+            && !(o.id.is_provisional() && o.synced_placement.is_none())
+            && !owners.iter().any(|r| r.replaces == Some(o.id))
+    }))
 }
 
 /// Is the file standing at this park's path somebody else's?

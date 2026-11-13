@@ -28537,3 +28537,34 @@ fn a_folder_moved_into_a_new_folder_inside_one_deleted_elsewhere_goes_back() {
 fn a_folder_moved_and_renamed_into_a_folder_deleted_elsewhere_goes_back_and_keeps_its_new_name() {
     a_folder_moved_into_a_folder_deleted_elsewhere(DropInto::ItUnderANewName);
 }
+
+#[test]
+fn a_peers_move_onto_a_name_a_file_with_the_same_bytes_just_took_here_keeps_both() {
+    // Two files with one body. Here the user renames x.txt to n.txt; on the
+    // Mac, before that reaches the server, the user renames y.txt to n.txt.
+    // The Mac's move lands on the server first. Applied here it meets x.txt's
+    // file at n.txt -- the same bytes -- and must not land on top of it: that
+    // destroys x.txt's file here, and the next look reads x.txt as deleted and
+    // trashes it on the server, a delete nobody made.
+    let world = World::new(9_855, &["laptop", "mac"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let mac = world.device("mac");
+    laptop.fs.user_write("x.txt", b"one body");
+    laptop.fs.user_write("y.txt", b"one body");
+    committed.note("x.txt", b"one body");
+    assert!(world.settle().is_some());
+
+    mac.fs.user_rename("y.txt", "n.txt");
+    world.pass(mac);
+    laptop.fs.user_rename("x.txt", "n.txt");
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "it settles");
+
+    let files = world.server.files();
+    let trashed: Vec<_> = files.iter().filter(|f| f.trashed).map(|f| (f.id, f.name.clone())).collect();
+    assert!(trashed.is_empty(), "nothing went to the trash: {trashed:?}");
+    let live = files.iter().filter(|f| !f.trashed).count();
+    assert_eq!(live, 2, "both files stand on the server: {:?}", files.iter().map(|f| (f.id, f.name.clone(), f.trashed)).collect::<Vec<_>>());
+    assert_invariants(&world, &committed);
+}
