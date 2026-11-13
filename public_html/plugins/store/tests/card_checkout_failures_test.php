@@ -345,7 +345,7 @@ check($stripe->client->subscriptions->calls('create') === 0 && $stripe->client->
 	'nothing further is made or taken yet');
 check(ccf_status($order) === Order::STATUS_UNPAID, 'the order waits, unpaid');
 $form = $stripe->output_stripe_regular_form(null);
-check(strpos($form, '"pi_ccf_secret"') !== false && strpos($form, 'confirmCardPayment') !== false,
+check(strpos($form, 'data-pending-secret="pi_ccf_secret"') !== false && strpos($form, 'stripe-card.js') !== false,
 	'the checkout page runs the bank\'s confirmation');
 
 $stripe->intent_status_later = 'requires_capture';

@@ -43,9 +43,8 @@
                 <div class="alert alert-info jy-booking-alert">
                     Booking functionality is temporarily disabled while we review our calendar integration.
                 </div>
-                <p class="jy-booking-text">We apologize for any inconvenience. Please check back soon or contact us directly for scheduling assistance.</p>
+                <p class="jy-booking-text">We apologize for any inconvenience. Please check back soon.</p>
                 <div class="jy-booking-actions">
-                    <a href="/contact" class="btn btn-primary">Contact Us</a>
                     <a href="/" class="btn btn-outline">Back to Home</a>
                 </div>
             </div>

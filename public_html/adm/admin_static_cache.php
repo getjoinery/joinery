@@ -356,7 +356,7 @@ $page->admin_header(array(
     'page_title' => 'Static Cache Management',
     'readable_title' => 'Static Cache Management',
     'breadcrumbs' => array(
-        'System' => '/admin/admin_system',
+        'Settings' => '/admin/admin_settings',
         'Cache Management' => '',
     ),
     'session' => $session,

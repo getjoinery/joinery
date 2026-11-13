@@ -13,7 +13,7 @@ function admin_survey_user_answers_logic(array $input): LogicResult {
 
 	$numperpage = 30;
 	$offset = LibraryFunctions::fetch_variable('offset', 0, 0, '');
-	$sort = LibraryFunctions::fetch_variable('sort', 'question_id', 0, '');
+	$sort = LibraryFunctions::fetch_variable('sort', 'qst_question_id', 0, '');
 	$sdirection = LibraryFunctions::fetch_variable('sdirection', 'ASC', 0, '');
 
 	$survey_id = LibraryFunctions::fetch_variable('svy_survey_id', 'DESC', 1, 'You must pass a survey.');

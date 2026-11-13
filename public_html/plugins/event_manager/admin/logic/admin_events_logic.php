@@ -35,11 +35,11 @@ function admin_events_logic(array $input): LogicResult {
 	}
 
 	if($filter == 'active'){
-		$breadcrumb_array = array('Events'=>'Active & Upcoming');
+		$breadcrumb_array = array('Events'=>'/plugins/event_manager/admin/admin_events', 'Active & Upcoming'=>'');
 		$searches['recurring_or_future'] = true;
 	}
 	else if($filter == 'all'){
-		$breadcrumb_array = array('Events'=>'All Events');
+		$breadcrumb_array = array('Events'=>'/plugins/event_manager/admin/admin_events', 'All Events'=>'');
 		$searches['exclude_past_materialized'] = true;
 	}
 	else if($filter == 'series'){

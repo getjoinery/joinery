@@ -56,7 +56,6 @@ $page->public_header([
                 <!-- Buttons -->
                 <div class="jy-e404-btns">
                     <a href="/" class="btn btn-primary">&#8962; Go Home</a>
-                    <a href="/contact" class="btn btn-outline">Contact Support</a>
                     <?php if (ErrorReference::reporterSignedIn()): ?>
                     <a href="<?php echo htmlspecialchars(ErrorReference::reportUrl(null, ErrorReference::requestPath(), 'Page not found'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline">Report a problem</a>
                     <?php endif; ?>
@@ -72,7 +71,6 @@ $page->public_header([
                             <li class="jy-e404-li"><a href="/pricing">&#8250; Pricing</a></li>
                         </ul>
                         <ul class="jy-e404-list">
-                            <li class="jy-e404-li"><a href="/contact">&#8250; Contact</a></li>
                             <li class="jy-e404-li"><a href="/login">&#8250; Login</a></li>
                             <li class="jy-e404-li"><a href="/register">&#8250; Register</a></li>
                         </ul>

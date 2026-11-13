@@ -1365,14 +1365,30 @@ abstract class PublicPageBase {
 		if (!$enabled) {
 			return null;
 		}
-		$parts = array();
-		foreach (self::csp_policy($extra_connect, $extra_form) as $directive => $sources) {
-			$parts[] = $directive . ' ' . implode(' ', $sources);
-		}
 		return array(
 			$report_only ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy',
-			implode('; ', $parts),
+			self::csp_value(self::csp_policy($extra_connect, $extra_form), $report_only),
 		);
+	}
+
+	/**
+	 * A policy as a header value. A report-only policy leaves out
+	 * frame-ancestors: browsers ignore it there (Safari says so on every page),
+	 * and X-Frame-Options still stops other sites framing the page.
+	 *
+	 * @param array<string, string[]> $policy directive => sources, as csp_policy() returns
+	 * @param bool $report_only whether it goes out as Content-Security-Policy-Report-Only
+	 * @param string[] $extra whole directives appended as written
+	 */
+	private static function csp_value(array $policy, bool $report_only, array $extra = array()): string {
+		$parts = array();
+		foreach ($policy as $directive => $sources) {
+			if ($report_only && $directive === 'frame-ancestors') {
+				continue;
+			}
+			$parts[] = $directive . ' ' . implode(' ', $sources);
+		}
+		return implode('; ', array_merge($parts, $extra));
 	}
 
 	/** Where a browser sends what the strict policy refused (CspReport::dispatchPreAuth()). */
@@ -1403,19 +1419,18 @@ abstract class PublicPageBase {
 		if ($strict !== 'report' && $strict !== 'enforce') {
 			return array(self::csp_header(true, $report_only, $extra_connect, $extra_form));
 		}
-		$parts = array();
-		foreach (self::csp_policy($extra_connect, $extra_form, true) as $directive => $sources) {
-			$parts[] = $directive . ' ' . implode(' ', $sources);
-		}
-		$parts[] = 'report-uri ' . self::CSP_REPORT_PATH;
-		$strict_value = implode('; ', $parts);
+		$strict_policy = self::csp_policy($extra_connect, $extra_form, true);
+		$report_uri = array('report-uri ' . self::CSP_REPORT_PATH);
 		if ($strict === 'report') {
 			return array(
 				self::csp_header(true, $report_only, $extra_connect, $extra_form),
-				array('Content-Security-Policy-Report-Only', $strict_value),
+				array('Content-Security-Policy-Report-Only', self::csp_value($strict_policy, true, $report_uri)),
 			);
 		}
-		return array(array($report_only ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy', $strict_value));
+		return array(array(
+			$report_only ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy',
+			self::csp_value($strict_policy, (bool)$report_only, $report_uri),
+		));
 	}
 
 	/**

@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/declared_settings_test.php
  *
+ * @version 1.4 - changedOnly is read from the form's data-jy-validate block
  * @version 1.3 - the agent_enabled row is accepted while an agent that reads it is installed (AgentEnabledRow)
  * @version 1.2 - the user setting type: drawn as the user search picker, and refuses an id that is no user
  * @version 1.1
@@ -420,8 +421,11 @@ SettingsFieldRenderer::renderGroup($cform, 'files', array('source' => 'core', 'o
 $cform->textinput('probe_required', 'Probe', array('validation' => array('required' => true)));
 $cform->end_form();
 $chtml = ob_get_clean();
-preg_match('/changedOnly:\s*(\[[^\]]*\])/', $chtml, $cm);
-$changed_only = isset($cm[1]) ? json_decode($cm[1], true) : null;
+// The rules travel in the form's validation block (data-jy-validate), read by joinery-forms.js.
+preg_match('/<script type="application\/json" data-jy-validate>(.*?)<\/script>/s', $chtml, $vm);
+$vcfg = isset($vm[1]) ? json_decode($vm[1], true) : null;
+$changed_only = is_array($vcfg) && isset($vcfg['changedOnly']) ? $vcfg['changedOnly'] : null;
+$cm = array(1 => isset($vm[1]) ? substr($vm[1], 0, 300) : null);
 check(is_array($changed_only) && in_array('allowed_upload_extensions', $changed_only, true),
 	'a setting with a rule is checked in the browser only once its value changes', $cm[1] ?? 'no changedOnly');
 check(is_array($changed_only) && !in_array('probe_required', $changed_only, true),

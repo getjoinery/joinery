@@ -65,6 +65,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 	
 	$searches['deleted'] = FALSE;
+	// The product page refuses an inactive product, so the list leaves them out.
+	$searches['is_active'] = true;
 	
 	if($show_items && !$show_events){
 		$searches['product_type'] = 2;

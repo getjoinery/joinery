@@ -52,7 +52,7 @@ $headers = array('ID', 'Level', 'Name', 'Display Name', 'Members', 'Actions');
         $member_count = count($members);
 
         $actions_html = '<a href="/admin/admin_subscription_tier_edit?id=' . $tier->key . '" class="btn btn-sm btn-primary">Edit</a> ';
-        $actions_html .= '<a href="/admin/admin_subscription_tier_members?id=' . $tier->key . '" class="btn btn-sm btn-info">View Members</a>';
+        $actions_html .= '<a href="/admin/admin_group_members?grp_group_id=' . (int)$tier->get('sbt_grp_group_id') . '" class="btn btn-sm btn-info">View Members</a>';
 
         $row = array(
             $tier->key,

@@ -159,7 +159,7 @@ if ($is_edit):
 ?>
     <p>This tier has <strong><?php echo $member_count; ?></strong> member(s).</p>
     <?php if ($member_count > 0): ?>
-        <a href="/admin/admin_subscription_tier_members?id=<?php echo $tier->key; ?>" class="btn btn-info">View Members</a>
+        <a href="/admin/admin_group_members?grp_group_id=<?php echo (int)$tier->get('sbt_grp_group_id'); ?>" class="btn btn-info">View Members</a>
     <?php endif; ?>
 <?php
     $page->end_box();

@@ -13,6 +13,7 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.7 - admin_header takes no menu-id (the tier edit page warned)
  * @version 1.6 - the root request panel's poller is assets/js/root-request.js (no inline script)
  * @version 1.5 - email_audience_table() lists direct messages; direct_messages_to()
  * @version 1.4 - the root request panel polls /api/v1/action/root_request_status; the bare /api/v1/ path is the
@@ -189,7 +190,7 @@ HTML;
 	public function admin_header($options=array()) {
 		$session = SessionControl::get_instance();
 		$_GLOBALS['page_header_loaded'] = true;
-		$options['vertical_menu'] =  MultiAdminMenu::getadminmenu($session->get_permission(), $options['menu-id']);
+		$options['vertical_menu'] =  MultiAdminMenu::getadminmenu($session->get_permission(), $options['menu-id'] ?? null);
 
 		$options['hide_horizontal_menu'] = true;
 		$options['full_width'] = true;

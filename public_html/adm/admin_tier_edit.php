@@ -96,6 +96,7 @@
 
 	$page = new AdminPage();
 	$page->admin_header(array(
+		'menu-id' => 'users-list',
 		'title' => 'Change User Subscription Tier',
 		'no_search' => 1
 	));

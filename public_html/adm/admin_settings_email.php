@@ -1,6 +1,7 @@
 <?php
 /** @joinery-admin class=config */
 /**
+ * @version 1.2 - no New Setting link (there is no such page; settings are declared in settings.json)
  * @version 1.1 - the provider sections' show/hide is assets/js/admin-settings-email.js (no inline script)
  */
 	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
@@ -35,8 +36,7 @@
 	)
 	);	
 
-	$pageoptions['altlinks'] = array('New Setting'=>'/admin/admin_setting_edit');
-	$pageoptions['altlinks'] += array('Public Menu'=>'/admin/admin_public_menu');
+	$pageoptions['altlinks'] = array('Public Menu'=>'/admin/admin_public_menu');
 	$pageoptions['altlinks'] += array('Admin Menu'=>'/admin/admin_admin_menu'); 
 	$pageoptions['altlinks'] += array('API Keys'=>'/admin/admin_api_keys'); 
 	$pageoptions['altlinks'] += array('Updates'=>'/admin/admin_updates');

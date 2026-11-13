@@ -107,6 +107,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$event_sessions->load();
 	$page_vars['event_sessions'] = $event_sessions;
 
+	// The page reads all three; a location record, or the event's own text, fills them.
+	$page_vars['location_object'] = null;
+	$page_vars['location_picture'] = null;
+	$page_vars['location_string'] = null;
 	if($event->get('evt_loc_location_id')){
 		$location = new Location($event->get('evt_loc_location_id'), true);
 		$page_vars['location_object'] = $location;

@@ -739,7 +739,7 @@ class AdminErrorHandler extends WebErrorHandler {
             $html .= '<a href="/login" class="btn btn-primary">Login to Admin</a>';
         } else {
             $html .= self::backLink();
-            $html .= '<a href="/adm" class="btn btn-primary">Admin Dashboard</a>';
+            $html .= '<a href="/admin" class="btn btn-primary">Admin Dashboard</a>';
         }
 
         if (!ErrorStatus::isExpected($exception)) {

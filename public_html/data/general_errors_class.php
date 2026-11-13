@@ -199,7 +199,7 @@ function display_time($session) {
 		$safe_data = $data;
 		
 		// Remove sensitive keys
-		$sensitive_keys = ['password', 'token', 'api_key', 'secret', 'credit_card', 'cvv', 'pin'];
+		$sensitive_keys = ['password', 'token', 'csrf', 'api_key', 'secret', 'credit_card', 'cvv', 'pin'];
 		
 		foreach ($sensitive_keys as $key) {
 			if (isset($safe_data[$key])) {

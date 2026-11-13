@@ -1251,7 +1251,11 @@ class StripeHelper {
 		return $fallback;
 	}
 
+	/** A customer's saved cards; none for a user with no Stripe customer here. */
 	public function get_payment_methods($stripe_user_id){
+		if (!is_string($stripe_user_id) || trim($stripe_user_id) === '') {
+			return array();
+		}
 		$result = $this->client()->customers->allPaymentMethods($stripe_user_id, ['limit' => 20]);
 		return $result;
 	}

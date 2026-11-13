@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php db --filter=raise_receipt
  *
+ * @version 1.3 - the removal confirm is data-jy-confirm
  * @version 1.2 - checklist fixes are buttons for one form outside the editor form; Fortress heading
  * @version 1.1 - the handoff follows a requested sending lock, not a level
  */
@@ -94,7 +95,7 @@ try {
 		'Make me the owner posts the owner claim for this domain');
 	check(strpos($html, htmlspecialchars('action=ceremony_remove_grant&ied_inbound_email_domain_id=' . intval($dom->key)
 		. '&alias_id=5&user_id=9')) !== false, 'Remove posts the grant it names');
-	check(strpos($html, 'return confirm(') !== false && strpos($html, "O'Brien") === false,
+	check(strpos($html, 'data-jy-confirm="') !== false && strpos($html, "O'Brien") === false,
 		'the removal asks first, the name escaped inside its confirm');
 	$fix_form = mailbox_protection_fix_form('tok123');
 	check(strpos($fix_form, 'id="' . MAILBOX_PROTECTION_FIX_FORM . '"') !== false

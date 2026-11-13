@@ -42,7 +42,7 @@
 	$headers = array('Stripe ID','Payment Method', 'Address', 'Info');
 	$altlinks = array();
 	$title= 'Payment Methods';
-	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
+	$pager = new Pager(array('numrecords'=>count($methods), 'numperpage'=> 20));
 	$table_options = array(
 		//'filteroptions'=>array("All files"=>"all", "Files only"=>"files", "Images only"=>"images"),
 		'altlinks' => $altlinks,

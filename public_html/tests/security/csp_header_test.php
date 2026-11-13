@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.12 - a report-only header carries no frame-ancestors
  * @version 1.11 - the enforced strict script-src holds only 'self', hosts, 'wasm-unsafe-eval' and 'report-sample'
  * @version 1.10 - the option patterns name event handlers only, so an array of names ("onedrive") is not counted
  * @version 1.9 - the sweep also counts a handler or custom_script set by assignment ($opts['onclick'] = ...)
@@ -51,7 +52,9 @@ $ro = PublicPageBase::csp_header(true, true);
 $en = PublicPageBase::csp_header(true, false);
 check(is_array($ro) && $ro[0] === 'Content-Security-Policy-Report-Only', 'report-only header name');
 check(is_array($en) && $en[0] === 'Content-Security-Policy', 'enforcing header name');
-check($ro[1] === $en[1], 'the policy text is identical either way — only enforcement changes');
+// Report-only leaves out frame-ancestors, which browsers ignore there; nothing else differs.
+$no_fa = function ($v) { return implode('; ', array_values(array_filter(explode('; ', $v), function ($d) { return strpos($d, 'frame-ancestors') !== 0; }))); };
+check($ro[1] === $no_fa($en[1]), 'the policy text is the same either way apart from frame-ancestors — only enforcement changes');
 
 section('The policy');
 $policy = PublicPageBase::csp_policy();
@@ -132,7 +135,7 @@ foreach (array('off', 'report', 'enforce') as $mode) {
 	}
 }
 $enf = PublicPageBase::csp_headers(true, false, 'enforce');
-check(count($enf) === 1 && $enf[0][0] === 'Content-Security-Policy' && $enf[0][1] === $rep[1][1],
+check(count($enf) === 1 && $enf[0][0] === 'Content-Security-Policy' && $no_fa($enf[0][1]) === $rep[1][1],
 	'enforce: the strict policy in place of the standard one');
 // With every inline block and handler gone from the tree (the sweep's
 // ceilings file is empty), the enforced script-src holds only the site,
@@ -150,6 +153,12 @@ check($keywords === array("'report-sample'", "'self'", "'wasm-unsafe-eval'") && 
 	"enforced script-src: 'self', https hosts, 'wasm-unsafe-eval' and 'report-sample', nothing else", implode(' ', $enf_script));
 $enf_ro = PublicPageBase::csp_headers(true, true, 'enforce');
 check(count($enf_ro) === 1 && $enf_ro[0][0] === 'Content-Security-Policy-Report-Only', 'enforce stays report-only while csp_report_only is on');
+// Browsers ignore frame-ancestors in a report-only policy (Safari says so on
+// every page), so a report-only header leaves it out; an enforced one keeps it.
+$fa = function ($h) { return strpos($h[1], 'frame-ancestors') !== false; };
+check(!$fa($rep[1]) && $fa($rep[0]), 'report mode: the strict report-only header has no frame-ancestors, the enforced standard one does');
+check($fa($enf[0]) && !$fa($enf_ro[0]), 'enforce: frame-ancestors when enforced, none while report-only');
+check(!$fa(PublicPageBase::csp_header(true, true)) && $fa(PublicPageBase::csp_header(true, false)), 'csp_report_only: the standard policy leaves it out too');
 $with_extra = PublicPageBase::csp_headers(true, false, 'report', array('https://models.example.test'));
 check(strpos($with_extra[0][1], 'https://models.example.test') !== false && strpos($with_extra[1][1], 'https://models.example.test') !== false,
 	"a page's own connect origin reaches both policies");
