@@ -31,6 +31,13 @@ class Location extends SystemBase {	public static $prefix = 'loc';
 		'loc_fil_file_id' => ['action' => 'null'],
 	];
 
+	/**
+	 * The locations the sitemap and SEO inventory list: published and not deleted, while events (the route) and page contents (location_logic) are both switched on.
+	 */
+	public static function seo_public_records(): array {
+		return SeoPageMetadata::public_link_records('Location', 'loc_is_published = TRUE', array('events_active', 'page_contents_active'));
+	}
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

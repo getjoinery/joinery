@@ -104,6 +104,7 @@ class PublicPage extends PublicPageBase {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <?php $this->render_theme_styles(); ?>
     <?php $this->render_theme_tail(); ?>
 </head>
 <body class="jy-default">
@@ -215,6 +216,7 @@ class PublicPage extends PublicPageBase {
 <?php if ($this->show_site_chrome()): ?>
 <footer class="jy-site-footer">
     <div class="jy-container">
+        <?php echo SocialLinks::render('jy-social-links'); ?>
         <div class="jy-footer-bottom">
             <p class="jy-copyright">&copy; <?php echo date('Y'); ?> <?php echo htmlspecialchars($settings->get_setting('site_name'), ENT_QUOTES, 'UTF-8'); ?>. All rights reserved.</p>
         </div>

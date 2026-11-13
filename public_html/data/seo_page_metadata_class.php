@@ -36,8 +36,10 @@ class SeoPageMetadata extends SystemBase {
 
 	// Which entity types have public, indexable pages (used by the sitemap,
 	// public-path enumeration, and the admin SEO pages) is contributed by the
-	// active plugins: core registers post/page/video/mailing_list, store
-	// registers product, event_manager registers event/location. Each
+	// active plugins: core registers post/page/video, store
+	// registers product, event_manager event/location, email_lists
+	// mailing_list, the forum its topics and categories, each from its
+	// plugin bootstrap. Each
 	// registration carries the model class + Multi class, the file that defines
 	// them, the URL namespace, the admin edit-URL prefix (id appended), and the
 	// Open Graph type.
@@ -487,67 +489,79 @@ class SeoPageMetadata extends SystemBase {
 			return $records;
 		}
 
-		// An entity whose public set is narrower than "every live row" — a forum
-		// topic is public only in a public category, and only once approved —
-		// supplies its own records: [['id'=>, 'link'=>, 'modify_time'=>], …],
-		// each link the path under the type's namespace.
-		if (method_exists($class, 'seo_public_records')) {
-			try {
-				foreach ($class::seo_public_records() as $row) {
-					$link = trim((string)($row['link'] ?? ''), '/');
-					if ($link === '') continue;
-					$records[] = array(
-						'path'        => self::canonicalize_path('/' . $info['namespace'] . '/' . $link),
-						'entity_type' => $type_key,
-						'entity_id'   => (int)$row['id'],
-						'modify_time' => $row['modify_time'] ?? null,
-					);
-				}
-			} catch (\Throwable $e) {
-				error_log('SeoPageMetadata seo_public_records failed for ' . $type_key . ': ' . $e->getMessage());
+		// Each entity lists the rows a visitor may see, by the same rule its
+		// page applies before showing one: a model with that rule supplies
+		// seo_public_records() (usually one call to public_link_records()).
+		// One without lists every live row with a link.
+		try {
+			$rows = method_exists($class, 'seo_public_records')
+				? $class::seo_public_records()
+				: self::public_link_records($class);
+			foreach ($rows as $row) {
+				$link = trim((string)($row['link'] ?? ''), '/');
+				if ($link === '') continue;
+				$records[] = array(
+					'path'        => self::canonicalize_path('/' . $info['namespace'] . '/' . $link),
+					'entity_type' => $type_key,
+					'entity_id'   => (int)$row['id'],
+					'modify_time' => $row['modify_time'] ?? null,
+				);
 			}
-			return $records;
+		} catch (\Throwable $e) {
+			error_log('SeoPageMetadata public records failed for ' . $type_key . ': ' . $e->getMessage());
+		}
+		return $records;
+	}
+
+	/**
+	 * A model's live rows with a link that a visitor may see, in the shape
+	 * seo_public_records() returns: [['id' =>, 'link' =>, 'modify_time' =>], …].
+	 *
+	 * @param string   $class        the model class
+	 * @param string   $public_where a condition on the row's own columns, written
+	 *                               in the model (never from input); '' for every live row
+	 * @param string[] $settings     feature switches that must all be on, as the
+	 *                               page's route and logic check them
+	 */
+	public static function public_link_records(string $class, string $public_where = '', array $settings = array()): array {
+		$globals = Globalvars::get_instance();
+		foreach ($settings as $setting) {
+			if (!$globals->get_setting($setting, true, true)) {
+				return array();
+			}
 		}
 
 		$prefix = $class::$prefix;
 		$pkey = $class::$pkey_column;
-		$link_col = $prefix . '_link';
-		$delete_col = $prefix . '_delete_time';
-		$tablename = $class::$tablename;
-
-		$dblink = DbConnector::get_instance()->get_db_link();
 		$specs = $class::$field_specifications;
-		$select_cols = array($pkey);
-		if (isset($specs[$link_col])) $select_cols[] = $link_col;
+		$link_col = $prefix . '_link';
+		if (!isset($specs[$link_col])) {
+			return array();
+		}
 		$modify_col = null;
-		foreach (array($prefix.'_modify_time', $prefix.'_published_time', $prefix.'_create_time') as $candidate) {
+		foreach (array($prefix . '_modify_time', $prefix . '_published_time', $prefix . '_create_time') as $candidate) {
 			if (isset($specs[$candidate])) {
 				$modify_col = $candidate;
 				break;
 			}
 		}
-		if ($modify_col) $select_cols[] = $modify_col;
 
-		$where = $delete_col . ' IS NULL';
-		$sql = 'SELECT ' . implode(', ', $select_cols) . ' FROM ' . $tablename . ' WHERE ' . $where;
-		try {
-			$q = $dblink->prepare($sql);
-			$q->execute();
-			while ($row = $q->fetch(PDO::FETCH_ASSOC)) {
-				$slug = isset($row[$link_col]) ? trim((string)$row[$link_col]) : '';
-				if ($slug === '') continue;
-				$path = self::canonicalize_path('/' . $info['namespace'] . '/' . $slug);
-				$records[] = array(
-					'path'        => $path,
-					'entity_type' => $type_key,
-					'entity_id'   => (int)$row[$pkey],
-					'modify_time' => $modify_col ? ($row[$modify_col] ?? null) : null,
-				);
-			}
-		} catch (\Throwable $e) {
-			error_log('SeoPageMetadata enumerate_entity_records failed for ' . $type_key . ': ' . $e->getMessage());
+		$sql = 'SELECT ' . $pkey . ' AS id, ' . $link_col . ' AS link'
+			. ($modify_col ? ', ' . $modify_col . ' AS modify_time' : '')
+			. ' FROM ' . $class::$tablename
+			. ' WHERE ' . $prefix . "_delete_time IS NULL AND COALESCE(TRIM(" . $link_col . "), '') <> ''"
+			. ($public_where !== '' ? ' AND (' . $public_where . ')' : '');
+		$q = DbConnector::GetPreparedStatement($sql);
+		$q->execute();
+		$out = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$out[] = array(
+				'id'          => (int)$row['id'],
+				'link'        => trim((string)$row['link']),
+				'modify_time' => $row['modify_time'] ?? null,
+			);
 		}
-		return $records;
+		return $out;
 	}
 
 	public static function sync_inventory() {
@@ -555,6 +569,7 @@ class SeoPageMetadata extends SystemBase {
 			'inserted_static'  => 0,
 			'inserted_entity'  => 0,
 			'adopted_entity'   => 0,
+			'restored_entity'  => 0,
 			'updated_path'     => 0,
 			'soft_deleted'     => 0,
 			'errors'           => array(),
@@ -594,6 +609,11 @@ class SeoPageMetadata extends SystemBase {
 							$upd->execute(array($rec['path'], $existing['spm_seo_page_metadata_id']));
 							$result['updated_path']++;
 						}
+					} elseif (self::restore_entity_row($dblink, $rec)) {
+						// The entity dropped off the public list once (a page
+						// unpublished, a feature switched off) and is back: its
+						// own row, with the SEO copy the operator wrote, returns.
+						$result['restored_entity']++;
 					} else {
 						$ins = $dblink->prepare("INSERT INTO spm_seo_page_metadata
 							(spm_path, spm_entity_type, spm_entity_id, spm_create_time)
@@ -648,6 +668,38 @@ class SeoPageMetadata extends SystemBase {
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Bring back an entity's soft-deleted row at its current path. Returns
+	 * false when it has none, or when another entity's live row holds the
+	 * path (the caller then inserts, which leaves that row alone).
+	 */
+	private static function restore_entity_row($dblink, array $rec): bool {
+		$q = $dblink->prepare("SELECT spm_seo_page_metadata_id FROM spm_seo_page_metadata
+			WHERE spm_entity_type = ? AND spm_entity_id = ? AND spm_delete_time IS NOT NULL
+			ORDER BY spm_delete_time DESC LIMIT 1");
+		$q->execute(array($rec['entity_type'], $rec['entity_id']));
+		$row_id = $q->fetchColumn();
+		if ($row_id === false) {
+			return false;
+		}
+		$taken = $dblink->prepare("SELECT 1 FROM spm_seo_page_metadata
+			WHERE spm_path = ? AND spm_delete_time IS NULL AND spm_entity_type IS NOT NULL");
+		$taken->execute(array($rec['path']));
+		if ($taken->fetchColumn()) {
+			return false;
+		}
+		// An untyped row made lazily at this path by a pageview while the
+		// entity was off the list gives way, as it does when an entity moves.
+		$clear = $dblink->prepare("UPDATE spm_seo_page_metadata SET spm_delete_time = now()
+			WHERE spm_path = ? AND spm_delete_time IS NULL AND spm_entity_type IS NULL");
+		$clear->execute(array($rec['path']));
+		$upd = $dblink->prepare("UPDATE spm_seo_page_metadata
+			SET spm_delete_time = NULL, spm_path = ?, spm_update_time = now()
+			WHERE spm_seo_page_metadata_id = ?");
+		$upd->execute(array($rec['path'], (int)$row_id));
+		return true;
 	}
 
 	public static function find_orphans() {

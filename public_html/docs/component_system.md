@@ -247,7 +247,7 @@ The JSON file defines the component metadata and config schema:
 | `title` | Yes | Display name |
 | `description` | No | Description for admins |
 | `category` | No | Grouping category (see categories table above) |
-| `css_framework` | No | Required framework: `bootstrap`, `tailwind`, or omit/`null` for universal |
+| `css_framework` | No | Required framework: `bootstrap`, or omit/`null` for universal |
 | `logic_function` | No | Name of logic function (see [Logic Functions](#6-logic-functions)) |
 | `layout_defaults` | No | Default layout settings (see [Layout Controls](#layout-controls)) |
 | `config_schema` | Yes | Field definitions object |
@@ -261,7 +261,6 @@ Components can specify framework requirements:
 | `css_framework` Value | Behavior |
 |-----------------------|----------|
 | `bootstrap` | Only active when Bootstrap theme is used |
-| `tailwind` | Only active when Tailwind theme is used |
 | (omitted/null) | Universal - works with any theme |
 
 When a theme is activated, components incompatible with its framework are deactivated. Components become active again if a compatible theme is activated.

@@ -44,6 +44,13 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	const VISIBILITY_PUBLIC = 1;  //LISTED ON /LISTS
 	const VISIBILITY_PUBLIC_UNLISTED = 2;  //NOT LISTED ON /LISTS BUT AVAILABLE TO REGISTER WITH THE LINK
 
+	/**
+	 * The mailing lists the sitemap and SEO inventory list: active, public and not deleted, while mailing lists are switched on. list_logic also shows an unlisted list to anyone with its link; an unlisted list is not advertised, so it is not listed.
+	 */
+	public static function seo_public_records(): array {
+		return SeoPageMetadata::public_link_records('MailingList', 'mlt_is_active = TRUE AND mlt_visibility = ' . self::VISIBILITY_PUBLIC, array('mailing_lists_active'));
+	}
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

@@ -26,7 +26,10 @@
 			continue;
 		}
 
-		$loc = LibraryFunctions::get_absolute_url($path);
+		// A slug may hold characters a URL reserves ('?', '#') or that a
+		// sitemap must escape: each segment is percent-encoded, so the
+		// address is the page's and not a query string.
+		$loc = LibraryFunctions::get_absolute_url(implode('/', array_map('rawurlencode', explode('/', $path))));
 
 		$lastmod = $rec['modify_time'] ?? ($seo['spm_update_time'] ?? null);
 		$lastmod_str = $lastmod ? substr($lastmod, 0, 10) : date('Y-m-d');

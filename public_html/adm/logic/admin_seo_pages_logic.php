@@ -18,8 +18,8 @@ function admin_seo_pages_logic(array $input): LogicResult {
 			try {
 				$result = SeoPageMetadata::sync_inventory();
 				$summary = sprintf(
-					'Scan complete. Inserted: %d entity / %d static. Adopted: %d. Path updates: %d. Soft-deleted: %d.',
-					$result['inserted_entity'], $result['inserted_static'], $result['adopted_entity'],
+					'Scan complete. Inserted: %d entity / %d static. Adopted: %d. Restored: %d. Path updates: %d. Soft-deleted: %d.',
+					$result['inserted_entity'], $result['inserted_static'], $result['adopted_entity'], $result['restored_entity'],
 					$result['updated_path'], $result['soft_deleted']
 				);
 				if (!empty($result['errors'])) {

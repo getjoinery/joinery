@@ -12,22 +12,10 @@
  * needs no registration here — CalendarItemSourceRegistry auto-discovers it by
  * scanning plugin item-source directories.
  *
+ * @version 1.2.0 - the event and location SEO entities register from includes/bootstrap.php
  * @version 1.1.0 - the event_registration fulfilment provider registers from includes/bootstrap.php
  * @version 1.0.0
  */
-
-// ---- SEO entities: event + location (moved out of core SeoPageMetadata defaults) ----
-require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
-SeoPageMetadata::register_entity_class(
-	'event', 'Event', 'MultiEvent',
-	'plugins/event_manager/data/events_class.php', 'event',
-	'/plugins/event_manager/admin/admin_event_edit?evt_event_id=', 'article'
-);
-SeoPageMetadata::register_entity_class(
-	'location', 'Location', 'MultiLocation',
-	'plugins/event_manager/data/locations_class.php', 'location',
-	'/plugins/event_manager/admin/admin_location_edit?loc_location_id=', 'website'
-);
 
 // ---- Tier gated-content summary: Events (moved out of core defaults) ----
 require_once(PathHelper::getIncludePath('includes/TierGatedContentRegistry.php'));

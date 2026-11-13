@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.7 - seo_public_records(): none while the store is switched off
  * @version 1.6 - seo_public_records(): the sitemap lists active products only
  * @version 1.5 - output_javascript() writes a data-jy-validate block and the requirements' script files (no inline script)
  * @version 1.4 - buyer_amount(): an amount a buyer types is a well-formed amount above zero, or refused
@@ -62,17 +63,11 @@ class Product extends SystemBase {
 
 	/**
 	 * The products the sitemap and SEO inventory list: active and not deleted,
-	 * the same rule product_logic applies before showing one to a visitor.
+	 * while the store is switched on, the same rule product_logic applies
+	 * before showing one to a visitor.
 	 */
 	public static function seo_public_records(): array {
-		$q = DbConnector::GetPreparedStatement("SELECT pro_product_id, pro_link FROM pro_products
-			WHERE pro_delete_time IS NULL AND pro_is_active = TRUE AND COALESCE(pro_link, '') <> ''");
-		$q->execute();
-		$out = array();
-		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-			$out[] = array('id' => (int)$row['pro_product_id'], 'link' => (string)$row['pro_link']);
-		}
-		return $out;
+		return SeoPageMetadata::public_link_records('Product', 'pro_is_active = TRUE', array('products_active'));
 	}
 	public static $content_pack_fields = ['pro_name', 'pro_short_description', 'pro_description',
 		'pro_after_purchase_message', 'pro_fulfillment_provider', 'pro_fulfillment_ref',

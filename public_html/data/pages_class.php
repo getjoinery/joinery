@@ -40,17 +40,11 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 
 	/**
 	 * The pages the sitemap and SEO inventory list: published and not deleted,
-	 * the same rule page_logic applies before showing one.
+	 * while pages are switched on, the same rule page_logic applies before
+	 * showing one.
 	 */
 	public static function seo_public_records(): array {
-		$q = DbConnector::GetPreparedStatement("SELECT pag_page_id, pag_link, pag_published_time FROM pag_pages
-			WHERE pag_delete_time IS NULL AND pag_published_time IS NOT NULL AND COALESCE(pag_link, '') <> ''");
-		$q->execute();
-		$out = array();
-		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-			$out[] = array('id' => (int)$row['pag_page_id'], 'link' => (string)$row['pag_link'], 'modify_time' => $row['pag_published_time']);
-		}
-		return $out;
+		return SeoPageMetadata::public_link_records('Page', 'pag_published_time IS NOT NULL', array('page_contents_active'));
 	}
 	public static $content_pack_fields = ['pag_title', 'pag_template', 'pag_component_layout', 'pag_published_time'];
 

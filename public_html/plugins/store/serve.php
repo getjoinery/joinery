@@ -9,16 +9,9 @@
  * declared in core serve.php with the `plugin => 'store'` option, not here —
  * plugins cannot own top-level dynamic routes.
  *
+ * @version 1.1.0 - the SEO entity registers from includes/bootstrap.php
  * @version 1.0.0
  */
-
-// ---- SEO entity: product (moved out of core SeoPageMetadata defaults) ----
-require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
-SeoPageMetadata::register_entity_class(
-	'product', 'Product', 'MultiProduct',
-	'plugins/store/data/products_class.php', 'product',
-	'/plugins/store/admin/admin_product_edit?pro_product_id=', 'product'
-);
 
 // ---- Tier gated-content summary: Products (moved out of core defaults) ----
 require_once(PathHelper::getIncludePath('includes/TierGatedContentRegistry.php'));

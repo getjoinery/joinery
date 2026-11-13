@@ -309,18 +309,10 @@ class HttpRoutingTestRunner {
             "/theme/falcon/includes/js/theme.js" => "Falcon theme JS",
             "/theme/falcon/includes/vendors/bootstrap/bootstrap.min.js" => "Falcon Bootstrap JS",
             
-            // Tailwind theme - has actual files  
-            "/theme/tailwind/includes/output.css" => "Tailwind CSS",
-            "/theme/tailwind/includes/jquery-3.4.1.min.js" => "Tailwind jQuery",
-            
             // Zoukroom theme - has actual files
             "/theme/zoukroom/includes/css/main.css" => "Zoukroom CSS",
             "/theme/zoukroom/includes/js/uikit.js" => "Zoukroom UIKit JS",
             
-            // Default theme - has actual files
-            "/theme/default/includes/output.css" => "Default theme CSS",
-            "/theme/default/includes/jquery-3.4.1.min.js" => "Default jQuery",
- 
             // Default theme - has actual files
             "/theme/sassa/assets/img/logo.svg" => "Sassa theme image",
 			

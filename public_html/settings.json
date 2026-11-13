@@ -2746,19 +2746,6 @@
       "helptext": "Filesystem path to the deployment root. Overridden when Globalvars_site.php hardcodes it, in which case the field is shown read-only."
     },
     {
-      "name": "node_dir",
-      "default": "",
-      "group": "paths",
-      "label": "Node Path",
-      "type": "text",
-      "helptext": "Absolute path to the node install used for asset builds, e.g. /var/www/html/mysite/node. Empty when the deployment has none. Plain path characters only; it is used in a shell command.",
-      "vault_gated": true,
-      "validation": {
-        "pattern": "/^(?:\\\/[A-Za-z0-9._-]+)+\\\/?$/",
-        "messages": { "pattern": "An absolute path made of letters, digits, dots, _ and -." }
-      }
-    },
-    {
       "name": "apache_error_log",
       "default": "",
       "group": "paths",

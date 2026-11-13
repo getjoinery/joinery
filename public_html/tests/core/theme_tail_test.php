@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php --only=tests/core/theme_tail_test.php
  *
+ * @version 1.1 - a theme renders as the active theme, with the page class a site running it gets; a theme's declared styles load after the kit and before the look
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -120,11 +121,17 @@ function ttt_render_core(string $class): string {
 	return (string)ob_get_clean();
 }
 
-/** Render a theme's own PublicPage head in a child process (each declares class PublicPage). */
+/** Render a theme's PublicPage head in a child process (each declares class PublicPage). */
 function ttt_render_theme(string $theme): string {
 	$script = '<?php $_SERVER["REQUEST_URI"] = "/"; $_SERVER["HTTP_HOST"] = "localhost";'
 		. 'require_once(' . var_export(PathHelper::getAbsolutePath('includes/PathHelper.php'), true) . ');'
-		. 'require_once(PathHelper::getIncludePath("theme/' . $theme . '/includes/PublicPage.php"));'
+		// The theme being rendered is the active one in the child, so its head
+		// finds its own assets (a compiled output.css, for one) as a site
+		// running it does. Held in memory only; no setting is written.
+		. '$g = Globalvars::get_instance(); $r = new ReflectionProperty("Globalvars", "settings");'
+		. '$r->setValue($g, array_merge((array)$r->getValue($g), array("theme_template" => ' . var_export($theme, true) . ')));'
+		// The page class a site running the theme gets: its own, or core's.
+		. 'require_once(PathHelper::getThemeFilePath("PublicPage.php", "includes"));'
 		. 'ob_start(); $p = new PublicPage(); $p->public_header(array("title" => "theme tail", "header_only" => true));'
 		. 'echo ob_get_clean();';
 	$file = harness_scratch_dir('theme_tail') . '/render_' . $theme . '_' . getmypid() . '.php';
@@ -134,14 +141,16 @@ function ttt_render_theme(string $theme): string {
 	return $out;
 }
 
-$core_classes = array('PublicPage', 'PublicPageJoinerySystem', 'PublicPageTailwindHTML5');
+$core_classes = array('PublicPage', 'PublicPageJoinerySystem');
 // The Falcon base renders only with the falcon theme's vendor assets on disk.
 if (is_dir($theme_root . '/falcon')) {
 	$core_classes[] = 'PublicPageFalcon';
 }
 $theme_classes = array();
-foreach (array('jeremytunnell-html5', 'getjoinery', 'phillyzouk-html5', 'scrolldaddy', 'galactictribune-html5') as $theme) {
-	if (is_file($theme_root . '/' . $theme . '/includes/PublicPage.php')) {
+foreach (array('jeremytunnell-html5', 'getjoinery', 'phillyzouk-html5', 'scrolldaddy', 'galactictribune-html5', 'xandyliberato-html5') as $theme) {
+	// A theme with its own page class, or one styling core's (theme.json "styles").
+	if (is_file($theme_root . '/' . $theme . '/includes/PublicPage.php')
+		|| (is_file($theme_root . '/' . $theme . '/theme.json') && ThemeHelper::getInstance($theme)->styleSheets())) {
 		$theme_classes[] = $theme;
 	}
 }
@@ -176,6 +185,19 @@ foreach ($renders as $label => $html) {
 	check(preg_match('~<style id="jy-brand-tokens">:root \{[^}]*--jy-color-primary: #123456;~', $html) === 1,
 		"$label: the look's brand token is emitted above the page theme's");
 	check(substr_count($html, 'data-look="' . TTT_FIXTURE . '"') === 2, "$label: the tail is written once");
+}
+
+section('A theme that styles the core page class: its declared stylesheets, after the kit, before the look');
+foreach ($theme_classes as $theme) {
+	$sheets = ThemeHelper::getInstance($theme)->styleSheets();
+	if (!$sheets || is_file($theme_root . '/' . $theme . '/includes/PublicPage.php')) continue;
+	$links = ttt_links($renders['theme ' . $theme]);
+	foreach ($sheets as $rel) {
+		$at = ttt_index($links, '/theme/' . $theme . '/' . $rel . '?v=');
+		check($at >= 0, "theme $theme: $rel is linked", json_encode(array_map(function ($p) { return $p[0]; }, $links)));
+		check($at > ttt_index($links, '/assets/css/joinery-styles.css') && $at < ttt_index($links, '/theme/' . TTT_FIXTURE . '/'),
+			"theme $theme: $rel loads after the kit and before the look");
+	}
 }
 
 section('With no look: nothing of it remains');

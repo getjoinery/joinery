@@ -11,6 +11,7 @@ require_once(PathHelper::getIncludePath('data/content_versions_class.php'));
 require_once(PathHelper::getIncludePath('data/groups_class.php'));
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/waiting_lists_class.php'));
 
+require_once(PathHelper::getIncludePath('includes/calendar-links/Exceptions/InvalidLink.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Link.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generator.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Google.php'));
@@ -91,6 +92,13 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 		'evt_recurrence_type', 'evt_recurrence_interval', 'evt_recurrence_days_of_week',
 		'evt_recurrence_week_of_month', 'evt_recurrence_end_date'
 	];
+
+	/**
+	 * The events the sitemap and SEO inventory list: public and not deleted, while events are switched on. event_logic also shows an unlisted event to anyone with its link; an unlisted event is not advertised, so it is not listed.
+	 */
+	public static function seo_public_records(): array {
+		return SeoPageMetadata::public_link_records('Event', 'evt_visibility = ' . self::VISIBILITY_PUBLIC, array('events_active'));
+	}
 
 		/**
 	 * Field specifications define database column properties and validation rules
@@ -207,6 +215,11 @@ function get_leader() {
 		if($this->get('evt_start_time') && $this->get('evt_show_add_to_calendar_link')){
 			$start_time_obj = new DateTime($this->get_event_start_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
 			$end_time_obj = new DateTime($this->get_event_end_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
+			// A row saved before the save rule refused an end before the start
+			// has no time range a calendar can hold: it offers no links.
+			if ($end_time_obj < $start_time_obj) {
+				return $calendar_links;
+			}
 
 			// Build location: Location object address preferred, fallback to evt_location text
 			$address = '';

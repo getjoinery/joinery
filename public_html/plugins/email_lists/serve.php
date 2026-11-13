@@ -9,15 +9,9 @@
  * serve.php with `plugin => 'email_lists'`; plugins cannot own top-level
  * dynamic routes.
  *
+ * @version 1.1.0 - the SEO entity registers from includes/bootstrap.php
  * @version 1.0.0
  */
-
-// ---- SEO entity: a mailing list's public page ----
-SeoPageMetadata::register_entity_class(
-	'mailing_list', 'MailingList', 'MultiMailingList',
-	'plugins/email_lists/data/mailing_lists_class.php', 'list',
-	'/plugins/email_lists/admin/admin_mailing_list_edit?mlt_mailing_list_id=', 'website'
-);
 
 // ---- Entity photo: a mailing list's image ----
 EntityPhotoRegistry::register('mailing_list', 'MailingList', 'plugins/email_lists/data/mailing_lists_class.php');

@@ -15,6 +15,7 @@
  *
  * Run: php tests/run.php db --filter=seo_public_paths
  *
+ * @version 1.2 - every entity type lists only what its page shows, and every type is known on the command line
  * @version 1.1 - a publicPaths entry may name a setting; pages list only published, products only active
  * @version 1.0
  */
@@ -66,5 +67,34 @@ if (!empty($by_type['product'])) {
 	check((int)$db->query("SELECT count(*) FROM pro_products WHERE pro_product_id IN ($ids) AND pro_is_active IS NOT TRUE")->fetchColumn() === 0,
 		'no inactive product is listed (product_logic shows them a 404)');
 }
+
+$listed_none = function ($type, $table, $pkey, $hidden_where, $label) use ($by_type, $db) {
+	if (empty($by_type[$type])) return;
+	$ids = implode(',', array_map('intval', $by_type[$type]));
+	check((int)$db->query("SELECT count(*) FROM $table WHERE $pkey IN ($ids) AND ($hidden_where)")->fetchColumn() === 0, $label);
+};
+$listed_none('post', 'pst_posts', 'pst_post_id', 'pst_is_published IS NOT TRUE', 'no unpublished post is listed (post_logic shows them a 404)');
+$listed_none('video', 'vid_videos', 'vid_video_id',
+	"COALESCE(vid_min_permission, 0) <> 0 OR vid_grp_group_id IS NOT NULL OR COALESCE(vid_access_provider, '') <> '' OR COALESCE(vid_tier_min_level, 0) <> 0",
+	'no gated video is listed (a visitor who is not signed in is shown a 404)');
+$listed_none('event', 'evt_events', 'evt_event_id', 'evt_visibility IS DISTINCT FROM 1', 'no private or unlisted event is listed');
+$listed_none('location', 'loc_locations', 'loc_location_id', 'loc_is_published IS NOT TRUE', 'no unpublished location is listed (location_logic shows them a 404)');
+$listed_none('mailing_list', 'mlt_mailing_lists', 'mlt_mailing_list_id', 'mlt_is_active IS NOT TRUE OR mlt_visibility IS DISTINCT FROM 1',
+	'no inactive, private or unlisted mailing list is listed');
+
+section('every entity type states its public rule and is known on the command line');
+$types = SeoPageMetadata::entity_classes();
+foreach ($types as $type => $info) {
+	require_once(PathHelper::getIncludePath($info['file']));
+	check(method_exists($info['class'], 'seo_public_records'), "$type states which rows a visitor may see (seo_public_records)");
+}
+foreach (array('event_manager' => array('event', 'location'), 'store' => array('product'), 'email_lists' => array('mailing_list')) as $plugin => $plugin_types) {
+	if (!PluginHelper::isPluginActive($plugin)) continue;
+	foreach ($plugin_types as $type) {
+		check(isset($types[$type]), "$type is registered from $plugin's bootstrap, so a command-line sweep lists it");
+	}
+}
+check(SeoPageMetadata::public_link_records('Post', '', array('no_such_setting_' . getmypid())) === array(),
+	'a type whose feature switch is off lists nothing');
 
 harness_finish();

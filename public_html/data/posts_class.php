@@ -38,6 +38,13 @@ class Post extends SystemBase {	public static $prefix = 'pst';
 		'pst_fil_file_id' => ['action' => 'null']
 	];
 
+	/**
+	 * The posts the sitemap and SEO inventory list: published and not deleted, while the blog is switched on, the same rule post_logic applies before showing one.
+	 */
+	public static function seo_public_records(): array {
+		return SeoPageMetadata::public_link_records('Post', 'pst_is_published = TRUE', array('blog_active'));
+	}
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

@@ -10,6 +10,7 @@ require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_regist
 require_once(PathHelper::getIncludePath('plugins/event_manager/data/event_session_files_class.php'));
 require_once(PathHelper::getIncludePath('data/session_analytics_class.php'));
 
+require_once(PathHelper::getIncludePath('includes/calendar-links/Exceptions/InvalidLink.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Link.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generator.php'));
 require_once(PathHelper::getIncludePath('includes/calendar-links/Generators/Google.php'));
@@ -129,12 +130,13 @@ public static function GetBySessionNumber($event_id, $session_number){
 
 	function get_end_time($tz='event', $format='M j, Y g:i a T') {
 		$event = new Event($this->get('evs_evt_event_id'), TRUE);
+		// A session with no end time set ends when it starts.
+		$end_local = $this->get('evs_end_time_local') ?: $this->get('evs_start_time_local');
 		if($tz == 'event' || !$tz){
-			
-			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $event->get('evt_timezone'), $format);
+			return LibraryFunctions::convert_time($end_local, $event->get('evt_timezone'), $event->get('evt_timezone'), $format);
 		}
 		else{
-			return LibraryFunctions::convert_time($this->get('evs_start_time_local'), $event->get('evt_timezone'), $tz, $format);
+			return LibraryFunctions::convert_time($end_local, $event->get('evt_timezone'), $tz, $format);
 		}
 	}
 
@@ -180,6 +182,11 @@ public static function GetBySessionNumber($event_id, $session_number){
 		if($this->get('evs_start_time')){
 			$start_time_obj = new DateTime($this->get_start_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
 			$end_time_obj = new DateTime($this->get_end_time($session->get_timezone()), new DateTimeZone($session->get_timezone()));
+			// A session that ends before it starts has no time range a
+			// calendar can hold: it offers no links.
+			if ($end_time_obj < $start_time_obj) {
+				return $calendar_links;
+			}
 			$settings = Globalvars::get_instance();
 			$cal_link = LibraryFunctions::get_absolute_url('/profile/event_sessions?evt_event_id='.$this->get('evs_evt_event_id'));
 			$link = Link::create($this->get('evs_title'), $start_time_obj, $end_time_obj)
@@ -196,6 +203,15 @@ public static function GetBySessionNumber($event_id, $session_number){
 	}
 	
 
+
+	function prepare() {
+		// Both local times are in the parent event's timezone, so they compare directly.
+		$start = (string)$this->get('evs_start_time_local');
+		$end = (string)$this->get('evs_end_time_local');
+		if ($start !== '' && $end !== '' && strtotime($end) < strtotime($start)) {
+			throw new SystemDisplayableErrorNoLog('The session ends before it starts. Set the end time after the start time.');
+		}
+	}
 
 	function save($debug=false) {
 		// Derive UTC from local + the parent event's timezone (local is source of

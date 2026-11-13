@@ -91,7 +91,7 @@ Rows in `spm_seo_page_metadata` are maintained through three mechanisms:
 
 ### Bounded auto-cleanup
 
-Inside each enumeration run, after upsert, any entity-linked row whose `spm_entity_id` is *not* in the live set for `spm_entity_type` (and that type was queried this run) is soft-deleted. **Auto-cleanup does not touch:**
+Inside each enumeration run, after upsert, any entity-linked row whose `spm_entity_id` is *not* in the public set for `spm_entity_type` (and that type was queried this run) is soft-deleted. An entity that comes back (a page published again, a feature switched back on) gets its own row back, SEO copy included, rather than a new empty one; an untyped row made lazily at its path in between gives way, as it does when an entity moves. **Auto-cleanup does not touch:**
 
 - Static-path rows (`spm_entity_type IS NULL`) — a missing path could be a removed view, a plugin route, an admin-added path, etc.
 - Rows tagged with entity types outside the core enumeration loop (plugin entities, custom types).
@@ -116,18 +116,37 @@ Both categories show up in the **Find orphans** view on the admin SEO list page 
   "publicPaths": [{"path": "/support_desk/ask", "setting": "support_desk_widget_enabled"}]
   ```
 
-- **Entities** — every type registered with `SeoPageMetadata::register_entity_class($type, $class, $multi, $file, $namespace, $admin_edit_url, $og_type)`; core registers its own; a plugin registers its types from its bootstrap (`plugin.json` `"bootstrap"`), which `entity_classes()` loads first, so they are known on the command line as well as in a web request. By default an entity's records are its live rows with a `{prefix}_link` slug, at `/{namespace}/{slug}`. An entity whose public set is narrower supplies its own with a static `seo_public_records()` returning `[['id' => …, 'link' => …, 'modify_time' => …], …]`, each `link` the path under the namespace. The forum uses it so only live, approved topics in public categories are listed (`/forum/t/{id}/{slug}`); pages list only published pages, and products only active ones, the same rule each page applies before showing one.
+- **Entities** — every type registered with `SeoPageMetadata::register_entity_class($type, $class, $multi, $file, $namespace, $admin_edit_url, $og_type)`; core registers its own; a plugin registers its types from its bootstrap (`plugin.json` `"bootstrap"`), which `entity_classes()` loads first, so they are known on the command line as well as in a web request. An entity's records are the rows a visitor may see, by the same rule its page applies before showing one, at `/{namespace}/{slug}`. The model states that rule in a static `seo_public_records()` returning `[['id' => …, 'link' => …, 'modify_time' => …], …]`, each `link` the path under the namespace. Most are one call to `SeoPageMetadata::public_link_records($class, $public_where, $settings)`: the live rows with a `{prefix}_link`, narrowed by a condition on the row's own columns, and none at all while any of the named feature switches is off:
+
+  ```php
+  public static function seo_public_records(): array {
+  	return SeoPageMetadata::public_link_records('Post', 'pst_is_published = TRUE', array('blog_active'));
+  }
+  ```
+
+  | Type | Listed when | Switches |
+  |---|---|---|
+  | post | published | `blog_active` |
+  | page | published | `page_contents_active` |
+  | video | open to any visitor: no permission level, group, access gate or tier | `videos_active` |
+  | event | public (an unlisted event is not advertised) | `events_active` |
+  | location | published | `events_active`, `page_contents_active` |
+  | product | active | `products_active` |
+  | mailing_list | active and public (an unlisted list is not advertised) | `mailing_lists_active` |
+  | forum_topic, forum_category | live, approved topics in public categories (`/forum/t/{id}/{slug}`) | |
+
+  A model without `seo_public_records()` lists every live row with a link.
 
 ## Sitemap
 
-`views/sitemap.php` is a thin XML wrapper around `SeoPageMetadata::enumerate_public_paths()`. Both the sitemap and the SEO row-population step share their discovery code — when a new entity type is added to enumeration, both systems pick it up. Paths with `spm_noindex = true` are excluded. `<lastmod>` uses the entity's `modify_time` for entity URLs, `spm_update_time` for static rows, and current date as the final fallback.
+`views/sitemap.php` is a thin XML wrapper around `SeoPageMetadata::enumerate_public_paths()`. Both the sitemap and the SEO row-population step share their discovery code — when a new entity type is added to enumeration, both systems pick it up. Paths with `spm_noindex = true` are excluded. Each path segment is percent-encoded in `<loc>`, so a slug holding `?`, `#` or a non-ASCII character is the page's address and not a query string. `<lastmod>` uses the entity's `modify_time` for entity URLs, `spm_update_time` for static rows, and current date as the final fallback.
 
 ## Limitations of the lazy/enumeration approach
 
 - **New entities lag the SEO list** until the next pageview (admin preview counts) or the next enumeration run (`update_database`, `upgrade.php`, or "Scan now").
 - **Slug changes propagate at enumeration time.** Between an entity's slug change and the next enumeration run, visitors to the new path see entity-content fallback (no row override) instead of the previously-set custom SEO. The row itself isn't lost — it follows the entity to its new path on the next sync.
 - **Static-path orphans persist** until admin removes them via "Find orphans". The trade is: auto-cleanup never deletes a real route just because enumeration missed it.
-- **A type registered from a plugin's `serve.php` (not its bootstrap) is known only in web requests**, so a command-line `update_database` sweep skips it; its rows are seeded by the next pageview or "Scan now". Register from the bootstrap to be enumerated everywhere.
+- **A type registered from a plugin's `serve.php` (not its bootstrap) is known only in web requests**, so a command-line `update_database` sweep skips it. Every type in the tree registers from its plugin's bootstrap; a new one does the same.
 - **A path that already has an untyped row** (made lazily by a pageview before its entity type was registered) is adopted by the sweep: the row takes the entity's type and id, and keeps its SEO copy.
 
 ## Admin UI

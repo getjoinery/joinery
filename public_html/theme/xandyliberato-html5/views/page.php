@@ -1,6 +1,6 @@
 <?php
-	// The site's pages as the Tailwind theme laid them out: the title centered
-	// over a panel, the text in a readable prose column.
+	// The site's pages: the title centered over a panel, the text in a
+	// readable column (xl-prose, assets/css/xandyliberato.css).
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	require_once(PathHelper::getThemeFilePath('page_logic.php', 'logic'));
 
@@ -33,7 +33,7 @@
 
 	echo PublicPage::BeginPage($page->get('pag_title'));
 	echo PublicPage::BeginPanel();
-	echo '<div class="text-lg prose max-w-prose mx-auto">';
+	echo '<div class="xl-prose">';
 
 	require_once(PathHelper::getIncludePath('includes/ComponentRenderer.php'));
 	echo ComponentRenderer::render(null, 'image_gallery', [

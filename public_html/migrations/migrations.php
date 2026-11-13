@@ -1989,3 +1989,15 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'report', stg_update_time = now() WHERE stg_name = 'csp_strict_scripts' AND stg_value = 'off';";
 	$migrations[] = $migration;
+
+	// node_dir is gone. Its one reader was galactictribune's point explorer,
+	// which was switched off and has been removed with the views that ran its
+	// Node scripts. Dropping the declaration alone would leave the row behind,
+	// and an undeclared row fails the every-row-is-declared check
+	// (docs/settings.md). Idempotent: a second run deletes nothing.
+	$migration = array();
+	$migration['database_version'] = '235';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'node_dir';";
+	$migrations[] = $migration;

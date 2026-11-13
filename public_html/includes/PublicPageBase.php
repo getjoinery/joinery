@@ -1041,6 +1041,29 @@ abstract class PublicPageBase {
 	 * theme's and nothing is emitted after them. The one place that writes
 	 * the look into a page, and it writes it once.
 	 */
+	/**
+	 * The page theme's own stylesheets, the "styles" its theme.json declares,
+	 * each cache-busted by file mtime. A theme that styles the core page class
+	 * needs nothing more than this declaration; it loads after the kit and the
+	 * plugins' stylesheets and before the applied look.
+	 */
+	protected function render_theme_styles() {
+		if ($this->theme_styles_emitted) { return; }
+		$this->theme_styles_emitted = true;
+		$name = trim((string)$this->get_render_theme());
+		if ($name === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $name)) { return; }
+		try {
+			$theme = ThemeHelper::getInstance($name);
+		} catch (Exception $e) {
+			return;
+		}
+		foreach ($theme->styleSheets() as $rel) {
+			$url = '/theme/' . $name . '/' . $rel . '?v=' . $this->asset_mtime('theme/' . $name . '/' . $rel);
+			echo '<link rel="stylesheet" href="' . htmlspecialchars($url, ENT_QUOTES) . '">' . "\n";
+		}
+	}
+	protected $theme_styles_emitted = false;
+
 	protected function render_theme_tail() {
 		if ($this->theme_tail_emitted) { return; }
 		$this->theme_tail_emitted = true;

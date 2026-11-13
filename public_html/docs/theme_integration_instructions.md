@@ -303,6 +303,7 @@ Create `theme/$THEME_NAME/theme.json` with minimal, accurate configuration:
 - `cssFramework`: Declares which CSS the theme's chrome loads — `"bootstrap"` for Bootstrap themes, `"html5"` for zero-dependency themes. This is independent of FormWriter.
 - `formWriterBase`: Always `"FormWriterV2HTML5"`. FormWriter renders semantic HTML5 regardless of the theme's `cssFramework`.
 - `publicPageBase`: Always use `"PublicPageBase"` (NOT PublicPageFalcon)
+- `styles` (optional): the theme's own stylesheets, e.g. `["assets/css/mytheme.css"]`. Core's page class (`includes/PublicPage.php`) links them after the kit and the plugins' stylesheets and before an applied look, each versioned by its file time. A theme with no `includes/PublicPage.php` of its own renders with core's page class, so its header, menus, member nav and footer come from core and the kit; a `styles` stylesheet and `brand_tokens` are then the theme's whole look (the `xandyliberato-html5` and `galactictribune-html5` themes are built this way). A theme with its own page class links its stylesheets itself. A theme's CSS is plain CSS of its own; a pre-built utility stylesheet is refused by `tests/integration/no_prebuilt_tailwind_test.php`.
 - `publicPaths` (optional): the theme's own public pages for the sitemap and the SEO inventory, e.g. `["/pricing"]`. A theme view of a core page (its own index or blog) needs no entry; a view not declared is not listed. See [SEO Metadata](seo_metadata.md#what-is-enumerated).
 
 ### Step 5: Create FormWriter.php
@@ -499,7 +500,6 @@ Your theme's `BeginPage`/`EndPage` should use your CSS framework's container cla
 |-----------|-----------------|----------------|
 | Bootstrap | `<section class="pt-100 pb-70"><div class="container">` | `</div></section>` |
 | UIKit | `<div class="uk-section"><div class="uk-container">` | `</div></div>` |
-| Tailwind | `<div class="max-w-7xl mx-auto px-4 py-16">` | `</div>` |
 
 **Fallback:** `PublicPageBase` provides a basic default container (`max-width: 1140px; margin: 0 auto; padding: 2rem 1rem`) so pages are never completely unstyled, but themes should always override with framework-appropriate markup.
 

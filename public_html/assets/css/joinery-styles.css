@@ -568,8 +568,8 @@ body.jy-default blockquote {
   .jy-user-dropdown-toggle { padding: var(--jy-space-2); }
   .jy-header-icons .jy-header-admin-link { padding-left: var(--jy-space-1); padding-right: var(--jy-space-1); }
   /* A phone has no room for a footer under an app surface; the page ends
-     where its content does. */
-  .jy-site-footer { display: none; }
+     where its content does. Every other page keeps its footer. */
+  body.jy-default:has(.page-content--app) .jy-site-footer { display: none; }
   .jy-nav-links {
     display: none;
     position: absolute;
@@ -606,6 +606,19 @@ body.jy-default blockquote {
   justify-content: space-between;
 }
 .jy-copyright { font-size: var(--jy-text-sm); color: var(--jy-color-text-muted); margin: 0; }
+/* The site's social profile links (SocialLinks), a row of icons above the copyright. */
+.jy-social-links {
+  list-style: none;
+  margin: 0;
+  padding: var(--jy-space-5) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--jy-space-3);
+}
+.jy-social-links a { display: block; color: var(--jy-color-text-muted); }
+.jy-social-links a:hover { color: var(--jy-color-text); }
+.jy-social-links svg { width: 20px; height: 20px; display: block; fill: currentColor; }
 
 /* Page structure helpers */
 .jy-container { max-width: 1200px; margin: 0 auto; padding: 0 var(--jy-space-5); }

@@ -715,7 +715,6 @@ The `css_framework` field controls when a component is available:
 | Value | Behavior |
 |-------|----------|
 | `"bootstrap"` | Only active when a Bootstrap theme is used |
-| `"tailwind"` | Only active when a Tailwind theme is used |
 | (omitted) | Universal - works with any theme |
 
 **Example scenarios:**

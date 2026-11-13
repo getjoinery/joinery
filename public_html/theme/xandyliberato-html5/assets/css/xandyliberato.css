@@ -1,0 +1,187 @@
+/*
+ * Xandy Liberato theme.
+ *
+ * The site renders with the core page class (includes/PublicPage.php) and the
+ * kit; this file gives it the site's look. Colours and fonts are brand tokens
+ * in theme.json, so an admin's colour settings still win. Everything here is
+ * layout and the home page's own sections.
+ *
+ * @version 1.0.0
+ */
+
+/* ─── Page ─────────────────────────────────────────────────────── */
+
+body.jy-default { background: var(--jy-color-surface); color: var(--jy-color-text); }
+.xl-wide { max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 640px) { .xl-wide { padding: 0 24px; } }
+@media (min-width: 1024px) { .xl-wide { padding: 0 32px; } }
+
+/* ─── Header ───────────────────────────────────────────────────── */
+
+.jy-site-header { background: var(--jy-color-bg); border-bottom: 0; position: relative; }
+.jy-header-inner { max-width: 1280px; height: auto; min-height: 104px; padding: 24px; gap: 40px; }
+.jy-logo-img { height: auto; max-height: 56px; max-width: 220px; }
+/* The logo is the site's name; the text beside it is for screen readers. */
+.jy-logo-img + .jy-logo-text {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
+.jy-header-right { flex: 1; justify-content: space-between; gap: 40px; }
+.jy-nav-links { gap: 40px; }
+.jy-nav-links a,
+.jy-nav-links a:hover,
+.jy-nav-links a.active { padding: 0; background: none; font-size: 16px; font-weight: 500; border-radius: 0; }
+.jy-nav-links a { color: var(--jy-color-text-muted); }
+.jy-nav-links a:hover,
+.jy-nav-links a.active { color: var(--jy-color-text); }
+.jy-nav-dropdown-menu { top: 100%; margin-top: 12px; border: 0; border-radius: 8px; padding: 8px 0;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1), 0 0 0 1px rgb(0 0 0 / 0.05); }
+/* The gap between the item and its menu stays inside the hover area. */
+.jy-nav-dropdown-menu::before { content: ""; position: absolute; left: 0; right: 0; top: -12px; height: 12px; }
+.jy-nav-dropdown-menu a,
+.jy-nav-dropdown-menu a:hover { padding: 12px 20px; font-size: 16px; color: var(--jy-color-text); }
+.jy-nav-dropdown-menu a:hover { background: var(--jy-color-surface); }
+
+/* Sign in reads as a link, Sign up as a soft blue button. */
+.jy-header-icons { gap: 32px; }
+.jy-header-icons .btn-outline,
+.jy-header-icons .btn-outline:hover { border: 0; background: none; padding: 0; font-size: 16px; font-weight: 500; }
+.jy-header-icons .btn-outline { color: var(--jy-color-text-muted); }
+.jy-header-icons .btn-outline:hover { color: var(--jy-color-text); }
+.jy-header-icons .btn-primary,
+.jy-header-icons .btn-primary:hover { border: 0; border-radius: 6px; padding: 8px 16px; font-size: 16px; font-weight: 500; }
+.jy-header-icons .btn-primary { background: #dbeafe; color: #1d4ed8; }
+.jy-header-icons .btn-primary:hover { background: #bfdbfe; color: #1d4ed8; }
+
+@media (max-width: 768px) {
+  .jy-header-inner { min-height: 72px; padding: 12px 16px; gap: 12px; }
+  .jy-logo-img { max-height: 40px; }
+  .jy-header-right { flex: 0 0 auto; gap: 12px; }
+  .jy-header-icons { gap: 12px; }
+  .jy-nav-links { top: 100%; gap: 16px; padding: 16px 20px; }
+  .jy-nav-links a { padding: 4px 0; }
+  .jy-nav-dropdown-menu { position: static; display: block; box-shadow: none; margin: 8px 0 0 16px; padding: 0; background: none; }
+  .jy-nav-dropdown-menu::before { content: none; }
+  .jy-nav-dropdown-menu a,
+  .jy-nav-dropdown-menu a:hover { padding: 6px 0; color: var(--jy-color-text-muted); background: none; }
+}
+
+/* ─── Page heading and panel (BeginPage, BeginPanel) ───────────── */
+
+.page-content { max-width: 1280px; padding: 40px 16px; }
+@media (min-width: 640px) { .page-content { padding: 40px 24px; } }
+@media (min-width: 1024px) { .page-content { padding: 40px 32px; } }
+.jy-page-header { text-align: center; padding: 40px 0 0; margin-bottom: 40px; }
+.page-content .jy-page-header h1 { font-size: 30px; line-height: 36px; font-weight: 700; color: var(--jy-color-text); margin: 0; }
+.jy-panel { border: 0; border-radius: 8px; padding: 64px 16px;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+@media (min-width: 640px) { .jy-panel { padding: 64px 24px; } }
+@media (min-width: 1024px) { .jy-panel { padding: 64px 32px; } }
+
+/* The text of a page: a readable column. */
+.xl-prose { max-width: 65ch; margin: 0 auto; font-size: 18px; line-height: 1.75; color: #374151; }
+.xl-prose a { color: var(--jy-color-text); text-decoration: underline; }
+.xl-prose img { max-width: 100%; height: auto; }
+
+/*
+ * Stored page content written in utility class names before this theme had a
+ * stylesheet of its own. Each rule serves the row named beside it, so the
+ * content keeps its look without being rewritten.
+ *
+ * /page/contact (xandyliberato.com): the three social buttons.
+ */
+.xl-prose .inline-block { display: inline-block; }
+.xl-prose .px-6 { padding-left: 24px; padding-right: 24px; }
+.xl-prose .py-2\.5 { padding-top: 10px; padding-bottom: 10px; }
+.xl-prose .mb-2 { margin-bottom: 8px; }
+.xl-prose .text-white { color: #ffffff; }
+.xl-prose .font-medium { font-weight: 500; }
+.xl-prose .text-xs { font-size: 12px; line-height: 16px; }
+.xl-prose .leading-tight { line-height: 1.25; }
+.xl-prose .uppercase { text-transform: uppercase; }
+.xl-prose .rounded { border-radius: 4px; }
+.xl-prose .shadow-md { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+.xl-prose .hover\:shadow-lg:hover,
+.xl-prose .focus\:shadow-lg:focus,
+.xl-prose .active\:shadow-lg:active { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1); }
+.xl-prose .focus\:outline-none:focus { outline: 2px solid transparent; outline-offset: 2px; }
+.xl-prose .transition { transition: box-shadow 150ms ease-in-out; }
+.xl-prose button.inline-block { border: 0; cursor: pointer; }
+.xl-prose .w-4 { width: 16px; }
+.xl-prose .h-4 { height: 16px; }
+.xl-prose svg.w-4 { fill: currentColor; }
+
+/* ─── Footer ───────────────────────────────────────────────────── */
+
+.jy-site-footer { background: var(--jy-color-bg); border-top: 0; margin-top: 0; padding: 48px 0; }
+.jy-social-links { padding-top: 0; gap: 8px; }
+.jy-social-links a { color: #374151; }
+.jy-footer-bottom { justify-content: center; padding: 32px 0 0; }
+.jy-copyright { font-size: 16px; color: var(--jy-color-text-subtle); text-align: center; }
+
+/* ─── Home page ────────────────────────────────────────────────── */
+
+.xl-serif,
+.page-content .xl-serif { font-family: Georgia, Cambria, "Times New Roman", Times, serif; }
+/* Scoped to the page so the kit's own heading rules do not win. */
+.page-content h2.xl-heading { font-size: 30px; line-height: 36px; font-weight: 800; letter-spacing: normal; color: #60a5fa; margin: 0; }
+
+.xl-hero { position: relative; border-radius: 16px; overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1); }
+.xl-hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.xl-hero-spacer { position: relative; height: 352px; }
+@media (min-width: 640px) { .xl-hero-spacer { height: 400px; } }
+@media (min-width: 1024px) { .xl-hero-spacer { height: 464px; } }
+
+.xl-intro { background: var(--jy-color-bg); padding: 64px 16px; }
+@media (min-width: 1024px) { .xl-intro { padding: 96px 32px; } }
+.xl-intro-head { max-width: 768px; margin: 0 auto; text-align: center; }
+.xl-intro-head p { margin: 16px 0 0; font-size: 18px; color: var(--jy-color-text-muted); }
+.xl-features { margin: 48px 0 0; display: grid; gap: 40px; }
+@media (min-width: 640px) { .xl-features { grid-template-columns: repeat(2, 1fr); gap: 48px 24px; } }
+@media (min-width: 1024px) { .xl-features { grid-template-columns: repeat(4, 1fr); gap: 48px 32px; } }
+.xl-features dt { margin-left: 36px; font-size: 18px; line-height: 24px; font-weight: 500; color: #60a5fa; }
+.xl-features dd { margin: 8px 0 0 36px; font-size: 16px; color: var(--jy-color-text-muted); }
+
+.xl-benefits { padding: 48px 0; }
+.page-content .xl-benefits h2.xl-heading { text-align: center; margin-bottom: 24px; }
+.xl-benefits-grid { display: grid; gap: 40px; max-width: 576px; margin: 0 auto; padding: 0 16px; align-items: start; }
+@media (min-width: 1024px) { .xl-benefits-grid { max-width: 1280px; grid-template-columns: repeat(3, 1fr); gap: 32px; padding: 0 32px; } }
+.xl-benefits-grid p { margin: 20px 0 0; font-size: 18px; line-height: 24px; font-weight: 500; color: #60a5fa; }
+.xl-benefits-grid img { max-width: 100%; height: auto; display: block; }
+
+.xl-band { background: #4b5563; color: #ffffff; }
+.page-content .xl-band h2.xl-heading { color: #ffffff; }
+.xl-retreat { max-width: 768px; margin: 0 auto; padding: 48px 0; text-align: center; }
+.page-content .xl-retreat h2.xl-heading { margin-bottom: 24px; }
+.xl-video { height: 320px; padding: 0 16px; }
+.xl-video iframe { width: 100%; height: 100%; border: 0; }
+
+.xl-events { padding: 64px 16px; text-align: center; }
+@media (min-width: 640px) { .xl-events { padding: 96px 24px; } }
+@media (min-width: 1024px) { .xl-events { padding: 128px 32px; } }
+.page-content .xl-events h2.xl-heading { margin-top: 8px; }
+@media (min-width: 640px) { .page-content .xl-events h2.xl-heading { font-size: 36px; line-height: 40px; } }
+
+.xl-testimonials-head { max-width: 768px; margin: 0 auto; padding-top: 48px; text-align: center; }
+.xl-quotes { max-width: 1280px; margin: 0 auto; }
+@media (min-width: 768px) { .xl-quotes { display: grid; grid-template-columns: repeat(2, 1fr); padding: 0 24px; } }
+@media (min-width: 1024px) { .xl-quotes { padding: 0 32px; } }
+.xl-quote { padding: 48px 16px; }
+.xl-quote + .xl-quote { border-top: 2px solid #312e81; }
+@media (min-width: 768px) {
+  .xl-quote { padding: 64px 40px 64px 0; }
+  .xl-quote + .xl-quote { border-top: 0; padding: 64px 0 64px 40px; }
+  .xl-quotes-ruled .xl-quote + .xl-quote { border-left: 1px solid #312e81; }
+}
+@media (min-width: 1024px) {
+  .xl-quote { padding-right: 64px; }
+  .xl-quote + .xl-quote { padding-left: 64px; padding-right: 0; }
+}
+.page-content .xl-quote blockquote { margin: 24px 0 0; padding: 0; border: 0; background: none; font-style: normal; color: #ffffff; }
+.xl-quote-text { position: relative; font-size: 18px; font-weight: 500; }
+.xl-quote-text svg { position: absolute; top: 0; left: 0; width: 32px; height: 32px; color: #4f46e5;
+  transform: translate(-12px, -8px); }
+.xl-quote-text p { position: relative; margin: 0; }
+.xl-quote footer { margin: 32px 0 0 16px; font-size: 16px; font-weight: 500; }
+.xl-quote footer span { display: block; color: #c7d2fe; }

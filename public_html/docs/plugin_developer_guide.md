@@ -2671,7 +2671,7 @@ protected function getTableClasses() {
 - Custom styling for UIKit components
 
 **Other Themes (Various Frameworks)**
-- Falcon (Bootstrap), Tailwind (Tailwind CSS), Default (minimal)
+- Falcon (Bootstrap), Default (minimal)
 - Each with framework-appropriate implementations
 - Clean separation of concerns maintained
 
@@ -2795,7 +2795,7 @@ The plugin theme system allows plugins to act as complete theme providers, repla
 
 **`theme_template`**
 - **New Option**: `'plugin'` - Delegates all theme functionality to a plugin
-- **Existing Options**: `'falcon'`, `'sassa'`, `'tailwind'`, etc.
+- **Existing Options**: `'falcon'`, `'sassa'`, `'default'`, etc.
 
 ## Admin Interface Documentation
 

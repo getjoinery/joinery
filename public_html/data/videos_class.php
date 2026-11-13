@@ -26,6 +26,13 @@ class Video extends SystemBase {	public static $prefix = 'vid';
 		'vid_grp_group_id' => ['action' => 'prevent', 'message' => 'videos still use this group for access control']
 	];
 
+	/**
+	 * The videos the sitemap and SEO inventory list: live and open to any visitor (no permission level, group, access gate or tier), while videos are switched on, the rule Video::is_viewable() applies to a visitor who is not signed in.
+	 */
+	public static function seo_public_records(): array {
+		return SeoPageMetadata::public_link_records('Video', "COALESCE(vid_min_permission, 0) = 0 AND vid_grp_group_id IS NULL AND COALESCE(vid_access_provider, '') = '' AND COALESCE(vid_tier_min_level, 0) = 0", array('videos_active'));
+	}
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
