@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.165 - a node whose vault host checks are unmet shows amber (security_weak_spots_2026_11 WP3)
  * @version 1.164 - install_node in bare mode with starter_host installs the docker host with --site-engine --multi-tenant
  * @version 1.163 - build_site_create (agent 1.119.0): a new live Starter site as a container on its host, its
  *                  admin password a slot opened at hand-out, its limits required; never a dormant copy
@@ -1249,9 +1250,15 @@ class JobCommandBuilder {
 			? $status_data['sealed_secrets'] : array();
 		$sealed_attention = (int)($sealed['dead_operator'] ?? 0) + (int)($sealed['dead_needs_ack'] ?? 0);
 
+		// A host that lets an open vault window's key reach the disk (swap in
+		// the clear, core dumps on) is posture, not an incident: amber, and
+		// fixed on the node.
+		$vault_host_unmet = (int)($status_data['vault_host']['unmet'] ?? 0);
+
 		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
 			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5) ||
 			$sealed_attention > 0 ||
+			$vault_host_unmet > 0 ||
 			$ssl_warn) {
 			return 'warning';
 		}

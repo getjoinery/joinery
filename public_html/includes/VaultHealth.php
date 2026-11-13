@@ -15,14 +15,17 @@
  * Unlike a plugin's provisioners (declared in plugin.json, surfaced on
  * /admin/admin_plugins - docs/plugin_developer_guide.md § Declaring Host
  * Provisioners), this is core and has no such registry to plug into yet, so
- * it is surfaced directly: informationally at vault setup
- * (logic/vault_setup_verify_logic.php) and via the CLI equivalent,
+ * it is surfaced directly: the five disk-exposure rows through VaultHostHealth
+ * (an admin notice and the management node's stats), the others through their
+ * own notices, and every row through the CLI,
  * maintenance_scripts/dev_tools/check_vault_health.php.
  *
  * Each check reads its host facts through a parameter with a live default,
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.22 - a swap device a container cannot see is found by its device-mapper name, else unknown, not plain
+ * @version 1.21 - header names where the rows show (VaultHostHealth); no row is shown at vault setup
  * @version 1.20 - the stalled-queue reason names RootState::requestLogDir() (specs/shell_command_audit.md D1)
  * @version 1.19 - the previous-build row states the launcher's rule (four starts with no five-minute run)
  * @version 1.18 - the unseal daemon row says when new windows are held in the pool (the fallback after five silent minutes)
@@ -728,6 +731,19 @@ class VaultHealth {
 			$path = trim(explode(' ', $line)[0] ?? '');
 			$real = @realpath($path);
 			$name = basename($real !== false ? $real : $path);
+			if ($real === false && strpos($path, '/dev/') === 0 && strpos($name, 'dm-') !== 0) {
+				// Inside a container /proc/swaps lists the host's devices, which
+				// its /dev does not have: /dev/mapper/cryptswap cannot be
+				// resolved here. sysfs still names every device-mapper device,
+				// so find it by name; a device not found there cannot be judged
+				// from here, which is unknown, not a plain device.
+				$mapped = self::dmDeviceNamed($sys_block, $name);
+				if ($mapped === null) {
+					return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+						'reason' => 'Active swap device "' . $path . '" is not visible from here (a container sees the host\'s swap); check it on the host.'];
+				}
+				$name = $mapped;
+			}
 
 			if (strpos($name, 'zram') === 0) {
 				continue;
@@ -750,6 +766,17 @@ class VaultHealth {
 				'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. Encrypt it (the installer\'s housekeeping does this) or turn swap off.'];
 		}
 		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+	}
+
+	/** The dm-N whose device-mapper name is $mapper_name, from sysfs, or null. */
+	private static function dmDeviceNamed(string $sys_block, string $mapper_name): ?string {
+		foreach (glob($sys_block . '/dm-*', GLOB_NOSORT) ?: array() as $dir) {
+			$name = @file_get_contents($dir . '/dm/name');
+			if (is_string($name) && trim($name) === $mapper_name) {
+				return basename($dir);
+			}
+		}
+		return null;
 	}
 }
 ?>

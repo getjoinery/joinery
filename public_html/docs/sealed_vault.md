@@ -723,10 +723,21 @@ daemon, a process that is not the pool user, the five-minute fallback):
   1 GB of swap as dm-crypt with a per-boot random key.
 
 Best-effort and advisory (a check that can't be verified reports `unknown`,
-never a false pass) — surfaced informationally from `vault_setup_verify` and
-via `php maintenance_scripts/dev_tools/check_vault_health.php` (exits
-non-zero on any `unmet` check, mirroring `check_provisioning.php`'s
-convention).
+never a false pass), and never a gate. Where they show:
+
+- **The admin notice** (`VaultHostNotice`): an unmet one of these five
+  (APCu, the RAM store, core dumps, exception arguments, swap) is named to the
+  superadmin, with the check's own reason. The rows that have their own notice
+  (parser jail, unseal daemon, host converger, certificates) are not repeated.
+  `VaultHostHealth` runs the five from the web process, the one that holds
+  windows, and caches its answer for an hour.
+- **The management node:** the node's stats carry `vault_host`, counts and
+  check names only, never a reason (which can name a path or device). An unmet
+  check ambers the node's badge and shows in its Overview as *Vault key safety*;
+  it is posture, not an incident.
+- **The shell:** `php maintenance_scripts/dev_tools/check_vault_health.php`
+  prints every row (exits non-zero on any `unmet` check, mirroring
+  `check_provisioning.php`'s convention).
 
 Two facts about the window store these checks guard:
 

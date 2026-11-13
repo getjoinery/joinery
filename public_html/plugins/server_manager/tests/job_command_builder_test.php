@@ -1967,6 +1967,18 @@ check(count($pc_named) === 1 && $pc_named[0]['key'] === 'search_index_storage'
 check(JobCommandBuilder::plugin_checks_failing(array('plugin_checks' => 'not a report')) === array(),
 	'a malformed report names nothing rather than throwing');
 
+section('Status dot: an unmet vault host check shows amber, not red');
+
+// Swap in the clear or core dumps on let an open vault window's key reach the
+// disk. That is posture, so the badge goes amber (security_weak_spots_2026_11 WP3).
+$vh_met = $pc_measured + array('vault_host' => array('checked' => 5, 'unmet' => 0, 'unmet_checks' => array(), 'unknown' => 0));
+$vh_unmet = $pc_measured + array('vault_host' => array('checked' => 5, 'unmet' => 1,
+	'unmet_checks' => array('swap_off_or_encrypted'), 'unknown' => 0));
+check(JobCommandBuilder::status_color_for_node($pc_node, $fold($vh_met), false) === 'success',
+	'a node whose vault host checks are met stays green');
+check(JobCommandBuilder::status_color_for_node($pc_node, $fold($vh_unmet), false) === 'warning',
+	'a node with one unmet shows amber');
+
 // ---------------------------------------------------------------------------
 section('Nothing composes work that nothing will run');
 

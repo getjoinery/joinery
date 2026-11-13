@@ -19,6 +19,7 @@
  * is all a plugin needs. A renderer that throws is logged and skipped — an
  * admin page never fails to render because a notice could not decide.
  *
+ * @version 1.11 - vault_host joins the core notices (specs/security_weak_spots_2026_11.md WP3)
  * @version 1.10 - unseal_daemon joins the core notices (specs/unseal_daemon.md WP3)
  * @version 1.9 - outbound_transfer joins the core notices (specs/node_outbound_and_transfer.md WP1)
  * @version 1.8 - backup_objects joins the core notices (specs/implemented/backup_offloaded_files.md § Admin surfaces, offloaded files waiting for a backup)
@@ -55,6 +56,10 @@ class AdminNotices {
 			// previous build or held says which, to the admin who can act.
 			// Silent while it answers on the current build.
 			'unseal_daemon'  => array('UnsealDaemonNotice', 'render'),
+			// A host that lets an open window's key reach the disk (a core
+			// dump, swap in the clear) names the checks to the admin who can
+			// fix the host. Silent while they hold.
+			'vault_host'     => array('VaultHostNotice', 'render'),
 			// A box whose root timer stopped following its upgrades says so to
 			// the one admin who can reinstall it. Silent while it runs.
 			'host_converger' => array('HostConvergerNotice', 'render'),

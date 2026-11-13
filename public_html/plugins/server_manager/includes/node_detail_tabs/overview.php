@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.104 - a Vault key safety row: the node's unmet vault host checks, by name, and the ones it could not read (security_weak_spots_2026_11 WP3)
  * @version 1.103 - no inline script or handlers: confirms are kit attributes, Hold stopped is data-jy-prompt, the rest assets/js/node-overview.js
  * @version 1.102 - Recovery key box: a decline past its day says a confirmation waits; Recorded only when the keys match
  * @version 1.101 - the Recovery key box says a proven key not yet recorded is recorded within a minute, not that there is none,
@@ -1963,6 +1964,59 @@
 			$ss_body = ob_get_clean();
 			$status_rows[] = array('title' => 'Stored secrets', 'tone' => $ss_attention > 0 ? 'warn' : 'ok',
 				'summary' => $ss_attention > 0 ? (int)$ss_attention . ' unreadable' : 'All readable', 'body' => $ss_body);
+		}
+
+		// Vault key safety on the node's host: names only ride up. The reasons
+		// (which device, which setting) stay on the node, in its admin notice.
+		if (isset($status_data['vault_host']) && is_array($status_data['vault_host'])) {
+			$vh = $status_data['vault_host'];
+			$vh_unmet = (int)($vh['unmet'] ?? 0);
+			$vh_unknown = (int)($vh['unknown'] ?? 0);
+			$vh_names = array(
+				'apcu_anonymous_shm'     => 'APCu on a file',
+				'ram_store'              => 'RAM store not private',
+				'coredumps_disabled'     => 'core dumps on',
+				'exception_args_ignored' => 'exception traces carry arguments',
+				'swap_off_or_encrypted'  => 'swap in the clear',
+			);
+			ob_start();
+			if ($vh_unmet > 0) {
+				$vh_bits = array();
+				foreach ((array)($vh['unmet_checks'] ?? array()) as $check) {
+					$vh_bits[] = $vh_names[(string)$check] ?? (string)$check;
+				}
+				echo '<div class="text-muted small mt-2">' . htmlspecialchars(implode(' · ', $vh_bits)) . '</div>';
+			}
+			if ($vh_unknown > 0) {
+				$vh_unread = array();
+				foreach ((array)($vh['unknown_checks'] ?? array()) as $check) {
+					$vh_unread[] = $vh_names[(string)$check] ?? (string)$check;
+				}
+				echo '<div class="text-muted small mt-2">Could not be read: '
+					. htmlspecialchars($vh_unread ? implode(' · ', $vh_unread) : $vh_unknown . ' check' . ($vh_unknown === 1 ? '' : 's')) . '</div>';
+			}
+			if ($vh_unmet > 0) {
+				$vh_site = rtrim((string)$node->get('mgn_site_url'), '/');
+				if ($vh_site !== '') {
+					echo '<div class="small mt-2"><a href="' . htmlspecialchars($vh_site . '/admin/')
+						. '" target="_blank" rel="noopener">Details on the node &rarr;</a></div>';
+				}
+			}
+			$vh_body = ob_get_clean();
+			// Unread checks are not a finding, but they are not a pass either:
+			// neutral, never "Keys stay off the disk".
+			if ($vh_unmet > 0) {
+				$vh_tone = 'warn';
+				$vh_summary = $vh_unmet . ' check' . ($vh_unmet === 1 ? '' : 's') . ' unmet';
+			} elseif ($vh_unknown > 0) {
+				$vh_tone = 'info';
+				$vh_summary = $vh_unknown . ' check' . ($vh_unknown === 1 ? '' : 's') . ' could not be read';
+			} else {
+				$vh_tone = 'ok';
+				$vh_summary = 'Keys stay off the disk';
+			}
+			$status_rows[] = array('title' => 'Vault key safety', 'tone' => $vh_tone,
+				'summary' => $vh_summary, 'body' => $vh_body);
 		}
 
 		// Plugin checks the node records for fleet reporting (plugin.json

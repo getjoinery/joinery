@@ -7,6 +7,7 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.10 - vault_host: counts and names of the unmet vault host checks (security_weak_spots_2026_11 WP3)
  * @version 1.9 - backup_recovery_public_key: a proven key's public half, so a copy of this site onto a server in its
  *               owner's own account is born encrypted to it (specs/site_copy_final_test.md E1)
  * @version 1.8 - the uptime line takes whole seconds (% on /proc/uptime's float was a deprecated conversion)
@@ -182,6 +183,20 @@ function stats_handler($request) {
 		);
 	} catch (Throwable $e) {
 		// No registry on this node yet — omit the key entirely.
+	}
+
+	// Whether this host lets an open vault window's key reach the disk: counts
+	// and check names only, never a reason, which can name a path or device.
+	// Only from a web request: three of the checks read the calling process's
+	// own settings, and the web workers are the ones that hold windows, so a
+	// CLI caller (a problem report built from cron) would describe itself.
+	// Omitted on a site with no vault, which has no key to leak this way.
+	try {
+		if (VaultHostHealth::fromWebProcess() && VaultHostHealth::relevant()) {
+			$result['vault_host'] = VaultHostHealth::forStats(VaultHostHealth::summary());
+		}
+	} catch (Throwable $e) {
+		// Omit the key; an old management node ignores it anyway.
 	}
 
 	// Plugin checks declared fleet_report, as the hourly Plugin health report
