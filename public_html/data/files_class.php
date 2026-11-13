@@ -45,6 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.22.2 - provisionSigningKey() forgets the remembered key first, so a re-mint makes a new one
  * @version 1.22.1 - get_by_name() answers FALSE for a name that is not UTF-8 (was a database error and a 500)
  * @version 1.22.0 - a served file is named by get_name() (a renamed file's title), inline types too
  * @version 1.21.0 - a served body leaves the router's output buffers first, so a download larger than half
@@ -1809,6 +1810,9 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @return bool True once a key exists.
 	 */
 	public static function provisionSigningKey() {
+		// The hook runs because the stored key is gone or being replaced: a key
+		// this request remembered is not the answer, so read the row again.
+		self::$signing_key = null;
 		return self::_get_signing_key(true) !== null;
 	}
 

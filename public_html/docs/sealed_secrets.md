@@ -122,6 +122,50 @@ of a site against its source.
   provenance, ambers the node badge, and links **to the node** to fix it (the
   management node never holds the node's keys).
 
+## Replacing them after a break-in
+
+PHP holds `secret_box_key` so it can use what it seals, so code that breaks in
+as the web user can open every stored secret. After a break-in each one has to
+be treated as read and replaced. The **Replace after a break-in** box on
+`/admin/admin_sealed_secrets` (`SecretReplacementList`) turns the registry into
+that list:
+
+- **Make new ones here:** `regenerable` and `regenerable-breaks-things` kinds,
+  the second marked with what replacing it cuts off. A kind held in one setting
+  with a `reprovision` recipe gets a *Make a new one* button
+  (`SecretReconciler::acknowledge_remint()`), which succeeds only if a new value
+  is stored. A recipe provisions what is missing, so a kind held in rows is
+  replaced on its own feature's page.
+- **Get new ones from the provider:** `operator` kinds, implicit `secret: true`
+  settings among them. Make a new one in the provider's console, revoke the old
+  one there, and enter the new one on its page.
+- **Nothing to do:** `ephemeral` kinds, listed so the list is complete.
+
+Only kinds with a value stored here appear. Opening the list records a short
+hash of every stored value (`SecretReconciler::present_hashes()`, which opens
+nothing) in its own table, `srs_secret_replacement_snapshots`, so a
+one-per-member kind does not swell the settings every request reads. A re-seal
+always changes the stored blob, so each row shows how many values are not yet
+replaced, and a kind is marked done once none of its values from the opening is
+left. A kind this admin cannot replace (registrant contact details, a customer
+server's password, a disk key in escrow) is closed without replacing, with a
+reason typed in; the reason and the count left unchanged stay on the row. The
+list closes once every kind to act on is done, and its snapshot goes with it;
+while it is open, an admin notice keeps it in view. Its state is the managed
+setting `secret_replacement_list`, changed under a lock on its row. A
+one-per-member kind says that replacing it means each member sets theirs up
+again, and a kind whose plugin is switched off says so. The Security sentinel's alarm on the
+management node links to the list on the node.
+
+The box also names the rest of a recovery, which is not stored secrets: change
+the database password; redeploy the code; sign everyone out and have admins
+change passwords; review what could have been added (admins, permissions, API
+keys, passkeys, app passwords, second factors, forwarding, webhooks, scheduled
+tasks); and members whose vault was open rotate their vault key.
+`secret_box_key` and `config/backup_site_key` cannot be replaced from the site,
+so a value replaced on the list is sealed under the same key an intruder may
+have copied.
+
 ## A database on another machine
 
 A restore onto **another machine** by default keeps nothing

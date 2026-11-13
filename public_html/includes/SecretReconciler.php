@@ -25,6 +25,8 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.7 - present_hashes(), can_write_now(); acknowledge_remint() also re-mints a regenerable secret, only a
+ *                setting, and succeeds only when a new value is stored (the replacement list)
  * @version 1.6 - the pass counts the plaintext values it seals ('sealed N plaintext' in the summary),
  *                so an upgrade's output shows them
  * @version 1.5 - a secret of an active sandboxed plugin is ranked as an active plugin's (PluginHelper::isActiveOfEitherKind)
@@ -260,16 +262,46 @@ class SecretReconciler {
 	}
 
 	/**
-	 * Acknowledge and perform a destructive re-mint of one regenerable-breaks-things
-	 * secret. Cold path (an admin POST), so the fresh-blob write is allowed. Audits
-	 * against the acting user — this unpaired devices / dropped peers and a human
-	 * authorized it. Returns true on success.
+	 * The stored values of each kind, by locator, for every category whose
+	 * plugin is still here: each one's SHA-256, so a caller can tell a value
+	 * replaced since an earlier look (a re-seal always changes the blob) from
+	 * one left as it was. Nothing is opened. The replacement list
+	 * (SecretReplacementList) reads it.
+	 *
+	 * @return array<string,string[]> locator => hashes of the stored values
+	 */
+	public static function present_hashes(): array {
+		require_once(PathHelper::getIncludePath('data/sealed_secret_registry_class.php'));
+		$out = array();
+		foreach (new MultiSealedSecretRegistry(array(), array('ssr_locator' => 'ASC')) as $row) {
+			if ($row->is_orphan()) {
+				continue;
+			}
+			$blobs = array();
+			self::inspect_category($row, false, null, $blobs);
+			$out[(string)$row->get('ssr_locator')] = array_map(function ($b) { return hash('sha256', (string)$b); }, $blobs);
+		}
+		return $out;
+	}
+
+	/** Can this request write a fresh SecretBox blob? Not once it has opened sealed content (SealedEgressGuard). */
+	public static function can_write_now(): bool {
+		return self::is_cold();
+	}
+
+	/**
+	 * Re-mint one machine-made secret through its declared reprovision recipe:
+	 * a regenerable-breaks-things one the operator acknowledged (unpairing
+	 * devices, dropping pinned peers), or a regenerable one being replaced after
+	 * a break-in. Cold path (an admin POST), so the fresh-blob write is allowed.
+	 * Audits against the acting user. Returns true on success.
 	 */
 	public static function acknowledge_remint(string $locator, int $acting_user_id): bool {
 		require_once(PathHelper::getIncludePath('data/sealed_secret_registry_class.php'));
 		require_once(PathHelper::getIncludePath('includes/SealedSecretsDeclarations.php'));
 		$d = SealedSecretsDeclarations::get($locator);
-		if ($d === null || ($d['kind'] ?? '') !== 'regenerable-breaks-things' || empty($d['reprovision'])) {
+		if ($d === null || !in_array($d['kind'] ?? '', array('regenerable', 'regenerable-breaks-things'), true)
+				|| empty($d['reprovision'])) {
 			return false;
 		}
 		$reprovision = (string)$d['reprovision'];
@@ -278,17 +310,35 @@ class SecretReconciler {
 		// tripping the egress guard mid-request.
 		if (!self::is_cold()) return false;
 
+		// A recipe provisions what is missing, so a row-scoped kind (one value
+		// per row, which this cannot blank) would come back "done" with every
+		// old value in place. Only a setting is re-minted here.
+		if (strpos($locator, '.') !== false) return false;
+
 		$ok = false;
 		self::server_write(function () use ($locator, $reprovision, &$ok) {
 			$dblink = DbConnector::get_instance()->get_db_link();
-			if (strpos($locator, '.') === false) {
-				$dblink->prepare('UPDATE stg_settings SET stg_value = \'\' WHERE stg_name = ?')->execute(array($locator));
+			$read = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+			$read->execute(array($locator));
+			$before = (string)$read->fetchColumn();
+			$dblink->prepare('UPDATE stg_settings SET stg_value = \'\' WHERE stg_name = ?')->execute(array($locator));
+			Globalvars::get_instance()->forget_setting($locator);
+			call_user_func($reprovision);
+			// Success is a NEW value stored, not the recipe's word: a recipe that
+			// memoized the old key in this request writes it straight back.
+			$read->execute(array($locator));
+			$after = (string)$read->fetchColumn();
+			$ok = $after !== '' && $after !== $before;
+			if (!$ok && $after === '') {
+				// Put the old value back rather than leave the feature with none.
+				$dblink->prepare('UPDATE stg_settings SET stg_value = ? WHERE stg_name = ?')->execute(array($before, $locator));
+				Globalvars::get_instance()->forget_setting($locator);
 			}
-			$ok = (bool)call_user_func($reprovision);
 		});
 		if ($ok) {
-			self::audit('secret.remint', $acting_user_id,
-				"Operator-acknowledged re-mint of {$locator} — prior paired state was invalidated.");
+			self::audit('secret.remint', $acting_user_id, ($d['kind'] === 'regenerable-breaks-things')
+				? "Operator-acknowledged re-mint of {$locator}; prior paired state was invalidated."
+				: "Re-mint of {$locator} by an operator.");
 		}
 		return $ok;
 	}
@@ -302,13 +352,15 @@ class SecretReconciler {
 	 *
 	 * @return array{present:int, dead:int}
 	 */
-	private static function inspect_category($row, bool $is_orphan, ?SecretBox $box): array {
+	private static function inspect_category($row, bool $is_orphan, ?SecretBox $box, ?array &$blobs = null): array {
 		$locator = (string)$row->get('ssr_locator');
 		$present = 0; $dead = 0;
+		$collect = is_array($blobs);
 
-		$classify = function (?string $blob) use (&$present, &$dead, $box) {
+		$classify = function (?string $blob) use (&$present, &$dead, $box, $collect, &$blobs) {
 			if ($blob === null || $blob === '') return;         // absent — not counted as present
 			$present++;
+			if ($collect) $blobs[] = $blob;
 			if ($box === null) { $dead++; return; }
 			// A wrapped column ({"enc":"v1..."}) is not itself a blob. Pull the
 			// embedded blob out so a dead WRAPPED secret is still seen on the

@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.105 - the sentinel alarm links to the node's replace-after-a-break-in list
  * @version 1.104 - a Vault key safety row: the node's unmet vault host checks, by name, and the ones it could not read (security_weak_spots_2026_11 WP3)
  * @version 1.103 - no inline script or handlers: confirms are kit attributes, Hold stopped is data-jy-prompt, the rest assets/js/node-overview.js
  * @version 1.102 - Recovery key box: a decline past its day says a confirmation waits; Recorded only when the keys match
@@ -2534,6 +2535,14 @@
 						. 'If you did not make them, do not mark them safe: treat the machine as broken into.';
 					echo '<button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 svm-fs-075"'
 						. ' data-jy-confirm="' . htmlspecialchars($nd_ask, ENT_QUOTES, 'UTF-8') . '" data-jy-submit="nodeActionNeverDoAccept">Mark safe</button>';
+					// A break-in means every secret the site stores has to be
+					// treated as read: the node keeps the list of what to replace.
+					$nd_site = rtrim((string)$node->get('mgn_site_url'), '/');
+					if ($nd_site !== '') {
+						echo '<div class="small mt-2">If this was a break-in, replace the site\'s stored secrets: <a href="'
+							. htmlspecialchars($nd_site . '/admin/admin_sealed_secrets') . '" target="_blank" rel="noopener">'
+							. 'the replacement list on the node &rarr;</a></div>';
+					}
 				} else {
 					echo '<div>No alarm.</div>';
 				}

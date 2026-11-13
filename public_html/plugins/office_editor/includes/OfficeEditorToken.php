@@ -15,6 +15,7 @@
  * URL-safe, so the editor puts it in a query string unchanged — which matters,
  * because the proof it signs covers that query string byte for byte.
  *
+ * @version 0.1.1 - provisionKey() forgets the remembered key first, so a re-mint makes a new one
  * @version 0.1.0
  */
 class OfficeEditorToken {
@@ -92,8 +93,13 @@ class OfficeEditorToken {
 		);
 	}
 
-	/** Mint the key now if none is stored (the sealed-secret reprovision hook). */
+	/**
+	 * Mint the key now if none is stored (the sealed-secret reprovision hook).
+	 * The hook runs because the stored key is gone or being replaced, so a key
+	 * this request remembered is not the answer: read the row again.
+	 */
 	public static function provisionKey() {
+		self::$key = null;
 		return self::key(true) !== null;
 	}
 

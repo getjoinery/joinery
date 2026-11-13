@@ -75,6 +75,7 @@
       "rows": 3,
       "helptext": "The public half of the recovery keypair whose private half you keep in your password manager. Every backup this site makes seals a copy of its encryption key to this value, so that one private key opens every backup forever. Set it through the Backup recovery panel, which generates the keypair, takes the public half, and then has you open a challenge to prove the private half works. That proof is the whole point: a mistyped key would seal happily while producing archives nobody can ever open. Encrypted backups refuse to run until it is proven."
     },
+    {"name": "secret_replacement_list", "default": "", "managed": true, "helptext": "JSON: the replace-after-a-break-in list on the Secrets Health page while one is open: when it was started and by whom, and each kind of stored secret marked done, with when and by whom. Blank when no list is open. Written by SecretReplacementList."},
     {
       "name": "recipe_case_mail_log",
       "default": "",
