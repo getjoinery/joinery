@@ -110,7 +110,13 @@ Both categories show up in the **Find orphans** view on the admin SEO list page 
   "publicPaths": ["/forum"]
   ```
 
-- **Entities** — every type registered with `SeoPageMetadata::register_entity_class($type, $class, $multi, $file, $namespace, $admin_edit_url, $og_type)`; core registers its own; a plugin registers its types from its bootstrap (`plugin.json` `"bootstrap"`), which `entity_classes()` loads first, so they are known on the command line as well as in a web request. By default an entity's records are its live rows with a `{prefix}_link` slug, at `/{namespace}/{slug}`. An entity whose public set is narrower supplies its own with a static `seo_public_records()` returning `[['id' => …, 'link' => …, 'modify_time' => …], …]`, each `link` the path under the namespace. The forum uses it so only live, approved topics in public categories are listed (`/forum/t/{id}/{slug}`).
+  A page that exists only while a setting is on names it, and is listed only while that setting is `1`. The same form works in `theme.json`:
+
+  ```json
+  "publicPaths": [{"path": "/support_desk/ask", "setting": "support_desk_widget_enabled"}]
+  ```
+
+- **Entities** — every type registered with `SeoPageMetadata::register_entity_class($type, $class, $multi, $file, $namespace, $admin_edit_url, $og_type)`; core registers its own; a plugin registers its types from its bootstrap (`plugin.json` `"bootstrap"`), which `entity_classes()` loads first, so they are known on the command line as well as in a web request. By default an entity's records are its live rows with a `{prefix}_link` slug, at `/{namespace}/{slug}`. An entity whose public set is narrower supplies its own with a static `seo_public_records()` returning `[['id' => …, 'link' => …, 'modify_time' => …], …]`, each `link` the path under the namespace. The forum uses it so only live, approved topics in public categories are listed (`/forum/t/{id}/{slug}`); pages list only published pages, and products only active ones, the same rule each page applies before showing one.
 
 ## Sitemap
 

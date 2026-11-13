@@ -391,6 +391,27 @@ class SeoPageMetadata extends SystemBase {
 		return $records;
 	}
 
+	/**
+	 * One publicPaths entry: a path, or {"path": "/x", "setting": "name"} for a
+	 * page that exists only while that setting is on ("1"). Returns the path,
+	 * false for a page whose setting is off, or the entry itself when it is
+	 * neither shape (is_declarable_path() then refuses it with a log line).
+	 *
+	 * @return mixed
+	 */
+	private static function public_path_entry($entry) {
+		if (!is_array($entry)) {
+			return $entry;
+		}
+		$path = $entry['path'] ?? null;
+		$setting = $entry['setting'] ?? null;
+		if (is_string($setting) && $setting !== ''
+			&& (string)Globalvars::get_instance()->get_setting($setting, true, true) !== '1') {
+			return false;
+		}
+		return $path;
+	}
+
 	/** Whether a declared public path is a same-site path. */
 	private static function is_declarable_path($path): bool {
 		return is_string($path) && preg_match('#^/[A-Za-z0-9/_\-.]*$#', $path) && strpos($path, '//') === false;
@@ -408,7 +429,9 @@ class SeoPageMetadata extends SystemBase {
 		if ($theme === '' || !class_exists('ThemeHelper')) {
 			return $paths;
 		}
-		foreach ((array)ThemeHelper::config('publicPaths', array(), $theme) as $path) {
+		foreach ((array)ThemeHelper::config('publicPaths', array(), $theme) as $entry) {
+			$path = self::public_path_entry($entry);
+			if ($path === false) continue;
 			if (!self::is_declarable_path($path)) {
 				error_log("SeoPageMetadata: theme '{$theme}' declares publicPaths entry that is not a same-site path; ignored.");
 				continue;
@@ -439,7 +462,9 @@ class SeoPageMetadata extends SystemBase {
 			return $paths;
 		}
 		foreach ($plugins as $name => $plugin) {
-			foreach ((array)$plugin->get('publicPaths', array()) as $path) {
+			foreach ((array)$plugin->get('publicPaths', array()) as $entry) {
+				$path = self::public_path_entry($entry);
+				if ($path === false) continue;
 				if (!self::is_declarable_path($path)) {
 					error_log("SeoPageMetadata: plugin '{$name}' declares publicPaths entry that is not a same-site path; ignored.");
 					continue;
