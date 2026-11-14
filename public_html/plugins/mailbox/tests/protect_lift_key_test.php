@@ -17,6 +17,7 @@
  *    lands on the DNS difference, says the command when it cannot, and leaves an
  *    existing key alone.
  *
+ * @version 1.1 - Make a signing key on the Setup row
  * @version 1.0
  */
 
@@ -132,6 +133,36 @@ if (!is_file(InboundEmailSetupCheck::localSigningKeyAddHelper())) {
 $refused = mailbox_provision_local_signing_key('not-a-domain-on-this-box.invalid');
 check($refused['ok'] === false && strpos($refused['message'], 'No such domain') !== false,
 	'a domain this server does not host is refused before any helper runs');
+
+section('Make a signing key, from the Setup row');
+
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/setup_fix_actions.php'));
+class LiftKeyMessages {
+	public $said = array();
+	public function save_message($m) { $this->said[] = $m; }
+}
+$said = function (LiftKeyMessages $s): string {
+	$m = end($s->said);
+	return $m ? (string)$m->message : '';
+};
+$sess = new LiftKeyMessages();
+$domain->set('ied_is_protected_identity', true);
+$domain->save();
+$r = mailbox_setup_fix_action(array('action' => 'make_local_key', 'domain' => $name), $sess, '/back');
+check($r !== null && strpos($said($sess), 'sealed key signs') !== false,
+	'a protected domain is refused: its sealed key signs, and a key on disk would be a second way', $said($sess));
+$domain->set('ied_is_protected_identity', false);
+$domain->save();
+$r = mailbox_setup_fix_action(array('action' => 'make_local_key', 'domain' => 'nowhere-' . bin2hex(random_bytes(2)) . '.invalid'), $sess, '/back');
+check($r !== null && strpos($said($sess), 'No such domain') !== false, 'a domain this server does not host is refused');
+if (!is_file(InboundEmailSetupCheck::localSigningKeyAddHelper())) {
+	$r = mailbox_setup_fix_action(array('action' => 'make_local_key', 'domain' => $name), $sess, '/back');
+	check($r !== null && strpos($said($sess), 'provision_dkim.sh ' . $name) !== false,
+		'with no helper here, an ordinary domain is told the command to run', $said($sess));
+	$fix = (new ReflectionMethod(InboundEmailSetupCheck::class, 'dkimFix'))->invoke(new InboundEmailSetupCheck(), $name);
+	check(empty($fix['action']) && strpos((string)($fix['command'] ?? ''), 'provision_dkim.sh ' . $name) !== false,
+		'and its DKIM row offers the command, not a button that cannot work');
+}
 
 section('who needs a key: the box that signs with one');
 

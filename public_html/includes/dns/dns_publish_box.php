@@ -18,6 +18,7 @@
  * whose API is open to everyone. The gated hosts are also named as such in the
  * provider list — a fact about the vendor, not a tier label.
  *
+ * @version 1.14 - a press that needs the vault open waits behind an in-place unlock (VaultGate)
  * @version 1.13 - a press box (vars['press']): one confirmed action in place of the ticks, for a ceremony
  *   that writes the records it lists (specs/send_protection_one_press.md)
  * @version 1.12 - the Apply gate's records are a JSON block and its script is assets/js/dns-boxes.js (no inline script)
@@ -512,10 +513,20 @@ function dns_publish_box_diff($page, array $vars): void {
 	}
 
 	if (is_array($press)) {
+		// A press that needs the vault open waits behind an Unlock that opens
+		// it in place (VaultGate); the handler checks the vault again anyway.
+		$locked = !empty($press['vault_locked']);
+		if ($locked) {
+			echo VaultGate::unlockButton('Unlock your vault to continue', 'to ' . lcfirst($press['label']), 'btn btn-primary');
+			echo '<span data-vault-open hidden>';
+		}
 		$form->submitbutton('btn_dns_apply', $press['label'], array(
 			'class'   => 'btn btn-primary',
 			'confirm' => $press['confirm'],
 		));
+		if ($locked) {
+			echo '</span>';
+		}
 	} elseif (!$blocked) {
 		$form->submitbutton('btn_dns_apply', $needs_oauth_config
 			? 'Connect and publish'

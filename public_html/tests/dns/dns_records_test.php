@@ -15,6 +15,7 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
+ * @version 1.7 - a press with the vault locked waits behind an in-place Unlock
  * @version 1.6 - a press box renders one confirmed action, no ticks, and the keys it covers
  * @version 1.5 - SRV is part of the vocabulary now (Joinery Direct's capability record)
  * @version 1.4 - records that must be absent: the diff, the gates on deleting,
@@ -1082,5 +1083,17 @@ check(strpos($press_html, 'dns_adopt') === false, 'and asks no adopt tick: the p
 check(strpos($press_html, 'name="press_keys"') !== false && strpos($press_html, 'pk1,pk2') !== false,
 	'it carries the keys of every record it shows, so the handler writes only those');
 check(strpos($press_html, 'Replaces TXT example.com') !== false, 'and says in words what each replacement overwrites');
+check(strpos($press_html, 'data-vault-unlock') === false, 'with the vault open, no Unlock stands in front of it');
+
+// Locked, the press waits behind an Unlock that opens the vault in place.
+$press_vars['press']['vault_locked'] = true;
+ob_start();
+dns_publish_box_render(new DnsRemovalPage(), $press_vars);
+$locked_html = ob_get_clean();
+check(preg_match('#<span data-vault-locked><button type="button"[^>]*data-vault-unlock#', $locked_html) === 1,
+	'with the vault locked, an Unlock button is shown in its place');
+check(preg_match('#<span data-vault-open hidden>.*?Turn on send protection.*?</span>#s', $locked_html) === 1,
+	'and the press is on the page but hidden until the vault opens');
+check(strpos($locked_html, '/assets/js/vault-gate.js') !== false, 'with the script that swaps them');
 
 harness_finish();

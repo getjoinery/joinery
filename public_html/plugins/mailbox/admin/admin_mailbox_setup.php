@@ -27,6 +27,7 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.22 - Unlock your vault opens it in place, and the turn-on button shows without a reload
  * @version 3.21 - one press turns send protection on where the DNS host takes an API key, and the
  *   page it lands on says what each step did
  * @version 3.20 - who owns the signing key is chosen in the Sending identity box (and changed there
@@ -185,7 +186,7 @@ $render_owner_form = function (string $button, int $value) use ($page, $protect,
 $render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
 		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check, $render_owner_form,
-		$protect_press_box, $protect_press_result, $protect_press_note) {
+		$protect_press_box, $protect_press_result, $protect_press_note, $acting_has_vault) {
 // --- Sending identity (the sending-lock add-on) ---
 // THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
 // (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
@@ -332,18 +333,26 @@ if (!empty($protect) && $focus_domain !== '') {
 		// THE UNLOCK GATE IS SHOWN, NOT DISCOVERED. A button that accepts a
 		// press and then explains why it did nothing is the same defect as a
 		// checklist step that is already done.
-		if (empty($protect_vault_unlocked)) {
-			echo '<p class="alert alert-warning mb-2">Your vault is locked. Turning send protection on decides what '
-				. 'the rest of the world will accept as this domain, so we need to know you are really here. '
-				. '<a class="btn btn-sm btn-primary ms-2" href="/profile/security">Unlock your vault</a></p>';
+		// Unlocked in place (VaultGate): the button is on the page behind the
+		// Unlock, and shows the moment the vault opens. Only a person with no
+		// vault is sent away, to set one up.
+		$locked = empty($protect_vault_unlocked);
+		if ($locked && empty($acting_has_vault)) {
+			echo '<p class="alert alert-warning mb-2">You have no vault. Turning send protection on decides what '
+				. 'the rest of the world will accept as this domain, so it needs you to unlock one. '
+				. '<a class="btn btn-sm btn-primary ms-2" href="/profile/security">Set up your vault</a></p>';
 		} else {
-			echo '<div class="mb-2">' . PublicPageBase::action_button('Check DNS and turn on send protection',
-				$self_url,
+			echo VaultGate::whileLocked('<p class="alert alert-warning mb-2">Your vault is locked. Turning send '
+				. 'protection on decides what the rest of the world will accept as this domain, so we need to know '
+				. 'you are really here. ' . VaultGate::unlockButton('Unlock your vault',
+					'to turn send protection on', 'btn btn-sm btn-primary ms-2') . '</p>', $locked);
+			echo VaultGate::behind('<div class="mb-2">' . PublicPageBase::action_button(
+				'Check DNS and turn on send protection', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_activate'),
 					'class' => 'btn btn-primary',
 					'confirm' => 'Turn send protection on for ' . $focus_domain . '? From this moment only your '
 						. 'key can send as this domain, and you will need your vault unlocked to send mail.'))
-				. '</div>';
+				. '</div>', $locked, 'div');
 		}
 	}
 

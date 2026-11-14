@@ -828,6 +828,18 @@ unlock/lock ceremony: `unlock()` (resolves `true` on success), `lock()`, and
 sending-lock compose) delegate to it when present rather than calling the vault actions
 directly, so every ceremony updates the chip and announces itself.
 
+**An action behind an unlock (`VaultGate`).** A server-rendered button that only
+an open vault can carry out renders behind `VaultGate` while the vault is locked:
+`VaultGate::behind($html, $locked)` puts it on the page hidden
+(`data-vault-open`), `VaultGate::unlockButton($label, $reason)` shows an Unlock in
+its place (`data-vault-locked`), and `VaultGate::whileLocked($html, $locked)`
+shows anything else only while locked, such as a warning. `assets/js/vault-gate.js`
+runs `JoineryVaultLock.unlock()` from the Unlock button and swaps the two on the
+lock-chip events, so the button appears the moment the vault opens and goes again
+if it locks. With no `JoineryVaultLock` on the page (the person has no vault), the
+Unlock goes to `/profile/security`. The gate decides nothing: the handler checks
+the vault again when the action arrives.
+
 **The event contract.** Two document-level events keep every surface on the
 page — chip, presence beacon, consumer UIs — in one state:
 

@@ -24,6 +24,7 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.25 - the press box is offered while the vault is locked; its button waits behind an in-place unlock
  * @version 2.24 - one press turns send protection on where the DNS host takes an API key (protect_press_box)
  * @version 2.23 - a domain_id focus is kept for any registered domain, not only the machine sender's:
  *   the editor's send-lock save and Finish send protection landed on an empty picker
@@ -558,28 +559,29 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// the person pressing (only its owner's vault opens it), and the change
 		// has to be one a single confirmation can cover — every record checked,
 		// nothing removed, no mail redirected. Otherwise the two presses stay,
-		// with their own confirmations, and the reason is said.
+		// with their own confirmations, and the reason is said. A locked vault
+		// does not take it away: its button waits behind an Unlock that opens the
+		// vault in place (VaultGate), and the press checks the vault again.
 		$protect_press_note = '';
-		if ($protect_vault_unlocked) {
-			$press = DnsPublishBox::build($checker->protectPressPlan($focus_domain),
-				array('dns_show' => '1') + $input,
-				DnsPublishBox::urlWith($state_qs(), array('dns_plan' => 'press')));
-			$press_class = $press['provider_class'] ?? null;
-			if ($press_class !== null && $press['state'] === DnsPublishBox::STATE_DIFF
-					&& $press_class::credentialMode() !== DnsProvider::CREDENTIAL_OAUTH2) {
-				$unsuitable = mailbox_protect_press_unsuitable($press['rows']);
-				// Asked cheaply: opening the key here would count as using the
-				// vault on every page view and keep it from ever idling out. The
-				// press itself opens it, before it writes anything.
-				if ((int)$focus_domain_model->get('ied_owner_usr_user_id') !== (int)$session->get_user_id()) {
-					$protect_press_note = 'Only the key\'s owner can turn send protection on in one press: the '
-						. 'key opens only in their unlocked vault.';
-				} elseif ($unsuitable !== '') {
-					$protect_press_note = 'One press is not offered here. ' . $unsuitable;
-				} else {
-					$press['press'] = _setup_press_confirmation($press['rows'], $focus_domain);
-					$protect_press_box = $press;
-				}
+		$press = DnsPublishBox::build($checker->protectPressPlan($focus_domain),
+			array('dns_show' => '1') + $input,
+			DnsPublishBox::urlWith($state_qs(), array('dns_plan' => 'press')));
+		$press_class = $press['provider_class'] ?? null;
+		if ($press_class !== null && $press['state'] === DnsPublishBox::STATE_DIFF
+				&& $press_class::credentialMode() !== DnsProvider::CREDENTIAL_OAUTH2) {
+			$unsuitable = mailbox_protect_press_unsuitable($press['rows']);
+			// Asked cheaply: opening the key here would count as using the
+			// vault on every page view and keep it from ever idling out. The
+			// press itself opens it, before it writes anything.
+			if ((int)$focus_domain_model->get('ied_owner_usr_user_id') !== (int)$session->get_user_id()) {
+				$protect_press_note = 'Only the key\'s owner can turn send protection on in one press: the '
+					. 'key opens only in their unlocked vault.';
+			} elseif ($unsuitable !== '') {
+				$protect_press_note = 'One press is not offered here. ' . $unsuitable;
+			} else {
+				$press['press'] = _setup_press_confirmation($press['rows'], $focus_domain);
+				$press['press']['vault_locked'] = !$protect_vault_unlocked;
+				$protect_press_box = $press;
 			}
 		}
 
