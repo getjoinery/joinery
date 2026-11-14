@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.5 - the strict DMARC value is built by foldDmarc(), read through its helper
  * @version 1.4 - the Step 1 box names its plan to the Apply handler
  * @version 1.3 - who owns the key is asked in the sending-identity panel, which leads Setup until answered
  * @version 1.2 - the sending-identity panel sits at the foot of Setup; no Advanced disclosure
@@ -266,7 +267,8 @@ class ProtectOptinTest {
 		$engine_plan = substr($engine_plan, 0, strpos($engine_plan, "\n\t}"));
 		check(strpos($engine_plan, 'signingStageRecords') !== false,
 			'the finished shape is built from the same records, so the two cannot drift');
-		check(strpos($engine_plan, 'v=spf1 -all') !== false && strpos($engine_plan, 'p=reject') !== false,
+		check(strpos($engine_plan, 'v=spf1 -all') !== false && strpos($engine_plan, 'dmarcPlanValue($domain, true)') !== false
+				&& strpos(InboundEmailSetupCheck::foldDmarc('example.test', true, ''), 'p=reject') !== false,
 			'and it is still the shape that carries the rejection instruction');
 
 		// The ceremony wiring itself.

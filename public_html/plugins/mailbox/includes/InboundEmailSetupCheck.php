@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.64 - a planned DMARC record keeps the owner's own settings, changing only what its stage is about
  * @version 1.63 - every hosted domain is read from its own nameservers, so checks see a publish at once
  * @version 1.62 - the send-protection fix links straight to the task (the owner question or the ceremony)
  * @version 1.61 - the Sending route row is INFO while nothing forwards: only forwarded mail takes it
@@ -545,8 +546,7 @@ class InboundEmailSetupCheck {
 			}
 		}
 
-		$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
-			'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain, null,
+		$this->planAdd($plan, 'TXT', '_dmarc.' . $domain, $this->dmarcPlanValue($domain, false), null,
 			'DMARC — reporting policy, recommended once SPF and DKIM pass.');
 	}
 
@@ -592,8 +592,7 @@ class InboundEmailSetupCheck {
 			// ceremony publishes it first.
 			$this->planAdd($plan, 'TXT', $domain, 'v=spf1 -all', null,
 				'SPF — a protected identity authorizes no ambient sender.');
-			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
-				'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@' . $domain, null,
+			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain, $this->dmarcPlanValue($domain, true), null,
 				'DMARC — strict alignment, so only the sealed key can send as this domain.');
 
 			$this->signingStageRecords($plan, $domain, $model, $fronted, $topology, $mx_target);
@@ -954,6 +953,99 @@ class InboundEmailSetupCheck {
 			$this->planAdd($plan, 'MX', $sub, $mx_target, 10,
 				'MX for the forwarding subdomain — bounce notices have to come back.');
 		}
+	}
+
+	/**
+	 * The DMARC record a plan publishes for $domain: the live record with only
+	 * this stage's own settings changed. See foldDmarc().
+	 */
+	private function dmarcPlanValue(string $domain, bool $strict): string {
+		list($txt, $ok) = $this->dns(function () use ($domain) {
+			return DnsResolver::getTxt('_dmarc.' . $domain);
+		});
+		// Not knowing the live record is no reason to overwrite it: '' leaves
+		// _dmarc out of this plan (planAdd skips it), and the check row already
+		// says the lookup failed.
+		return $ok ? self::foldDmarc($domain, $strict, self::firstDmarc((array)$txt)) : '';
+	}
+
+	/** The first v=DMARC1 record in a TXT record set, or ''. */
+	public static function firstDmarc(array $txt): string {
+		foreach ($txt as $t) {
+			if (stripos(ltrim((string)$t), 'v=DMARC1') === 0) { return trim((string)$t); }
+		}
+		return '';
+	}
+
+	/**
+	 * A DMARC record built from the live one ($live, '' for none), changing only
+	 * what this stage is about.
+	 *
+	 * Strict sets p=reject; aspf=s; adkim=s, and drops whatever would let a
+	 * forgery through: pct other than 100 and t other than n (they apply the
+	 * policy to only part of the mail, or one step down), and sp or np other than
+	 * reject (either would hand the domain's subdomains, real or not, a weaker
+	 * policy than the domain). The strict check fails exactly these.
+	 *
+	 * Ordinary keeps the owner's policy and alignment as written, using p=none
+	 * when there is no p or one receivers would not recognize. The one exception is the strict shape send
+	 * protection wrote (p=reject with aspf=s and adkim=s): switching protection
+	 * off puts p=none and relaxed alignment back, or legitimate mail would go on
+	 * failing alignment with nothing protected in exchange.
+	 *
+	 * The report address postmaster@ comes first in rua, because report ingest
+	 * reads it; every other report address and tag (ruf, fo, ri, ...) is kept as
+	 * written, in its order. Plan matching is exact text
+	 * (DnsRecord::isSatisfiedBy), so folding a record this built gives the same
+	 * record back.
+	 */
+	public static function foldDmarc(string $domain, bool $strict, string $live): string {
+		$domain = strtolower(trim($domain));
+		$kept = array();
+		foreach (explode(';', $live) as $pair) {
+			$pair = trim($pair);
+			if ($pair === '' || strpos($pair, '=') === false) { continue; }
+			list($k, $v) = explode('=', $pair, 2);
+			$k = strtolower(trim($k));
+			$v = trim($v);
+			if ($k === '' || $v === '' || isset($kept[$k])) { continue; }
+			$kept[$k] = $v;
+		}
+
+		$is = function ($k, $v) use (&$kept) { return strtolower((string)($kept[$k] ?? '')) === $v; };
+		if ($strict) {
+			$set = array('p' => 'reject', 'aspf' => 's', 'adkim' => 's');
+			$drop = array();
+			foreach (array('pct' => '100', 't' => 'n', 'sp' => 'reject', 'np' => 'reject') as $k => $safe) {
+				if (isset($kept[$k]) && !$is($k, $safe)) { $drop[$k] = true; }
+			}
+		} elseif ($is('p', 'reject') && $is('aspf', 's') && $is('adkim', 's')) {
+			$set = array('p' => 'none');
+			$drop = array('aspf' => true, 'adkim' => true);
+		} else {
+			// A p receivers do not know makes them ignore the whole record.
+			$p = in_array(strtolower((string)($kept['p'] ?? '')), array('none', 'quarantine', 'reject'), true);
+			$set = array('p' => $p ? (string)$kept['p'] : 'none');
+			$drop = array();
+		}
+
+		$rua = array('mailto:postmaster@' . $domain);
+		$seen = array(strtolower($rua[0]) => true);
+		foreach (explode(',', (string)($kept['rua'] ?? '')) as $addr) {
+			$addr = trim($addr);
+			if ($addr === '' || isset($seen[strtolower($addr)])) { continue; }
+			$seen[strtolower($addr)] = true;
+			$rua[] = $addr;
+		}
+
+		$out = array('v=DMARC1');
+		foreach ($set as $k => $v) { $out[] = $k . '=' . $v; }
+		$out[] = 'rua=' . implode(',', $rua);
+		foreach ($kept as $k => $v) {
+			if ($k === 'v' || $k === 'rua' || isset($set[$k]) || isset($drop[$k])) { continue; }
+			$out[] = $k . '=' . $v;
+		}
+		return implode('; ', $out);
 	}
 
 	/**
@@ -2052,7 +2144,7 @@ class InboundEmailSetupCheck {
 					: $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::WARN,
 						$domain . ' has no DMARC record.',
 						'DMARC is optional but recommended once SPF and DKIM pass.',
-						$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
+						$this->dnsFix('TXT', '_dmarc.' . $domain, self::foldDmarc($domain, false, '')));
 
 				// Aggregate reports arriving (specs/deliverability_report_ingest.md
 				// § Surfaces). A DMARC record whose rua address is wrong looks
@@ -4120,13 +4212,19 @@ class InboundEmailSetupCheck {
 	 * ambient capability right back.
 	 */
 	private function protectedDmarcResult($domain, $ok, $dmarcTxt) {
-		$strict = 'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@' . $domain;
 		if (!$ok) {
 			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::UNKNOWN,
 				'DNS lookup for _dmarc.' . $domain . ' failed — try again.');
 		}
-		$record = '';
-		foreach ($dmarcTxt as $t) { if (stripos($t, 'v=DMARC1') === 0) { $record = $t; break; } }
+		$record = self::firstDmarc((array)$dmarcTxt);
+		$strict = self::foldDmarc($domain, true, $record);
+		$all = array_values(array_filter((array)$dmarcTxt, function ($t) { return stripos(ltrim((string)$t), 'v=DMARC1') === 0; }));
+		if (count($all) > 1) {
+			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::FAIL,
+				'_dmarc.' . $domain . ' has ' . count($all) . ' DMARC records — receivers treat that as no policy at all. Keep one.',
+				'Records: ' . implode('  |  ', $all),
+				$this->dnsFix('TXT', '_dmarc.' . $domain, $strict));
+		}
 		if ($record === '') {
 			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::FAIL,
 				$domain . ' has no DMARC record — a protected identity requires a strict policy.', '',
@@ -4143,6 +4241,11 @@ class InboundEmailSetupCheck {
 		if (($tags['p'] ?? '') !== 'reject') { $problems[] = 'p must be reject (is "' . ($tags['p'] ?? '(absent)') . '")'; }
 		if (($tags['aspf'] ?? '') !== 's')   { $problems[] = 'aspf must be s (is "' . ($tags['aspf'] ?? '(absent)') . '")'; }
 		if (($tags['adkim'] ?? '') !== 's')  { $problems[] = 'adkim must be s (is "' . ($tags['adkim'] ?? '(absent)') . '")'; }
+		if (isset($tags['pct']) && $tags['pct'] !== '100') { $problems[] = 'pct must be 100 or absent (is "' . $tags['pct'] . '"), or the rest of the forged mail is only quarantined'; }
+		if (isset($tags['t']) && $tags['t'] !== 'n') { $problems[] = 't must be absent (is "' . $tags['t'] . '"), or receivers apply the policy one step down'; }
+		foreach (array('sp' => 'subdomains', 'np' => 'names that do not exist') as $k => $what) {
+			if (isset($tags[$k]) && $tags[$k] !== 'reject') { $problems[] = $k . ' must be reject or absent (is "' . $tags[$k] . '"), or mail forged from ' . $what . ' under the domain is let through'; }
+		}
 		if (empty($problems)) {
 			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::PASS,
 				$domain . ' publishes a strict DMARC policy (p=reject; aspf=s; adkim=s).');

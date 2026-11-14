@@ -136,6 +136,17 @@ The two plans that ship:
 planners the checks use (`spfPlan()`, `dkimPlan()`, `topology()`), so every
 topology and security-level branch reaches the plan without being restated.
 
+Its DMARC record starts from the live one (`foldDmarc()`) and changes only what
+the stage is about. A protected domain gets `p=reject; aspf=s; adkim=s`, with
+a `pct` other than 100, a `t` other than `n`, and any `sp` or `np` weaker than
+reject dropped. An ordinary domain keeps the owner's policy and alignment, using
+`p=none` when there is no `p` or one receivers would not recognize; the strict shape send protection wrote is the exception, and goes back to
+`p=none` with relaxed alignment. `postmaster@` comes first in `rua`, where
+report ingest reads it, and every other report address and tag is kept as
+written. A record the plan built folds back to itself, so the diff settles. When
+the live record cannot be read, `_dmarc` is left out of the plan rather than
+overwritten blind.
+
 ## Adding the box to a page
 
 Two calls: one in the action path, one in the render path.
