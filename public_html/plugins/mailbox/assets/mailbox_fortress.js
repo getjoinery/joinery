@@ -41,6 +41,8 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.17 - a mailbox whose move to Fortress has not reached the relay yet gets a quiet note and a
+ *   recheck every 30 s for up to 5 min before the alarm; a key's fingerprint reads base64url keys
  * @version 1.16 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * @version 1.15 - an opened message's inline parts are the ones its body shows by cid: (MailboxMime.isInline, B5)
  * @version 1.14 - a draft's key is sealed in the v2 frame (specs/post_quantum_sealing.md WP2)
@@ -975,14 +977,22 @@ window.MailboxFortress = (function () {
 		if (!await VaultCrypto.verifyEd25519(pinned, signed, relay.signature)) {
 			return { ok: false, reason: 'signature', expected: pinned, reported: pinned };
 		}
-		if (!names) return { ok: false, reason: 'key', expected: keys[0], reported: st.public_key };
+		if (!names) {
+			// The relay this device trusts, in its own signed words, still seals
+			// this address to the server's transport key: a mailbox just moved to
+			// Fortress whose new key has not reached the relay yet. The server
+			// opens such mail at pull and seals it to the mail key.
+			var switching = st.recipient === String(box.address).toLowerCase() && st.key_kind === 'transport';
+			return { ok: false, reason: 'key', expected: keys[0], reported: st.public_key, switching: switching };
+		}
 		return { ok: true, firstUse: firstUse, identity: pinned };
 	}
 
 	/** A key's fingerprint for people: SHA-256, the first 16 bytes in groups of four hex digits. */
 	async function fingerprint(b64) {
 		try {
-			var d = new Uint8Array(await crypto.subtle.digest('SHA-256', VaultCrypto.b64decode(String(b64))));
+			// Keys travel as base64url (SealedBox) or plain base64; b64urlDecode reads both.
+			var d = new Uint8Array(await crypto.subtle.digest('SHA-256', VaultCrypto.b64urlDecode(String(b64))));
 			var hex = Array.prototype.map.call(d.slice(0, 16), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
 			return hex.match(/.{4}/g).join(' ');
 		} catch (e) { return '(unreadable)'; }
@@ -1028,10 +1038,15 @@ window.MailboxFortress = (function () {
 	 * Check every mailbox the relay seals for this browser (MAILBOX_READER
 	 * .relayPinMailboxes), once per page, while the mail vault is open.
 	 */
-	async function checkRelayPins() {
-		var boxes = cfg().relayPinMailboxes || [];
-		if (pinsChecked || !boxes.length || !isOpen()) return;
-		pinsChecked = true;
+	async function checkRelayPins(only) {
+		var boxes = only || cfg().relayPinMailboxes || [];
+		if (!only && pinsChecked) return;
+		if (!boxes.length) return;
+		// A recheck that cannot run now is asked again later, so a mailbox's
+		// "finishing its move" note never outlives its grace unjudged.
+		var again = function () { (only || []).forEach(recheckSoon); };
+		if (!isOpen()) { again(); return; }
+		if (!only) pinsChecked = true;
 		if (!(await VaultCrypto.ed25519Supported())) {
 			if (window.console) console.warn('MailboxFortress: this browser cannot check the relay\'s signature (no Ed25519).');
 			return;
@@ -1039,7 +1054,8 @@ window.MailboxFortress = (function () {
 		var session = await JoinerySealed.session(SCOPE);
 		var accepted = await acceptedKeys(session);
 		if (!accepted) {
-			pinsChecked = false;
+			if (!only) pinsChecked = false;
+			again();
 			if (window.console) console.warn('MailboxFortress: the relay check waits for your vault to be open on a page with the rotation\'s new key.');
 			return;
 		}
@@ -1059,6 +1075,8 @@ window.MailboxFortress = (function () {
 		} catch (e) {
 			// The server can withhold the check; it cannot forge its answer.
 			if (window.console) console.warn('MailboxFortress: the relay could not be asked about ' + box.address + ': ' + (e && e.message));
+			// A mailbox mid-move is asked again; its grace keeps running meanwhile.
+			if (typeof document !== 'undefined' && document.querySelector('[data-relay-switching="' + box.alias_id + '"]')) recheckSoon(box);
 			return;
 		}
 		// A mailbox this browser pinned before whose pin the server no longer
@@ -1066,6 +1084,25 @@ window.MailboxFortress = (function () {
 		var local = localPin(box.alias_id);
 		if (!answer.pin && local) answer = Object.assign({}, answer, { relay_identity_public_key: local });
 		var verdict = await judgeSealTarget(answer, box, accepted.macs, accepted.keys);
+		// The grace is for a mailbox this browser has never seen sealed to its
+		// key: no pin anywhere, since a pin is made only by an ok check. A relay
+		// put back on the transport key after that is what the alarm is for.
+		var neverSealed = !answer.pin && !local;
+		if (!verdict.ok && verdict.switching && neverSealed) {
+			if (stillSwitching(box.alias_id)) {
+				switchingNotice(box, true);
+				recheckSoon(box);
+				return;
+			}
+			// The grace ran out. Its record stays while the relay still seals to
+			// the transport key, so the next page alarms too instead of granting
+			// a fresh grace.
+			switchingNotice(box, false);
+			await relayAlarm(box, verdict, session);
+			return;
+		}
+		forgetSwitching(box.alias_id);
+		switchingNotice(box, false);
 		if (verdict.ok) {
 			rememberPin(box.alias_id, verdict.identity);
 			if (verdict.firstUse) {
@@ -1076,6 +1113,62 @@ window.MailboxFortress = (function () {
 		} else {
 			await relayAlarm(box, verdict, session);
 		}
+	}
+
+	// A mailbox just moved to Fortress: the relay keeps sealing to the server's
+	// transport key until this server's next routing push reaches it (at once
+	// as a rule, or the next cron pass). For that long this page says the move
+	// is finishing and asks again; past SWITCH_GRACE_MS the alarm stands, and
+	// stays on every later page until the relay seals to this key, so a server
+	// that kept the relay off it gains no more than the push gap. Only a
+	// mailbox never seen sealed here gets it (checkOne). The start is this
+	// browser's own record, which the server cannot reset; a server can as well
+	// withhold the check outright (checkOne's catch), so the grace hands it
+	// nothing it lacks.
+	var SWITCH_GRACE_MS = 5 * 60 * 1000, SWITCH_RECHECK_MS = 30 * 1000;
+	var SWITCH_SEEN = 'joinery-relay-switching:';
+	var switchSeen = {}, recheckTimer = null, recheckBoxes = {};
+	function stillSwitching(aliasId) {
+		var now = Date.now(), first = switchSeen[aliasId] || null;
+		try { first = first || parseInt(window.localStorage.getItem(SWITCH_SEEN + aliasId), 10) || null; } catch (e) { /* no storage here */ }
+		if (!first || first > now) {
+			first = now;
+			try { window.localStorage.setItem(SWITCH_SEEN + aliasId, String(now)); } catch (e) { /* no storage here */ }
+		}
+		switchSeen[aliasId] = first;
+		return now - first < SWITCH_GRACE_MS;
+	}
+	function forgetSwitching(aliasId) {
+		delete switchSeen[aliasId];
+		try { window.localStorage.removeItem(SWITCH_SEEN + aliasId); } catch (e) { /* no storage here */ }
+	}
+	/** Ask again about the mailboxes still switching, and only those: one with a standing alarm is not asked again. */
+	function recheckSoon(box) {
+		recheckBoxes[box.alias_id] = box;
+		if (recheckTimer) return;
+		recheckTimer = setTimeout(function () {
+			recheckTimer = null;
+			var boxes = Object.keys(recheckBoxes).map(function (k) { return recheckBoxes[k]; });
+			recheckBoxes = {};
+			checkRelayPins(boxes).catch(function () {});
+		}, SWITCH_RECHECK_MS);
+	}
+	/** The quiet note under the reader while a mailbox's move to Fortress reaches the relay. */
+	function switchingNotice(box, show) {
+		if (typeof document === 'undefined') return;
+		var el = document.querySelector('[data-relay-switching="' + box.alias_id + '"]');
+		if (!show) { if (el) el.parentNode.removeChild(el); return; }
+		if (el) return;
+		el = document.createElement('div');
+		el.className = 'mbx-relay-switching';
+		el.setAttribute('role', 'status');
+		el.setAttribute('data-relay-switching', String(box.alias_id));
+		el.textContent = box.address + ' is finishing its move to end-to-end encryption: the mail relay has not picked up '
+			+ 'your device key yet. Until it does, new mail is sealed to your key when this server collects it. '
+			+ 'This usually takes about a minute.';
+		var anchor = document.getElementById('mbx-reader');
+		if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(el, anchor);
+		else document.body.appendChild(el);
 	}
 
 	function savePin(session, box, identity) {

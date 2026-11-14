@@ -2692,11 +2692,16 @@ reasons not to switch the add-on on, not reasons to leave it half-on.
 is its whole surface.** `includes/protect_identity.php` owns the state transitions
 and nothing else; `mailbox_protect_handle_action()` runs any `protect_*` action
 posted to Setup and redirects back to the focused domain with a flash. The
-*Sending identity* box, at the foot of the focused domain's setup, holds the entire arc: what send protection
-buys and what it costs, the owner question when the raise could not guess, the
-publish step, the pre-flight verification, the switch, and afterwards the
-lifecycle (replace the key, switch over, cancel, turn off, and the return address
-behind a disclosure).
+*Sending identity* box holds the entire arc: who the signing key belongs to (asked
+when the raise could not guess, and changeable until protection is on), what send
+protection buys and what it costs, the publish step, the pre-flight verification,
+the switch, and afterwards the lifecycle (replace the key, switch over, cancel,
+turn off, and the return address behind a disclosure). It leads the page while it
+is the task — the ceremony is open, or the owner is still to be chosen — and sits
+at the foot of the focused domain's setup otherwise; either way it carries the
+`#sending-identity` anchor. Making the key carries `protect_setup`, so the next
+step opens at once. The domain editor only states who owns the key and links
+here, and the `domain.send_protection` row's fix links to the same place.
 
 The ceremony opens on an explicit gesture (`?protect_setup=1`). Only inside it
 does `dnsPlan($domain, true)` prescribe the protected shape; the DNS records and

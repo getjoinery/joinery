@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.3 - who owns the key is asked in the sending-identity panel, which leads Setup until answered
  * @version 1.2 - the sending-identity panel sits at the foot of Setup; no Advanced disclosure
  * @version 1.1 - the send-protection row and the finishing step follow the
  *   sending-lock add-on (asked for, then finished), not a level
@@ -609,12 +610,21 @@ class ProtectOptinTest {
 			check(strpos($panel, $act) !== false, $act . ' lives in the sending-identity panel');
 		}
 
-		// OWNERSHIP IS NOT A SETUP STEP. Who the signing key belongs to is a
-		// property of the domain, decided where the security level is. It was also
-		// the one control that never asked: the old Start-over button posted no
-		// owner, so it silently resealed the domain to whoever pressed it.
-		check(strpos($view, 'protect_generate') === false,
-			'the Setup tab hosts no key-ownership control at all');
+		// WHO OWNS THE KEY IS ASKED WHERE THE TASK IS. The Sending identity panel
+		// asks it by name, beside the steps it unblocks; the domain editor only
+		// states the answer and links there. Asking in one place and finishing in
+		// another sent people back and forth between the two pages. It was also
+		// once the one control that never asked: the old Start-over button posted
+		// no owner, so it silently resealed the domain to whoever pressed it.
+		check(strpos($panel, '$render_owner_form(') !== false,
+			'the owner question lives in the sending-identity panel');
+		$owner_form = substr($view, strpos($view, '$render_owner_form = function'));
+		$owner_form = substr($owner_form, 0, strpos($owner_form, "\n};"));
+		check(strpos($owner_form, "'value' => 'protect_generate'") !== false
+			&& strpos($owner_form, "'owner_user_id'") !== false,
+			'and it always asks who, rather than defaulting to the person clicking');
+		check(strpos($owner_form, "hiddeninput('protect_setup'") !== false,
+			'making the key lands on the next step, opened');
 		// The comment where it used to be still names it, deliberately — a future
 		// reader should find out why it went rather than reinvent it. So assert on
 		// the control, not the words.
@@ -622,31 +632,34 @@ class ProtectOptinTest {
 			'and the button that reassigned the owner without asking is gone');
 		$domains = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/admin/admin_mailbox_domains.php'));
-		check(strpos($domains, "'value' => 'protect_generate'") !== false,
-			'ownership is decided on the domain editor');
-		check(strpos($domains, "'owner_user_id'") !== false,
-			'and it always asks who, rather than defaulting to the person clicking');
+		check(strpos($domains, 'protect_generate') === false,
+			'the domain editor hosts no key-ownership control: one place for the task');
 		check(strpos($domains, 'The signing key belongs to') !== false,
-			'the owner is stated — it was written by the raise and shown on no screen');
+			'the owner is stated there — it was written by the raise and shown on no screen');
+		check(strpos($domains, '#sending-identity') !== false,
+			'and an unanswered owner links straight to the question');
 		$dlogic = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/logic/admin_mailbox_domains_logic.php'));
-		check(strpos($dlogic, 'mailbox_protect_handle_action') !== false,
-			'the domain page routes the action to protect_identity.php rather than reimplementing it');
+		check(strpos($dlogic, "=== 'protect_generate'") === false,
+			'nor does its logic route the action');
 		check(strpos($panel, 'Your vault is locked') !== false,
 			'the unlock gate is rendered before the press, not discovered by pressing');
 		check(substr_count($view, '$render_sending_identity = function ()') === 1,
 			'the panel is written once, not duplicated per position');
 
 		// WHATEVER IS BEING WORKED ON GOES TO THE TOP. The panel renders in one of
-		// two places and never both: at the top while the ceremony is open, at the
-		// foot of the domain's setup otherwise. A reload that dumps the operator at the top of a long
+		// two places and never both: at the top while the ceremony is open or the
+		// key's owner is still to be chosen, at the foot of the domain's setup
+		// otherwise. A reload that dumps the operator at the top of a long
 		// page, with the thing they just pressed still buried, is the jank this
 		// exists to remove.
 		check(substr_count($view, '$render_sending_identity();') === 2,
 			'the panel is called from exactly two places');
-		check(strpos($view, "if (\$setup_open) {\n\t\$render_sending_identity();") !== false,
-			'rendered at the top of the page while the ceremony is open');
-		check(strpos($view, "if (!\$setup_open) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
+		check(strpos($view, '$si_at_top   = $setup_open || $owner_needed;') !== false,
+			'the top is for the open ceremony and the unanswered owner');
+		check(strpos($view, "if (\$si_at_top) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
+			'rendered at the top of the page while it is the task');
+		check(strpos($view, "if (!\$si_at_top) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
 			'and at the foot of the domain\'s setup when it is not');
 
 		// ONE PUBLISH BOX AT A TIME. The ceremony renders its own, for the

@@ -1,7 +1,8 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.53 — contacts pane: .mbx-contact-edit pencils, .mbx-contacts-locked;
+ * Vanilla CSS, no framework. @version 2.54 — .mbx-relay-switching (a mailbox's move to Fortress reaching the relay)
+ * @version 2.53 — contacts pane: .mbx-contact-edit pencils, .mbx-contacts-locked;
  *   the add/import controls and the delete button are gone (the Contacts page has them)
  * @version 2.52 — .mbx-thread-purge removed (Trash rows show the received date)
  * @version 2.51 — .mbx-context-waiting (a slot held below a still-loading docked panel)
@@ -1148,6 +1149,15 @@
 }
 .mbx-catchup-text { color: #475569; }
 .mbx-catchup-progress { color: #64748b; }
+.mbx-relay-switching {
+	padding: 0.5rem 0.875rem;
+	margin: 0.5rem 0;
+	background: #f8fafc;
+	border: 1px solid #e2e8f0;
+	border-radius: 8px;
+	font-size: var(--mbx-text-sm);
+	color: #334155;
+}
 .mbx-catchup-btn {
 	margin-left: auto;
 	padding: 0.3rem 0.8rem;

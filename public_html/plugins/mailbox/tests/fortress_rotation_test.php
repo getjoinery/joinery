@@ -233,6 +233,33 @@ try {
 		&& $after['wrappings'][0]['wrapped_secret_key'] === 'root-wrapping-gen2',
 		'after commit the new key opens through the root, by its new wrapping alone');
 	check(in_array($rid . ':commit', $heard, true), 'the listener heard this rotation too');
+
+	// ------------------------------------------------------------ create
+	// Setting up the mail vault tells the same listeners, so the relay's map
+	// names the browser's key at once rather than at the next reconcile.
+	section('Setting up a mail vault tells the listeners');
+
+	require_once(PathHelper::getIncludePath('logic/vault_client_setup_logic.php'));
+	harness_set_setting_mem('passkeys_enabled', '1');
+	$cuser = make_user('RotateCreate');
+	$cpair = (new SealedBox())->generateKeypair();
+	$session = SessionControl::get_instance();
+	$session->set_api_user(intval($cuser->key));
+	try {
+		$created = vault_client_setup_logic(array(
+			'scope' => 'mail', 'acknowledged' => true, 'salt' => base64_encode(random_bytes(16)),
+			'public_key' => base64_encode(SealedBox::b64url_decode($cpair['public'])),
+			'wrappings' => array(array('unlocker_type' => 'root', 'wrapped_secret_key' => 'root-wrapping-create')),
+		));
+	} finally {
+		$session->clear_api_user();
+	}
+	$cvault = VaultClientCustody::loadVault(intval($cuser->key), 'mail');
+	if ($cvault !== null) {
+		harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($cvault->key));
+	}
+	check($cvault !== null, 'the mail vault is set up', (string)$created->error);
+	check(in_array(intval($cuser->key) . ':create', $heard, true), 'and the mail listener heard create');
 } catch (Throwable $e) {
 	check(false, 'unexpected ' . get_class($e) . ': ' . $e->getMessage());
 }

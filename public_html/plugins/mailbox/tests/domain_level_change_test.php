@@ -43,7 +43,7 @@ function dlc_domain(string $level, ?int $owner_id): InboundEmailDomain {
 }
 
 /** Post the editor's save for $domain at $level as $admin_id. */
-function dlc_save(InboundEmailDomain $domain, string $level, int $admin_id): LogicResult {
+function dlc_save(InboundEmailDomain $domain, string $level, int $admin_id, array $extra = array()): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->set_api_user($admin_id);
 	$was_method = $_SERVER['REQUEST_METHOD'] ?? null;
@@ -56,7 +56,7 @@ function dlc_save(InboundEmailDomain $domain, string $level, int $admin_id): Log
 			'ied_is_enabled' => '1',
 			'ied_catch_all_mode' => 'store',
 			'ied_security_level' => $level,
-		));
+		) + $extra);
 	} finally {
 		if ($was_method === null) { unset($_SERVER['REQUEST_METHOD']); } else { $_SERVER['REQUEST_METHOD'] = $was_method; }
 		$session->clear_api_user();
@@ -95,6 +95,36 @@ try {
 	check($r->redirect !== null && strpos($r->redirect, 'sealed_now=1') !== false,
 		'the raise redirects to the sealing receipt', (string)$r->redirect . ' ' . (string)($r->data['error'] ?? ''));
 	check(dlc_level($domain) === InboundEmailDomain::LEVEL_PRIVATE, 'and the domain is Private');
+} finally {
+	$db->rollBack();
+}
+
+// ---------------------------------------------------------------------------
+section('A raise that switches the sending lock on makes an obvious owner\'s key before its receipt');
+
+$db->beginTransaction();
+try {
+	$admin = make_user('DlcLocker', 10);
+	vault_fixture_server_vault(intval($admin->key));
+	$domain = dlc_domain(InboundEmailDomain::LEVEL_STANDARD, intval($admin->key));
+	// Mail stored before the raise: a backlog, so the save lands on the
+	// sealing receipt rather than handing off to Setup.
+	$m = new InboundEmailMessage(NULL);
+	$m->set('iem_ied_inbound_email_domain_id', intval($domain->key));
+	$m->set('iem_direction', 'inbound');
+	$m->set('iem_sender', 'sender@example.test');
+	$m->set('iem_recipient', 'inbox@' . $domain->get('ied_domain'));
+	$m->set('iem_subject', 'Before the raise');
+	$m->set('iem_body_plain', 'stored in the clear');
+	$m->save();
+	$send_field = ProtectionLevelPicker::addonFieldName('ied_security_level', ProtectionLevelPicker::ADDON_SEND_LOCK);
+	$r = dlc_save($domain, InboundEmailDomain::LEVEL_PRIVATE, intval($admin->key), array($send_field => '1'));
+	check($r->redirect !== null && strpos($r->redirect, 'sealed_now=1') !== false,
+		'the raise lands on the sealing receipt', (string)$r->redirect . ' ' . (string)($r->data['error'] ?? ''));
+	$after = new InboundEmailDomain(intval($domain->key), TRUE);
+	check($after->send_lock_requested() && (string)$after->get('ied_dkim_sealed_key') !== '',
+		'and the sending lock is on with its key made, sealed to the owner');
+	check(intval($after->get('ied_owner_usr_user_id')) === intval($admin->key), 'the owner is the stored owner');
 } finally {
 	$db->rollBack();
 }

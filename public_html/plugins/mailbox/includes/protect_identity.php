@@ -47,6 +47,8 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
+ * @version 1.6 - mailbox_protect_state() says whether the owner is obvious and whether the default owner has a vault
+ * @version 1.5 - the stored owner switching the lock on is the obvious owner, whoever else holds a mailbox
  * @version 1.4 - the stored owner is always a candidate and never replaced
  *                without a choice; generate and activate need a Private domain
  * @version 1.3 - the sending lock is an add-on: mailbox_protect_lift() is the one
@@ -102,15 +104,16 @@ function mailbox_protect_candidate_owners(InboundEmailDomain $domain, int $actin
 }
 
 /**
- * True when the key can be sealed without asking anything: the acting user is
- * the only candidate — the domain has no stored owner or is already theirs,
- * and no one else holds a mailbox on it. Anything else is somebody's decision,
- * and a stored owner is never replaced without one.
+ * True when the key can be sealed without asking anything: the domain already
+ * belongs to the acting user (its stored owner, who also holds its unmatched
+ * mail), or it has no stored owner and no one else holds a mailbox on it.
+ * Anything else is somebody's decision, and a stored owner is never replaced
+ * without one.
  */
 function mailbox_protect_owner_is_unambiguous(InboundEmailDomain $domain, int $acting_user_id): bool {
 	$stored_owner = intval($domain->get('ied_owner_usr_user_id'));
-	if ($stored_owner > 0 && $stored_owner !== $acting_user_id) {
-		return false;
+	if ($stored_owner > 0) {
+		return $acting_user_id > 0 && $stored_owner === $acting_user_id;
 	}
 	$candidates = mailbox_protect_candidate_owners($domain, $acting_user_id);
 	return count($candidates) === 1 && array_key_exists($acting_user_id, $candidates);
@@ -190,8 +193,16 @@ function mailbox_protect_state(InboundEmailDomain $domain, int $acting_user_id):
 	// and writes the column, show what sealing would write.
 	$stored = trim((string)$domain->get('ied_forwarding_subdomain'));
 	$stored_owner = intval($domain->get('ied_owner_usr_user_id'));
+	$default_owner = isset($owner_options[$stored_owner]) ? $stored_owner
+		: (isset($owner_options[$acting_user_id]) ? $acting_user_id : key($owner_options));
+	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	return array(
 		'is_protected'        => $domain->is_protected_identity(),
+		// Nothing to choose: the switch would have made this person's key, and
+		// only a missing vault stopped it (mailbox_protect_seal_new_key).
+		'owner_obvious'       => mailbox_protect_owner_is_unambiguous($domain, $acting_user_id),
+		'default_owner_has_vault' => intval($default_owner) > 0
+			&& UserEncryptionVault::loadForUser(intval($default_owner)) !== null,
 		'has_key'             => ((string)$domain->get('ied_dkim_sealed_key') !== ''),
 		'has_pending'         => ((string)$domain->get('ied_dkim_pending_sealed_key') !== ''),
 		'pending_selector'    => (string)$domain->get('ied_dkim_pending_selector'),
@@ -199,8 +210,7 @@ function mailbox_protect_state(InboundEmailDomain $domain, int $acting_user_id):
 			: 'fwd.' . strtolower((string)$domain->get('ied_domain')),
 		'owner_options'       => $owner_options,
 		// The stored owner first: the domain is already theirs.
-		'default_owner_id'    => isset($owner_options[$stored_owner]) ? $stored_owner
-			: (isset($owner_options[$acting_user_id]) ? $acting_user_id : key($owner_options)),
+		'default_owner_id'    => $default_owner,
 	);
 }
 

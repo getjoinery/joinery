@@ -456,9 +456,18 @@ try {
 		'the stored owner switching it on is');
 	check(mailbox_protect_state($owned, intval($other->key))['default_owner_id'] === intval($owner->key),
 		'the owner picker starts on the stored owner');
+	$reader = make_user('PaReader');
+	pa_grant_raw(intval(pa_alias($owned, 'pa_owned_shared')->key), intval($reader->key));
+	check(mailbox_protect_owner_is_unambiguous($owned, intval($owner->key)),
+		'the stored owner is still the obvious owner when someone else reads mail on the domain');
+	check(!mailbox_protect_owner_is_unambiguous($owned, intval($reader->key)),
+		'and that reader switching it on is not');
 	$unowned = pa_domain('private', array('ied_send_lock_requested' => true));
 	check(mailbox_protect_owner_is_unambiguous($unowned, intval($other->key)),
 		'a domain with no owner and no holders still belongs to whoever sets it up');
+	pa_grant_raw(intval(pa_alias($unowned, 'pa_unowned_shared')->key), intval($reader->key));
+	check(!mailbox_protect_owner_is_unambiguous($unowned, intval($other->key)),
+		'a domain with no owner whose mailboxes someone else holds is asked about');
 } finally {
 	$db->rollBack();
 }

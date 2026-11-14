@@ -16,7 +16,8 @@
  *
  * This tab is also the whole surface for outbound send protection — there is no
  * separate ceremony page — ALL of it lives in the Sending identity box, at the
- * foot of the focused domain's setup: the offer, the cost, the publish step, the switch, and the
+ * foot of the focused domain's setup (at its top while it is the task): who owns
+ * the key, the offer, the cost, the publish step, the switch, and the
  * lifecycle afterwards. Send protection is the "Only send while I'm signed in"
  * add-on, switched on in the domain editor: a Private domain that never asked
  * for it is finished as it is, and this box appears only once it has been asked
@@ -26,6 +27,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.20 - who owns the signing key is chosen in the Sending identity box (and changed there
+ *                until protection is on); while it is unanswered the box leads the page
  * @version 3.19 - no Advanced section: server-wide work is the Server tab; the Sending identity
  *                box and a finished domain's publish box sit at the foot of the domain's setup
  * @version 3.18 - a site container has no mail identity box (it has no mail server)
@@ -138,14 +141,19 @@ $page->end_box();
 // looking for — but the moment an operator opens the ceremony, it is the task,
 // and leaving it at the foot meant every press reloaded the page to the top and
 // sent them scrolling back down to find where they were. So the same box
-// renders in one of two places: at the top while the ceremony is open, and at
-// the foot otherwise.
+// renders in one of two places: at the top while the ceremony is open or the
+// key's owner is still to be chosen, and at the foot otherwise.
 //
 // Defined once as a closure rather than written twice, because two copies of a
 // 170-line panel is how they drift apart.
 $prot_hidden = array('ied_inbound_email_domain_id' => (int)($focus_domain_id ?? 0));
 $setup_open  = !empty($protect_setup) && !empty($protect)
 	&& empty($protect['is_protected']) && !empty($protect['has_key']);
+// Asked for, and waiting on who owns the key: nothing else about send
+// protection can start until that is answered, so it is the task too.
+$owner_needed = !empty($protect) && $focus_domain !== ''
+	&& empty($protect['is_protected']) && empty($protect['has_key']);
+$si_at_top   = $setup_open || $owner_needed;
 $focus_qs    = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
 	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
 $focus_base  = $base . $focus_qs;
@@ -153,9 +161,28 @@ $setup_url   = $focus_base . ($focus_qs !== '' ? '&' : '?') . 'protect_setup=1';
 // Leaving puts the box back at the foot of the page, and lands on it.
 $leave_url   = $focus_base . '#sending-identity';
 
+// Who the key belongs to. The owner is the only person who can ever send as the
+// domain, so it is asked rather than guessed whenever more than one person
+// could be it; the answer is given here, beside the steps it unblocks. The form
+// carries protect_setup, so making the key lands on the next step, opened at
+// the top of the page.
+$render_owner_form = function (string $button, int $value) use ($page, $protect, $self_url, $focus_domain_id) {
+	$own_form = $page->getFormWriter('domain_owner_form', array('action' => $self_url));
+	echo $own_form->begin_form();
+	$own_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => (int)$focus_domain_id));
+	$own_form->hiddeninput('action', '', array('value' => 'protect_generate'));
+	$own_form->hiddeninput('protect_setup', '', array('value' => '1'));
+	$own_form->dropinput('owner_user_id', 'Key belongs to', array(
+		'options' => $protect['owner_options'],
+		'value'   => $value,
+	));
+	$own_form->submitbutton('btn_domain_owner', $button);
+	echo $own_form->end_form();
+};
+
 $render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
-		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check) {
+		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check, $render_owner_form) {
 // --- Sending identity (the sending-lock add-on) ---
 // THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
 // (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
@@ -267,15 +294,37 @@ if (!empty($protect) && $focus_domain !== '') {
 	// No key at all. Switching the lock on seals one automatically, so this
 	// only happens where it could not guess: a domain whose mailboxes already
 	// have holders, where the admin switching it on need not be the person who
-	// reads the mail. The ANSWER is given on the domain editor, because who owns
-	// the key is a property of the domain rather than a step in setting it up.
+	// reads the mail. Asked here, first thing in the box.
 	if (!$protect['is_protected'] && empty($protect['has_key'])) {
-		echo '<p class="mb-2">This domain has no signing key yet, because more than one person could own it — '
-			. 'and only its owner will ever be able to send as ' . htmlspecialchars($focus_domain) . '. '
-			. 'That is decided on the domain itself; nothing here can start until it is answered.</p>';
-		echo '<p class="mb-0"><a class="btn btn-primary" '
-			. 'href="/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
-			. (int)$focus_domain_id . '">Choose who this key belongs to</a></p>';
+		if (!empty($protect['owner_obvious']) && empty($protect['default_owner_has_vault'])) {
+			// The key would have been made when the switch was flipped; the only
+			// thing missing is the vault it is locked inside.
+			echo '<p class="mb-2"><strong>First, set up your vault.</strong> The key that signs mail as '
+				. htmlspecialchars($focus_domain) . ' is locked inside it, so it has to exist before the key can '
+				. 'be made. <a class="btn btn-sm btn-primary ms-2" href="/profile/security">Set up my vault</a></p>';
+			echo '<p class="text-muted small mb-2">Then make the key here. It publishes nothing and changes no mail.</p>';
+		} else {
+			echo '<p class="mb-2"><strong>First, choose who this domain\'s signing key belongs to.</strong> Only '
+				. 'the key\'s owner will ever be able to send as ' . htmlspecialchars($focus_domain) . ', and more '
+				. 'than one person could be it. Making the key publishes nothing and changes no mail.</p>';
+			if (empty($protect['default_owner_has_vault'])) {
+				echo '<p class="text-muted small mb-2">The owner needs a vault first: the key is locked inside it.</p>';
+			}
+		}
+		$render_owner_form('Make the key', (int)$protect['default_owner_id']);
+	} elseif (!$protect['is_protected']) {
+		// CHANGING THE OWNER MEANS A NEW KEY, unavoidably: the current one is
+		// sealed to its owner's vault, and re-sealing it to somebody else would
+		// need the plaintext, which only that owner can produce. Say so, because
+		// the published DNS record has to be replaced afterwards. Once
+		// protection is on, protect_generate refuses: lift it first.
+		echo '<details class="mb-2"><summary class="fix-toggle small">Change who this key belongs to</summary>';
+		echo '<div class="mt-2">';
+		echo '<p class="text-muted small">The key that exists is locked to its owner\'s vault and cannot be '
+			. 'handed to anyone else, so choosing a different person makes a fresh one. Its DNS record changes '
+			. 'with it and has to be republished. Nothing is enforced yet, so no mail is affected.</p>';
+		$render_owner_form('Make a new key for this person', (int)$protect['default_owner_id']);
+		echo '</div></details>';
 	}
 
 	if (!empty($protect['has_pending'])) {
@@ -306,8 +355,7 @@ if (!empty($protect) && $focus_domain !== '') {
 	// resealed the domain to whoever pressed it. On a domain with two holders
 	// that took the sending identity away from the other, with no warning.
 	//
-	// Who the key belongs to is a property of the domain, so it is decided on the
-	// domain editor, where the level is chosen and the owner can be named.
+	// Who the key belongs to is asked by name, in the owner form above.
 	if ($protect['is_protected']) {
 		// "Send protection", not "protection": turning this off does not stop
 		// arriving mail being sealed, and a confirm that reads as though it
@@ -354,8 +402,10 @@ if (!empty($protect) && $focus_domain !== '') {
 };
 
 // The active task, first on the page.
-if ($setup_open) {
+if ($si_at_top) {
+	echo '<div id="sending-identity">';
 	$render_sending_identity();
+	echo '</div>';
 }
 
 // --- Machine sender ceremony (specs/mailbox_machine_sender_card.md) ---------
@@ -675,8 +725,8 @@ if ($selected) {
 // =====================================================================
 // The foot of the domain's setup: optional undertakings and finished business
 // =====================================================================
-// Rendered at the top instead while the ceremony is open — see the closure.
-if (!$setup_open) {
+// Rendered at the top instead while it is the task — see the closure.
+if (!$si_at_top) {
 	echo '<div id="sending-identity">';
 	$render_sending_identity();
 	echo '</div>';

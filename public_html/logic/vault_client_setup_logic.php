@@ -52,9 +52,14 @@ function vault_client_setup_logic(array $input): LogicResult {
 	// takes it from the next page (the setup ceremony said so beforehand).
 	$session->forget_vault_posture();
 
+	// The scope's sealing key now exists: a consumer that publishes it (mail's
+	// relay routing map) hears it at once, not at its next periodic pass.
+	VaultUnlock::clientRotationChanged($user_id, $scope, 'create');
+
 	return LogicResult::render(['set_up' => true, 'scope' => $scope, 'vault_id' => (int)$vault->key]);
 }
 
+// @version 1.2 - tells the scope's key listeners the key exists (VaultUnlock::clientRotationChanged 'create')
 // @version 1.1 - the floor and the root's code pairing move to VaultClientCustody::createVault()
 function vault_client_setup_logic_descriptor() {
 	return [

@@ -54,6 +54,7 @@
  * credential's revocation (lockCredentialWindow()) end it; signing out of one
  * browser does not.
  *
+ * @version 1.32 - onClientRotation() listeners also hear 'create', when a client-custody scope's vault is set up
  * @version 1.31 - modelReseal() re-seals each model in batches (security_weak_spots_2026_11 WP2)
  * @version 1.30 - a window lock() ends for this request's own session sends X-Joinery-Vault: locked, so the page
  *   announces the lock at once rather than at the next presence beat (the partly-locked gap)
@@ -1728,12 +1729,13 @@ class VaultUnlock {
 	private static $client_rotation_callbacks = array();
 
 	/**
-	 * Be told when a rotation of client-custody $scope begins and when it
-	 * commits: $callback(int $user_id, string $phase), $phase 'begin' or
-	 * 'commit', called after the change is stored. For a consumer that
-	 * publishes the scope's sealing key elsewhere (mail's relay routing map),
-	 * which changes at begin (UserEncryptionVault::sealingPublicKey() turns to
-	 * the pending key) and again at commit.
+	 * Be told when client-custody $scope's sealing key first exists and when a
+	 * rotation of it begins and commits: $callback(int $user_id, string $phase),
+	 * $phase 'create', 'begin' or 'commit', called after the change is stored.
+	 * For a consumer that publishes the scope's sealing key elsewhere (mail's
+	 * relay routing map), which appears at create and changes at begin
+	 * (UserEncryptionVault::sealingPublicKey() turns to the pending key) and
+	 * again at commit.
 	 */
 	public static function onClientRotation(string $scope, callable $callback): void {
 		self::$client_rotation_callbacks[$scope][] = $callback;

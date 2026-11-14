@@ -13,6 +13,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.13 - the Protected sending identity box states who owns the key and links to Setup, where it is chosen
  * @version 4.12 - no inline script: the Fortress gate, receipt title, unseal loop and ceremony gating are assets/admin_domains.js
  * @version 4.11 - Set up a relay opens the Server tab
  * @version 4.10 - the catch-all address says it must confirm (and that a sealed level keeps the mail
@@ -492,84 +493,43 @@ if ($show_form) {
 	}
 
 	// Protected sending identity — once the sending lock is asked for, or on.
-	//
-	// WHO THE KEY BELONGS TO IS DECIDED HERE. It is a property of the domain, not
-	// a step in setting one up: Setup is where you publish records, verify them
-	// and switch protection on. Until now the owner was written by the raise,
-	// read by MailboxDkimSigner, and shown on no screen at all — for the one
-	// value that decides who can ever send as this domain.
-	//
-	// Turning protection on, replacing a key and lifting protection all stay on
-	// the Setup tab. This box states the fact and owns the one decision.
+	// The domain states who its signing key belongs to; choosing or changing
+	// that, publishing, verifying and switching protection on all happen in the
+	// Sending identity box on the Setup tab, one place for the whole task.
 	if ($edit_domain && $edit_domain->key && !$edit_domain->get('ied_is_imap_source')
 			&& ($edit_domain->send_lock_requested() || $edit_domain->is_protected_identity())) {
 		$page->begin_box(array('title' => 'Protected sending identity'));
 		$dom_key = (int)$edit_domain->key;
 		$has_key = !empty($protect) && !empty($protect['has_key']);
+		$setup_link = '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . $dom_key;
 
 		if ($edit_domain->is_protected_identity()) {
 			echo '<p class="alert alert-success">Send protection is on — while you are signed out, nothing on this server '
 				. 'can send mail as this domain that anyone will accept.</p>';
+		} elseif (!$has_key) {
+			echo '<p>You asked for <strong>Only send while I\'m signed in</strong>. This domain has no signing key '
+				. 'yet: Setup says what it is waiting for (who owns it, or the vault it is locked inside). Only the '
+				. 'key\'s owner will ever be able to send as this domain.</p>';
+			$setup_link .= '#sending-identity';
 		} else {
 			echo '<p>You asked for <strong>Only send while I\'m signed in</strong>. It is not on yet: finish it '
-				. 'under Sending identity on the Setup tab, or switch it off above and this domain is finished as '
-				. 'it is.</p>';
+				. 'on the Setup tab, or switch it off above and this domain is finished as it is.</p>';
+			$setup_link .= '&protect_setup=1';
 		}
 
 		if ($has_key) {
 			echo '<p class="mb-2"><strong>The signing key belongs to '
 				. htmlspecialchars($owner_label !== '' ? $owner_label : 'somebody who is no longer listed here')
-				. '.</strong> Only that person can send as this domain once send protection is on.</p>';
+				. '.</strong> Only that person can send as this domain once send protection is on.'
+				. ($edit_domain->is_protected_identity()
+					? ' To hand it to someone else, turn send protection off on the Setup tab first.'
+					: ' You can change who it belongs to on the Setup tab until then.')
+				. '</p>';
 		}
 
-		if (!empty($protect) && !$has_key) {
-			// Switching the lock on seals a key automatically and only fails to when
-			// it cannot guess: a domain whose mailboxes already have holders, where
-			// the admin switching it on need not be the person who reads the mail.
-			echo '<p class="mb-2">This domain has no signing key yet, because more than one person could own it '
-				. '— and only its owner will ever be able to send as this domain. That is not ours to guess.</p>';
-			$own_form = $page->getFormWriter('domain_owner_form');
-			echo $own_form->begin_form();
-			$own_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => $dom_key));
-			$own_form->hiddeninput('action', '', array('value' => 'protect_generate'));
-			$own_form->dropinput('owner_user_id', 'Key belongs to', array(
-				'options' => $protect['owner_options'],
-				'value'   => $protect['default_owner_id'],
-			));
-			$own_form->submitbutton('btn_domain_owner', 'Make the key');
-			echo $own_form->end_form();
-		} elseif ($has_key && !$edit_domain->is_protected_identity()) {
-			// CHANGING THE OWNER MEANS A NEW KEY, unavoidably: the current one is
-			// sealed to its owner's vault, and re-sealing it to somebody else would
-			// need the plaintext, which only that owner can produce. Say so, because
-			// the published DNS record has to be replaced afterwards.
-			echo '<details class="mb-2"><summary class="fix-toggle small">Change who this key belongs to</summary>';
-			echo '<div class="mt-2">';
-			echo '<p class="text-muted small">The key that exists is locked to its owner\'s vault and cannot be '
-				. 'handed to anyone else, so choosing a different person makes a fresh one. Its DNS record changes '
-				. 'with it and has to be republished. Nothing is enforced yet, so no mail is affected.</p>';
-			$own_form = $page->getFormWriter('domain_owner_form');
-			echo $own_form->begin_form();
-			$own_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => $dom_key));
-			$own_form->hiddeninput('action', '', array('value' => 'protect_generate'));
-			$own_form->dropinput('owner_user_id', 'Key belongs to', array(
-				'options' => $protect['owner_options'],
-				'value'   => (int)$edit_domain->get('ied_owner_usr_user_id') ?: $protect['default_owner_id'],
-			));
-			$own_form->submitbutton('btn_domain_owner', 'Make a new key for this person');
-			echo $own_form->end_form();
-			echo '</div></details>';
-		} elseif ($has_key) {
-			// Protection is ON. A new key here would stop the domain sending until
-			// its record was republished, and protect_generate refuses outright —
-			// so offer the honest route rather than a control that gets rejected.
-			echo '<p class="text-muted small mb-2">To hand this domain to a different owner, turn send protection '
-				. 'off first under Sending identity on the Setup tab, then change it here. Replacing the key while '
-				. 'keeping the same owner is a separate action there, and keeps mail working throughout.</p>';
-		}
-
-		echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_setup?domain_id='
-			. $dom_key . '">Go to setup for this domain</a>';
+		echo '<a class="btn btn-primary" href="' . htmlspecialchars($setup_link) . '">'
+			. ($has_key || $edit_domain->is_protected_identity() ? 'Go to setup for this domain' : 'Make the signing key')
+			. '</a>';
 		$page->end_box();
 	}
 } // end show_form

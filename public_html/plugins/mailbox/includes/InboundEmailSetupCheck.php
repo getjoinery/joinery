@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.62 - the send-protection fix links straight to the task (the owner question or the ceremony)
  * @version 1.61 - the Sending route row is INFO while nothing forwards: only forwarded mail takes it
  * @version 1.60 - relay and send-protection fixes name the Server tab and the Sending identity box;
  *                 a missing relay MX hostname says where it is recorded
@@ -3438,6 +3439,13 @@ class InboundEmailSetupCheck {
 		// mail is being rejected, accepted by the provider and discarded
 		// downstream where nobody sees a bounce. Every other state here is a gap;
 		// this one is an outage.
+		// The fix opens the task itself: the ceremony when the key exists, or
+		// the owner question that comes before it (the Sending identity box
+		// leads the Setup page while that is unanswered).
+		$finish = array('url' => '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$model->key
+				. (((string)$model->get('ied_dkim_sealed_key') !== '') ? '&protect_setup=1' : '#sending-identity'),
+			'label' => 'Finish send protection');
+
 		if (!$signing && $strict) {
 			return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
 				'Your DNS is rejecting your own mail from ' . $domain . '.',
@@ -3445,9 +3453,9 @@ class InboundEmailSetupCheck {
 				. 'sealed key did not sign — but send protection is off, so nothing is signing with that key. '
 				. 'Mail leaving this domain is being accepted by your provider and then discarded by the '
 				. 'recipient, usually with no bounce you would see.',
-				array('text' => 'Two ways out, and either is fine: finish turning send protection on (the Sending '
-					. 'identity box at the foot of this domain\'s Setup page), which makes the published records correct — or restore the '
-					. 'ordinary records so mail flows the normal way. Do one of them now; this state sends nothing.'));
+				array('text' => 'Two ways out, and either is fine: finish turning send protection on, which makes '
+					. 'the published records correct — or restore the ordinary records so mail flows the normal way. '
+					. 'Do one of them now; this state sends nothing.', 'link' => $finish));
 		}
 
 		if (!$signing) {
@@ -3456,8 +3464,8 @@ class InboundEmailSetupCheck {
 					. ' — anyone can still send as this domain.',
 				'You asked for nobody to be able to send mail claiming to be you — including someone who has '
 				. 'broken into this server. That is send protection, and it is not on yet.',
-				array('text' => 'Finish it in the Sending identity box at the foot of this domain\'s Setup page. Nothing changes for your mail '
-					. 'until the last step, and you can stop at any point.'));
+				array('text' => 'Nothing changes for your mail until the last step, and you can stop at any point.',
+					'link' => $finish));
 		}
 
 		if (!$strict) {

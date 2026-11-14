@@ -1,4 +1,5 @@
 <?php
+// @version 1.8 - switching the sending lock on makes the key before a raise's receipt landing
 // @version 1.7 - a catch-all forwarding address is asked to confirm, and the editor can resend
 //   the request (specs/relay_receive_only_forwarding.md)
 // @version 1.6 - a level change runs through ProtectionLevelChange (MailboxDomainLevel); levels are ProtectionLevel's
@@ -529,6 +530,27 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . (int)$domain->key);
 			}
 
+			// Switching the sending lock on makes the signing key here rather than
+			// asking for it, BEFORE any of the landings below: a raise lands on its
+			// receipt, and a key made only on the Setup hand-off was never made for
+			// a raise that switched the lock on in the same save. Sealing needs only
+			// the owner's public key, so no unlock window is required, and a key
+			// that exists publishes nothing and changes no mail — the operator's
+			// confirmation belongs on activate, where enforcement starts. Skipped
+			// when someone else could be the owner: the key binds to ONE person for
+			// good, and the admin switching the lock on need not be the person who
+			// reads the mail. The Sending identity box on Setup asks then.
+			if ($domain->send_lock_outstanding() && (string)$domain->get('ied_dkim_sealed_key') === '') {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+				if (mailbox_protect_owner_is_unambiguous($domain, $acting_user_id)) {
+					$key_error = mailbox_protect_seal_new_key($domain, $acting_user_id);
+					if ($key_error !== null) {
+						error_log('mailbox: switching the sending lock on could not seal a signing key for '
+							. $domain_name . ': ' . $key_error);
+					}
+				}
+			}
+
 			// Raising the level revokes every forwarding acknowledgment on this
 			// domain (specs/implemented/sealed_content_egress.md § resolved decision 7).
 			// Agreeing to send this domain's mail out in clear text was agreed at
@@ -595,22 +617,6 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// automated-mail subdomain), and it is a place the operator can
 			// navigate back to. The ceremony is one button away from there.
 			if ($domain->send_lock_outstanding()) {
-				// Make the signing key here rather than asking for it. Sealing needs
-				// only the owner's public key, so no unlock window is required, and
-				// a key that exists publishes nothing and changes no mail — the
-				// operator's confirmation belongs on activate, where enforcement
-				// starts. Skipped when the domain has mailbox holders: the key binds
-				// to ONE person for good, and the admin switching the lock on need
-				// not be the person who reads the mail. The protect page asks then.
-				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
-				if ((string)$domain->get('ied_dkim_sealed_key') === ''
-						&& mailbox_protect_owner_is_unambiguous($domain, $acting_user_id)) {
-					$key_error = mailbox_protect_seal_new_key($domain, $acting_user_id);
-					if ($key_error !== null) {
-						error_log('mailbox: switching the sending lock on could not seal a signing key for '
-							. $domain_name . ': ' . $key_error);
-					}
-				}
 				$session->save_message(new DisplayMessage(
 					'Domain saved. Finish the sending lock: publish the protected DNS records and turn on send protection.',
 					'Saved',
@@ -637,22 +643,6 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 				'session' => $session,
 				'settings' => $settings,
 			));
-		}
-	}
-
-	// WHO THE SIGNING KEY BELONGS TO IS A PROPERTY OF THE DOMAIN, so its control
-	// lives here rather than in the Setup tab's ceremony. Setup is where you
-	// publish, verify and switch on; ownership is decided where the level is.
-	// The transitions themselves still belong to protect_identity.php — this only
-	// routes the action and comes back to the domain being edited.
-	if (($input['action'] ?? '') === 'protect_generate') {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
-		$owner_domain_id = (int)($input['ied_inbound_email_domain_id'] ?? 0);
-		$owner_return = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
-			. $owner_domain_id;
-		$owner_redirect = mailbox_protect_handle_action($input, $session, $owner_return);
-		if ($owner_redirect !== null) {
-			return $owner_redirect;
 		}
 	}
 

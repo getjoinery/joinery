@@ -2193,11 +2193,12 @@ session opens — unreadable before the rotation too — is left and reported wi
 manager its store key through `vault/keyring_replace` (accepted only while a
 rotation is pending; `keyring_save` stays create-only).
 
-A consumer that publishes a scope's sealing key somewhere else hears the
-rotation through `VaultUnlock::onClientRotation($scope, fn(int $user_id, string
-$phase))`, called with `'begin'` and `'commit'` once each is stored; a listener
-that throws is logged and changes nothing. The mailbox uses it to push the
-relay routing map for `mail`.
+A consumer that publishes a scope's sealing key somewhere else hears it
+through `VaultUnlock::onClientRotation($scope, fn(int $user_id, string
+$phase))`, called with `'create'` when the vault is set up and `'begin'` and
+`'commit'` as a rotation stores each step; a listener that throws is logged and
+changes nothing. The mailbox uses it to push the relay routing map for `mail`,
+so a new Fortress mailbox's relay seals to the browser's key from the start.
 
 A consumer whose published key something may still be sealing to can hold the
 commit back: `VaultUnlock::onClientRotationCommit($scope, fn(int $user_id):
