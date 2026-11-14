@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.12 - a full-width bar above the list leads to the Marketplace (AdminPage::marketplace_bar)
 // @version 1.11 - the upload box offers a sandboxed plugin only while they are switched on (SandboxPlugins::enabled())
 // @version 1.10 - each action is a single-button POST form or a link; the page's script is assets/js/admin-plugins.js (no inline script)
 // @version 1.9 - the host setup line says whether the plugin declares a host remover; an uninstalled plugin's row
@@ -156,6 +157,8 @@ $page->begin_box(array('altlinks' => $altlinks));
             </div>
         </div>
         <?php endif; ?>
+
+        <?php echo AdminPage::marketplace_bar('plugins'); ?>
 
         <?php if (empty($plugins)): ?>
             <div class="alert alert-warning">

@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.6 - a full-width bar above the list leads to the Marketplace (AdminPage::marketplace_bar)
 // @version 1.5 - each action is a single-button POST form (no javascript: links, no inline script)
 // @version 1.4 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited theme (specs/local_edits_detected.md)
 // @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Allow upgrade asks first (specs/package_replace_on_upload.md WP2, WP3)
@@ -116,6 +117,8 @@ $page->begin_box(array('altlinks' => $altlinks));
             </div>
             <?php endif; ?>
             
+            <?= AdminPage::marketplace_bar('themes') ?>
+
             <!-- Themes Table -->
             <h3>Installed Themes (<?= count($themes) ?>)</h3>
             <p class="mb-3">

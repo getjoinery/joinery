@@ -13,6 +13,7 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.8 - marketplace_bar(): the full-width Add bar on the Plugins and Themes pages
  * @version 1.7 - admin_header takes no menu-id (the tier edit page warned)
  * @version 1.6 - the root request panel's poller is assets/js/root-request.js (no inline script)
  * @version 1.5 - email_audience_table() lists direct messages; direct_messages_to()
@@ -61,6 +62,30 @@ class AdminPage extends PublicPage {
 	 * @param string|null $current Label of the calling page's tab
 	 * @return string HTML
 	 */
+	/**
+	 * The full-width bar at the top of the Plugins and Themes pages that
+	 * leads to the Marketplace. Those pages list only what is already on this
+	 * site, so without the bar an extension the upgrade source offers looks
+	 * as though it does not exist.
+	 *
+	 * @param string $type 'plugins' or 'themes'
+	 * @return string HTML
+	 */
+	public static function marketplace_bar($type) {
+		$noun = $type === 'themes' ? 'themes' : 'plugins';
+		$source = MarketplaceClient::source();
+		$host = $source !== null ? (string)parse_url($source, PHP_URL_HOST) : '';
+		$text = $host !== ''
+			? 'More ' . $noun . ' are available from ' . htmlspecialchars($host) . '. This list shows only the ones on this site.'
+			: 'No upgrade source is set, so no other ' . $noun . ' can be added from here.';
+		$button = $host !== ''
+			? '<a href="/admin/admin_marketplace" class="btn btn-primary">Add ' . $noun . '</a>'
+			: '';
+		return '<div class="card mb-4"><div class="card-body d-flex flex-wrap gap-2 justify-content-between align-items-center">'
+			. '<span>' . $text . '</span>' . $button
+			. '</div></div>';
+	}
+
 	/**
 	 * The live view of a queued root request.
 	 *
