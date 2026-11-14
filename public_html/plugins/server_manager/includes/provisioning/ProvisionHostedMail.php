@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.8 - the mail push carries the DKIM key name from the provider's records (dkim_key_name, B7)
  * @version 1.7 - a test site's mail goes to its plane's trap (server_manager_test_site_mail_trap), sent with
  *   its credential and confirmed by the site before the leg is done
  * @version 1.6 - the subaccount gets its own webhook (Smtp2GoLeg::ensureWebhook)
@@ -483,7 +484,8 @@ class ProvisionHostedMail {
 			// response; here they travel to the node's own settings script.
 			$built = JobCommandBuilder::build_hosted_mail_settings($node,
 				Smtp2GoLeg::sendValues($username, $password, $sender)
-					+ array('test_recipient' => self::test_trap($provision)));
+					+ array('test_recipient' => self::test_trap($provision),
+						'dkim_key_name' => self::dkim_key_name($provision)));
 		} catch (Throwable $e) {
 			$this->note_transient($provision, 'Cannot push mail settings — ' . $e->getMessage());
 			return false;
@@ -534,6 +536,25 @@ class ProvisionHostedMail {
 		$raw = $provision->get('cvp_mail_records');
 		if (is_string($raw)) { $raw = json_decode($raw, true); }
 		return is_array($raw) ? $raw : array();
+	}
+
+	/**
+	 * The DKIM key name (selector) the provider signs this site's mail with:
+	 * the label before ._domainkey. in its DKIM record (SMTP2GO's s<id>), or ''.
+	 * The site's mail check looks for the key there (hosting_launch B7).
+	 */
+	public static function dkim_key_name($provision): string {
+		foreach (self::records_of($provision) as $record) {
+			$name = strtolower(trim((string)($record['name'] ?? '')));
+			$at = strpos($name, '._domainkey.');
+			if ($at !== false && $at > 0) {
+				$label = substr($name, 0, $at);
+				if (preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/', $label)) {
+					return $label;
+				}
+			}
+		}
+		return '';
 	}
 
 	/** The managed-domain row for this domain, or null when we do not hold it. */

@@ -355,6 +355,39 @@ try {
 } catch (Exception $e) { $err = $e->getMessage(); }
 check($err !== null, 'a trap that is not one address is refused', (string)$err);
 
+// B7: the provider's DKIM key name, read from its records, goes to an agent
+// that takes it; an older agent's push is the same as before.
+$key_prov = new CustomerCloudProvision(NULL);
+$key_prov->set('cvp_mail_records', json_encode(array(
+	array('name' => 'em1217236.st1.example.com', 'type' => 'CNAME', 'value' => 'return.smtp2go.net'),
+	array('name' => 's1217236._domainkey.st1.example.com', 'type' => 'CNAME', 'value' => 'dkim.smtp2go.net'))));
+check(ProvisionHostedMail::dkim_key_name($key_prov) === 's1217236', 'the DKIM key name is read from the provider\'s records');
+$key_prov->set('cvp_mail_records', json_encode(array()));
+check(ProvisionHostedMail::dkim_key_name($key_prov) === '', 'no DKIM record, no key name');
+$key_node = ht_node('httest-key-' . $suffix);
+$key_node->set('mgn_agent_version', JobCommandBuilder::HOSTED_MAIL_KEY_NAME_AGENT);
+$key_node->save();
+$keyed = JobCommandBuilder::build_hosted_mail_settings($key_node, array(
+	'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525, 'dkim_key_name' => 's1217236'));
+check(($keyed['params']['dkim_key_name'] ?? '') === 's1217236', 'an agent that takes it is sent the DKIM key name');
+$unkeyed = JobCommandBuilder::build_hosted_mail_settings($trap_node, array(
+	'service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525, 'dkim_key_name' => 's1217236'));
+check(!array_key_exists('dkim_key_name', $unkeyed['params']), 'an older agent is not sent it, so its push still goes');
+$err = null;
+try {
+	JobCommandBuilder::build_hosted_mail_settings($key_node, array('service' => 'smtp', 'host' => 'mail.smtp2go.com',
+		'dkim_key_name' => 's1._domainkey.example.com'));
+} catch (Exception $e) { $err = $e->getMessage(); }
+check($err !== null, 'a key name that is not one DNS label is refused', (string)$err);
+
+// The site's mail check tries the key name it was told first.
+require_once(PathHelper::getIncludePath('includes/DnsAuthChecker.php'));
+harness_set_setting_mem('smtp_dkim_key_name', 's1217236');
+$assessed = DnsAuthChecker::assess('b7-' . $suffix . '.invalid', 'smtp');
+check(($assessed['service_key_names'][0] ?? '') === 's1217236', 'the mail check looks first under the key name the plane sent',
+	json_encode($assessed['service_key_names']));
+harness_set_setting_mem('smtp_dkim_key_name', '');
+
 // The site writes it: test mode on, to the trap. An empty one writes nothing,
 // because test mode is also a switch an owner may set for themselves.
 $was_mode = Globalvars::get_instance()->get_setting('email_test_mode', false, true);
@@ -381,6 +414,8 @@ section('The node-side scripts own the names, and refuse what they do not know')
 
 foreach (array(
 	array('utils/hosted_mail_settings.php', array('service' => 'nonsense'), 'HOSTED_MAIL_SETTINGS=error'),
+	array('utils/hosted_mail_settings.php', array('service' => 'smtp', 'host' => 'mail.smtp2go.com',
+		'dkim_key_name' => 's1._domainkey.example.com'), 'HOSTED_MAIL_SETTINGS=error'),
 	array('utils/hosted_plan_notice.php',   array('state' => 'suspended'),  'HOSTED_PLAN_NOTICE=error'),
 ) as $case) {
 	list($rel, $payload, $marker) = $case;
@@ -708,6 +743,22 @@ check(!$copy_row->is_sold() && !$shard_row->is_sold(), 'a site copy and a relay 
 $sold_ids = array_map(function ($p) { return (int)$p->key; }, HostedTrialWatch::sold_sites());
 check(!in_array((int)$copy_row->key, $sold_ids, true) && !in_array((int)$shard_row->key, $sold_ids, true),
 	'so the watch passes over both');
+// B11: the per-buyer limit counts what was bought, never an admin's machine.
+$limit_user = 980000 + random_int(0, 9999);
+$admin_host = ht_provision('httest-lim-host-' . $suffix, 'operator', array(
+	'cvp_install_mode' => 'bare', 'cvp_status' => 'done', 'cvp_usr_user_id' => $limit_user));
+$admin_site = ht_provision('httest-lim-site-' . $suffix, 'operator', array(
+	'cvp_status' => 'done', 'cvp_usr_user_id' => $limit_user));
+$bought_site = ht_provision('httest-lim-buy-' . $suffix, 'operator', array(
+	'cvp_origin' => 'buyer', 'cvp_status' => 'done', 'cvp_usr_user_id' => $limit_user,
+	'cvp_external_order_item_id' => 970000 + random_int(0, 9999)));
+check(CustomerCloudProvision::hosted_sites_held($limit_user)['account'] === 1,
+	'the per-buyer limit counts the site bought, not a starter host or a site an admin made',
+	json_encode(CustomerCloudProvision::hosted_sites_held($limit_user)));
+foreach (array($admin_host, $admin_site, $bought_site) as $lim_row) {
+	$lim_row->set('cvp_delete_time', gmdate('Y-m-d H:i:s'));
+	$lim_row->save();
+}
 foreach (array('order', 'buyer') as $origin) {
 	$bought = new CustomerCloudProvision(NULL);
 	$bought->set('cvp_origin', $origin);

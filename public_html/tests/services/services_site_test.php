@@ -325,8 +325,8 @@ check(_setup_services_disconnect() === array('mail', 'shelf'), 'what the plane r
 svc_operator_requests($op);
 
 section('the map is one list');
-check(count(HostedMailSettingsMap::MAP) === 8 && HostedMailSettingsMap::MAP['email_service'] === 'service'
-	&& HostedMailSettingsMap::MAP['smtp_password'] === 'password', 'eight values, nine settings with smtp_auth');
+check(count(HostedMailSettingsMap::MAP) === 9 && HostedMailSettingsMap::MAP['email_service'] === 'service'
+	&& HostedMailSettingsMap::MAP['smtp_password'] === 'password' && HostedMailSettingsMap::MAP['smtp_dkim_key_name'] === 'dkim_key_name', 'nine values (the DKIM key name among them), ten settings with smtp_auth');
 $script = file_get_contents(PathHelper::getIncludePath('utils/hosted_mail_settings.php'));
 check(strpos($script, 'HostedMailSettingsMap::apply') !== false && strpos($script, "'smtp_username' =>") === false,
 	'the node-side script writes through the map and carries no second list');

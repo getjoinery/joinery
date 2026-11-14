@@ -2017,6 +2017,14 @@
       "helptext": "Shown in page titles, emails, and the header."
     },
     {
+      "name": "smtp_dkim_key_name",
+      "default": "",
+      "group": "email_provider_smtp",
+      "label": "DKIM key name",
+      "type": "text",
+      "helptext": "The key name (selector) the SMTP service signs this site's mail with, such as s1217236 for SMTP2GO. Set by the management node for hosted mail; the mail check looks for the key under it."
+    },
+    {
       "name": "smtp_helo",
       "default": "",
       "group": "email_provider_smtp",

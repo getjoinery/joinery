@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.34 - hosted_sites_held() counts only sold sites: a starter host an admin made counted toward their limit (B11)
  * @version 1.33 - option has_site: leaves out bare installs (a machine with no site)
  * @version 1.32 - cvp_starter_host: a bare instance installed as a multi-tenant starter host
  * @version 1.31 - stamp_unstamped_default() leaves container rows alone: no server of a cloud account is made for them
@@ -531,8 +532,11 @@ class CustomerCloudProvision extends SystemBase {
 	public static function hosted_sites_held(int $user_id, string $fingerprint = '', int $except_id = 0): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$pre = "'" . implode("','", self::PRE_PAYMENT_STATUSES) . "'";
+		// Sites a buyer bought (is_sold): a machine an admin made in our account
+		// (a starter host, a relay shard, a test install) is nobody's purchase.
 		$base = "SELECT COUNT(*) FROM cvp_customer_cloud_provisions
 		          WHERE cvp_delete_time IS NULL AND cvp_hosting_mode = 'operator'
+		            AND cvp_origin IN ('order', 'buyer') AND cvp_install_mode <> 'bare'
 		            AND cvp_status NOT IN ($pre) AND cvp_customer_cloud_provision_id <> ?";
 		$q = $db->prepare($base . ' AND cvp_usr_user_id = ?');
 		$q->execute(array($except_id, $user_id));

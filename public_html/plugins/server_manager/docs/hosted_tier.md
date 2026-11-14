@@ -41,7 +41,7 @@ is a draft on their sites page (Continue, Edit, Delete) that holds nothing and
 expires after `server_manager_draft_days`. Payment activates it (see
 [Server Manager § The buyer configures first](overview.md#the-buyer-configures-first-then-pays-payment-activates)).
 
-**One buyer, a few sites.** One account may hold `server_manager_hosted_sites_per_buyer` hosted sites at once (default 3), and so may one card across every account. A site counts from payment until it is deleted, held and failed ones included; a server on the buyer's own cloud account is not ours and does not count.
+**One buyer, a few sites.** One account may hold `server_manager_hosted_sites_per_buyer` hosted sites at once (default 3), and so may one card across every account. A site counts from payment until it is deleted, held and failed ones included; a server on the buyer's own cloud account is not ours and does not count, and nor is a machine an admin made in ours (a starter host, a relay shard, an admin's own install): only a site that was bought counts.
 
 - **At checkout**, before any money moves, an account already at the limit is refused with *This account already has 3 hosted sites, the most one account can have. Contact us if you need more.*
 - **At payment** the card is known: `fulfill()` reads its Stripe fingerprint (`StripeHelper::card_fingerprint_for_order`) and counts again, by account and by card. Two lines in one cart each pass checkout alone, which is why the account is counted again here. A PayPal payment carries no card and is judged by the account alone.
@@ -159,7 +159,10 @@ than pretending otherwise.
    only credential that reaches the box, handed over by the
    `hosted_mail_settings` primitive — which carries *values* whose setting
    names live in a script on the node, so this management node cannot name a
-   setting on any site it manages. The password is not stored here: a
+   setting on any site it manages. The same push carries the DKIM key name the
+   provider signs with (SMTP2GO's `s<id>`, from the records it returned) to an
+   agent of 1.120.0 or later; the site keeps it as `smtp_dkim_key_name`, and its
+   mail check looks for the signing key under it. The password is not stored here: a
    replacement is one call away, which is a better property than a copy in this
    database. If the site cannot take it (an agent too old for the primitive),
    nothing is minted at all, so a stale credential is never left behind.

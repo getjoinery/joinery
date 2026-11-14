@@ -89,6 +89,7 @@
  * of them is a password, and job output is stored on the management node and
  * read by people). Exits 0 on success, 2 on unusable input, 1 on a failed write.
  *
+ * @version 1.5 - dkim_key_name: the provider's DKIM key name, written to smtp_dkim_key_name (hosting_launch B7)
  * @version 1.4 - a test site's trap (test_recipient): every email to one address, written before the
  *   credential; prints test_trap=on
  * @version 1.3 - a site with no From address is given hello@ its sending domain (B166)
@@ -157,7 +158,13 @@ $values = array(
 	'sender'   => trim((string)($supplied['sender'] ?? '')),
 	'helo'     => trim((string)($supplied['helo'] ?? '')),
 	'hostname' => trim((string)($supplied['hostname'] ?? '')),
+	// The provider's DKIM key name: one DNS label or nothing.
+	'dkim_key_name' => trim((string)($supplied['dkim_key_name'] ?? '')),
 );
+if ($values['dkim_key_name'] !== '' && !preg_match('/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/', $values['dkim_key_name'])) {
+	fwrite(STDERR, "HOSTED_MAIL_SETTINGS=error\nThe DKIM key name is not one DNS label.\n");
+	exit(2);
+}
 $trap = trim((string)($supplied['test_recipient'] ?? ''));
 if ($trap !== '' && !filter_var($trap, FILTER_VALIDATE_EMAIL)) {
 	fwrite(STDERR, "HOSTED_MAIL_SETTINGS=error\nThe test trap is not one email address.\n");

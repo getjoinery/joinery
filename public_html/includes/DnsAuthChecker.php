@@ -8,6 +8,7 @@
  * Lookups go through DnsResolver — the single raw-DNS chokepoint — so this
  * class is fully unit-testable via DnsResolver::setBackend().
  *
+ * @version 1.3 - assess() tries smtp_dkim_key_name first, the key name hosted mail signs with (hosting_launch B7)
  * @version 1.2 - assess(): the sending service's own key names, the domain it signs as, whether that
  *   matches the From domain, and the plain-language explanation every page shows
  * @version 1.1
@@ -302,6 +303,12 @@ class DnsAuthChecker {
 		// always the From domain (Mailgun through mail.<domain>, B169).
 		$key_domain = $signing ?? $domain;
 		$key_names = $class ? self::serviceKeyNames($class, $key_domain) : array();
+		// The key name a management node told this site (hosted mail over
+		// SMTP, whose service cannot say it): tried first, for the site's own domain.
+		$told = trim((string)Globalvars::get_instance()->get_setting('smtp_dkim_key_name'));
+		if ($told !== '' && preg_match('/^[A-Za-z0-9-]{1,63}$/', $told)) {
+			$key_names = array_values(array_unique(array_merge(array($told), $key_names)));
+		}
 		$names = array_values(array_unique(array_merge($key_names, self::COMMON_KEY_NAMES)));
 		$results = self::quickCheck($domain, $names);
 		if ($key_domain !== $domain) {

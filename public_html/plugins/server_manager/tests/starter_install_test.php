@@ -175,11 +175,34 @@ $host_agent->set('mgn_mgh_managed_host_id', $host->key);
 $host_agent->save();
 check(ManagedHost::pick_for_provisioning('starter') !== null,
 	'a host with Max Sites 1 and only its own agent placed on it still has its one place');
+check(ManagedHost::starter_free_places() === 1, 'one free place is counted across the starter hosts', (string)ManagedHost::starter_free_places());
 $reserved = si_provision('si-reserved-' . $suffix);
-$reserved->set('cvp_mgh_managed_host_id', $host->key);
-$reserved->save();
-check(ManagedHost::pick_for_provisioning('starter') === null,
+harness_set_setting_mem('server_manager_starter_free_places_alert', '1');
+ProvisionStarterSites::$free_places_alerts = array();
+$got = ManagedHost::reserve_starter_place($reserved);
+$reserved->load();
+check($got !== null && (int)$got->key === (int)$host->key && (int)$reserved->get('cvp_mgh_managed_host_id') === (int)$host->key,
+	'reserve_starter_place records the host on the provision');
+check(ManagedHost::pick_for_provisioning('starter') === null && ManagedHost::starter_free_places() === 0,
 	'a paid site reserved on it, with no node yet, takes that place');
+$second = si_provision('si-second-' . $suffix);
+check(ManagedHost::reserve_starter_place($second) === null && !(int)$second->get('cvp_mgh_managed_host_id'),
+	'a second reservation for the last place gets none, and its provision is unchanged');
+$second->set('cvp_status', 'cancelled');
+$second->set('cvp_delete_time', gmdate('Y-m-d H:i:s'));
+$second->save();
+ProvisionStarterSites::note_free_places();
+check(ProvisionStarterSites::$free_places_alerts === array(), 'no free-places alert at none left: the waiting order alerts instead');
+$host->set('mgh_max_sites', 2);
+$host->save();
+ProvisionStarterSites::note_free_places();
+check(ProvisionStarterSites::$free_places_alerts === array(1), 'one place left, at an alert level of 1, alerts the operator');
+harness_set_setting_mem('server_manager_starter_free_places_alert', '0');
+ProvisionStarterSites::$free_places_alerts = array();
+ProvisionStarterSites::note_free_places();
+check(ProvisionStarterSites::$free_places_alerts === array(), 'an alert level of 0 turns it off');
+$host->set('mgh_max_sites', 1);
+$host->save();
 $threw = null;
 try {
 	$h = new ManagedHost(NULL);

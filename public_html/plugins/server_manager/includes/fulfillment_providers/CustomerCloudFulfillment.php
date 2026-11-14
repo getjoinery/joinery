@@ -49,6 +49,7 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.10 - the Starter place is reserved under the place lock (ManagedHost::reserve_starter_place, R2-2), and few places left alerts
  * @version 1.9 - a Starter order's host place is reserved at payment (reviewer2 F2-2); the activation alert names
  *                hosting, not Managed alone (F2-9)
  * @version 1.8 - a third reference, 2: Starter, a container on one of our shared hosts (starter_tier.md, Launch
@@ -293,9 +294,11 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			// full fleet leaves it unreserved, and the Starter worker waits
 			// for room and says so.
 			require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
-			$host = ManagedHost::pick_for_provisioning('starter');
-			if ($host !== null) {
-				$draft->set('cvp_mgh_managed_host_id', (int)$host->key);
+			// Recorded under the Starter place lock, so two payments for the
+			// last place cannot both be given it (R2-2).
+			if (ManagedHost::reserve_starter_place($draft) !== null) {
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionStarterSites.php'));
+				ProvisionStarterSites::note_free_places();
 			}
 		}
 		if ($hosting_mode === 'operator') {

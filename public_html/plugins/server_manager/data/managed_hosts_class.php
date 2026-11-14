@@ -6,6 +6,7 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.11 - reserve_starter_place(): pick and record a Starter place under one lock (R2-2); starter_free_places()
  * @version 1.10 - places taken = the host's site nodes, not its own agent's node, plus paid starter sites reserved
  *                on it with no node yet (reviewer2 F2-2, F2-3); a starter host's address is its IPv4; a host's
  *                tier does not change while it holds sites or paid reservations
@@ -399,12 +400,7 @@ class ManagedHost extends SystemBase {
 		// node is the machine, not a site) and by each paid starter site
 		// reserved on it at payment whose node is not made yet: three buyers
 		// paying for the last place must not all be promised it.
-		$taken = "((SELECT COUNT(*) FROM mgn_managed_nodes mgn WHERE mgn.mgn_mgh_managed_host_id = mgh.mgh_managed_host_id " .
-			"AND mgn.mgn_delete_time IS NULL " .
-			"AND mgn.mgn_managed_node_id IS DISTINCT FROM mgh.mgh_mgn_managed_node_id) + " .
-			"(SELECT COUNT(*) FROM cvp_customer_cloud_provisions cvp WHERE cvp.cvp_mgh_managed_host_id = mgh.mgh_managed_host_id " .
-			"AND cvp.cvp_delete_time IS NULL AND cvp.cvp_mgn_managed_node_id IS NULL " .
-			"AND cvp.cvp_status IN ('ready', 'held', 'installing')))";
+		$taken = self::places_taken_sql();
 		$q = $db->prepare(
 			"SELECT mgh.mgh_managed_host_id FROM mgh_managed_hosts mgh " .
 			"WHERE mgh.mgh_provisioning_enabled = true AND mgh.mgh_delete_time IS NULL AND mgh.mgh_tier = :tier " .
@@ -416,6 +412,53 @@ class ManagedHost extends SystemBase {
 		$row = $q->fetch(PDO::FETCH_ASSOC);
 		if (!$row) return null;
 		return new ManagedHost($row['mgh_managed_host_id'], true);
+	}
+
+	/**
+	 * SQL for the places taken on host row mgh: each site node on the host (the
+	 * host's own agent node is the machine, not a site) and each paid starter
+	 * site reserved on it whose node is not made yet.
+	 */
+	private static function places_taken_sql(): string {
+		return "((SELECT COUNT(*) FROM mgn_managed_nodes mgn WHERE mgn.mgn_mgh_managed_host_id = mgh.mgh_managed_host_id " .
+			"AND mgn.mgn_delete_time IS NULL " .
+			"AND mgn.mgn_managed_node_id IS DISTINCT FROM mgh.mgh_mgn_managed_node_id) + " .
+			"(SELECT COUNT(*) FROM cvp_customer_cloud_provisions cvp WHERE cvp.cvp_mgh_managed_host_id = mgh.mgh_managed_host_id " .
+			"AND cvp.cvp_delete_time IS NULL AND cvp.cvp_mgn_managed_node_id IS NULL " .
+			"AND cvp.cvp_status IN ('ready', 'held', 'installing')))";
+	}
+
+	/** The lock every Starter place reservation takes, so two at once never share the last place. */
+	const STARTER_PLACE_LOCK = 734211;
+
+	/**
+	 * Reserve a place for a Starter site: pick the starter host with the most
+	 * room and record it on the provision, under one lock, so two payments (or
+	 * a payment and the Starter worker) cannot both be given the last place.
+	 * Null when no starter host has room; the provision is then unchanged.
+	 */
+	public static function reserve_starter_place($provision) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->query('SELECT pg_advisory_lock(' . self::STARTER_PLACE_LOCK . ')');
+		try {
+			$host = self::pick_for_provisioning('starter');
+			if ($host !== null) {
+				$provision->set('cvp_mgh_managed_host_id', (int)$host->key);
+				$provision->save();
+			}
+			return $host;
+		} finally {
+			$db->query('SELECT pg_advisory_unlock(' . self::STARTER_PLACE_LOCK . ')');
+		}
+	}
+
+	/** Places free across the starter hosts taking sites: their Max Sites less what pick_for_provisioning counts as taken. */
+	public static function starter_free_places(): int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$taken = self::places_taken_sql();
+		$q = $db->query("SELECT COALESCE(SUM(GREATEST(mgh.mgh_max_sites - {$taken}, 0)), 0) FROM mgh_managed_hosts mgh " .
+			"WHERE mgh.mgh_provisioning_enabled = true AND mgh.mgh_delete_time IS NULL AND mgh.mgh_tier = 'starter'");
+		return (int)$q->fetchColumn();
 	}
 }
 

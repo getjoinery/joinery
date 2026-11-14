@@ -8,7 +8,7 @@
  * values arrive over the agent channel and utils/hosted_mail_settings.php
  * writes them) and the services enrol call (a self-hosted site connected to
  * getjoinery; the values come back in the enrol response and the Email step
- * writes them). Both write the same nine settings from the same eight values,
+ * writes them). Both write the same settings from the same values,
  * and the mapping lives here once so the two can never drift.
  *
  * THE SETTING NAMES ARE HERE, NOT ON THE WIRE. What arrives is VALUES; which
@@ -17,6 +17,7 @@
  * that boundary matters: a site whose outbound mail can be pointed elsewhere
  * is a site whose password resets can be.
  *
+ * @version 1.4 - smtp_dkim_key_name from dkim_key_name: the key name the provider signs with (hosting_launch B7)
  * @version 1.3 - apply() records included_mail_identity (host|username), blank when no service or host
  * @version 1.2 - testTrap(): a test site sends all its mail to one address of its plane's
  * @version 1.1 - defaultFrom(): a site that has no From address yet gets hello@ its sending
@@ -35,6 +36,9 @@ class HostedMailSettingsMap {
 		'smtp_sender'   => 'sender',
 		'smtp_helo'     => 'helo',
 		'smtp_hostname' => 'hostname',
+		// The DKIM key name the provider signs with, which no list of common
+		// names finds (SMTP2GO's s<id>); the mail check looks there first.
+		'smtp_dkim_key_name' => 'dkim_key_name',
 	);
 
 	/**

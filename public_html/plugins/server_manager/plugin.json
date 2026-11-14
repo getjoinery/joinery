@@ -308,6 +308,14 @@
       "helptext": "A Managed site draft the buyer never continued is deleted after this many days; one frozen for the cart but never paid returns to draft, because its domain quote is stale."
     },
     {
+      "name": "server_manager_starter_free_places_alert",
+      "default": "2",
+      "group": "hosted",
+      "label": "Starter places left before an alert",
+      "type": "text",
+      "helptext": "When a Starter order takes a place and this many free places or fewer are left across the starter hosts, the operator is emailed to make another host. 0 turns the alert off."
+    },
+    {
       "name": "server_manager_starter_memory",
       "default": "384m",
       "group": "hosted",

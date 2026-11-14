@@ -25,6 +25,8 @@
  * The site's limits are the starter settings (server_manager_starter_memory,
  * _cpus, _disk), sized so 8 sites share a Linode 4 GB.
  *
+ * @version 1.2 - a place is reserved under the place lock (ManagedHost::reserve_starter_place, R2-2); note_free_places()
+ *                alerts the operator at or under server_manager_starter_free_places_alert free places (S10)
  * @version 1.1 - reviewer2 F3-1/F3-3/F3-4/F3-7/F3-8: the container name is the plane's (st<provision id>), never the
  *               buyer's; the job carries a password slot, not the password; a cancelled or lost job fails the
  *               row; retry(); an agent too old for site_create, a host gone or no release waits with one alert;
@@ -155,12 +157,11 @@ class ProvisionStarterSites {
 			}
 		}
 		if ($host === null) {
-			$host = ManagedHost::pick_for_provisioning('starter');
+			$host = ManagedHost::reserve_starter_place($provision);
 			if ($host === null) {
 				return $this->wait($provision, self::NO_ROOM);
 			}
-			$provision->set('cvp_mgh_managed_host_id', (int)$host->key);
-			$provision->save();
+			self::note_free_places();
 		}
 		if (!$host->key || $host->get('mgh_delete_time') || (string)$host->get('mgh_tier') !== 'starter') {
 			return $this->wait($provision, 'Its starter host #' . (int)$host->key . ' is gone or no longer a starter host.');
@@ -319,6 +320,40 @@ class ProvisionStarterSites {
 		$provision->fail($reason);
 		$this->alert($provision, $reason);
 	}
+
+	/**
+	 * Tell the operator when the starter hosts are running out of places: at
+	 * or under server_manager_starter_free_places_alert free places, after a
+	 * place is taken. Starter hosts are made by hand, so a person needs the
+	 * lead time; at none, the waiting order's own alert takes over.
+	 */
+	public static function note_free_places(): void {
+		$at = (int)Globalvars::get_instance()->get_setting('server_manager_starter_free_places_alert');
+		if ($at <= 0) {
+			return;
+		}
+		$free = ManagedHost::starter_free_places();
+		if ($free > $at || $free <= 0) {
+			return;
+		}
+		self::$free_places_alerts[] = $free;
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionManagedDomains.php'));
+			$to = ProvisionManagedDomains::resolve_alert_recipient();
+			if ($to === '') {
+				return;
+			}
+			EmailSender::quickSend($to, '[starter-hosting] ' . $free . ' Starter place' . ($free === 1 ? '' : 's') . ' left',
+				'The starter hosts have ' . $free . ' free place' . ($free === 1 ? '' : 's') . ' left. Make another starter host '
+				. '(Install New Node, Install Type Starter host) before they run out; a paid Starter order with no place waits.'
+				. "\n\nLook at it on /admin/server_manager.\n");
+		} catch (Throwable $e) {
+			error_log('ProvisionStarterSites: the free places alert failed: ' . $e->getMessage());
+		}
+	}
+
+	/** Each free-places alert raised in this process, for tests. */
+	public static $free_places_alerts = array();
 
 	/** A person's task, never silent. Protected: the edge a test double intercepts. */
 	protected function alert(CustomerCloudProvision $provision, string $reason): void {
