@@ -14,6 +14,13 @@
  * DnsAuthChecker and every other consumer testable. Production code never
  * touches it.
  *
+ * Zones this platform publishes for can be read from their own nameservers
+ * instead (preferAuthoritative(), AuthoritativeDns): the system resolver keeps
+ * old answers for their TTL, so a check right after a publish would say a
+ * finished domain is broken. A test double, when set, still wins.
+ *
+ * @version 1.4 - names under a zone registered with preferAuthoritative() are
+ *   asked of that zone's own nameservers first (AuthoritativeDns)
  * @version 1.3
  */
 
@@ -28,6 +35,27 @@ class DnsResolver {
      * arrays, or false to simulate a resolver failure.
      */
     private static $backend = null;
+
+    /** Zones read from their own nameservers first: zone => true. */
+    private static $authoritative_zones = [];
+
+    /**
+     * Read names at or under $zone from the zone's own nameservers first, for
+     * the rest of this request. For zones this platform publishes records in,
+     * whose checks must see a publish the moment it lands. Anything those
+     * nameservers cannot answer cleanly falls back to the system resolver.
+     */
+    public static function preferAuthoritative($zone) {
+        $zone = rtrim(strtolower(trim((string)$zone)), '.');
+        if ($zone !== '' && strpos($zone, '.') !== false) {
+            self::$authoritative_zones[$zone] = true;
+        }
+    }
+
+    /** Stop preferring any zone's own nameservers. Tests only. */
+    public static function clearAuthoritative() {
+        self::$authoritative_zones = [];
+    }
 
     /** Install a test double for the raw-DNS layer. Tests only. */
     public static function setBackend($backend) {
@@ -270,11 +298,36 @@ class DnsResolver {
         if (self::$backend !== null) {
             $result = self::$backend->getRecords($name, $type);
         } else {
-            $result = @dns_get_record($name, $type);
+            $result = null;
+            $zone = self::authoritativeZoneOf((string)$name);
+            if ($zone !== null) {
+                require_once(PathHelper::getIncludePath('includes/dns/AuthoritativeDns.php'));
+                $result = AuthoritativeDns::lookup((string)$name, (int)$type, $zone);
+            }
+            if ($result === null) {
+                $result = @dns_get_record($name, $type);
+            }
         }
         if ($result === false) {
             throw new DnsLookupException('DNS lookup failed for ' . $name);
         }
         return is_array($result) ? $result : [];
+    }
+
+    /** The longest registered zone $name sits at or under, or null. */
+    private static function authoritativeZoneOf($name) {
+        if (empty(self::$authoritative_zones)) {
+            return null;
+        }
+        $name = rtrim(strtolower(trim($name)), '.');
+        $labels = explode('.', $name);
+        while (count($labels) >= 2) {
+            $candidate = implode('.', $labels);
+            if (isset(self::$authoritative_zones[$candidate])) {
+                return $candidate;
+            }
+            array_shift($labels);
+        }
+        return null;
     }
 }

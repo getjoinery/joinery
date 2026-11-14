@@ -12,6 +12,8 @@
  * Registered into the core MailIdentityGuard at plugin bootstrap so core send
  * code (SmtpProvider, EmailSender) never names a mailbox symbol.
  *
+ * @version 1.4 - an ordinary domain's in-app signer always uses the 'mail' selector, never the
+ *   sealed key's mailkN (asked-for or lifted send protection left relay-fronted sends unsigned)
  * @version 1.3 - an ordinary domain's key lives under /etc/rspamd/dkim (localKeyFile);
  *   rspamd signs with it on a colocated deployment
  * @version 1.2 - relay-fronted in-app signing skips IMAP-source domains, ending
@@ -139,6 +141,17 @@ class MailboxDkimSigner {
 		return self::LOCAL_KEY_ROOT . $relative;
 	}
 
+	/**
+	 * The private key file of a domain's ORDINARY signing key. Always the
+	 * ordinary selector: ied_dkim_selector names the SEALED key (mailkN) and
+	 * stays set while send protection is asked for but not on, and after it is
+	 * turned off. Reading it here looked for mailkN.private, found nothing, and
+	 * sent the domain's ordinary mail unsigned.
+	 */
+	public static function standardKeyPath(InboundEmailDomain $domain): string {
+		return self::localKeyFile(strtolower((string)$domain->get('ied_domain')), self::STANDARD_SELECTOR . '.private');
+	}
+
 	/** True on a relay-fronted deployment (an active MailboxRelay row exists). */
 	private static function relayActive(): bool {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
@@ -152,7 +165,7 @@ class MailboxDkimSigner {
 	/**
 	 * The in-app signer for a STANDARD (non-protected) hosted domain, reading the
 	 * same filesystem DKIM key rspamd signs with on a colocated deployment
-	 * (localKeyFile(), selector from the domain row or the provision_dkim.sh
+	 * (localKeyFile(), selector STANDARD_SELECTOR, the provision_dkim.sh
 	 * default "mail"). Returns null when no readable key is
 	 * provisioned — the send then goes unsigned, exactly as a colocated standard
 	 * domain with no DKIM key does. The private key is read into memory only; the
@@ -162,11 +175,8 @@ class MailboxDkimSigner {
 	 */
 	private static function standardFilesystemSigner(InboundEmailDomain $domain): ?array {
 		$domain_name = strtolower((string)$domain->get('ied_domain'));
-		$selector = trim((string)$domain->get('ied_dkim_selector'));
-		if ($selector === '') {
-			$selector = self::STANDARD_SELECTOR;
-		}
-		$key_path = self::localKeyFile($domain_name, $selector . '.private');
+		$selector = self::STANDARD_SELECTOR;
+		$key_path = self::standardKeyPath($domain);
 		if (!is_readable($key_path)) {
 			// An unsigned relay-fronted send must never be silent: a key that
 			// exists but is unreadable means provisioning perms are wrong (the

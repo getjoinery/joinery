@@ -185,6 +185,19 @@ detection, the cutover warnings — is a read. A deployment gets the whole safet
 surface without holding any secret, and re-checking a published domain is free
 forever.
 
+**The diff reads the zone itself, not this box's cache.** A system resolver keeps
+an answer for its TTL, and keeps "no such record" for the zone's negative lifetime
+(1800 s at Cloudflare) when a name was looked up before it existed, which every
+check does before a publish. Read through it, a domain looks broken for up to half
+an hour after it is finished. So `DnsResolver` asks a zone's own nameservers first
+for any name at or under a zone registered with `DnsResolver::preferAuthoritative()`
+(`AuthoritativeDns`: one UDP query with EDNS0). `diffAgainstPublicDns()` registers
+the plan's domain; the mailbox plugin's setup check registers every hosted domain.
+Only a clean answer is used: the AA bit set, not truncated, NOERROR or NXDOMAIN, and
+no CNAME standing in for the asked type. Anything else, and a zone whose nameservers
+do not answer, falls back to the system resolver. A test double set with
+`DnsResolver::setBackend()` still wins.
+
 A credential is required only for the write. Pressing **Apply** on a diff the
 operator is looking at is what starts the consent flow (or takes a scoped key),
 and that credential lives for exactly one request:

@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.63 - every hosted domain is read from its own nameservers, so checks see a publish at once
  * @version 1.62 - the send-protection fix links straight to the task (the owner question or the ceremony)
  * @version 1.61 - the Sending route row is INFO while nothing forwards: only forwarded mail takes it
  * @version 1.60 - relay and send-protection fixes name the Server tab and the Sending identity box;
@@ -159,8 +160,32 @@ class InboundEmailSetupCheck {
 
 	function __construct() {
 		$this->settings = Globalvars::get_instance();
+		self::preferAuthoritativeForHostedDomains();
 		$this->mailHostname = strtolower(trim((string)$this->settings->get_setting('mailbox_mail_hostname')));
 		list($this->publicIp, $this->publicIpIsPrivate) = $this->detectPublicIp();
+	}
+
+	/**
+	 * Every domain this deployment hosts is read from its own nameservers, once
+	 * per request: a check right after a publish must see the publish, not this
+	 * box's cached answer from before it (specs/send_protection_one_press.md
+	 * WP0). An IMAP-source anchor (gmail.com) is someone else's zone.
+	 */
+	private static function preferAuthoritativeForHostedDomains(): void {
+		static $registered = false;
+		if ($registered) {
+			return;
+		}
+		$registered = true;
+		try {
+			foreach (new MultiInboundEmailDomain(array('deleted' => false)) as $hosted) {
+				if (!$hosted->get('ied_is_imap_source')) {
+					DnsResolver::preferAuthoritative((string)$hosted->get('ied_domain'));
+				}
+			}
+		} catch (\Throwable $e) {
+			error_log('InboundEmailSetupCheck: could not list hosted domains for authoritative DNS: ' . $e->getMessage());
+		}
 	}
 
 	/** The public IP the engine is verifying against (may be ''). */

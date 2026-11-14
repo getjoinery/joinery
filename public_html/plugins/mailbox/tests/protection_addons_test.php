@@ -32,6 +32,7 @@
  *
  * Run: php tests/run.php db --filter=protection_addons
  *
+ * @version 1.7 - the ordinary signer ignores the sealed key's selector
  * @version 1.6 - Step 1 Apply through a mailbox resolves the records Step 1 showed
  * @version 1.5 - follows the mail cards' wording
  * @version 1.4 - the editor offers the Fortress card, its copy from the catalog (WP5)
@@ -539,6 +540,26 @@ try {
 	check(pa_has_dkim_record($asked), 'while the lock is asked for, its record is prescribed');
 	$on = pa_domain('standard', array_merge($keyed, array('ied_is_protected_identity' => true)));
 	check(pa_has_dkim_record($on), 'and while it is enforcing, at any level');
+} finally {
+	$db->rollBack();
+}
+
+// ---------------------------------------------------------------------------
+section('Ordinary mail signs with the ordinary key while the sealed one waits');
+
+// Sealing a key sets ied_dkim_selector to mailkN, and it stays set until send
+// protection is on (and after it is turned off). The relay-fronted in-app
+// signer read it for the ORDINARY key file, found no mailkN.private, and sent
+// the domain's mail unsigned.
+$db->beginTransaction();
+try {
+	$asked = pa_domain('private', array('ied_dkim_selector' => 'mailk1', 'ied_dkim_sealed_key' => 'sealed',
+		'ied_dkim_public_dns' => 'v=DKIM1; k=rsa; p=AAAA', 'ied_send_lock_requested' => true));
+	$path = MailboxDkimSigner::standardKeyPath($asked);
+	check(substr($path, -strlen('/mail.private')) === '/mail.private',
+		'a domain with a sealed key asked for still signs ordinary mail from mail.private');
+	check(strpos($path, '/' . strtolower((string)$asked->get('ied_domain')) . '/') !== false,
+		'in that domain\'s own key directory');
 } finally {
 	$db->rollBack();
 }

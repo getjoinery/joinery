@@ -24,6 +24,8 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.23 - a domain_id focus is kept for any registered domain, not only the machine sender's:
+ *   the editor's send-lock save and Finish send protection landed on an empty picker
  * @version 2.22 - the DNS Apply handler resolves the plan of the box pressed (dns_plan=signing for the
  *   send-protection step), so a mailbox-focused page publishes the signing records it showed
  * @version 2.21 - server-wide work moved to the Server tab: no Advanced state, no relay
@@ -259,17 +261,21 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		$selected_alias_id = 0;
 	}
 	if (!isset($domain_options[$selected_domain_id])) {
-		// The picker lists only mailbox-less domains, but the machine sender
-		// ceremony legitimately focuses ANY registered domain — its card links
-		// here with domain_id, and dropping the focus would dump the operator
-		// on the picker with no way back in. Keep it when the domain resolves.
+		// The picker lists only mailbox-less domains, but every domain-level
+		// task focuses ANY registered domain by domain_id — the machine sender
+		// card, the domain editor's send-lock save, the Finish send protection
+		// link. Dropping the focus dumps the operator on the picker with no way
+		// back in. Keep it whenever the domain resolves.
 		$keep = false;
-		if ($machine_setup && $selected_domain_id > 0) {
+		if ($selected_domain_id > 0) {
 			$dm = new InboundEmailDomain($selected_domain_id, TRUE);
 			$keep = (bool)$dm->key && !$dm->get('ied_is_imap_source');
 		}
 		if (!$keep) {
 			$selected_domain_id = 0;
+		} else {
+			// Listed so the picker shows what is focused, not "Choose one".
+			$domain_options[$selected_domain_id] = strtolower((string)$dm->get('ied_domain')) . '  —  Domain';
 		}
 	}
 

@@ -47,6 +47,7 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
+ * @version 1.7 - switching off says nothing signs only when the ordinary key is really gone
  * @version 1.6 - mailbox_protect_state() says whether the owner is obvious and whether the default owner has a vault
  * @version 1.5 - the stored owner switching the lock on is the obvious owner, whoever else holds a mailbox
  * @version 1.4 - the stored owner is always a candidate and never replaced
@@ -470,9 +471,13 @@ function mailbox_protect_lift(InboundEmailDomain $domain): array {
 
 	$message = 'Send protection is off. This server can send as ' . $name . ' again without you signed in — '
 		. 'and so can anyone who breaks into it. Arriving mail is still sealed and still needs your vault; '
-		. 'this only affected sending.' . $tail
-		. ' Nothing on this server is signing for ' . $name . ' until you re-run provision_dkim.sh to put an '
-		. 'ordinary signing key back on disk.';
+		. 'this only affected sending.' . $tail;
+	// Only true when the ordinary key was destroyed: otherwise it signs again
+	// from this moment, and saying nothing signs would be false.
+	if (!file_exists(MailboxDkimSigner::standardKeyPath($domain))) {
+		$message .= ' Nothing on this server is signing for ' . $name . ' until you re-run provision_dkim.sh to '
+			. 'put an ordinary signing key back on disk.';
+	}
 
 	return array('message' => $message, 'land_dns' => !$reverted['ok']);
 }

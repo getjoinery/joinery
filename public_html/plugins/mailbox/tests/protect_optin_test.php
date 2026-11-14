@@ -301,6 +301,10 @@ class ProtectOptinTest {
 		check(strpos($setup_logic, "(\$posted['dns_plan'] ?? '') === 'signing'") !== false,
 			'and the Apply handler picks the signing plan from it');
 
+		// Every domain-level task links here by domain_id, mailboxes or not.
+		check(strpos($setup_logic, "if (\$machine_setup && \$selected_domain_id > 0)") === false,
+			'a domain_id focus is kept for any registered domain, not only the machine sender');
+
 		// The heading has to say which step it is, or two publish boxes across
 		// the ceremony read as the same offer repeated.
 		$view = (string)file_get_contents(PathHelper::getIncludePath(

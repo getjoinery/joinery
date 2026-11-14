@@ -33,6 +33,7 @@
  * claims no ownership when it finds nothing — because the record it deletes is,
  * by definition, one the platform did not write.
  *
+ * @version 1.4 - the public-DNS diff reads the zone's own nameservers first (DnsResolver::preferAuthoritative)
  * @version 1.3 - the public-DNS diff reads SRV, so a capability record verifies green
  * @version 1.2 - a record type a provider's API cannot express is reported, never written
  * @version 1.1 - a plan can require a record to be absent, and applying it deletes
@@ -115,6 +116,9 @@ class DnsReconciler {
 	 * @return array[] One row per planned record (see rowFor()).
 	 */
 	public function diffAgainstPublicDns(DnsRecordPlan $plan): array {
+		// What the zone itself serves, not what this box's resolver remembers:
+		// right after an apply the cache still holds the old answers.
+		DnsResolver::preferAuthoritative($plan->getDomain());
 		$rows = array();
 		$cache = array();
 		foreach ($plan->getRecords() as $record) {
