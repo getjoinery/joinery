@@ -206,8 +206,14 @@ for any name at or under a zone registered with `DnsResolver::preferAuthoritativ
 the plan's domain; the mailbox plugin's setup check registers every hosted domain.
 Only a clean answer is used: the AA bit set, not truncated, NOERROR or NXDOMAIN, and
 no CNAME standing in for the asked type. Anything else, and a zone whose nameservers
-do not answer, falls back to the system resolver. A test double set with
-`DnsResolver::setBackend()` still wins.
+do not answer, falls back to the system resolver. Each fallback is logged once per
+zone and reason in a request, as `AuthoritativeDns: fallback to system resolver for
+ZONE: REASON`, the reason one of `AuthoritativeDns::FALLBACK_REASONS` (no nameserver
+addresses found, no nameserver answered, reply not a response, reply truncated,
+reply not authoritative, reply error code, reply malformed, CNAME answer). The line
+names the zone, never the record asked for or its value. A CNAME is the usual shape
+of a provider's DKIM record, so that reason is the common one. A test double set
+with `DnsResolver::setBackend()` still wins.
 
 A credential is required only for the write. Pressing **Apply** on a diff the
 operator is looking at is what starts the consent flow (or takes a scoped key),
@@ -271,7 +277,10 @@ verification record the platform wrote still needs an adopt choice.
 
 **Applying is per-record and best-effort.** If one record fails — a rate limit, a
 transient error, a managed-record refusal — the others still land and the failed
-one reports its own reason. There is no transaction, because the only rollback
+one reports its own reason. Each failed record is also logged, one line each, as
+`DnsReconciler: record failed: OP TYPE NAME in ZONE (EXCEPTION CLASS)` with OP
+`create`, `update`, `delete` or `withdraw`; the record's value and the provider's
+message stay on the result row only. There is no transaction, because the only rollback
 would be another write; re-running publish converges whatever is left, which is
 why re-publishing a correct domain is a no-op.
 

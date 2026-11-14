@@ -8,6 +8,7 @@
  * the POST here first. Each fix writes through a model or the settings table
  * and redirects, so the next render reads fresh state.
  *
+ * @version 1.1 - send_test_message: one fixed test message to the probe mailbox (MailTestProbe)
  * @version 1.0
  */
 
@@ -119,6 +120,23 @@ function mailbox_setup_fix_action(array $posted, $session, string $redirect_url)
 					. ($result['error'] ?? $result['status'] ?? 'unknown error'), 'Error');
 			}
 		}
+		return LogicResult::redirect($redirect_url);
+	}
+
+	// One fixed test message from a hosted domain to the probe mailbox: a
+	// protected domain's through this session's compose path, any other's
+	// through EmailSender (MailTestProbe).
+	if ($action === 'send_test_message') {
+		$domain_name = strtolower(trim((string)($posted['domain'] ?? '')));
+		$model = $domain_name !== '' ? InboundEmailDomain::GetByDomain($domain_name) : false;
+		if (!$model) {
+			$announce('No such domain on this server.', 'Error');
+			return LogicResult::redirect($redirect_url);
+		}
+		$answer = $model->is_protected_identity()
+			? MailTestProbe::sendProtected($session, $domain_name)
+			: MailTestProbe::sendOrdinary($domain_name);
+		$announce(MailTestProbe::describe($answer), !empty($answer['sent']) ? 'Sent' : 'Not sent');
 		return LogicResult::redirect($redirect_url);
 	}
 

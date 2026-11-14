@@ -10,6 +10,7 @@
  * root:www-data 640 (_plugin_installers_start.sh,
  * plugin_installer_from_the_browser.md D2). This class only reads them.
  *
+ * @version 1.2 - refused: the installer declined to install here, with its reason (exit 78)
  * @version 1.1 - the records are read from RootState's directories (specs/shell_command_audit.md D1)
  * @version 1.0
  */
@@ -24,7 +25,7 @@ class PluginInstallerStatus {
 	 *
 	 * @return array{plugin:string, installer:string, started_at:string,
 	 *               finished_at:string, outcome:string, exit_code:int,
-	 *               release:string, tail:string}|null
+	 *               release:string, reason:string, tail:string}|null
 	 */
 	public static function forPlugin(string $name): ?array {
 		if (preg_match('/^[a-z][a-z0-9_]{1,49}$/', $name) !== 1) {
@@ -46,6 +47,7 @@ class PluginInstallerStatus {
 			'outcome'     => (string)$record['outcome'],
 			'exit_code'   => (int)($record['exit_code'] ?? 0),
 			'release'     => (string)($record['release'] ?? ''),
+			'reason'      => (string)($record['reason'] ?? ''),
 			'tail'        => '',
 		);
 		$log = @file(RootState::pluginLogDir() . '/' . $name . '.log', FILE_IGNORE_NEW_LINES);
@@ -73,6 +75,7 @@ class PluginInstallerStatus {
 		$word = match ($record['outcome']) {
 			'ok'                => 'installed',
 			'failed'            => 'failed',
+			'refused'           => 'not installed on this server',
 			'refused-untrusted' => 'refused (the installer is not a file this server runs as root)',
 			'refused-unsigned'  => 'refused (not a package we built)',
 			'missing'           => 'refused (the declared installer is missing)',
@@ -81,6 +84,9 @@ class PluginInstallerStatus {
 		$line = 'Host setup: ' . $word . ($when !== '' ? ' ' . $when : '');
 		if ($record['outcome'] === 'ok' && $record['release'] !== '') {
 			$line .= ' (release ' . $record['release'] . ')';
+		}
+		if ($record['outcome'] === 'refused' && ($record['reason'] ?? '') !== '') {
+			$line .= ': ' . $record['reason'];
 		}
 		return $line;
 	}

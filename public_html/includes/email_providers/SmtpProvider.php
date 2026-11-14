@@ -12,6 +12,8 @@
  * forwarding relay. The EmailMessage→PHPMailer mapping lives once in
  * SmtpMailer::applyMessage().
  *
+ * @version 1.6 - send() notes its signing to MailSendOutcome: signed (selector, d=), or handed on to
+ *   the SMTP host it submits to, or unsigned with the signer's reason
  * @version 1.5 - SendReceiptSource: the server's reply to DATA (queue id and line) is the
  *   send's receipt (specs/mailbox_message_timeline.md A3)
  * @version 1.4
@@ -166,6 +168,15 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay, SendReceipt
             $mailer->DKIM_selector       = $sig['selector'];
             $mailer->DKIM_private_string = $sig['private_string']; // in-memory only, never a file
             $mailer->DKIM_identity       = (string)$message->getFrom();
+        }
+        // How this message leaves, for the per-domain send counters
+        // (MailSendOutcome): signed here, or handed to the SMTP host, which may
+        // sign it (the box's own Postfix and rspamd on a colocated deployment).
+        $provider_label = static::getKey() . ':' . strtolower(trim((string)$this->config->host));
+        if ($sig !== null) {
+            MailSendOutcome::noteSigned(MailSendOutcome::PATH_SMTP, (string)$sig['selector'], (string)$sig['domain'], $provider_label);
+        } else {
+            MailSendOutcome::notePath(MailSendOutcome::PATH_SMTP, $provider_label);
         }
 
         $this->last_receipt = null;

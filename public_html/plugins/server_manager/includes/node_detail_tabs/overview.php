@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.107 - Plugins shows each one's host setup where it is not installed (refused with its reason, failed, not run), and a Themes row; the tab's words name mailbox_status
  * @version 1.106 - no Move to customer's Linode panel on a Starter site: it has no server of its own (B8, hosting_launch S3 run)
  * @version 1.105 - the sentinel alarm links to the node's replace-after-a-break-in list
  * @version 1.104 - a Vault key safety row: the node's unmet vault host checks, by name, and the ones it could not read (security_weak_spots_2026_11 WP3)
@@ -668,13 +669,13 @@
 	if ($node->get('mgn_agent_public_key')) {
 		$tab_words = ['host_report', 'site_log', 'site_log_count', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
-			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status', 'site_state_report',
+			'listening_sockets', 'container_inventory', 'reboot_machine', 'mailbox_status', 'site_state_report',
 			'install_security_updates', 'net_health', 'web_workers', 'disable_root_login', 'never_do_check'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
 		if (!$node->hosts_site()) {
-			$tab_words = array_values(array_diff($tab_words, ['site_log', 'site_log_count', 'log_table_tail', 'schema_probe', 'page_probe', 'spam_learning_status']));
+			$tab_words = array_values(array_diff($tab_words, ['site_log', 'site_log_count', 'log_table_tail', 'schema_probe', 'page_probe', 'mailbox_status']));
 		}
 		$tab_missing = AgentVocabulary::missing_words($node, $tab_words);
 		if ($tab_missing) {
@@ -2062,8 +2063,15 @@
 				$pl_name = preg_replace('/[^A-Za-z0-9._+-]/', '', (string)($pl['name'] ?? ''));
 				if ($pl_name === '') { continue; }
 				if (($pl['active'] ?? null) === true) {
+					// What its host installer did here, where it declares one
+					// (agent 1.120.0): installed, refused with its reason, failed,
+					// queued or never run.
+					$pl_inst = is_array($pl['installer'] ?? null) ? $pl['installer'] : null;
 					$pl_on[$pl_name] = [preg_replace('/[^A-Za-z0-9._+-]/', '', (string)($pl['version'] ?? '')),
-						preg_replace('/[^a-z]/', '', (string)($pl['status'] ?? ''))];
+						preg_replace('/[^a-z]/', '', (string)($pl['status'] ?? '')),
+						$pl_inst ? preg_replace('/[^a-z_]/', '', (string)($pl_inst['state'] ?? '')) : '',
+						$pl_inst ? mb_substr((string)($pl_inst['reason'] ?? ''), 0, 240) : '',
+						$pl_inst && ($pl_inst['queued'] ?? null) === true];
 				} else {
 					$pl_off++;
 				}
@@ -2076,18 +2084,46 @@
 				$pl_parts = [];
 				foreach ($pl_on as $pl_name => $pl_v) {
 					$pl_parts[] = htmlspecialchars($pl_name) . ($pl_v[0] !== '' ? ' <span class="text-muted">' . htmlspecialchars($pl_v[0]) . '</span>' : '')
-						. (in_array($pl_v[1], ['error', 'stale'], true) ? ' <span class="badge bg-warning">' . htmlspecialchars($pl_v[1]) . '</span>' : '');
+						. (in_array($pl_v[1], ['error', 'stale'], true) ? ' <span class="badge bg-warning">' . htmlspecialchars($pl_v[1]) . '</span>' : '')
+						. (($pl_v[2] ?? '') !== '' && $pl_v[2] !== 'installed' ? ' <span class="badge bg-warning">host setup: ' . htmlspecialchars(str_replace('_', ' ', $pl_v[2])) . '</span>' : '');
 				}
 				echo implode(' · ', $pl_parts) . '</div>';
+				// A host installer that did not install says why, one line each.
+				foreach ($pl_on as $pl_name => $pl_v) {
+					if (($pl_v[2] ?? '') === '' || $pl_v[2] === 'installed') { continue; }
+					$pl_say = array('refused' => 'not installed on this server', 'failed' => 'its last run failed', 'not_run' => 'not run here yet',
+						'refused_untrusted' => 'refused: the installer is not a file this server runs as root', 'refused_unsigned' => 'refused: not a package we built',
+						'missing' => 'refused: the declared installer is missing');
+					echo '<div class="small text-muted mt-1">' . htmlspecialchars($pl_name) . ' host setup: ' . htmlspecialchars($pl_say[$pl_v[2]] ?? $pl_v[2])
+						. ($pl_v[3] !== '' ? ' — ' . htmlspecialchars($pl_v[3]) : '') . (!empty($pl_v[4]) ? ' (a run is queued)' : '') . '</div>';
+				}
 			}
 			if ($pl_off) {
 				echo '<div class="small text-muted mt-1">' . (int)$pl_off . ' installed and switched off</div>';
 			}
 			$pl_stale = count(array_filter($pl_on, function ($v) { return in_array($v[1], array('error', 'stale'), true); }));
-			$detail_rows[] = array('title' => 'Plugins', 'tone' => 'info',
+			$pl_unset = count(array_filter($pl_on, function ($v) { return ($v[2] ?? '') !== '' && $v[2] !== 'installed'; }));
+			$detail_rows[] = array('title' => 'Plugins', 'tone' => $pl_unset ? 'warn' : 'info',
 				'summary' => count($pl_on) . ' on' . ($pl_off ? ', ' . (int)$pl_off . ' off' : '')
-					. ($pl_stale ? ' · ' . $pl_stale . ' flagged (stale: no longer in the release\'s plugin list)' : ''),
+					. ($pl_stale ? ' · ' . $pl_stale . ' flagged (stale: no longer in the release\'s plugin list)' : '')
+					. ($pl_unset ? ' · ' . $pl_unset . ' whose host setup is not installed here' : ''),
 				'body' => ob_get_clean());
+		}
+
+		// The site's themes from its own registry (check_status, agent 1.120.0).
+		if (isset($status_data['themes']) && is_array($status_data['themes'])) {
+			$th_active = '';
+			$th_names = array();
+			foreach (array_slice($status_data['themes'], 0, 100) as $th) {
+				if (!is_array($th)) { continue; }
+				$th_name = preg_replace('/[^A-Za-z0-9._+-]/', '', (string)($th['name'] ?? ''));
+				if ($th_name === '') { continue; }
+				$th_label = $th_name . (($th['version'] ?? '') !== '' ? ' ' . preg_replace('/[^A-Za-z0-9._+-]/', '', (string)$th['version']) : '');
+				if (($th['active'] ?? null) === true) { $th_active = $th_label; } else { $th_names[] = $th_label; }
+			}
+			$detail_rows[] = array('title' => 'Themes', 'tone' => 'info',
+				'summary' => ($th_active !== '' ? 'active: ' . $th_active : 'none active') . ' · ' . (count($th_names) + ($th_active !== '' ? 1 : 0)) . ' installed',
+				'body' => $th_names ? '<div class="small text-muted mt-1">Also installed: ' . htmlspecialchars(implode(' · ', $th_names)) . '</div>' : '');
 		}
 		}
 

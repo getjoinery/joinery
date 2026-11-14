@@ -26,6 +26,8 @@
  *   - Non-protected hosted domains: no in-app signature (the provider's normal
  *     alignment for the domain applies if it is verified there).
  *
+ * @version 1.2 - send() notes its signing to MailSendOutcome: signed (selector, d=), unsigned with the
+ *   signer's reason, or handed on to the API provider
  * @version 1.1
  */
 
@@ -112,6 +114,12 @@ class RawRelayComposeTransport implements EmailServiceProvider {
             $mailer->DKIM_selector       = $sig['selector'];
             $mailer->DKIM_private_string = $sig['private_string']; // in-memory only, never a file
             $mailer->DKIM_identity       = (string)$message->getFrom();
+        }
+        $provider_key = method_exists($provider, 'getKey') ? (string)$provider::getKey() : get_class($provider);
+        if ($sig !== null) {
+            MailSendOutcome::noteSigned(MailSendOutcome::PATH_RELAY_COMPOSE, (string)$sig['selector'], (string)$sig['domain'], $provider_key);
+        } else {
+            MailSendOutcome::notePath(MailSendOutcome::PATH_RELAY_COMPOSE, $provider_key);
         }
 
         try {

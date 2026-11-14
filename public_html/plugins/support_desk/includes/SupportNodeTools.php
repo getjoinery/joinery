@@ -27,6 +27,8 @@
  * is off, in the node's words, and the node refuses them anyway); the
  * thread's live-read consent; and the per-thread daily allowance.
  *
+ * @version 0.4.0 - mailbox_status (spam_learning_status widened to one mail domain)
+ * @version 0.3.0 - building, queueing and waiting go through server_manager's ObserveWordAsk, shared with ask_node
  * @version 0.2.0 - relay_status: the site's view of its mail relay (agent 1.101.0)
  * @version 0.1.0
  */
@@ -35,7 +37,7 @@ class SupportNodeTools {
 	/** The observe words a support turn may use. */
 	const WORDS = array(
 		'host_report', 'site_log', 'log_table_tail', 'unit_journal', 'file_head', 'disk_usage',
-		'schema_probe', 'page_probe', 'container_inventory', 'listening_sockets', 'spam_learning_status', 'relay_status',
+		'schema_probe', 'page_probe', 'container_inventory', 'listening_sockets', 'mailbox_status', 'relay_status',
 	);
 
 	/** How long one read waits for the node. */
@@ -44,12 +46,9 @@ class SupportNodeTools {
 	/** Longest read handed to the model, in characters. */
 	const RESULT_CAP = 12000;
 
-	/** Seconds between looks at the job while waiting. */
-	const POLL_SECONDS = 1.5;
-
 	/** Whether the plane's agent machinery is here at all. */
 	public static function available(): bool {
-		return class_exists('JobCommandBuilder') && class_exists('ManagementJob') && class_exists('ManagedNode');
+		return class_exists('ObserveWordAsk') && ObserveWordAsk::available();
 	}
 
 	/**
@@ -60,11 +59,7 @@ class SupportNodeTools {
 		if (!self::available() || !$node) {
 			return array();
 		}
-		$reported = AgentVocabulary::reported_words($node);
-		if (AgentVocabulary::below_floor($node)) {
-			return array();
-		}
-		return array_values(array_intersect(self::WORDS, $reported));
+		return ObserveWordAsk::offered($node, self::WORDS);
 	}
 
 	/** The words a node does not report, among WORDS: what the gap report counts. */
@@ -90,7 +85,7 @@ class SupportNodeTools {
 			'page_probe'           => "Render one of the site's own pages as a throwaway visitor, member or administrator and report facts about the render (status, errors, size); nothing on the page is changed.",
 			'container_inventory'  => "List the containers on the site's host: image, state, mounts and run settings.",
 			'listening_sockets'    => "List the addresses and ports the site's machine listens on, with the program holding each.",
-			'spam_learning_status' => "Report whether members' spam corrections reach the site's spam filter: counts only.",
+			'mailbox_status'       => "With no domain: whether members' spam corrections reach the site's spam filter (counts only) and the site's mail domains. With one of those domains: its Setup checks (status only), whether send protection is on, its DNS records as the site's machine sees them beside the zone's own nameservers, and how its mail left (signed, unsigned, or handed to a provider). Changes nothing.",
 			'relay_status'         => "Report the site's view of its mail relay: the relay's version and last health answer, when the routing map was pushed, when mail was last picked up and how much is held, the transport key's kind, and how much mail arrived in the last hour and day. No addresses or keys.",
 		);
 		return ($d[$word] ?? 'Read one fact about the site.')
@@ -131,6 +126,11 @@ class SupportNodeTools {
 					'table' => array('type' => 'string', 'pattern' => '^[a-z][a-z0-9_]{0,62}$',
 						'description' => 'A table name, e.g. usr_users.'),
 				), 'required' => array('table'));
+			case 'mailbox_status':
+				return array('type' => 'object', 'properties' => array(
+					'domain' => array('type' => 'string', 'pattern' => '^[a-z0-9.-]+\\.[a-z]{2,}$',
+						'description' => 'One of the site\'s own mail domains, from a call with no domain. Leave out for the spam-learning counts and the domain list.'),
+				));
 			case 'page_probe':
 				return array('type' => 'object', 'properties' => array(
 					'page'   => array('type' => 'string', 'description' => 'A page path on the site, lowercase, no query string, e.g. /events.'),
@@ -147,37 +147,6 @@ class SupportNodeTools {
 			$out[] = $k . ' = ' . $label;
 		}
 		return implode('; ', $out);
-	}
-
-	/** The builder envelope for a word and its input; throws with the reason when the plane refuses. */
-	private static function build($node, string $word, array $in): array {
-		switch ($word) {
-			case 'site_log':
-				return JobCommandBuilder::build_site_log($node, (string)($in['file'] ?? ''), !empty($in['previous']), (int)($in['lines'] ?? 100));
-			case 'log_table_tail':
-				return JobCommandBuilder::build_log_table_tail($node, (string)($in['table'] ?? ''), (int)($in['rows'] ?? 50));
-			case 'unit_journal':
-				return JobCommandBuilder::build_unit_journal($node, (string)($in['unit'] ?? ''), (int)($in['lines'] ?? 100));
-			case 'file_head':
-				return JobCommandBuilder::build_file_head($node, (string)($in['file'] ?? ''), (int)($in['lines'] ?? 200));
-			case 'schema_probe':
-				return JobCommandBuilder::build_schema_probe($node, (string)($in['table'] ?? ''));
-			case 'page_probe':
-				return JobCommandBuilder::build_page_probe($node, (string)($in['page'] ?? ''), (string)($in['viewer'] ?? ''));
-			case 'host_report':
-				return JobCommandBuilder::build_host_report($node);
-			case 'disk_usage':
-				return JobCommandBuilder::build_disk_usage($node);
-			case 'container_inventory':
-				return JobCommandBuilder::build_container_inventory($node);
-			case 'listening_sockets':
-				return JobCommandBuilder::build_listening_sockets($node);
-			case 'spam_learning_status':
-				return JobCommandBuilder::build_spam_learning_status($node);
-			case 'relay_status':
-				return JobCommandBuilder::build_relay_status($node);
-		}
-		throw new Exception("'$word' is not a word the support desk reads.");
 	}
 
 	// ------------------------------------------------------------ running
@@ -207,37 +176,23 @@ class SupportNodeTools {
 			return array('content' => 'This thread has used its ' . $per_day . ' reads of the site for today. Answer from what has been read, or hand the thread to a person.', 'is_error' => true);
 		}
 
+		$requested_by = 'support:' . (int)$thread->key;
 		try {
-			$built = self::build($node, $word, $input);
+			$asked = ObserveWordAsk::ask($node, $word, $input, $requested_by, SupportDesk::systemUserId(),
+				self::CALL_CEILING_SECONDS, function () use ($ctx) { return $ctx->shouldAbort(); });
 		} catch (\Throwable $e) {
 			// The plane's refusal, in the node's words (the log switch, a value
 			// outside the closed set): the model repeats it.
 			return array('content' => 'Refused: ' . $e->getMessage(), 'is_error' => true);
 		}
-
-		$requested_by = 'support:' . (int)$thread->key;
-		try {
-			$job = ManagementJob::createFromBuild((int)$node->key, $word, $built,
-				array('requested_by' => $requested_by), SupportDesk::systemUserId());
-		} catch (\Throwable $e) {
-			return array('content' => 'The read could not be queued: ' . $e->getMessage(), 'is_error' => true);
-		}
+		$job = $asked['job'];
 		$job_id = (int)$job->key;
-
-		$deadline = microtime(true) + self::CALL_CEILING_SECONDS;
-		while (true) {
-			$job = new ManagementJob($job_id, TRUE);
-			$status = (string)$job->get('mjb_status');
-			if ($status === 'completed' || $status === 'failed') {
-				break;
-			}
-			if (microtime(true) >= $deadline) {
-				return array('content' => "The site did not answer in time. The read is job #$job_id on the site's job list and finishes there; it is not part of this answer.", 'is_error' => true);
-			}
-			if ($ctx->shouldAbort()) {
-				return array('content' => 'Cancelled by the person.', 'is_error' => true);
-			}
-			usleep((int)(self::POLL_SECONDS * 1000000));
+		$status = $asked['status'];
+		if ($status === 'waiting') {
+			return array('content' => "The site did not answer in time. The read is job #$job_id on the site's job list and finishes there; it is not part of this answer.", 'is_error' => true);
+		}
+		if ($status === 'aborted') {
+			return array('content' => 'Cancelled by the person.', 'is_error' => true);
 		}
 
 		$nonce = $ctx->untrustedNonce();

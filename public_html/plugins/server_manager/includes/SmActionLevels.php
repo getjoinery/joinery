@@ -13,6 +13,8 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.12 - mail_test_send is a change (8): it sends mail
+ * @version 1.11 - mailbox_status is a look (7), as spam_learning_status, the word it widened, was
  * @version 1.10 - adopt_container_join on the dashboard (10)
  * @version 1.9 - discard_test_provision on the dashboard (10)
  * @version 1.8 - never_do_clear clears the never-do review list and resets what is expected (10)
@@ -32,11 +34,11 @@ final class SmActionLevels {
 			// Looks (7)
 			'check_status' => 7, 'refresh_status' => 7, 'install_report' => 7, 'host_report' => 7, 'site_log' => 7, 'site_log_count' => 7,
 			'log_table_tail' => 7, 'unit_journal' => 7, 'site_converger' => 7, 'disk_usage' => 7, 'largest_files' => 7, 'listening_sockets' => 7,
-			'site_state_report' => 7, 'container_inventory' => 7, 'spam_learning_status' => 7, 'relay_status' => 7, 'file_head' => 7,
+			'site_state_report' => 7, 'container_inventory' => 7, 'mailbox_status' => 7, 'relay_status' => 7, 'file_head' => 7,
 			'schema_probe' => 7, 'page_probe' => 7, 'net_health' => 7, 'web_workers' => 7, 'edge_vs_origin' => 7,
 			// Changes (8)
 			'host_converge' => 8, 'install_security_updates' => 8, 'refresh_site_containers' => 8,
-			'reset_failed_unit' => 8, 'restart_unit' => 8, 'restart_container' => 8, 'hold_container' => 8,
+			'reset_failed_unit' => 8, 'restart_unit' => 8, 'mail_test_send' => 8, 'restart_container' => 8, 'hold_container' => 8,
 			'site_limits' => 8, 'outbound_limits' => 8, 'run_installer' => 8, 'reclaim_managed_file' => 8,
 			'restore_release_file' => 8, 'repair_release_files' => 8, 'backup_run' => 8, 'save_backup_policy' => 8,
 			'apply_update' => 8, 'apply_update_all_on_host' => 8, 'publish_upgrade' => 8, 'retry_install' => 8,

@@ -718,6 +718,30 @@ Failed emails are automatically queued:
 // Can be retried later with queue processing script
 ```
 
+### How each domain's mail left (send outcome counters)
+
+Every message that leaves through `EmailSender` is counted per From-domain in `mso_mail_send_outcomes` (`MailSendOutcome`, `data/mail_send_outcomes_class.php`). It answers "is this domain's mail actually signed", which an error count cannot: a send path that never reaches the signer logs nothing.
+
+One row per distinct path, outcome, DKIM selector, `d=` tag, reason, provider and test-mode flag, with a count and the first and last time (UTC). The counter is a single `INSERT ... ON CONFLICT` upsert, so web workers and cron counting at once lose nothing.
+
+| Path | Where the message left |
+|---|---|
+| `smtp` | `SmtpProvider` (and providers built on it): SMTP submission to the configured host |
+| `relay_compose` | `RawRelayComposeTransport`: the app-built raw message through an API relay |
+| `api` | any HTTP-API provider (Mailgun, SES, Postmark, ...) given the message |
+| `connected` | `ConnectedMailboxProvider`: sent as an external account through its own server |
+| `joinery_direct` | Joinery Direct, instance to instance |
+
+| Outcome | Meaning |
+|---|---|
+| `signed` | a DKIM signature was added here; `selector` and `d` say which |
+| `unsigned` | the site meant to sign here and could not; `reason` is `key_missing`, `key_unreadable` or `key_empty` |
+| `handed_on` | no signature was added here; `provider` names what took it (`smtp:localhost` is the box's own Postfix and rspamd), which may sign it. Not a pass |
+
+The two places a signing decision is made, `SmtpProvider::send()` and `RawRelayComposeTransport::send()`, leave a note (`MailSendOutcome::noteSigned()` / `notePath()`); a signer that meant to sign and could not says why first (`noteUnsignedReason()`, called by the mailbox plugin's `MailboxDkimSigner`). `EmailSender` counts the note after a successful send, or, with no note, counts the message handed on to the service it used. A refused send is not counted, a dry run is not counted, and a test-mode send is counted on its own row with `test_mode` set. Names reserved for examples and tests (`example.com`, `.example`, `.test`, `.invalid`, `.localhost`) are never counted. Counting never costs a send: a failure is logged and the send stands.
+
+No row holds an address, a subject or a body. `MailSendOutcome::summaryForDomain($domain)` returns a domain's rows, newest first, at most 20: `path`, `outcome`, `selector`, `d`, `reason`, `provider`, `test_mode`, `count`, `first_time`, `last_time` (ISO 8601 UTC).
+
 ### Custom Headers and Attachments
 
 ```php

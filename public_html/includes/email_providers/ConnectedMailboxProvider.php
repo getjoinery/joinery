@@ -17,6 +17,7 @@
  * with inbound — a send rejected for missing scope/auth flags iia_needs_reauth so
  * one Reconnect fixes both directions.
  *
+ * @version 1.1 - send() notes the connected path to MailSendOutcome (handed on to the account's own server)
  * @version 1.0
  */
 
@@ -120,6 +121,9 @@ class ConnectedMailboxProvider implements EmailServiceProvider {
 
         $mailer = new SmtpMailer($config);
         $mailer->applyMessage($message);
+        // Sent as the external account through its own server, which signs it.
+        MailSendOutcome::notePath(MailSendOutcome::PATH_CONNECTED,
+            self::getKey() . ':' . strtolower(trim((string)$config->host)));
 
         if ($mailer->send()) {
             return true;

@@ -6,6 +6,9 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.41 - mail_test_send: a Send a test message button on an ordinary domain's answer, and what the send did
+ * @version 1.40 - mailbox_status: the domain list with a Check button each, and one domain's rows, flags, DNS and send outcomes
+ * @version 1.39 - the site_log_count card names both logs it reads
  * @version 1.38 - no inline script: the reload is data-jy-reload-after, the poller assets/js/job-detail.js
  * @version 1.37 - an apply result's warnings (a role step that left the site on postgres) show as alerts on the card
  * @version 1.36 - a log_table_tail event read shows the vault windows paired and counted (VaultWindowHistory) above its rows
@@ -503,9 +506,9 @@ if ($result) {
 		// Counts first, then whether they cover the whole window: a count from a
 		// read that stopped short of 'since' is a floor, not an answer.
 		$covers = !empty($result_data['covers_since']);
-		echo '<div class="card mb-3"><div class="card-header"><strong>Error log problem lines since '
+		echo '<div class="card mb-3"><div class="card-header"><strong>Error and scheduled-task log problem lines since '
 			. htmlspecialchars((string)($result_data['since'] ?? '')) . '</strong> <small class="text-muted">— '
-			. (empty($result_data['present']) ? 'no error log on the node'
+			. (empty($result_data['present']) ? 'no log on the node'
 				: (int)($result_data['lines_in_window'] ?? 0) . ' line(s) in the window, read from '
 					. htmlspecialchars(implode(', ', (array)($result_data['files_read'] ?? []))))
 			. '</small></div><div class="card-body">';
@@ -924,8 +927,113 @@ if ($result) {
 		}
 		echo '</div>';
 		$result_data = null;
-	} elseif (is_array($result_data) && $job_type === 'spam_learning_status' && !empty($result_data['read'])) {
-		// Whether members' spam corrections reach the filter (agent 1.76.0): counts only.
+	} elseif (is_array($result_data) && $job_type === 'mailbox_status' && !empty($result_data['read']) && isset($result_data['domain'])) {
+		// One hosted domain, read without changing anything: its Setup rows,
+		// send protection, its DNS as the machine sees it beside the zone's own
+		// nameservers, and how its mail left.
+		$mbs_domain = (string)$result_data['domain'];
+		echo '<div class="card mb-3"><div class="card-header"><strong>Mailbox: ' . htmlspecialchars($mbs_domain) . '</strong></div><div class="card-body">';
+		if (!empty($result_data['refused'])) {
+			echo '<div class="text-muted">' . htmlspecialchars($mbs_domain) . ' is not a mail domain of this site, so nothing was looked up.</div>';
+		} else {
+			$fl = $result_data['flags'] ?? array();
+			$yn = function ($v) { return $v ? 'yes' : 'no'; };
+			echo '<div>Send protection: <strong>' . ($fl['protected'] ? 'on' : 'off') . '</strong>; asked for: ' . $yn($fl['send_lock_requested'] ?? false)
+				. '; sealed signing key: ' . $yn($fl['sealed_key_present'] ?? false)
+				. (($fl['selector'] ?? '') !== '' ? ' (selector ' . htmlspecialchars($fl['selector']) . ')' : '')
+				. '; owner set: ' . $yn($fl['owner_set'] ?? false) . ', with a vault: ' . $yn($fl['owner_has_vault'] ?? false)
+				. '; forwarding from ' . htmlspecialchars((string)($fl['forwarding_subdomain'] ?? '')) . '.</div>';
+			if (!empty($result_data['not_asked'])) {
+				$na = array('fleet' => 'the fleet service', 'provider_api' => 'the mail provider\'s API');
+				echo '<div class="small text-muted mt-1">Not asked, because this read changes nothing and calls nothing outside the machine: '
+					. htmlspecialchars(implode(' and ', array_map(function ($k) use ($na) { return $na[$k] ?? $k; }, $result_data['not_asked'])))
+					. '. Rows that needed them show unknown.</div>';
+			}
+			echo '<table class="table table-sm mt-2 mb-2"><thead><tr><th>Setup check</th><th>Status</th></tr></thead><tbody>';
+			foreach ($result_data['checks'] ?? array() as $c) {
+				echo '<tr><td>' . htmlspecialchars($c['label'] !== '' ? $c['label'] : $c['id']) . ' <span class="text-muted small">' . htmlspecialchars($c['id']) . '</span></td><td>'
+					. htmlspecialchars($c['status']) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+			$verdicts = array('agree' => 'the machine agrees with the zone', 'node_differs' => 'the machine\'s answer differs from the zone (a stale cache, or a change still arriving)',
+				'nameservers_disagree' => 'the zone\'s own nameservers disagree', 'zone_unreadable' => 'the zone\'s nameservers gave no clean answer', 'node_error' => 'the machine could not look it up');
+			echo '<table class="table table-sm mb-2"><thead><tr><th>DNS name</th><th>This machine</th><th>The zone\'s nameservers</th><th>Reading</th></tr></thead><tbody>';
+			foreach ($result_data['dns'] ?? array() as $r) {
+				$node_cell = $r['node']['status'] === 'answer'
+					? htmlspecialchars(implode(' | ', $r['node']['answer'])) . (is_int($r['node']['ttl_left']) ? ' <span class="text-muted small">(cached ' . $r['node']['ttl_left'] . ' s more)</span>' : '')
+					: ($r['node']['status'] === 'no_answer' ? 'no answer <span class="text-muted small">(time left unknown)</span>' : 'lookup failed');
+				$auth_cell = array();
+				foreach ($r['authoritative'] as $a) {
+					$auth_cell[] = htmlspecialchars($a['nameserver']) . ': ' . ($a['status'] === 'answer' ? htmlspecialchars(implode(' | ', $a['answer'])) : str_replace('_', ' ', $a['status']));
+				}
+				echo '<tr><td>' . htmlspecialchars($r['type'] . ' ' . $r['name']) . '</td><td class="small svm-break-all">' . $node_cell . '</td><td class="small svm-break-all">'
+					. ($auth_cell ? implode('<br>', $auth_cell) : 'none found') . '</td><td class="small">' . htmlspecialchars($verdicts[$r['verdict']] ?? $r['verdict'])
+					. '; the Setup tab reads ' . ($r['setup_reads'] === 'node' ? 'this machine' : 'the zone') . '</td></tr>';
+			}
+			echo '</tbody></table>';
+			$so = $result_data['send_outcomes'] ?? null;
+			if (is_array($so) && isset($so['error'])) {
+				echo '<div class="small text-muted">How its mail left could not be read.</div>';
+			} elseif (is_array($so)) {
+				if (!$so) {
+					echo '<div class="small text-muted">No mail sent as ' . htmlspecialchars($mbs_domain) . ' has been recorded.</div>';
+				} else {
+					echo '<table class="table table-sm mb-0"><thead><tr><th>How mail left</th><th>Count</th><th>Last</th></tr></thead><tbody>';
+					foreach ($so as $o) {
+						$what = $o['outcome'] === 'signed' ? 'signed here, d=' . $o['d'] . ($o['selector'] !== '' ? ', s=' . $o['selector'] : '')
+							: ($o['outcome'] === 'unsigned' ? 'left unsigned here' . ($o['reason'] !== '' ? ' (' . $o['reason'] . ')' : '')
+							: 'handed on to ' . ($o['provider'] !== '' ? $o['provider'] : 'another sender') . ', which signs it or not');
+						echo '<tr><td>' . htmlspecialchars($what . ($o['path'] !== '' ? ' — ' . $o['path'] : '') . (!empty($o['test_mode']) ? ' (while email test mode was on)' : '')) . '</td><td>' . (is_int($o['count']) ? number_format($o['count']) : 'unknown')
+							. '</td><td class="small">' . htmlspecialchars((string)$o['last_time']) . '</td></tr>';
+					}
+					echo '</tbody></table>';
+				}
+			}
+			if (empty($fl['protected'])) {
+				echo '<form method="post" action="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$job->get('mjb_mgn_managed_node_id') . '" class="mt-2">'
+					. '<input type="hidden" name="action" value="mail_test_send"><input type="hidden" name="domain" value="' . htmlspecialchars($mbs_domain) . '">'
+					. SmAdminCsrf::field()
+					. '<button type="submit" class="btn btn-sm btn-outline-secondary">Send a test message</button> '
+					. '<span class="small text-muted">One fixed message from ' . htmlspecialchars($mbs_domain) . ' to the probe mailbox, whose receiver records its SPF, DKIM and DMARC verdicts.</span></form>';
+			} else {
+				echo '<div class="small text-muted mt-2">Send protection is on, so a test message can only be sent from its owner\'s signed-in session: Send test message on the Setup page.</div>';
+			}
+			if (!empty($result_data['checked_at'])) {
+				echo '<div class="small text-muted mt-1">Checked ' . htmlspecialchars(LibraryFunctions::convert_time(str_replace(array('T', 'Z'), array(' ', ''), $result_data['checked_at']), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A')) . '.</div>';
+			}
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'mail_test_send' && !empty($result_data['read'])) {
+		// One fixed test message to the probe mailbox: its token finds it at
+		// the receiver, whose Authentication-Results header has the verdicts.
+		echo '<div class="card mb-3"><div class="card-header"><strong>Test message</strong></div><div class="card-body">';
+		$mts_refusals = array(
+			'not_a_hosted_domain' => 'it is not a mail domain of this site',
+			'protected'           => 'send protection is on: its mail leaves only from its owner\'s signed-in session (Send test message on the Setup page)',
+			'email_test_mode'     => 'the site\'s email test mode is on, which would send it to the test mailbox instead',
+			'email_dry_run'       => 'the site\'s email dry run is on',
+			'too_soon'            => 'one was sent less than ten minutes ago',
+			'busy'                => 'another test send for it is running',
+			'no_rate_record'      => 'the site could not keep its record of when it last sent one',
+		);
+		if (($result_data['mailbox'] ?? '') === 'inactive') {
+			echo '<div class="text-muted">The Mailbox plugin is not active on this site.</div>';
+		} elseif (!empty($result_data['refused'])) {
+			echo '<div>Not sent from ' . htmlspecialchars($result_data['domain']) . ': ' . htmlspecialchars($mts_refusals[$result_data['refused']] ?? 'refused')
+				. (is_int($result_data['retry_after_seconds'] ?? null) ? ' (try again in ' . (int)ceil($result_data['retry_after_seconds'] / 60) . ' min)' : '') . '.</div>';
+		} elseif (!empty($result_data['sent'])) {
+			echo '<div>Sent from <strong>' . htmlspecialchars($result_data['from']) . '</strong> to <strong>' . htmlspecialchars($result_data['to']) . '</strong>'
+				. ($result_data['transport'] !== '' ? ' through ' . htmlspecialchars($result_data['transport']) : '') . '.</div>'
+				. '<div class="mt-1">Subject: <code>' . htmlspecialchars((string)$result_data['subject']) . '</code>. Its receiver records the SPF, DKIM and DMARC verdicts in the message\'s Authentication-Results header; look for this subject there.</div>';
+		} else {
+			echo '<div>The message did not go: ' . htmlspecialchars((string)$result_data['error']) . '</div>';
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && in_array($job_type, array('mailbox_status', 'spam_learning_status'), true) && !empty($result_data['read'])) {
+		// Whether members' spam corrections reach the filter: counts only, and
+		// the site's mail domains, each of which can be asked about on its own.
 		echo '<div class="card mb-3"><div class="card-header"><strong>Spam learning</strong></div><div class="card-body">';
 		if (($result_data['mailbox'] ?? '') !== 'active') {
 			echo '<div class="text-muted">The Mailbox plugin is not active on this site.</div>';
@@ -945,6 +1053,18 @@ if ($result) {
 				. $n($k['tokens'] ?? null) . ' words), ' . (!empty($k['trained']) ? 'enough for its answer to count' : 'not yet enough for its answer to count')
 				. (!empty($k['newest_token']) ? '; it last learned something on ' . htmlspecialchars(LibraryFunctions::convert_time(str_replace(array('T', 'Z'), array(' ', ''), $k['newest_token']), 'UTC', $session->get_timezone(), 'M j, Y g:i A')) : '')
 				. '.</div>';
+			if (!empty($result_data['domains'])) {
+				echo '<div class="mt-3"><strong>Mail domains</strong></div><table class="table table-sm mb-0"><tbody>';
+				foreach ($result_data['domains'] as $md) {
+					echo '<tr><td>' . htmlspecialchars($md['domain']) . '</td><td class="small text-muted">' . ($md['enabled'] ? 'enabled' : 'disabled')
+						. ($md['protected'] ? ', send protection on' : '') . '</td><td>'
+						. '<form method="post" action="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$job->get('mjb_mgn_managed_node_id') . '" class="jy-inline-form">'
+						. '<input type="hidden" name="action" value="mailbox_status"><input type="hidden" name="domain" value="' . htmlspecialchars($md['domain']) . '">'
+						. SmAdminCsrf::field()
+						. '<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2">Check this domain</button></form></td></tr>';
+				}
+				echo '</tbody></table>';
+			}
 		}
 		echo '</div></div>';
 		$result_data = null;

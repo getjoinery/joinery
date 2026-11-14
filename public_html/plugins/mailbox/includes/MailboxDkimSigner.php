@@ -12,6 +12,8 @@
  * Registered into the core MailIdentityGuard at plugin bootstrap so core send
  * code (SmtpProvider, EmailSender) never names a mailbox symbol.
  *
+ * @version 1.7 - signsStandardInApp(), so the Setup tab prescribes the key it signs with
+ * @version 1.6 - a relay-fronted send left unsigned tells MailSendOutcome why (key missing, unreadable, empty)
  * @version 1.5 - proveKeyMatchesRecord() and openSealedKey(), for proving the sealed key before protection goes on
  * @version 1.4 - an ordinary domain's in-app signer always uses the 'mail' selector, never the
  *   sealed key's mailkN (asked-for or lifted send protection left relay-fronted sends unsigned)
@@ -153,6 +155,15 @@ class MailboxDkimSigner {
 		return self::localKeyFile(strtolower((string)$domain->get('ied_domain')), self::STANDARD_SELECTOR . '.private');
 	}
 
+	/**
+	 * Does this deployment sign an ordinary domain's mail itself, with the
+	 * on-disk key (standardFilesystemSigner())? True where a relay fronts it.
+	 * The Setup tab prescribes that key's record exactly when this is true.
+	 */
+	public static function signsStandardInApp(): bool {
+		return self::relayActive();
+	}
+
 	/** True on a relay-fronted deployment (an active MailboxRelay row exists). */
 	private static function relayActive(): bool {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relays_class.php'));
@@ -185,12 +196,15 @@ class MailboxDkimSigner {
 			error_log('MailboxDkimSigner: relay-fronted send for ' . $domain_name
 				. ' leaving UNSIGNED — DKIM key ' . (file_exists($key_path) ? 'not readable by the PHP user' : 'missing')
 				. ' at ' . $key_path);
+			MailSendOutcome::noteUnsignedReason(file_exists($key_path)
+				? MailSendOutcome::REASON_KEY_UNREADABLE : MailSendOutcome::REASON_KEY_MISSING);
 			return null;
 		}
 		$private = (string)@file_get_contents($key_path);
 		if (trim($private) === '') {
 			error_log('MailboxDkimSigner: relay-fronted send for ' . $domain_name
 				. ' leaving UNSIGNED — DKIM key file is empty at ' . $key_path);
+			MailSendOutcome::noteUnsignedReason(MailSendOutcome::REASON_KEY_EMPTY);
 			return null;
 		}
 		return array(

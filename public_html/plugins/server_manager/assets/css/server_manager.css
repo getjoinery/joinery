@@ -69,6 +69,7 @@ details.svm-status-row > summary:hover { background: #f8f9fa; }
 .svm-relative { position: relative; }
 .svm-dropdown-menu { display: none; position: absolute; right: 0; top: 100%; }
 .svm-fs-075 { font-size: .75rem; }
+.svm-break-all { word-break: break-all; }
 .svm-w200 { width: 200px; }
 .svm-m0 { margin: 0; }
 

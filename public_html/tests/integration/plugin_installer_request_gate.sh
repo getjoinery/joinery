@@ -17,6 +17,9 @@
 #   - with the active set unreadable, a request stays queued;
 #   - a failing installer records `failed` and its request exits 1 with the
 #     output; refusals leave their reason in the log and the transcript;
+#   - an installer that exits 78 declined to install here: the record says
+#     refused, with its last line as the reason, and the run is not marked
+#     installer-failed;
 #   - an installer that leaves a daemon holding stdout does not hang the run;
 #   - the runner's own stdout lines are unchanged.
 
@@ -68,6 +71,7 @@ plugin untrustp "echo ran-untrustp"
 chmod 775 "$PH/plugins/untrustp/install/host.sh"
 plugin unsigp "echo ran-unsigp"
 plugin betap "echo ran-betap; echo x >> '$T/betap.count'"
+plugin refusep "echo refusep: checking; echo; echo 'refusep: this server has under 2 GB of memory - nothing installed.'; exit 78"
 mkdir -p "$PH/plugins/gammap"; printf '{"name":"gammap"}' > "$PH/plugins/gammap/plugin.json"
 
 ACTIVE=$'alphap\nfailp\ndaemonp\nuntrustp\nunsigp\ngammap'
@@ -133,6 +137,17 @@ chk "unsigned: the reason is in the log and the transcript" \
     "$(grep -c 'not a package we built' "$T/logs/plugin_installers/unsigp.log" 2>/dev/null)|$(transcript "$N-a0000005" | grep -c 'not a package we built')" "1|1"
 chk "unsigned: the record" "$(php -r 'echo json_decode(file_get_contents($argv[1]),true)["outcome"];' "$T/cache/plugin_installers/unsigp.json" 2>/dev/null)" "refused-unsigned"
 chk "neither refused installer ran" "$(echo "$out" | grep -c -e '^ran-untrustp$' -e '^ran-unsigp$')" "0"
+
+echo "== an installer that declines to install here (exit 78) =="
+REFUSE_OUT=$(JOINERY_ACTIVE_PLUGINS=refusep timeout 120 bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "the record says refused, exit 78, with the last line as the reason" \
+    "$(php -r '$r=json_decode(file_get_contents($argv[1]),true); echo $r["outcome"],"|",$r["exit_code"],"|",$r["reason"];' "$T/cache/plugin_installers/refusep.json" 2>/dev/null)" \
+    "refused|78|refusep: this server has under 2 GB of memory - nothing installed."
+chk "stdout says refused here, with the reason, and no WARNING" \
+    "$(echo "$REFUSE_OUT" | grep -c '^plugin installers: refusep: refused here - refusep: this server has under 2 GB')|$(echo "$REFUSE_OUT" | grep -c 'WARNING - refusep')" "1|0"
+chk "the run is not marked installer-failed" "$(cut -d' ' -f2 "$T/cache/host_converger.last" 2>/dev/null | grep -c installer-failed)" "0"
+chk "an ok installer's record carries an empty reason" \
+    "$(php -r 'echo json_encode(json_decode(file_get_contents($argv[1]),true)["reason"] ?? null);' "$T/cache/plugin_installers/alphap.json" 2>/dev/null)" '""'
 
 echo "== requests that should do nothing run nothing, exit 2 =="
 chk "an inactive plugin" "$(exitcode failed "$N-a0000006")|$(transcript "$N-a0000006" | grep -c 'not an active plugin')|$(test -e "$T/betap.count" && echo ran || echo none)" "2|1|none"

@@ -1731,7 +1731,13 @@ check((string)$nj->get('mjb_result') === json_encode(['read' => false]),
 // site_log_count: counts, bounded samples, and the coverage flag exactly as sent.
 $cnt_env = json_encode(['api_version' => '1.0', 'data' => [
 	'file' => 'error', 'since' => '2026-10-22T23:07:00Z', 'present' => true, 'covers_since' => true,
-	'covered_from' => '2026-10-22T00:00:01Z', 'not_covered' => '', 'files_read' => ['error.log', 'error.log.1', '../x'],
+	'covered_from' => '2026-10-22T00:00:01Z', 'not_covered' => '',
+	'files_read' => ['error.log', 'error.log.1', 'cron_scheduled_tasks.log', 'cron_scheduled_tasks.log.2.gz', '../x', 'other.log'],
+	'logs' => [
+		'error' => ['present' => true, 'covers_since' => true, 'covered_from' => '2026-10-22T00:00:01Z', 'not_covered' => ''],
+		'cron_scheduled_tasks' => ['present' => true, 'covers_since' => true, 'covered_from' => '2026-10-21T00:00:01Z', 'not_covered' => ''],
+		'invented_log' => ['present' => true],
+	],
 	'bytes_read' => 400000, 'lines_in_window' => 1200,
 	'markers' => [
 		'entry_script_missing' => ['count' => 2, 'first' => '2026-10-22T23:10:00Z', 'last' => '2026-10-22T23:10:01Z',
@@ -1747,7 +1753,10 @@ check(is_array($cr) && $cr['read'] === true && $cr['covers_since'] === true && $
 check(count($cr['markers']['entry_script_missing']['samples']) === 3 && !isset($cr['markers']['invented_marker'])
 	&& array_keys($cr['markers']) === array_keys(JobCommandBuilder::SITE_LOG_COUNT_MARKERS),
 	'samples are capped at three and a marker the plane does not know is dropped');
-check($cr['files_read'] === ['error.log', 'error.log.1'], 'only error.log and its rotations are kept as file names', json_encode($cr['files_read']));
+check($cr['files_read'] === ['error.log', 'error.log.1', 'cron_scheduled_tasks.log', 'cron_scheduled_tasks.log.2.gz'],
+	'only the error log, the scheduled-task log and their rotations are kept as file names', json_encode($cr['files_read']));
+check(array_keys($cr['logs']) === ['error', 'cron_scheduled_tasks'] && $cr['logs']['cron_scheduled_tasks']['covers_since'] === true,
+	'each known log\'s own coverage is kept; a log the plane does not know is dropped', json_encode($cr['logs']));
 $uj = jrp_job($jrp_log_node, 'site_log_count', json_encode(['api_version' => '1.0', 'data' => [
 	'covers_since' => 'yes', 'markers' => [], 'not_covered' => 'stopped after 8 files']]));
 JobResultProcessor::process($uj);
@@ -2451,6 +2460,57 @@ check($sl['corpus']['newest_token'] === '2026-10-14T05:41:03Z' && $sl['policy'] 
 check(JobResultProcessor::sanitise_spam_learning_status(array('mailbox' => 'inactive')) === array('read' => true, 'mailbox' => 'inactive')
 	&& JobResultProcessor::sanitise_spam_learning_status(array('corrections' => array())) === array('read' => false),
 	'mailbox inactive is said; an answer with no mailbox state is not read');
+
+// mailbox_status: the no-domain answer is the counts plus the domain list; a
+// domain answer keeps compiled ids, statuses, flags, DNS and send outcomes only.
+$mbn = JobResultProcessor::sanitise_mailbox_status(array('mailbox' => 'active', 'window_days' => 7,
+	'corrections' => array('recorded' => 1), 'corpus' => array(), 'policy' => array(),
+	'domains' => array(array('domain' => 'Example.com', 'enabled' => true, 'protected' => 1), array('domain' => 'bad domain'), 'x')));
+check($mbn['corrections']['recorded'] === 1 && $mbn['domains'] === array(array('domain' => 'example.com', 'enabled' => true, 'protected' => false)),
+	'mailbox_status with no domain: the counts, and each domain held to its shape', var_export($mbn['domains'] ?? null, true));
+check(!isset(JobResultProcessor::sanitise_mailbox_status(array('mailbox' => 'active', 'window_days' => 7, 'corrections' => array(),
+	'corpus' => array(), 'policy' => array()))['domains']),
+	'an older agent\'s spam_learning_status answer has no domain list, and none is made up');
+check(JobResultProcessor::sanitise_mailbox_status(array('mailbox' => 'active', 'domain' => 'example.com', 'refused' => 'not_a_hosted_domain'))
+	=== array('read' => true, 'mailbox' => 'active', 'domain' => 'example.com', 'refused' => 'not_a_hosted_domain'),
+	'a domain the site does not host comes back refused');
+$mbd = JobResultProcessor::sanitise_mailbox_status(array('mailbox' => 'active', 'domain' => 'example.com', 'checked_at' => '2026-11-14T17:00:00Z',
+	'checks' => array(array('id' => 'domain.spf', 'status' => 'fail', 'severity' => 'required', 'label' => 'SPF <b>record</b>',
+		'summary' => 'Mail to bob@example.com bounced', 'fix' => array('dns_record' => array('value' => 'v=spf1 -all')))),
+	'not_asked' => array('fleet', 'shell'),
+	'flags' => array('protected' => true, 'sealed_key_present' => 'yes', 'selector' => 'mailk2', 'owner_set' => true,
+		'forwarding_subdomain' => 'fwd.example.com', 'owner_usr_user_id' => 12),
+	'dns' => array(array('record' => 'dmarc', 'name' => '_dmarc.example.com', 'type' => 'TXT',
+		'node' => array('status' => 'no_answer', 'answer' => array(), 'ttl_left' => null),
+		'authoritative' => array(array('nameserver' => '192.0.2.53', 'status' => 'answer', 'answer' => array('v=DMARC1; p=reject')),
+			array('nameserver' => 'not-an-ip', 'status' => 'answer', 'answer' => array('x'))),
+		'verdict' => 'node_differs', 'setup_reads' => 'authoritative'),
+		array('record' => 'arbitrary', 'name' => 'x.example.com')),
+	'send_outcomes' => array(array('path' => 'smtp', 'outcome' => 'unsigned', 'reason' => 'key_missing', 'count' => 3,
+		'last_time' => '2026-11-14T16:00:00Z', 'to' => 'bob@example.com'))));
+check($mbd['checks'] === array(array('id' => 'domain.spf', 'status' => 'fail', 'severity' => 'required', 'label' => 'SPF record')),
+	'a check row keeps id, status, severity and a plain label; never the summary or the fix', var_export($mbd['checks'], true));
+check($mbd['not_asked'] === array('fleet') && $mbd['flags']['protected'] === true && $mbd['flags']['sealed_key_present'] === false
+	&& $mbd['flags']['selector'] === 'mailk2' && !isset($mbd['flags']['owner_usr_user_id']),
+	'not_asked from its closed set; flags literal true only, no owner id', var_export($mbd['flags'], true));
+check(count($mbd['dns']) === 1 && count($mbd['dns'][0]['authoritative']) === 1 && $mbd['dns'][0]['verdict'] === 'node_differs'
+	&& $mbd['dns'][0]['node']['ttl_left'] === null,
+	'DNS rows from the fixed record list, nameservers that are addresses, the verdict kept', var_export($mbd['dns'], true));
+check(count($mbd['send_outcomes']) === 1 && $mbd['send_outcomes'][0]['count'] === 3 && $mbd['send_outcomes'][0]['reason'] === 'key_missing'
+	&& !isset($mbd['send_outcomes'][0]['to']),
+	'a send outcome keeps its words and counts, never an address', var_export($mbd['send_outcomes'], true));
+
+// mail_test_send: sent with its token, or a refusal from the closed set.
+$mt = JobResultProcessor::sanitise_mail_test_send(array('domain' => 'example.com', 'sent' => true, 'token' => '0123456789abcdef',
+	'from' => 'joinery-mail-check@example.com', 'to' => 'test@dev.getjoinery.com', 'subject' => "Joinery mail check 0123456789abcdef\r\nBcc: x",
+	'transport' => 'smtp', 'sent_at' => '2026-11-14T17:00:00Z', 'extra' => 'dropped'));
+check($mt['sent'] === true && $mt['token'] === '0123456789abcdef' && strpos($mt['subject'], "\n") === false && !isset($mt['extra']),
+	'a sent test keeps its token and a subject with no line breaks', var_export($mt, true));
+$mtr = JobResultProcessor::sanitise_mail_test_send(array('domain' => 'example.com', 'sent' => false, 'refused' => 'too_soon', 'retry_after_seconds' => 120));
+check($mtr['refused'] === 'too_soon' && $mtr['retry_after_seconds'] === 120, 'a refusal keeps its word and when to try again');
+check(JobResultProcessor::sanitise_mail_test_send(array('domain' => 'example.com', 'refused' => 'rm -rf'))['refused'] === 'refused'
+	&& JobResultProcessor::sanitise_mail_test_send(array('sent' => true)) === array('read' => false),
+	'a refusal outside the set is plain refused; no domain is not read');
 
 // relay_status: versions, times, counts, booleans and short words; nothing else.
 $rs_in = array('mailbox' => 'active', 'relay' => 'active', 'relays_enabled' => 1, 'relay_id' => 4, 'route' => 'cloud',

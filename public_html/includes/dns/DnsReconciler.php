@@ -33,6 +33,13 @@
  * claims no ownership when it finds nothing — because the record it deletes is,
  * by definition, one the platform did not write.
  *
+ * A record a write fails on is logged, one line each, as "DnsReconciler: record
+ * failed: OP TYPE NAME in ZONE (EXCEPTION CLASS)": the operation, the record's
+ * type and name, never its value or the provider's message, which can carry
+ * request detail. The agent's site_log_count counts these (marker
+ * dns_reconciler_failed); the reason itself stays on the result row.
+ *
+ * @version 1.6 - every failed record write logs one line naming its operation, type and name
  * @version 1.5 - a TXT slot is ours only when we last wrote the same kind there; a TXT is diffed and replaced only against records of its own kind, so SPF never overwrites a verification record
  * @version 1.4 - the public-DNS diff reads the zone's own nameservers first (DnsResolver::preferAuthoritative)
  * @version 1.3 - the public-DNS diff reads SRV, so a capability record verifies green
@@ -490,9 +497,8 @@ class DnsReconciler {
 					$provider_key, $zone, $outcome === self::CONFLICTS);
 				$written[] = $record;
 				$results[] = $this->result($key, $record, $action, true, '');
-			} catch (DnsManagedRecordException $e) {
-				$results[] = $this->result($key, $record, 'failed', false, $e->getMessage());
 			} catch (Throwable $e) {
+				self::logFailure($outcome === self::MISSING ? 'create' : 'update', $record, $zone, $e);
 				$results[] = $this->result($key, $record, 'failed', false, $e->getMessage());
 			}
 		}
@@ -561,6 +567,7 @@ class DnsReconciler {
 			return $this->result($key, $record, 'deleted', true,
 				$count > 1 ? $count . ' records at this name were deleted.' : '');
 		} catch (Throwable $e) {
+			self::logFailure('delete', $record, $zone, $e);
 			return $this->result($key, $record, 'failed', false, $e->getMessage());
 		}
 	}
@@ -569,6 +576,15 @@ class DnsReconciler {
 	private function replaceable(array $row): DnsRecord {
 		$live = $row['live'];
 		return !empty($live) ? $live[0] : $row['record'];
+	}
+
+	/** The prefix every failed-record line starts with: what site_log_count's marker matches. */
+	const FAILURE_LOG_PREFIX = 'DnsReconciler: record failed: ';
+
+	/** One line for a failed write: operation, type, name, zone and the exception's class, nothing else. */
+	private static function logFailure(string $op, DnsRecord $record, string $zone, Throwable $e): void {
+		error_log(self::FAILURE_LOG_PREFIX . $op . ' ' . strtoupper((string)$record->type) . ' '
+			. (string)$record->name . ' in ' . $zone . ' (' . get_class($e) . ')');
 	}
 
 	private function result(string $key, DnsRecord $record, string $action, bool $ok, string $reason): array {
@@ -613,6 +629,7 @@ class DnsReconciler {
 					empty($matches) ? 'skipped' : 'deleted', true,
 					empty($matches) ? 'Already gone from the zone; the platform simply stopped claiming it.' : '');
 			} catch (Throwable $e) {
+				self::logFailure('withdraw', $record, $zone, $e);
 				$results[] = $this->result($record->key(), $record, 'failed', false, $e->getMessage());
 			}
 		}

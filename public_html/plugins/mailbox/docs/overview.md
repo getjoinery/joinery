@@ -40,7 +40,7 @@ host may be a Docker container or bare metal.
 
 ### Removal
 
-`provisioning/remove_email.sh` is the plugin's declared `host_remover`: a site removal (`remove_account.sh`) runs it as root before the site's folder goes, and a plugin uninstall runs it through the `run_plugin_remover` root request. It takes off what the installer put on the machine for this site and nothing else. **What goes:** Postfix stops looking the site up (`virtual_mailbox_domains`, `virtual_transport`, the recipient lookup in `smtpd_recipient_restrictions` and `proxy_read_maps`, the `joinery` pipe service, the two pgsql map files under `/etc/postfix/`), and a running Postfix is reloaded; every `iemap_*` lookup role granted CONNECT on one of the site's databases (its own and its test database) has its grants revoked in each with `DROP OWNED BY` and is dropped, this site's `iemap_<dbname>` included; the DKIM signing keys of the site's domains under `/etc/rspamd/dkim/` go and the signing list is rewritten without them, when the domains table can still be read (at a plugin uninstall it is already gone, and the keys are left, said, for a reinstall to pick up); the relay helpers `/usr/local/sbin/joinery-mail-listener`, `/usr/local/sbin/joinery-dkim-remove` and `/etc/sudoers.d/joinery-relay` go when present. **What stays:** the packages, Postfix itself running with its hostname, TLS certificate, renewal hook and milter settings, the spam scanner's configuration and the firewall's 25/tcp rule; a later site's installer runs over them. In a site container it exits 0 with nothing to do. A `DROP ROLE` that fails is reported with PostgreSQL's message naming the database that still grants to the role: that is a copy or restore of this site's database on the same cluster (`createdb -T` keeps the grants), not a defect, and the role goes when that database does.
+`provisioning/remove_email.sh` is the plugin's declared `host_remover`: a site removal (`remove_account.sh`) runs it as root before the site's folder goes, and a plugin uninstall runs it through the `run_plugin_remover` root request. It takes off what the installer put on the machine for this site and nothing else. **What goes:** Postfix stops looking the site up (`virtual_mailbox_domains`, `virtual_transport`, the recipient lookup in `smtpd_recipient_restrictions` and `proxy_read_maps`, the `joinery` pipe service, the two pgsql map files under `/etc/postfix/`), and a running Postfix is reloaded; every `iemap_*` lookup role granted CONNECT on one of the site's databases (its own and its test database) has its grants revoked in each with `DROP OWNED BY` and is dropped, this site's `iemap_<dbname>` included; the DKIM signing keys of the site's domains under `/etc/rspamd/dkim/` go and the signing list is rewritten without them, when the domains table can still be read (at a plugin uninstall it is already gone, and the keys are left, said, for a reinstall to pick up); the relay helpers `/usr/local/sbin/joinery-mail-listener`, `/usr/local/sbin/joinery-dkim-remove`, `/usr/local/sbin/joinery-dkim-add` and `/etc/sudoers.d/joinery-relay` go when present. **What stays:** the packages, Postfix itself running with its hostname, TLS certificate, renewal hook and milter settings, the spam scanner's configuration and the firewall's 25/tcp rule; a later site's installer runs over them. In a site container it exits 0 with nothing to do. A `DROP ROLE` that fails is reported with PostgreSQL's message naming the database that still grants to the role: that is a copy or restore of this site's database on the same cluster (`createdb -T` keeps the grants), not a defect, and the role goes when that database does.
 
 ### Enabling
 
@@ -89,6 +89,46 @@ Copy-ready DNS records and exact fix commands appear inline on any failing
 check, along with one-click actions to enable the plugin or register a domain.
 The tab cannot create DNS records or set reverse DNS for you (those live with
 your registrar / VPS provider) — it detects, instructs, and verifies.
+
+Every enabled hosted domain carries a **Test message to a receiver** row
+(`domain.test_message`, neutral) with a **Send test message** button: one fixed
+message from the domain to the probe mailbox, whose receiver records its SPF, DKIM
+and DMARC verdicts in the message's `Authentication-Results` header. Its subject
+carries a code (`Joinery mail check {16 hex}`) that finds it there. `MailTestProbe`
+sends it: an ordinary domain's through `EmailSender`, from
+`joinery-mail-check@{domain}`; a protected domain's through the signed-in compose
+path, from the pressing person's first mailbox at that domain, as all of its mail
+must leave. It is refused while email test mode or dry run is on (the probe would
+never reach a receiver) and more than once per domain every ten minutes, a record
+kept in the site's `cache/mail_test_send/`. The probe mailbox is
+`test@dev.getjoinery.com` (`MailTestProbe::PROBE_ADDRESS`).
+
+#### The read-only check engine
+
+`InboundEmailSetupCheck::readOnly()` builds an engine that changes nothing and
+calls nothing outside the machine but DNS. A full run has three deliberate side
+effects, and the read-only engine skips each: on a fleet-relay deployment it asks
+the fleet service for claim state, re-verifies pending claims and files a missing
+one; it asks each mail provider's API for its DKIM and sending-domain state; and it
+records the relay cutover verdict as a setting. Rows that needed the fleet or a
+provider come back UNKNOWN, and `notAsked()` names which (`fleet`,
+`provider_api`).
+
+The agent's `mailbox_status` word, given one of the site's hosted domains, runs this
+engine (`maintenance_scripts/sysadmin_tools/mailbox_status.php`, as the web user, so
+a file-readability row reads as the Setup tab sees it). It returns each domain row's
+id, status, severity and label (never the summary, detail or fix, which can name a
+recipient or carry values to publish); the domain's flags (enabled, protected, send
+lock asked for, sealed key present, selector, forwarding subdomain, owner set, owner
+has a vault); and a fixed list of the domain's DNS names (MX and SPF at the domain,
+`_dmarc`, `mail._domainkey`, the sealed key's selector, the forwarding subdomain's MX
+and SPF), each read through the machine's own resolver, with the cached copy's time
+left, beside each of the zone's authoritative nameservers, with a verdict (`agree`,
+`node_differs`, `nameservers_disagree`, `zone_unreadable`, `node_error`) and which of
+the two the Setup tab reads. A cached "no such name" has no readable time left and
+shows as no answer with the time unknown. A name the site does not host is refused
+before any lookup. Given no domain, the word lists the site's hosted domains beside
+the spam-learning counts.
 
 Below a focused domain's checks sit the things it does not lead with: the
 **Sending identity** box (send protection, once asked for) and, once nothing is
@@ -734,20 +774,21 @@ published" check then hands you the TXT record as a copy-paste DNS fix.
 Forwarding works without a DKIM key; only outbound DKIM signing is affected.
 
 **The Setup tab's DKIM rows follow the signing path** (specs/mailbox_provider_dkim.md):
-the local signing key above is prescribed only when the domain's mail actually
-leaves through local Postfix (colocated deployments). When composed mail rides
-an API provider — always the case on a relay-fronted deployment with provider
-outbound, and additionally on colocated deployments whose active provider is
-API-class — the correct DKIM record is the one the **provider** issues for the
-domain, and the row verifies exactly that: providers implementing
+the local signing key above is prescribed wherever something on this box signs
+with it — rspamd as the mail leaves through local Postfix (colocated
+deployments), or the app itself on a relay-fronted main box, which signs an
+ordinary domain's mail with the same key before handing it to the provider
+(`MailboxDkimSigner::signsStandardInApp()`). When composed mail rides an API
+provider — always the case on a relay-fronted deployment, and additionally on
+colocated deployments whose active provider is API-class — the provider's own
+DKIM record is prescribed as well, and the row verifies exactly that: providers implementing
 `DkimRecordSource` (Mailgun, SES — see
 [email_system.md](../../../docs/email_system.md#provider-dkim-records-optional-capability))
 report their required records from their own API, and the Setup tab renders one
 row per record, each checked against live DNS with a copy-paste fix. A domain
 not registered at the provider gets a row saying so (mail from it fails DMARC
 alignment until it is added at the provider dashboard); a provider without the
-capability gets generic guidance naming it. When sent mail leaves through the
-relay, the row states plainly that sends carry no DKIM signature.
+capability gets generic guidance naming it.
 
 ### Firewall
 
@@ -2786,6 +2827,16 @@ manual `provision_dkim.sh --remove` command. **It never runs automatically**:
 deleting key material is irreversible from a browser, so it happens because a
 person pressed it.
 
+**Switching send protection off puts a key back.** Once the sealed key stops
+signing, the domain's ordinary key signs again, so where it was destroyed
+`mailbox_protect_lift()` makes a fresh one through the sibling helper —
+`sudo -n /usr/local/sbin/joinery-dkim-add <domain>`, installed the same way,
+which writes `mail.private` and `mail.txt` in the layout `provision_dkim.sh`
+uses, keeps a key already there, and answers `DKIM_ADDED`. The DNS plan then
+prescribes its `mail._domainkey` record and the switch-off lands on the DNS
+difference. Where the helper is not installed, the switch-off message names the
+`provision_dkim.sh <domain>` command instead.
+
 **Proof of presence sits on enforcement, not on key creation.** Sealing needs
 only the owner's vault public key, and a key that exists publishes nothing and
 changes no mail, so `generate` and `rotate` run without an unlock window.
@@ -4728,8 +4779,8 @@ rows marked spam or not spam in the last `STATUS_DAYS` (7) days, split into taug
 handled), waiting for the keyless pass, waiting for their owner's window, and never
 taught because they were polled over IMAP; the corpus's token count, newest token and
 spam and good message totals; and the two policy switches. A management node asks for
-it with the agent's `spam_learning_status` word, which runs
-`maintenance_scripts/sysadmin_tools/spam_learning_status.php`; nothing in it names a
+it with the agent's `mailbox_status` word given no domain, which runs
+`maintenance_scripts/sysadmin_tools/mailbox_status.php`; nothing in it names a
 message, a sender or an address.
 
 ### What the spam filter keeps readable

@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.169 - build_mail_test_send: one fixed test message to the probe mailbox (operate)
+ * @version 1.168 - build_mailbox_status: spam_learning_status widened to one hosted domain's Setup rows, flags and DNS
+ * @version 1.167 - SITE_LOG_COUNT_MARKERS: dkim_unsigned, authoritative_dns_fallback, dns_reconciler_failed; the
+ *                  word counts the scheduled-task log too
+ * @version 1.166 - hosted_mail_settings carries dkim_key_name to an agent of 1.120.0 or later (HOSTED_MAIL_KEY_NAME_AGENT, B7)
  * @version 1.165 - a node whose vault host checks are unmet shows amber (security_weak_spots_2026_11 WP3)
  * @version 1.164 - install_node in bare mode with starter_host installs the docker host with --site-engine --multi-tenant
  * @version 1.163 - build_site_create (agent 1.119.0): a new live Starter site as a container on its host, its
@@ -2127,11 +2132,15 @@ class JobCommandBuilder {
 		'transaction_left_open'  => 'TRANSACTION_LEFT_OPEN',
 		'get_write'              => 'GET_WRITE',
 		'get_mutation'           => 'GET_MUTATION',
+		'dkim_unsigned'          => 'Mail sent unsigned (MailboxDkimSigner)',
+		'authoritative_dns_fallback' => 'DNS read fell back to the system resolver (AuthoritativeDns)',
+		'dns_reconciler_failed'  => 'DNS record write failed (DnsReconciler)',
 	];
 
 	/**
 	 * How many times each known problem marker appears in the site's error log
-	 * since a time, read back through its rotations (site_log_count). The
+	 * and its scheduled-task log since a time, read back through their
+	 * rotations (site_log_count). The
 	 * answer says how far back the read reached, so a check after an upgrade
 	 * is answered whole or says it is not, where site_log's last 200 lines
 	 * stop short of the upgrade on a busy site. Behind the owner's log-access
@@ -3773,22 +3782,65 @@ class JobCommandBuilder {
 		return ['primitive' => 'container_inventory', 'params' => []];
 	}
 
+	/** The shape a mailbox_status domain must have; the node checks it again, and that it is hosted. */
+	const MAILBOX_STATUS_DOMAIN_PATTERN = '/^[a-z0-9.-]+\.[a-z]{2,}$/';
+
 	/**
-	 * Whether members' spam corrections reach the site's spam filter: counts
-	 * only (agent 1.76.0). PRIMITIVE ONLY, and it takes nothing; a site word,
-	 * so a machine with no site does not offer it.
+	 * This site's mailbox, read without changing anything. With no domain: the
+	 * spam-learning counts and the site's own mail domains. With one of those
+	 * domains: its Setup rows, send-protection flags, its DNS read on the node
+	 * beside the zone's own nameservers, and how its mail left. PRIMITIVE ONLY;
+	 * a site word. A node whose agent still reports spam_learning_status (the
+	 * word this one widened) is asked that for the no-domain answer, the same
+	 * counts without the domain list.
 	 */
-	public static function build_spam_learning_status($node) {
-		if (!self::has_primitive($node, 'spam_learning_status')) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot report its spam learning. "
-				. AgentVocabulary::needs_newer_agent_text($node, ['spam_learning_status']));
+	public static function build_mailbox_status($node, $domain = null) {
+		$domain = strtolower(trim((string)$domain));
+		if ($domain !== '' && (strlen($domain) > 253 || !preg_match(self::MAILBOX_STATUS_DOMAIN_PATTERN, $domain))) {
+			throw new Exception("'" . mb_substr($domain, 0, 60) . "' is not a domain name.");
 		}
-		return self::build_spam_learning_status_primitive($node);
+		if (self::has_primitive($node, 'mailbox_status')) {
+			return self::build_mailbox_status_primitive($node, $domain);
+		}
+		// Not has_primitive(): the plane no longer builds the old word as one of
+		// its own (no build_spam_learning_status_primitive, so the transport
+		// parity check holds); it only answers an agent that still reports it.
+		if ($domain === '' && self::has_agent_channel($node) && !AgentVocabulary::below_floor($node)
+				&& in_array('spam_learning_status', AgentVocabulary::reported_words($node), true)) {
+			return ['primitive' => 'spam_learning_status', 'params' => []];
+		}
+		throw new Exception(
+			"Node '{$node->get('mgn_slug')}' cannot report its mailbox" . ($domain !== '' ? ' for one domain' : '') . '. '
+			. AgentVocabulary::needs_newer_agent_text($node, ['mailbox_status']));
 	}
 
-	public static function build_spam_learning_status_primitive($node) {
-		return ['primitive' => 'spam_learning_status', 'params' => []];
+	public static function build_mailbox_status_primitive($node, $domain = '') {
+		$domain = strtolower(trim((string)$domain));
+		return ['primitive' => 'mailbox_status', 'params' => $domain !== '' ? ['domain' => $domain] : []];
+	}
+
+	/**
+	 * One fixed test message from one of the site's own ordinary mail domains
+	 * to the one probe mailbox, so a receiver's SPF, DKIM and DMARC verdicts
+	 * can be read. PRIMITIVE ONLY; an operate word. The node refuses a domain
+	 * it does not host, a protected one, test mode and a second send within
+	 * ten minutes.
+	 */
+	public static function build_mail_test_send($node, $domain) {
+		$domain = strtolower(trim((string)$domain));
+		if ($domain === '' || strlen($domain) > 253 || !preg_match(self::MAILBOX_STATUS_DOMAIN_PATTERN, $domain)) {
+			throw new Exception("'" . mb_substr($domain, 0, 60) . "' is not a domain name.");
+		}
+		if (!self::has_primitive($node, 'mail_test_send')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot send a test message. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['mail_test_send']));
+		}
+		return self::build_mail_test_send_primitive($node, $domain);
+	}
+
+	public static function build_mail_test_send_primitive($node, $domain) {
+		return ['primitive' => 'mail_test_send', 'params' => ['domain' => strtolower(trim((string)$domain))]];
 	}
 
 	/**
@@ -6042,7 +6094,7 @@ class JobCommandBuilder {
 	/**
 	 * Hand a hosted site the outbound mail credentials its operator minted.
 	 *
-	 * NINE VALUES CROSS, AND NOT THE SETTING NAMES. Those are compiled into
+	 * TEN VALUES CROSS, AND NOT THE SETTING NAMES. Those are compiled into
 	 * utils/hosted_mail_settings.php on the node. That is not tidiness: a
 	 * primitive that could name a setting could name the mail settings on ANY
 	 * node this plane manages, and a site whose outbound mail can be redirected
@@ -6115,6 +6167,17 @@ class JobCommandBuilder {
 			}
 		}
 
+		// The DKIM key name, to an agent that takes it (1.120.0); an older one
+		// refuses a key it does not declare, and its site's check simply guesses.
+		$key_name = strtolower(trim((string)($params['dkim_key_name'] ?? '')));
+		if ($key_name !== '' && !preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/', $key_name)) {
+			throw new Exception("The DKIM key name '{$key_name}' is not one DNS label.");
+		}
+		$agent_for_key = AgentVocabulary::version($node);
+		if ($key_name !== '' && ($agent_for_key === '' || version_compare($agent_for_key, self::HOSTED_MAIL_KEY_NAME_AGENT, '<'))) {
+			$key_name = '';
+		}
+
 		$out = ['primitive' => 'hosted_mail_settings', 'params' => [
 			'service'  => $service,
 			'host'     => $host,
@@ -6128,11 +6191,17 @@ class JobCommandBuilder {
 		if ($trap !== '') {
 			$out['params']['test_recipient'] = $trap;
 		}
+		if ($key_name !== '') {
+			$out['params']['dkim_key_name'] = $key_name;
+		}
 		return $out;
 	}
 
 	/** The first agent whose hosted_mail_settings takes a test site's trap. */
 	const HOSTED_MAIL_TRAP_AGENT = '1.118.0';
+
+	/** The first agent whose hosted_mail_settings takes the DKIM key name. */
+	const HOSTED_MAIL_KEY_NAME_AGENT = '1.120.0';
 
 	/**
 	 * Set the five hosting-banner facts on a site this operator hosts.

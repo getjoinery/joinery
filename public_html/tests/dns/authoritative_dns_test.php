@@ -133,6 +133,46 @@ AuthoritativeDns::lookup('b.example.test', DNS_TXT, 'example.test');
 check($asked === 2, 'a zone whose two nameservers did not answer is not asked again in the same request');
 
 // ---------------------------------------------------------------------------
+section('Every fallback is logged once per zone and reason, naming the zone only');
+
+$ad_log = tempnam(sys_get_temp_dir(), 'adlog');
+$ad_prev_log = ini_get('error_log');
+ini_set('error_log', $ad_log);
+ad_with(function ($name, $type, $packet) {
+	if (strpos($name, 'cname') === 0) { return ad_reply($packet, array(array($name, 5, ad_name('dkim.provider.example')))); }
+	if (strpos($name, 'tc') === 0)    { return ad_reply($packet, array(), 0x8600); }
+	if (strpos($name, 'noaa') === 0)  { return ad_reply($packet, array(array($name, 16, ad_txt('secret-value'))), 0x8000); }
+	return null;
+});
+AuthoritativeDns::lookup('cname1.example.test', DNS_TXT, 'example.test');
+AuthoritativeDns::lookup('cname2.example.test', DNS_TXT, 'example.test');
+AuthoritativeDns::lookup('tc.example.test', DNS_TXT, 'example.test');
+AuthoritativeDns::lookup('noaa.example.test', DNS_TXT, 'example.test');
+AuthoritativeDns::lookup('silent.example.test', DNS_TXT, 'example.test');
+AuthoritativeDns::reset();
+AuthoritativeDns::setNameservers('nons.test', array());
+AuthoritativeDns::lookup('x.nons.test', DNS_TXT, 'nons.test');
+ini_set('error_log', $ad_prev_log === false ? '' : $ad_prev_log);
+$ad_lines = array_values(array_filter(array_map(function ($l) {
+	$at = strpos($l, AuthoritativeDns::FALLBACK_LOG_PREFIX);
+	return $at === false ? null : substr($l, $at);
+}, (array)file($ad_log, FILE_IGNORE_NEW_LINES))));
+@unlink($ad_log);
+$ad_prefix = AuthoritativeDns::FALLBACK_LOG_PREFIX;
+check($ad_lines === array(
+		$ad_prefix . 'example.test: CNAME answer',
+		$ad_prefix . 'example.test: reply truncated',
+		$ad_prefix . 'example.test: reply not authoritative',
+		$ad_prefix . 'example.test: no nameserver answered',
+		$ad_prefix . 'nons.test: no nameserver addresses found',
+	), 'one line per zone and reason, in the order met, with two CNAME answers logged once', implode("\n", $ad_lines));
+check(strpos(implode("\n", $ad_lines), 'secret-value') === false && strpos(implode("\n", $ad_lines), 'cname1') === false,
+	'a line names the zone, never the record asked for or its value');
+$ad_reasons = array();
+foreach ($ad_lines as $l) { $ad_reasons[] = substr($l, strrpos($l, ': ') + 2); }
+check(!array_diff($ad_reasons, AuthoritativeDns::FALLBACK_REASONS), 'every reason is from the closed set');
+
+// ---------------------------------------------------------------------------
 section('lookupAll asks every nameserver, and a silent one marks nothing dead');
 
 ad_with(function ($name, $type, $packet, $ip) {

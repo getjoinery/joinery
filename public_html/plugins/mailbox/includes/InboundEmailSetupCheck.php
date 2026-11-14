@@ -9,8 +9,14 @@
  * InboundEmailHealth's provisioning checks all consume this — there is no
  * second copy of detection logic.
  *
- * Side-effect-free and time-bounded: DNS goes through DnsResolver, host state
- * through bounded exec()/socket probes.
+ * Time-bounded: DNS goes through DnsResolver, host state through bounded
+ * exec()/socket probes. A full run has three deliberate side effects: on a
+ * fleet-relay deployment it asks the fleet service for claim state, re-verifies
+ * pending claims and files a missing one (fleetState, fleetClaimFor); it asks
+ * each mail provider's API for its DKIM and domain state; and it records the
+ * relay cutover verdict as a setting. readOnly() builds an engine that does
+ * none of them: those rows come back UNKNOWN, and notAsked() names what was
+ * not asked. The mailbox_status agent word runs that engine.
  *
  * Each result is an associative array:
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
@@ -25,6 +31,9 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.68 - behind a relay the on-disk key's record is prescribed and checked: the app signs with it
+ * @version 1.67 - domain.test_message: a Send test message button on every enabled hosted domain (MailTestProbe)
+ * @version 1.66 - readOnly(): an engine that calls no fleet service or provider API and writes nothing
  * @version 1.65 - strictStagePlan() and protectPressPlan() for the one-press ceremony
  * @version 1.64 - a planned DMARC record keeps the owner's own settings, changing only what its stage is about
  * @version 1.63 - every hosted domain is read from its own nameservers, so checks see a publish at once
@@ -157,8 +166,12 @@ class InboundEmailSetupCheck {
 	private $router = null;
 	private $spf_mechanisms = array();
 	private $dkim_statuses = array();
+	/** @var bool|null Whether the app signs ordinary mail with the on-disk key (signsStandardInApp()). */
+	private $signs_standard_in_app = null;
 	private $topology = null;
 	private $fleet_state = null;
+	private $read_only = false;
+	private $not_asked = array();
 
 	function __construct() {
 		$this->settings = Globalvars::get_instance();
@@ -188,6 +201,22 @@ class InboundEmailSetupCheck {
 		} catch (\Throwable $e) {
 			error_log('InboundEmailSetupCheck: could not list hosted domains for authoritative DNS: ' . $e->getMessage());
 		}
+	}
+
+	/**
+	 * An engine that changes nothing and calls nothing outside this box but
+	 * DNS: no fleet claim state, verification or filing, no provider API, no
+	 * cutover setting written. Rows that needed those come back UNKNOWN.
+	 */
+	public static function readOnly(): self {
+		$engine = new self();
+		$engine->read_only = true;
+		return $engine;
+	}
+
+	/** What a read-only run did not ask, by kind ('fleet', 'provider_api'), each once. */
+	public function notAsked(): array {
+		return array_values(array_unique($this->not_asked));
 	}
 
 	/** The public IP the engine is verifying against (may be ''). */
@@ -300,6 +329,12 @@ class InboundEmailSetupCheck {
 			return $this->fleet_state;
 		}
 		$state = array('ok' => false, 'error' => '', 'enrolled' => false, 'claims' => array());
+		if ($this->read_only) {
+			$this->not_asked[] = 'fleet';
+			$state['error'] = 'Not asked: a read-only check does not call the fleet service.';
+			$this->fleet_state = $state;
+			return $state;
+		}
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
 			$client = new FleetClient();
@@ -2237,6 +2272,17 @@ class InboundEmailSetupCheck {
 			$out[] = $this->sendProtectionResult($domain, $model);
 		}
 
+		// The one check DNS cannot answer: does real mail from this domain pass
+		// at a receiver? A button sends one fixed message to the probe mailbox
+		// (MailTestProbe); a protected domain's goes through this session's
+		// compose path, as all its mail must.
+		if ($model && $model->get('ied_is_enabled')) {
+			$out[] = $this->r('domain.test_message', $domain, 'domain', 'Test message to a receiver', self::RECOMMENDED, self::INFO,
+				'Send one test message from ' . $domain . ' to the probe mailbox, whose receiver records its SPF, DKIM and DMARC verdicts.',
+				'The message is fixed; its subject carries a code that finds it at the receiver. At most one every ten minutes per domain.',
+				array('action' => array('action' => 'send_test_message', 'domain' => $domain, 'label' => 'Send test message')), false);
+		}
+
 		// Unsealed mail on a protected domain (specs/mailbox_protection_ceremony.md
 		// § 3). Two states wear the same "not sealed yet" flag and mean opposite
 		// things, so they are counted and reported separately:
@@ -2729,6 +2775,10 @@ class InboundEmailSetupCheck {
 	 * counts as active, because that provider reports no finer state.
 	 */
 	private function machineSenderProviderState(string $class, string $machine): string {
+		if ($this->read_only) {
+			$this->not_asked[] = 'provider_api';
+			return '';
+		}
 		if (is_callable(array($class, 'getSendingDomainState'))) {
 			try {
 				return (string)$class::getSendingDomainState($machine);
@@ -2968,6 +3018,9 @@ class InboundEmailSetupCheck {
 	 * on every evaluation; check passes and Setup page loads keep it fresh.
 	 */
 	private function recordCutover(array $state): array {
+		if ($this->read_only) {
+			return $state;
+		}
 		try {
 			require_once(PathHelper::getIncludePath('data/settings_class.php'));
 			$value = $state['complete'] ? '1' : '0';
@@ -3668,6 +3721,28 @@ class InboundEmailSetupCheck {
 	/** The root helper that destroys one, when this box has been provisioned with it. */
 	public static function localSigningKeyHelper(): string {
 		return '/usr/local/sbin/joinery-dkim-remove';
+	}
+
+	/** The root helper that makes one where a domain has none (provision_relay_main.sh). */
+	public static function localSigningKeyAddHelper(): string {
+		return '/usr/local/sbin/joinery-dkim-add';
+	}
+
+	/**
+	 * Does an ordinary domain's mail get signed on this box with its on-disk key
+	 * (rspamd on a mail server, or the app behind a relay)? Where it does, a
+	 * domain with no key there has nothing of its own signing it.
+	 */
+	public function signsWithLocalKey(): bool {
+		return !empty($this->dkimPlan()['local']);
+	}
+
+	/** MailboxDkimSigner's answer, asked once per run; the topology tests set it. */
+	private function signsStandardInApp(): bool {
+		if ($this->signs_standard_in_app === null) {
+			$this->signs_standard_in_app = MailboxDkimSigner::signsStandardInApp();
+		}
+		return $this->signs_standard_in_app;
 	}
 
 	/**
@@ -4530,6 +4605,14 @@ class InboundEmailSetupCheck {
 			return array('local' => true,
 				'provider' => $source, 'class' => $source ? $class : null, 'label' => $label);
 		}
+		// Behind a relay the app signs an ordinary domain's mail itself with the
+		// same on-disk key (MailboxDkimSigner), beside the provider's signature.
+		// That key's record is prescribed too, or the signature names a record
+		// nothing ever asked to have published.
+		if ($this->originHidden() && $this->signsStandardInApp()) {
+			return array('local' => true,
+				'provider' => true, 'class' => $source ? $class : null, 'label' => $label);
+		}
 		return array('local' => false,
 			'provider' => true, 'class' => $source ? $class : null, 'label' => $label);
 	}
@@ -4651,6 +4734,11 @@ class InboundEmailSetupCheck {
 		$key = $class . '|' . $domain;
 		if (!array_key_exists($key, $this->dkim_statuses)) {
 			$status = array('status' => 'unreachable', 'records' => array());
+			if ($this->read_only) {
+				$this->not_asked[] = 'provider_api';
+				$this->dkim_statuses[$key] = $status;
+				return $status;
+			}
 			try {
 				$status = $class::getDkimStatus($domain);
 			} catch (\Throwable $e) {

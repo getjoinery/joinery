@@ -23,6 +23,12 @@
  * The wire format is built and read here; PublicResolvers does the same for
  * DNS-over-HTTPS but reads only A, AAAA and TXT.
  *
+ * Every fallback lookup() takes is logged once per zone and reason per request,
+ * as "AuthoritativeDns: fallback to system resolver for ZONE: REASON", REASON
+ * one of FALLBACK_REASONS. The line names the zone and never a record's value,
+ * so the agent's site_log_count can count them (marker authoritative_dns_fallback).
+ *
+ * @version 1.2 - every lookup() fallback logs its reason once per zone and reason per request
  * @version 1.1 - lookupAll(): every nameserver's own answer, for a caller that must know all of them serve a record
  * @version 1.0
  */
@@ -60,6 +66,27 @@ class AuthoritativeDns {
 	/** Zones whose nameservers stopped answering in this request: not asked again. */
 	private static $dead_zones = array();
 
+	/** The prefix every fallback line starts with: what site_log_count's marker matches. */
+	const FALLBACK_LOG_PREFIX = 'AuthoritativeDns: fallback to system resolver for ';
+
+	/** The closed set of reasons a fallback line names. */
+	const FALLBACK_REASONS = array(
+		'no nameserver addresses found',
+		'no nameserver answered',
+		'reply not a response',
+		'reply truncated',
+		'reply not authoritative',
+		'reply error code',
+		'reply malformed',
+		'CNAME answer',
+	);
+
+	/** Why records() last returned null: one of FALLBACK_REASONS, or null. */
+	private static $last_reason = null;
+
+	/** zone|reason => true: the fallback lines already written in this request. */
+	private static $logged = array();
+
 	/**
 	 * Records for $name of $type (a DNS_* constant), shaped as dns_get_record
 	 * returns them, asked of $zone's own nameservers. Null when this cannot
@@ -78,6 +105,7 @@ class AuthoritativeDns {
 		}
 		$ips = self::nameserverIps($zone);
 		if (empty($ips)) {
+			self::logFallback($zone, 'no nameserver addresses found');
 			return null;
 		}
 		foreach (array_slice($ips, 0, 2) as $ip) {
@@ -87,11 +115,25 @@ class AuthoritativeDns {
 			}
 			// A reply that answered but not cleanly (no AA, truncated, a CNAME)
 			// would read the same from the other nameserver: fall back now.
-			return self::records($reply, $name, $qtype);
+			$records = self::records($reply, $name, $qtype);
+			if ($records === null) {
+				self::logFallback($zone, self::$last_reason ?? 'reply malformed');
+			}
+			return $records;
 		}
 		self::$dead_zones[$zone] = true;
-		error_log('AuthoritativeDns: no nameserver of ' . $zone . ' answered; using the system resolver');
+		self::logFallback($zone, 'no nameserver answered');
 		return null;
+	}
+
+	/** One line per zone and reason per request; the zone only, never a record value. */
+	private static function logFallback(string $zone, string $reason): void {
+		$key = $zone . '|' . $reason;
+		if (isset(self::$logged[$key])) {
+			return;
+		}
+		self::$logged[$key] = true;
+		error_log(self::FALLBACK_LOG_PREFIX . $zone . ': ' . $reason);
 	}
 
 	/**
@@ -128,6 +170,8 @@ class AuthoritativeDns {
 	public static function reset(): void {
 		self::$zone_ips = array();
 		self::$dead_zones = array();
+		self::$logged = array();
+		self::$last_reason = null;
 		self::$sender = null;
 	}
 
@@ -165,19 +209,31 @@ class AuthoritativeDns {
 	 * it is not a clean authoritative answer.
 	 */
 	public static function records(string $msg, string $name, int $qtype): ?array {
+		self::$last_reason = 'reply malformed';
 		if (strlen($msg) < 12) {
 			return null;
 		}
 		$h = unpack('nid/nflags/nqd/nan/nns/nar', substr($msg, 0, 12));
 		$flags = $h['flags'];
-		if (!($flags & 0x8000) || ($flags & 0x0200) || !($flags & 0x0400)) {
-			return null;   // not a response, truncated, or not authoritative
+		if (!($flags & 0x8000)) {
+			self::$last_reason = 'reply not a response';
+			return null;
+		}
+		if ($flags & 0x0200) {
+			self::$last_reason = 'reply truncated';
+			return null;
+		}
+		if (!($flags & 0x0400)) {
+			self::$last_reason = 'reply not authoritative';
+			return null;
 		}
 		$rcode = $flags & 0x0f;
 		if ($rcode === 3) {
+			self::$last_reason = null;
 			return array();   // NXDOMAIN, from the zone itself
 		}
 		if ($rcode !== 0) {
+			self::$last_reason = 'reply error code';
 			return null;
 		}
 		$pos = 12;
@@ -204,6 +260,7 @@ class AuthoritativeDns {
 			$start = $pos;
 			$pos += $rr['len'];
 			if ($rr['type'] === 5 && $qtype !== 5) {
+				self::$last_reason = 'CNAME answer';
 				return null;   // a CNAME stands in: only a recursive resolver follows it
 			}
 			if ($rr['type'] !== $qtype || strtolower($owner) !== $name) {
@@ -215,6 +272,7 @@ class AuthoritativeDns {
 			}
 			$out[] = $record;
 		}
+		self::$last_reason = null;
 		return $out;
 	}
 

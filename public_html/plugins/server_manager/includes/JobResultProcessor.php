@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.132 - sanitise_mail_test_send: sent with its token, or why it was refused
+ * @version 1.131 - sanitise_mailbox_status: the no-domain counts and domain list, or one domain's rows, flags, DNS and send outcomes
+ * @version 1.130 - process_site_log_count keeps the scheduled-task log's file names and each log's own coverage
  * @version 1.129 - the welcome email goes into this site's own mail queue when the store is this site, with no API key;
  *                 a remote store with no credentials alerts the operator instead of dropping it (hosting_launch S3 run)
  * @version 1.128 - process_site_create: a new Starter site's install on its host
@@ -2591,12 +2594,28 @@ HTML;
 				'samples' => $samples,
 			];
 		}
+		// Only the names the node can read: the error log, the scheduled-task
+		// log, and their numbered rotations.
+		$log_file = '/^(error|cron_scheduled_tasks)\.log(\.[0-9]{1,2}(\.gz)?)?$/';
 		$files = [];
-		foreach (array_slice(is_array($data['files_read'] ?? null) ? $data['files_read'] : [], 0, 15) as $f) {
-			// Only the names the node can read: error.log and its numbered rotations.
-			if (is_string($f) && preg_match('/^error\.log(\.[0-9]{1,2}(\.gz)?)?$/', $f)) {
+		foreach (array_slice(is_array($data['files_read'] ?? null) ? $data['files_read'] : [], 0, 30) as $f) {
+			if (is_string($f) && preg_match($log_file, $f)) {
 				$files[] = $f;
 			}
+		}
+		// Each log's own coverage, so a short read names the log that fell short.
+		$logs = [];
+		foreach (['error', 'cron_scheduled_tasks'] as $log) {
+			$l = is_array($data['logs'][$log] ?? null) ? $data['logs'][$log] : null;
+			if ($l === null) {
+				continue;
+			}
+			$logs[$log] = [
+				'present'      => !empty($l['present']),
+				'covers_since' => ($l['covers_since'] ?? false) === true,
+				'covered_from' => $time($l['covered_from'] ?? ''),
+				'not_covered'  => substr((string)($l['not_covered'] ?? ''), 0, 300),
+			];
 		}
 		$job->set('mjb_result', json_encode([
 			'read'            => true,
@@ -2608,6 +2627,7 @@ HTML;
 			'files_read'      => $files,
 			'bytes_read'      => max(0, (int)($data['bytes_read'] ?? 0)),
 			'lines_in_window' => max(0, (int)($data['lines_in_window'] ?? 0)),
+			'logs'            => $logs,
 			'markers'         => $markers,
 		]));
 		$job->save();
@@ -4216,6 +4236,191 @@ HTML;
 
 	private static function process_spam_learning_status($job) {
 		$job->set('mjb_result', json_encode(self::sanitise_spam_learning_status(self::script_json($job))));
+		$job->save();
+	}
+
+	/** A domain name as the mailbox_status word reports one, or null. */
+	private static function mailbox_domain($v) {
+		$v = is_string($v) ? strtolower($v) : '';
+		return (strlen($v) <= 253 && preg_match(JobCommandBuilder::MAILBOX_STATUS_DOMAIN_PATTERN, $v)) ? $v : null;
+	}
+
+	/** A short compiled word (an id, a path, a reason): letters, digits and ._:- only, or ''. */
+	private static function mailbox_word($v, int $max = 80) {
+		return (is_string($v) && strlen($v) <= $max && preg_match('/^[A-Za-z0-9_.:-]*$/', $v)) ? $v : '';
+	}
+
+	/**
+	 * A mailbox_status job's result. With no domain: the spam-learning counts
+	 * (sanitise_spam_learning_status, which an older agent's spam_learning_status
+	 * job also reaches) and the site's mail domains. With a domain: its Setup
+	 * rows (id, status, severity, label), what a read-only run did not ask, its
+	 * flags, its DNS side by side and its send outcomes, each held to its shape.
+	 * Anything else the node sent is dropped. Pure; the processor test drives it.
+	 */
+	public static function sanitise_mailbox_status($d) {
+		if (!is_array($d) || !array_key_exists('domain', $d)) {
+			$out = self::sanitise_spam_learning_status($d);
+			if (!empty($out['read']) && ($out['mailbox'] ?? '') === 'active' && is_array($d['domains'] ?? null)) {
+				$out['domains'] = array();
+				foreach (array_slice($d['domains'], 0, 100) as $row) {
+					$name = is_array($row) ? self::mailbox_domain($row['domain'] ?? null) : null;
+					if ($name !== null) {
+						$out['domains'][] = array('domain' => $name, 'enabled' => ($row['enabled'] ?? null) === true,
+							'protected' => ($row['protected'] ?? null) === true);
+					}
+				}
+			}
+			return $out;
+		}
+		$domain = self::mailbox_domain($d['domain']);
+		if ($domain === null || ($d['mailbox'] ?? null) !== 'active') {
+			return array('read' => false);
+		}
+		if (isset($d['refused'])) {
+			return array('read' => true, 'mailbox' => 'active', 'domain' => $domain,
+				'refused' => $d['refused'] === 'not_a_hosted_domain' ? 'not_a_hosted_domain' : 'refused');
+		}
+		$statuses = array('pass', 'fail', 'warn', 'unknown', 'info', 'optional');
+		$checks = array();
+		foreach (array_slice(is_array($d['checks'] ?? null) ? $d['checks'] : array(), 0, 80) as $row) {
+			if (!is_array($row)) { continue; }
+			$checks[] = array(
+				'id'       => self::mailbox_word($row['id'] ?? null),
+				'status'   => in_array($row['status'] ?? null, $statuses, true) ? $row['status'] : 'unknown',
+				'severity' => in_array($row['severity'] ?? null, array('required', 'recommended', 'optional', 'info'), true) ? $row['severity'] : '',
+				'label'    => mb_substr(trim(strip_tags((string)($row['label'] ?? ''))), 0, 120),
+			);
+		}
+		$f = is_array($d['flags'] ?? null) ? $d['flags'] : array();
+		$flags = array();
+		foreach (array('enabled', 'protected', 'send_lock_requested', 'sealed_key_present', 'owner_set', 'owner_has_vault') as $k) {
+			$flags[$k] = ($f[$k] ?? null) === true;
+		}
+		$flags['selector'] = preg_match('/^[a-z0-9-]{1,63}$/', (string)($f['selector'] ?? '')) ? (string)$f['selector'] : '';
+		$flags['forwarding_subdomain'] = self::mailbox_domain($f['forwarding_subdomain'] ?? null) ?? '';
+
+		$answers = function ($v) {
+			$out = array();
+			foreach (array_slice(is_array($v) ? $v : array(), 0, 8) as $a) {
+				if (is_string($a)) { $out[] = mb_substr(preg_replace('/[\x00-\x1f\x7f]/', '', $a), 0, 512); }
+			}
+			return $out;
+		};
+		$dns = array();
+		$records = array('mx', 'spf', 'dmarc', 'dkim_ordinary', 'dkim_sealed', 'forwarding_mx', 'forwarding_spf');
+		foreach (array_slice(is_array($d['dns'] ?? null) ? $d['dns'] : array(), 0, 12) as $row) {
+			if (!is_array($row) || !in_array($row['record'] ?? null, $records, true)) { continue; }
+			$name = (string)($row['name'] ?? '');
+			$node = is_array($row['node'] ?? null) ? $row['node'] : array();
+			$auth = array();
+			foreach (array_slice(is_array($row['authoritative'] ?? null) ? $row['authoritative'] : array(), 0, 6) as $a) {
+				if (!is_array($a) || @inet_pton((string)($a['nameserver'] ?? '')) === false) { continue; }
+				$auth[] = array('nameserver' => (string)$a['nameserver'],
+					'status' => in_array($a['status'] ?? null, array('answer', 'no_answer', 'no_clean_answer'), true) ? $a['status'] : 'no_clean_answer',
+					'answer' => $answers($a['answer'] ?? null));
+			}
+			$ttl = $node['ttl_left'] ?? null;
+			$dns[] = array(
+				'record'        => $row['record'],
+				'name'          => (strlen($name) <= 253 && preg_match('/^[a-z0-9._-]+$/', $name)) ? $name : '',
+				'type'          => in_array($row['type'] ?? null, array('MX', 'TXT'), true) ? $row['type'] : '',
+				'node'          => array(
+					'status'   => in_array($node['status'] ?? null, array('answer', 'no_answer', 'error'), true) ? $node['status'] : 'error',
+					'answer'   => $answers($node['answer'] ?? null),
+					'ttl_left' => $ttl === null ? null : self::host_report_count($ttl),
+				),
+				'authoritative' => $auth,
+				'verdict'       => in_array($row['verdict'] ?? null, array('agree', 'node_differs', 'nameservers_disagree', 'zone_unreadable', 'node_error'), true)
+					? $row['verdict'] : 'zone_unreadable',
+				'setup_reads'   => ($row['setup_reads'] ?? null) === 'node' ? 'node' : 'authoritative',
+			);
+		}
+
+		$outcomes = null;
+		$so = $d['send_outcomes'] ?? null;
+		if (is_array($so) && isset($so['error'])) {
+			$outcomes = array('error' => 'unreadable');
+		} elseif (is_array($so)) {
+			$outcomes = array();
+			$time = function ($t) { return (is_string($t) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/', $t)) ? $t : null; };
+			foreach (array_slice($so, 0, 20) as $row) {
+				if (!is_array($row)) { continue; }
+				$outcomes[] = array(
+					'path'       => self::mailbox_word($row['path'] ?? null, 40),
+					'outcome'    => in_array($row['outcome'] ?? null, array('signed', 'unsigned', 'handed_on'), true) ? $row['outcome'] : self::mailbox_word($row['outcome'] ?? null, 40),
+					'selector'   => self::mailbox_word($row['selector'] ?? null, 63),
+					'd'          => self::mailbox_domain($row['d'] ?? null) ?? '',
+					'reason'     => self::mailbox_word($row['reason'] ?? null, 64),
+					'provider'   => self::mailbox_word($row['provider'] ?? null, 120),
+					'test_mode'  => ($row['test_mode'] ?? null) === true,
+					'count'      => self::host_report_count($row['count'] ?? null),
+					'first_time' => $time($row['first_time'] ?? null),
+					'last_time'  => $time($row['last_time'] ?? null),
+				);
+			}
+		}
+
+		$checked_at = (string)($d['checked_at'] ?? '');
+		return array(
+			'read'          => true,
+			'mailbox'       => 'active',
+			'domain'        => $domain,
+			'checked_at'    => preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $checked_at) ? $checked_at : null,
+			'checks'        => $checks,
+			'not_asked'     => array_values(array_intersect(array('fleet', 'provider_api'), is_array($d['not_asked'] ?? null) ? $d['not_asked'] : array())),
+			'flags'         => $flags,
+			'dns'           => $dns,
+			'send_outcomes' => $outcomes,
+		);
+	}
+
+	/**
+	 * A mail_test_send job's result: whether the message went, its token,
+	 * sender, recipient and subject (all compiled on the node), or the reason
+	 * it was refused. Pure; the processor test drives it.
+	 */
+	public static function sanitise_mail_test_send($d) {
+		if (!is_array($d)) {
+			return array('read' => false);
+		}
+		if (($d['mailbox'] ?? null) === 'inactive') {
+			return array('read' => true, 'mailbox' => 'inactive');
+		}
+		$domain = self::mailbox_domain($d['domain'] ?? null);
+		if ($domain === null) {
+			return array('read' => false);
+		}
+		$refusals = array('not_a_hosted_domain', 'protected', 'email_test_mode', 'email_dry_run', 'too_soon', 'busy', 'no_rate_record');
+		if (isset($d['refused'])) {
+			return array('read' => true, 'domain' => $domain, 'sent' => false,
+				'refused' => in_array($d['refused'], $refusals, true) ? $d['refused'] : 'refused',
+				'retry_after_seconds' => isset($d['retry_after_seconds']) ? self::host_report_count($d['retry_after_seconds']) : null);
+		}
+		$email = function ($v) { return (is_string($v) && strlen($v) <= 254 && filter_var($v, FILTER_VALIDATE_EMAIL)) ? $v : ''; };
+		$sent = ($d['sent'] ?? null) === true;
+		$token = (string)($d['token'] ?? '');
+		return array(
+			'read'      => true,
+			'domain'    => $domain,
+			'sent'      => $sent,
+			'token'     => $sent && preg_match('/^[0-9a-f]{16}$/', $token) ? $token : null,
+			'from'      => $email($d['from'] ?? null),
+			'to'        => $email($d['to'] ?? null),
+			'subject'   => $sent ? mb_substr(preg_replace('/[\x00-\x1f\x7f]/', '', (string)($d['subject'] ?? '')), 0, 120) : null,
+			'transport' => self::mailbox_word($d['transport'] ?? null, 40),
+			'error'     => $sent ? null : mb_substr(strip_tags((string)($d['error'] ?? '')), 0, 240),
+			'sent_at'   => preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', (string)($d['sent_at'] ?? '')) ? $d['sent_at'] : null,
+		);
+	}
+
+	private static function process_mail_test_send($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_mail_test_send(self::script_json($job))));
+		$job->save();
+	}
+
+	private static function process_mailbox_status($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_mailbox_status(self::script_json($job))));
 		$job->save();
 	}
 

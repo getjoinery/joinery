@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # install_office_editor.sh - host installer for the office_editor plugin.
+# Version: 0.1.3 - a refusal exits 78, so the runner records it as refused with its reason, not as ok
 # Version: 0.1.2 - the web user may also run office-editor-ctl off and remove (the
 #                plugin's deactivate and uninstall hooks). Every setting is written
 #                into the editor's configuration file: editor 26.04.5.2 ignores
@@ -66,7 +67,8 @@ refuse() {
     chmod 644 "${REFUSED}"
     rm -f "${MARK}"
     say "$1 - nothing installed."
-    exit 0
+    # 78: declined here, the reason the line above (the runner records it).
+    exit 78
 }
 
 if [[ ! -f "${CONFIG_FILE}" || -z "${PHP_BIN}" ]]; then

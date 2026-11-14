@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.10 - The machine: Mailbox (mailbox_status), the spam-learning counts and the site's mail domains
  * @version 1.9 - Compare edge and direct is data-jy-busy (no inline handler)
  * @version 1.8 - Vault windows (24 h): the vault's unlock history through log_table_tail (agent 1.113.0)
  * @version 1.7 - Old key census removed with the v1 code
@@ -36,7 +37,7 @@
 <?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php foreach (['nodeActionDiskUsage' => 'disk_usage', 'nodeActionLargestFiles' => 'largest_files', 'nodeActionListeningSockets' => 'listening_sockets',
-	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRelayStatus' => 'relay_status',
+	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'mailbox_status', 'nodeActionRelayStatus' => 'relay_status',
 	'nodeActionSiteStateReport' => 'site_state_report', 'nodeActionNetHealth' => 'net_health',
 	'nodeActionWebWorkers' => 'web_workers'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -114,8 +115,8 @@ $diag_mailbox = false;
 foreach ((is_array($diag_status['plugins'] ?? null) ? $diag_status['plugins'] : array()) as $pl) {
 	if (is_array($pl) && ($pl['name'] ?? '') === 'mailbox' && ($pl['active'] ?? null) === true) { $diag_mailbox = true; }
 }
-if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'spam_learning_status')) {
-	$machine_qs[] = array('nodeActionSpamLearning', 'Spam learning', 'Whether what members mark as spam or not spam reaches the spam filter: counts only.');
+if ($diag_mailbox && (JobCommandBuilder::has_primitive($node, 'mailbox_status') || in_array('spam_learning_status', AgentVocabulary::reported_words($node), true))) {
+	$machine_qs[] = array('nodeActionSpamLearning', 'Mailbox', 'Whether what members mark as spam or not spam reaches the spam filter (counts only), and the site\'s mail domains, each of which can then be checked: its Setup rows, send protection and DNS as this machine sees it.');
 }
 if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'relay_status')) {
 	$machine_qs[] = array('nodeActionRelayStatus', 'Mail relay', 'This site\'s view of its mail relay: the version and health it last reported, the map push, pickup and held mail, the transport key\'s kind, and mail arriving. No addresses.');

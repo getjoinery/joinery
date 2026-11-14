@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.58 - an installer that exits INSTALLER_REFUSED_EXIT (78) declined to install here: its
+#                 record says refused, with its last line of output as the reason, and the converge
+#                 is not marked installer-failed (a server too small for it is not a broken one)
 # Version: 2.57 - the converger's old log and its rotations in the site's logs/ are removed on every run,
 #                 a site migrated by 2.56 included (nothing writes them since 2.55)
 # Version: 2.56 - root's state for a site lives in /var/lib/joinery/sites/SITENAME (the queue and its outcomes,
@@ -342,6 +345,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
 # This list is also the whole of what --only may name.
+# The exit code a plugin's host installer uses to say it declined to install
+# on this machine, with the reason as its last line of output (sysexits'
+# EX_CONFIG). Recorded as refused, never as failed.
+INSTALLER_REFUSED_EXIT=78
+
 CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_unseal_daemon.sh install_sandbox_host.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
 
 # The host's own installers: what a machine with no site converges to. A
@@ -1483,7 +1491,7 @@ plugin_record_publish() {
     mv -f "$1" "$2" 2>/dev/null || true
 }
 
-# PLUGIN INSTALLER_REL STARTED OUTCOME EXIT_CODE - after the log is in place.
+# PLUGIN INSTALLER_REL STARTED OUTCOME EXIT_CODE [REASON] - after the log is in place.
 plugin_record_write() {
     local rec="${PLUGIN_RECORD_DIR}/$1.json"
     plugin_record_tmp "${rec}.tmp" || return 0
@@ -1493,8 +1501,9 @@ plugin_record_write() {
             "started_at" => $argv[3], "finished_at" => gmdate("Y-m-d\TH:i:s\Z"),
             "outcome" => $argv[4], "exit_code" => (int)$argv[5],
             "release" => trim((string)@file_get_contents($argv[6])),
+            "reason" => mb_substr(trim((string)($argv[7] ?? "")), 0, 240),
         ], JSON_UNESCAPED_SLASHES) . "\n";
-    ' "$1" "$2" "$3" "$4" "$5" "${PUBLIC_HTML}/VERSION" > "${rec}.tmp" 2>/dev/null \
+    ' "$1" "$2" "$3" "$4" "$5" "${PUBLIC_HTML}/VERSION" "${6:-}" > "${rec}.tmp" 2>/dev/null \
         || { rm -f "${rec}.tmp"; return 0; }
     plugin_record_publish "${rec}.tmp" "${rec}"
 }
@@ -1598,16 +1607,26 @@ run_one_plugin_installer() {
         plugin_record_publish "${LOG}.tmp" "${LOG}"
         cat "${LOG}" 2>/dev/null || true
     fi
+    local REFUSAL=""
     if (( rc == 0 )); then
         INSTALLER_OUTCOME="ok"
         echo "plugin installers: ${PLUGIN}: ok"
+    elif (( rc == INSTALLER_REFUSED_EXIT )); then
+        # The installer declined to install here (a server too small for it,
+        # a site it does not serve) and said why on its last line. Not a
+        # failure of the converge: the plugin is simply not available here.
+        INSTALLER_OUTCOME="refused"
+        if [[ "${LOG}" != "/dev/null" ]]; then
+            REFUSAL="$(grep -v '^[[:space:]]*$' "${LOG}" 2>/dev/null | tail -n 1 | cut -c1-240)"
+        fi
+        echo "plugin installers: ${PLUGIN}: refused here${REFUSAL:+ - ${REFUSAL}}"
     else
         INSTALLER_OUTCOME="failed"
         echo "plugin installers: WARNING - ${PLUGIN} installer failed; its services may be down." >&2
         CONVERGE_OUTCOME="installer-failed"
     fi
     PASS_OUTCOME["${PLUGIN}"]="${INSTALLER_OUTCOME}"
-    [[ "${LOG}" == "/dev/null" ]] || plugin_record_write "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" "${INSTALLER_OUTCOME}" "${rc}"
+    [[ "${LOG}" == "/dev/null" ]] || plugin_record_write "${PLUGIN}" "${INSTALLER_REL}" "${STARTED}" "${INSTALLER_OUTCOME}" "${rc}" "${REFUSAL}"
 }
 
 if [[ -n "${ONLY_INSTALLER}" ]]; then
@@ -1925,8 +1944,12 @@ if [[ "${MACHINE}" == "1" ]]; then
             continue
         fi
         echo "host plugin installers: running ${HOST_PLUGIN_INSTALLER}"
-        if bash "${HOST_PLUGIN_PATH}" --machine "${SITE_ROOT}"; then
+        HOST_RC=0
+        bash "${HOST_PLUGIN_PATH}" --machine "${SITE_ROOT}" || HOST_RC=$?
+        if (( HOST_RC == 0 )); then
             echo "host plugin installers: ${HOST_PLUGIN_INSTALLER}: ok"
+        elif (( HOST_RC == INSTALLER_REFUSED_EXIT )); then
+            echo "host plugin installers: ${HOST_PLUGIN_INSTALLER}: refused here"
         else
             echo "host plugin installers: WARNING - ${HOST_PLUGIN_INSTALLER} failed" >&2
             CONVERGE_OUTCOME="installer-failed"

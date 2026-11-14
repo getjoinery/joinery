@@ -245,6 +245,7 @@ $permitted = array(
 	'data/seo_page_metadata_class.php'                        => 'a page that exists recorded on its first view (lazy_auto_create), so the SEO pages list knows it',
 	'data/backup_targets_class.php'                            => 'a Backblaze credential completed with the region and endpoint Backblaze itself reports, written back once on the read that found them missing',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
+	'data/mail_send_outcomes_class.php'                       => 'a send counted per From-domain (signed, unsigned, handed on), on whatever request sent it: observation of the platform\'s own mail',
 	'data/problem_reports_class.php'                          => 'an automatic problem report started or counted, on whatever request recorded an unexpected error',
 	'data/logins_class.php'                                   => 'the login row and usr_lastlogin_time stamp, written when a remembered cookie resumes a session on a read request',
 	'includes/Access.php'                                     => 'the access_refused / access_granted audit row decide() writes, on the request it decides',

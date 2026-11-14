@@ -2626,8 +2626,20 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 	try { JobCommandBuilder::build_site_log_count($off_node, $since); } catch (Exception $e) { $threw = true; }
 	check($threw, 'site_log_count is behind the owner\'s log-access switch, like site_log');
 	check(array_keys(JobCommandBuilder::SITE_LOG_COUNT_MARKERS) === array('entry_script_missing', 'primary_script_unknown',
-		'permission_denied', 'php_fatal', 'critical', 'error_logged', 'undefined_column', 'transaction_left_open', 'get_write', 'get_mutation'),
+		'permission_denied', 'php_fatal', 'critical', 'error_logged', 'undefined_column', 'transaction_left_open', 'get_write', 'get_mutation',
+		'dkim_unsigned', 'authoritative_dns_fallback', 'dns_reconciler_failed'),
 		'the marker list mirrors the agent\'s, in its order');
+	$slc_src = AgentDistPublisher::sourcePath();
+	if ($slc_src && is_file($slc_src . '/primitives/observe_site_log_count.go')) {
+		$slc_code = (string)file_get_contents($slc_src . '/primitives/observe_site_log_count.go');
+		preg_match('/var siteLogMarkers = \[\]siteLogMarker\{(.*?)\n\}/s', $slc_code, $slc_m);
+		preg_match_all('/^\s*\{"([a-z_]+)",/m', $slc_m[1] ?? '', $slc_names);
+		check($slc_names[1] === array_keys(JobCommandBuilder::SITE_LOG_COUNT_MARKERS),
+			'SITE_LOG_COUNT_MARKERS is the agent\'s siteLogMarkers, read from its source, in order', implode(',', $slc_names[1]));
+		// Each marker names the platform's own line: the prefix constants are what the agent matches.
+		check(strpos($slc_code, AuthoritativeDns::FALLBACK_LOG_PREFIX) !== false && strpos($slc_code, DnsReconciler::FAILURE_LOG_PREFIX) !== false,
+			'the agent matches AuthoritativeDns and DnsReconciler by their own log prefixes');
+	}
 	check(in_array('site_log_count', ManagementJob::LOG_EXCERPT_TYPES, true), 'its sample lines age out with the other log excerpts');
 
 	// Every agent at the version floor has the PostgreSQL entry on its own
@@ -3164,11 +3176,11 @@ $cp_none->load();
 check(JobResultProcessor::bundle_of($cp_none) === null, 'a declined export keeps no bundle');
 
 
-section('The running list\'s words: listening_sockets, container_inventory, spam_learning_status, reboot_machine (agent 1.76.0), relay_status (1.101.0)');
+section('The running list\'s words: listening_sockets, container_inventory, mailbox_status, reboot_machine (agent 1.76.0), relay_status (1.101.0)');
 
 {
 	$rl_node = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x31", 32))));
-	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'relay_status', 'reboot_machine') as $w) {
+	foreach (array('listening_sockets', 'container_inventory', 'mailbox_status', 'relay_status', 'reboot_machine') as $w) {
 		$m = 'build_' . $w;
 		$built = JobCommandBuilder::$m($rl_node);
 		check($built === array('primitive' => $w, 'params' => array()),
@@ -3181,12 +3193,46 @@ section('The running list\'s words: listening_sockets, container_inventory, spam
 		'mgn_agent_version'    => AgentVocabulary::FLOOR,
 		'mgn_agent_primitives' => 'check_status,host_report,disk_usage',
 	));
-	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'relay_status', 'reboot_machine') as $w) {
+	foreach (array('listening_sockets', 'container_inventory', 'mailbox_status', 'relay_status', 'reboot_machine') as $w) {
 		$m = 'build_' . $w;
 		$said = '';
 		try { JobCommandBuilder::$m($rl_old); } catch (Exception $e) { $said = $e->getMessage(); }
 		check($said !== '' && strpos($said, $w) !== false, 'a node without ' . $w . ' is told it needs a newer agent, naming the word', $said);
 	}
+
+	// mailbox_status takes one domain, held to a domain's shape here (the node
+	// refuses one it does not host); an agent that still reports the word it
+	// widened, spam_learning_status, is sent that for the no-domain answer only.
+	$mb = JobCommandBuilder::build_mailbox_status($rl_node, 'Example.COM ');
+	check($mb === array('primitive' => 'mailbox_status', 'params' => array('domain' => 'example.com')),
+		'mailbox_status carries one domain, lowercased', var_export($mb, true));
+	foreach (array('example', '../etc', 'a b.com', 'example.com;id', str_repeat('a', 250) . '.com') as $bad) {
+		$said = '';
+		try { JobCommandBuilder::build_mailbox_status($rl_node, $bad); } catch (Exception $e) { $said = $e->getMessage(); }
+		check(strpos($said, 'not a domain name') !== false, 'mailbox_status refuses ' . var_export(mb_substr($bad, 0, 20), true) . ' as a domain', $said);
+	}
+	$mb_older = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x34", 32))));
+	$mb_older->set('mgn_agent_primitives', 'check_status,host_report,spam_learning_status');
+	$mb_older->save();
+	check(JobCommandBuilder::build_mailbox_status($mb_older) === array('primitive' => 'spam_learning_status', 'params' => array()),
+		'an agent with only spam_learning_status is sent it for the no-domain answer');
+	$said = '';
+	try { JobCommandBuilder::build_mailbox_status($mb_older, 'example.com'); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'for one domain') !== false && strpos($said, 'mailbox_status') !== false,
+		'and is told it needs a newer agent for one domain', $said);
+
+	// mail_test_send: one required domain, an operate word.
+	$mts = JobCommandBuilder::build_mail_test_send($rl_node, 'Example.com');
+	check($mts === array('primitive' => 'mail_test_send', 'params' => array('domain' => 'example.com')),
+		'mail_test_send carries one domain and nothing else', var_export($mts, true));
+	$said = '';
+	try { JobCommandBuilder::build_mail_test_send($rl_node, ''); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'not a domain name') !== false, 'mail_test_send refuses no domain', $said);
+	$said = '';
+	try { JobCommandBuilder::build_mail_test_send($rl_old, 'example.com'); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'mail_test_send') !== false, 'an older agent is told it needs a newer one for mail_test_send', $said);
+	check(SmActionLevels::PAGES['node_detail']['mail_test_send'] === 8 && SmActionLevels::PAGES['node_detail']['mailbox_status'] === 7,
+		'mail_test_send is a change (8); mailbox_status a look (7)');
 
 	// The reboot is refused on the plane where the node would refuse it.
 	$rl_container = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x33", 32)), 'mgn_container_name' => 'sitex'));

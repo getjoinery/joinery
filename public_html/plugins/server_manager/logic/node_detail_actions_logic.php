@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.92 - mail_test_send, from a mailbox domain answer's Send test message button
+ * @version 1.91 - mailbox_status, with an optional domain, in place of spam_learning_status
  * @version 1.90 - Retry install on a Starter site's node puts its paid row back to ready (ProvisionStarterSites::retry)
  * @version 1.89 - never_do_accept marks only the alarm safe, remembered by path and content; never_do_clear clears
  *                 the review list (specs/never_do_false_alarms.md)
@@ -219,7 +221,8 @@ class NodeDetailActions {
 		'install_security_updates' => 'overview',
 		'refresh_site_containers'  => 'overview',
 		'container_inventory'      => 'diagnostics',
-		'spam_learning_status'     => 'diagnostics',
+		'mailbox_status'           => 'diagnostics',
+		'mail_test_send'           => 'diagnostics',
 		'relay_status'             => 'diagnostics',
 		'reboot_machine'           => 'overview',
 		'disable_root_login'       => 'overview',
@@ -564,7 +567,6 @@ class NodeDetailActions {
 			// 1.88.0) takes nothing: the host decides which sites are due.
 			case 'listening_sockets':
 			case 'container_inventory':
-			case 'spam_learning_status':
 			case 'relay_status':
 			case 'site_state_report':
 			case 'install_security_updates':
@@ -576,6 +578,26 @@ class NodeDetailActions {
 				$builder = 'build_' . $action;
 				$built = JobCommandBuilder::$builder($node);
 				$job = ManagementJob::createFromBuild($node->key, $action, $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'mailbox_status': {
+				// The site's mailbox: no domain for the spam-learning counts
+				// and the domain list, or one of those domains for its Setup
+				// rows, flags and DNS. The builder checks the shape; the node
+				// refuses a domain it does not host.
+				$domain = isset($_POST['domain']) ? (string)$_POST['domain'] : '';
+				$built = JobCommandBuilder::build_mailbox_status($node, $domain);
+				$job = ManagementJob::createFromBuild($node->key, 'mailbox_status', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'mail_test_send': {
+				// One fixed test message from an ordinary hosted domain to the
+				// probe mailbox; the node refuses a protected domain, test
+				// mode and a second send within ten minutes.
+				$built = JobCommandBuilder::build_mail_test_send($node, (string)($_POST['domain'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'mail_test_send', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

@@ -6,12 +6,15 @@ require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException (the locked-state signal)
 
 require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
+require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
 
 /**
  * EmailSender - the one outbound mail pipeline: egress assertions, dry-run and
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.6 - every send that leaves is counted per From-domain in MailSendOutcome: signed, unsigned or
+ *   handed on, from the transport's note; a dry run is not counted, a test-mode send is counted as one
  * @version 1.5 - usesIncludedMail(): whether the site sends through the included Joinery email
  * @version 1.4 - quickSend() puts an HTML body in the blank inner template inside the default
  *   outer template; it had rendered the outer template as the inner one, which dropped the body
@@ -446,6 +449,7 @@ class EmailSender {
         // straight into the REAL recipient's instance, which is exactly the
         // thing a redirect exists to prevent.
         $trap = self::testModeTrap();
+        $this->test_mode_send = ($trap !== null && $trap !== '');
         if ($trap !== null) {
             if ($trap === '') {
                 // Redirect-on with nowhere to redirect to: suppressing is the
@@ -482,6 +486,7 @@ class EmailSender {
                     $this->last_send_report['direct_delivered'] = array_values($direct['delivered']);
                     $this->logEmailDebug('Delivered over Joinery Direct to '
                         . implode(', ', $direct['delivered']), 'joinery-direct');
+                    $this->countSend($message, MailSendOutcome::PATH_DIRECT, 'joinery_direct');
                     if (empty($direct['remaining'])) {
                         return true;
                     }
@@ -499,7 +504,11 @@ class EmailSender {
             $service = method_exists($transport, 'getKey') ? $transport::getKey() : get_class($transport);
             $this->last_send_report['transport'] = $service;
             try {
+                MailSendOutcome::resetNote();
                 $result = $transport->send($message);
+                if ($result) {
+                    $this->countSend($message, null, $service);
+                }
                 $this->recordSendOutcome($transport, $result,
                     $result ? null : 'The ' . $service . ' transport refused the message.');
                 $this->logEmailDebug(
@@ -692,6 +701,7 @@ class EmailSender {
         // the whole list, with the size and first addresses named in the
         // subject so the trap mailbox still says what would have gone out.
         $trap = self::testModeTrap();
+        $this->test_mode_send = ($trap !== null && $trap !== '');
         if ($trap !== null) {
             if ($trap === '') {
                 $this->logEmailDebug('Test mode is on but email_test_recipient is empty — '
@@ -728,7 +738,10 @@ class EmailSender {
         }
 
         // Try primary provider's native batch
+        MailSendOutcome::resetNote();
         $result = $provider->sendBatch($message, $recipients);
+        $this->countSend($message, null, $service,
+            count($recipients) - count($result['failed_recipients'] ?? array()));
 
         if ($result['success']) {
             $this->logEmailDebug("Batch sent successfully via $service (" . count($recipients) . " recipients)");
@@ -741,7 +754,10 @@ class EmailSender {
             $fallback_provider = self::getProvider($fallback);
             if ($fallback_provider) {
                 $this->logEmailDebug("Batch: " . count($failed) . " recipients failed via $service, trying $fallback");
+                MailSendOutcome::resetNote();
                 $fallback_result = $fallback_provider->sendBatch($message, $failed);
+                $this->countSend($message, null, $fallback,
+                    count($failed) - count($fallback_result['failed_recipients'] ?? array()));
 
                 if ($fallback_result['success']) {
                     $this->logEmailDebug("Batch fallback via $fallback succeeded");
@@ -838,7 +854,11 @@ class EmailSender {
         // the message (or the last one that refused it).
         $this->last_send_report['transport'] = $service;
         try {
+            MailSendOutcome::resetNote();
             $result = $provider->send($message);
+            if ($result) {
+                $this->countSend($message, null, $service);
+            }
             $this->recordSendOutcome($provider, $result,
                 $result ? null : "The $service service refused the message.");
             if ($result) {
@@ -851,6 +871,34 @@ class EmailSender {
             $this->last_send_report['error'] = $e->getMessage();
             $this->logEmailDebug("Email send exception via $service: " . $e->getMessage(), $service);
             return false;
+        }
+    }
+
+    /** Whether the send under way is a test-mode send (redirected to the trap). */
+    private $test_mode_send = false;
+
+    /**
+     * Count $messages messages that just left, per From-domain, in
+     * MailSendOutcome: from the transport's note (signed, unsigned, or handed
+     * on), or with no note as handed on to $service. $path names the path when
+     * no transport is involved (Joinery Direct). Never throws: counting must
+     * never cost a send.
+     */
+    private function countSend(EmailMessage $message, ?string $path, string $service, int $messages = 1): void {
+        if ($messages < 1) {
+            return;
+        }
+        try {
+            $domain = MailIdentityGuard::domainOf((string)$message->getFrom());
+            if ($path !== null) {
+                MailSendOutcome::resetNote();
+                MailSendOutcome::record($domain, $path, MailSendOutcome::OUTCOME_HANDED_ON, '', '', '', $service,
+                    $messages, $this->test_mode_send);
+                return;
+            }
+            MailSendOutcome::recordAfterSend($domain, $service, $messages, $this->test_mode_send);
+        } catch (\Throwable $e) {
+            error_log('[EmailSender] could not count a send: ' . $e->getMessage());
         }
     }
 

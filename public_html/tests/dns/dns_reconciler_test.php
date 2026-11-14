@@ -209,9 +209,21 @@ list($driver, $reconciler) = fixture();
 $plan = mail_plan();
 $driver->fail_value = 'v=spf1 ip4:1.2.3.4 -all';
 
+$rec_log = tempnam(sys_get_temp_dir(), 'reclog');
+$rec_prev_log = ini_get('error_log');
+ini_set('error_log', $rec_log);
 $results = by_record($reconciler->apply($driver, ZONE, $plan));
+ini_set('error_log', $rec_prev_log === false ? '' : $rec_prev_log);
+$rec_lines = array_values(array_filter(array_map(function ($l) {
+	$at = strpos($l, DnsReconciler::FAILURE_LOG_PREFIX);
+	return $at === false ? null : substr($l, $at);
+}, (array)file($rec_log, FILE_IGNORE_NEW_LINES))));
+@unlink($rec_log);
 check($results['TXT example.com → v=spf1 ip4:1.2.3.4 -all']['action'] === 'failed',
 	'the record that failed reports failure');
+check(count($rec_lines) === 1 && strpos($rec_lines[0], DnsReconciler::FAILURE_LOG_PREFIX . 'create TXT example.com in ' . ZONE . ' (') === 0,
+	'the failed record is logged once, naming the operation, its type and name and the zone', implode("\n", $rec_lines));
+check(strpos(implode("\n", $rec_lines), 'v=spf1') === false, 'the line never carries the record\'s value');
 check($results['TXT example.com → v=spf1 ip4:1.2.3.4 -all']['ok'] === false, 'and is marked not ok');
 check($results['MX example.com → 10 mail.example.com']['action'] === 'created',
 	'the others still landed');
