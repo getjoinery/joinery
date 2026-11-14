@@ -15,7 +15,7 @@
  * broken (specs/send_protection_one_press.md WP0). These checks stand a fake
  * nameserver in for the real ones, so nothing here touches the network.
  *
- * @version 1.0
+ * @version 1.1 - lookupAll()
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -131,6 +131,19 @@ ad_with(function ($name, $type, $packet) use (&$asked) { $asked++; return null; 
 AuthoritativeDns::lookup('a.example.test', DNS_TXT, 'example.test');
 AuthoritativeDns::lookup('b.example.test', DNS_TXT, 'example.test');
 check($asked === 2, 'a zone whose two nameservers did not answer is not asked again in the same request');
+
+// ---------------------------------------------------------------------------
+section('lookupAll asks every nameserver, and a silent one marks nothing dead');
+
+ad_with(function ($name, $type, $packet, $ip) {
+	if ($ip === '192.0.2.54') { return null; }
+	return ad_reply($packet, array(array($name, 16, ad_txt('v=DKIM1; p=AAAA'))));
+});
+$all = AuthoritativeDns::lookupAll('mailk1._domainkey.example.test', DNS_TXT, 'example.test');
+check(count($all) === 2 && ($all['192.0.2.53'][0]['txt'] ?? '') === 'v=DKIM1; p=AAAA' && $all['192.0.2.54'] === null,
+	'one answer per nameserver, null for the one that did not reply');
+$again = AuthoritativeDns::lookupAll('mailk1._domainkey.example.test', DNS_TXT, 'example.test');
+check(count($again) === 2, 'asked again: a missed reply does not stop the next poll');
 
 // ---------------------------------------------------------------------------
 section('DnsResolver asks a registered zone first, and only that zone');

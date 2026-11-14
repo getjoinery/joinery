@@ -15,6 +15,7 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
+ * @version 1.6 - a press box renders one confirmed action, no ticks, and the keys it covers
  * @version 1.5 - SRV is part of the vocabulary now (Joinery Direct's capability record)
  * @version 1.4 - records that must be absent: the diff, the gates on deleting,
  *                and that nothing else in the rail learned to delete
@@ -1058,5 +1059,28 @@ check(strpos((string)file_get_contents(PathHelper::getIncludePath('includes/dns/
 	'no confirmation in the box carries help text under a key FormWriter never reads');
 check(stripos($removal_html, 'stays exactly as it is') !== false,
 	'so the help under the removal list actually reaches the page');
+
+// A press box (send protection in one press): one confirmed action about the
+// list on screen, so no ticks, the keys it covers, and each replaced value in words.
+$spf_new = new DnsRecord('TXT', 'example.com', 'v=spf1 -all');
+$press_vars = array_merge($removal_vars, array(
+	'counts' => array(DnsReconciler::CONFLICTS => 1),
+	'rows' => array(array(
+		'key' => 'pk1', 'record' => $spf_new, 'outcome' => DnsReconciler::CONFLICTS,
+		'live' => array(new DnsRecord('TXT', 'example.com', 'v=spf1 include:mailgun.org ~all')),
+		'owned' => false, 'written' => '', 'cutover' => false, 'cutover_note' => '', 'note' => 'SPF',
+	)),
+	'press' => array('label' => 'Turn on send protection', 'confirm' => 'Turn it on?', 'keys' => array('pk1', 'pk2'),
+		'lines' => array('Replaces TXT example.com "v=spf1 include:mailgun.org ~all" with "v=spf1 -all".')),
+));
+ob_start();
+dns_publish_box_render(new DnsRemovalPage(), $press_vars);
+$press_html = ob_get_clean();
+check(strpos($press_html, 'Turn on send protection') !== false && strpos($press_html, 'data-jy-confirm="Turn it on?"') !== false,
+	'a press box renders its own button, behind its own confirmation');
+check(strpos($press_html, 'dns_adopt') === false, 'and asks no adopt tick: the press is the decision');
+check(strpos($press_html, 'name="press_keys"') !== false && strpos($press_html, 'pk1,pk2') !== false,
+	'it carries the keys of every record it shows, so the handler writes only those');
+check(strpos($press_html, 'Replaces TXT example.com') !== false, 'and says in words what each replacement overwrites');
 
 harness_finish();

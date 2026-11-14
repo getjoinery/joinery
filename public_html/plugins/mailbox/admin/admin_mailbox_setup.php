@@ -27,6 +27,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.21 - one press turns send protection on where the DNS host takes an API key, and the
+ *   page it lands on says what each step did
  * @version 3.20 - who owns the signing key is chosen in the Sending identity box (and changed there
  *                until protection is on); while it is unanswered the box leads the page
  * @version 3.19 - no Advanced section: server-wide work is the Server tab; the Sending identity
@@ -182,7 +184,8 @@ $render_owner_form = function (string $button, int $value) use ($page, $protect,
 
 $render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
-		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check, $render_owner_form) {
+		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check, $render_owner_form,
+		$protect_press_box, $protect_press_result, $protect_press_note) {
 // --- Sending identity (the sending-lock add-on) ---
 // THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
 // (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
@@ -200,6 +203,37 @@ if (!empty($protect) && $focus_domain !== '') {
 		'title'   => 'Sending identity — ' . $focus_domain,
 		'variant' => 'focus',
 	));
+
+	// What the press just did, step by step, on the page it landed on. Said
+	// once: the checks below carry the lasting state.
+	if (!empty($protect_press_result)) {
+		$res = $protect_press_result;
+		echo '<div class="alert ' . (!empty($res['ok']) ? 'alert-success' : 'alert-warning') . ' mb-3">';
+		echo '<p class="mb-2"><strong>' . htmlspecialchars((string)$res['message']) . '</strong></p>';
+		echo '<ol class="small mb-0">';
+		foreach ((array)$res['steps'] as $step) {
+			$mark = $step['status'] === 'done' ? 'Done' : ($step['status'] === 'failed' ? 'Stopped here' : 'Not reached');
+			echo '<li>' . htmlspecialchars($step['label']) . ' — <strong>' . $mark . '</strong>'
+				. ($step['detail'] !== '' ? '<div class="text-muted">' . htmlspecialchars($step['detail']) . '</div>' : '')
+				. '</li>';
+		}
+		echo '</ol>';
+		echo '</div>';
+		// THE ONE STEP THE PRESS LEAVES TO YOU: nothing undoes it, and deleting
+		// key material is a decision a person makes. Its own gate still applies.
+		if (!empty($res['ok']) && $protect['is_protected']) {
+			echo '<p class="mb-2">One step is yours: the ordinary signing key is still on this server, and with '
+				. 'send protection on nothing needs it. Destroying it means even someone who breaks into this '
+				. 'server cannot sign as ' . htmlspecialchars($focus_domain) . '. It cannot be undone.</p>';
+			echo '<div class="mb-3">' . PublicPageBase::action_button('Destroy the old signing key', $self_url,
+				array('hidden' => array('action' => 'destroy_local_key', 'domain' => $focus_domain),
+					'class' => 'btn btn-danger',
+					'confirm' => 'Destroy the ordinary signing key for ' . $focus_domain . '? This cannot be undone.'))
+				. '</div>';
+			echo '<p class="text-muted small mb-3">Leave your old provider\'s DKIM record up for a day, so mail '
+				. 'already on its way still passes, then remove it at your DNS host.</p>';
+		}
+	}
 
 	if ($protect['is_protected']) {
 		echo '<p class="mb-2">Send protection is on. While you are signed out, nothing on this server can send '
@@ -239,6 +273,28 @@ if (!empty($protect) && $focus_domain !== '') {
 		// that reject unsigned mail before anything signs takes the domain's own
 		// mail down for as long as DNS takes to travel, and nothing else on the
 		// page would warn an operator who did the two halves the other way round.
+		if (!empty($protect_press_box)) {
+			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+			// ONE PRESS, IN THE SAFE ORDER. The press publishes the records the
+			// key needs, waits for your DNS host to serve them, proves a signature,
+			// starts signing, and only then publishes the records that reject
+			// forgeries. Saying the order is what makes the press trustworthy.
+			echo '<p class="text-muted small mb-2">One press does it all, in the order that keeps your mail '
+				. 'flowing: publish the record your key needs, wait until your DNS host serves it, prove a '
+				. 'signature from your key verifies, start signing, and only then publish the records that make '
+				. 'other servers reject forgeries. If anything does not finish, it stops there and says so.</p>';
+			dns_publish_box_render($page, $protect_press_box, 'Turn on send protection', 'nested');
+			if (!empty($protect_preflight)) {
+				echo '<h5 class="mt-3 mb-2">What the press checks before signing starts</h5>';
+				foreach ($protect_preflight as $r) { $render_check($r); }
+			}
+		}
+	}
+
+	if ($setup_open && empty($protect_press_box)) {
+		if (!empty($protect_press_note)) {
+			echo '<p class="text-muted small mb-2">' . htmlspecialchars($protect_press_note) . '</p>';
+		}
 		echo '<p class="text-muted small mb-2">This happens in two steps, and taking them in this order is what '
 			. 'keeps your mail flowing the whole way through:</p>';
 		echo '<ol class="text-muted small mb-3">';

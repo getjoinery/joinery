@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.6 - the strict records come from strictStageRecords(), shared with the one press
  * @version 1.5 - the strict DMARC value is built by foldDmarc(), read through its helper
  * @version 1.4 - the Step 1 box names its plan to the Apply handler
  * @version 1.3 - who owns the key is asked in the sending-identity panel, which leads Setup until answered
@@ -223,7 +224,10 @@ class ProtectOptinTest {
 		$activate = substr($src, strpos($src, "\$action === 'protect_activate'"));
 		$activate = substr($activate, 0, strpos($activate, 'protect_rotate'));
 
-		check(strpos($activate, 'signingReadinessChecks') !== false,
+		$blockers_fn = substr($src, strpos($src, 'function mailbox_protect_signing_blockers'));
+		$blockers_fn = substr($blockers_fn, 0, strpos($blockers_fn, "\n}"));
+		check(strpos($activate, 'mailbox_protect_signing_blockers') !== false
+				&& strpos($blockers_fn, 'signingReadinessChecks') !== false,
 			'activation gates on signing readiness');
 		check(strpos($activate, 'protectedDomainChecks') === false,
 			'and no longer demands the strict records first');
@@ -267,7 +271,8 @@ class ProtectOptinTest {
 		$engine_plan = substr($engine_plan, 0, strpos($engine_plan, "\n\t}"));
 		check(strpos($engine_plan, 'signingStageRecords') !== false,
 			'the finished shape is built from the same records, so the two cannot drift');
-		check(strpos($engine_plan, 'v=spf1 -all') !== false && strpos($engine_plan, 'dmarcPlanValue($domain, true)') !== false
+		check(strpos($engine_plan, 'strictStageRecords') !== false
+				&& strpos($engine, "'v=spf1 -all'") !== false && strpos($engine, 'dmarcPlanValue($domain, true)') !== false
 				&& strpos(InboundEmailSetupCheck::foldDmarc('example.test', true, ''), 'p=reject') !== false,
 			'and it is still the shape that carries the rejection instruction');
 
@@ -321,8 +326,8 @@ class ProtectOptinTest {
 		// beside it already answer that, so they decide whether it renders.
 		check(strpos($setup_logic, '$protect_signing_ready = _setup_rows_all_pass($protect_preflight)') !== false,
 			'the ceremony asks whether step one has any work left');
-		check(strpos($setup_logic, "if (!\$protect_signing_ready) {\n\t\t\t\$protect_dns_box = DnsPublishBox::build(") !== false,
-			'and builds the publish box only when it does');
+		check(strpos($setup_logic, "if (!\$protect_signing_ready && \$protect_press_box === null) {\n\t\t\t\$protect_dns_box = DnsPublishBox::build(") !== false,
+			'and builds the publish box only when it does (and the one press is not offered)');
 		check(strpos($view, 'Step 1 is already done.') !== false,
 			'a step with nothing to do says so rather than rendering an empty gap');
 

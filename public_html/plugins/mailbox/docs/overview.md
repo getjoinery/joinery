@@ -1721,6 +1721,34 @@ own when `iea_security_level` says so.
   record set that rejects its own outgoing mail. The ceremony asks for the shape
   explicitly while it runs (`dnsPlan($domain, true)`), which is the one exception.
 
+**Turning send protection on.** The Sending identity box's ceremony runs the
+completion order: publish the signing-stage records (the sealed key's DKIM record and
+the forwarding subdomain), start signing (`ied_is_protected_identity`), then publish
+the strict SPF and DMARC. Where the domain's DNS host takes an API key (Cloudflare,
+for one), the ceremony is **one press** (`mailbox_protect_press()`): the box shows
+every record it writes or replaces, from `protectPressPlan()`, and the press
+publishes `signingReadinessPlan()`, waits up to 30 s until every one of the zone's
+nameservers that answers serves it (`AuthoritativeDns::lookupAll()`; an address that never
+answers, such as an IPv6 one from a box with no IPv6 route, is skipped for the rest of the
+press) and the readiness rows pass, proves that a signature
+from the sealed key verifies against the published record
+(`MailboxDkimSigner::proveKeyMatchesRecord()`), sets the flag, and publishes
+`strictStagePlan()` (apex SPF and `_dmarc` only). The confirmation's consent is a
+token per row binding the record to the live values shown beside it
+(`mailbox_protect_consent_token()`), so a record, or a value it replaces, that
+changed since the page was shown stops the press before any write. The press is
+offered only where it can finish: the sealed key must open for the person pressing
+(only its owner's vault opens it), every row must have been checked, and nothing
+may be removed or move mail (an MX or address record already in use); otherwise the
+page says why and keeps the two presses. It stops when the apex holds more than one SPF record
+or `_dmarc` more than one DMARC record, and treats a strict record that was skipped
+as not done. It stops at the first step that does not finish, and every stopping
+point is safe: before the flag nothing changed, after it the domain signs with
+ambient DNS. It removes nothing: destroying the old on-disk key is a button on the
+page it lands on, and the old provider's DKIM record is left up for mail already
+on its way. A DNS host signed into with OAuth, or one with no driver, keeps the
+two presses: the Step 1 publish box, then **Check DNS and turn on send protection**.
+
 **Raising a level or switching an add-on on runs the protection ceremony**
 (specs/mailbox_protection_ceremony.md, `includes/protection_ceremony.php`).
 Choosing Private above the current level, or ticking an add-on, reveals a

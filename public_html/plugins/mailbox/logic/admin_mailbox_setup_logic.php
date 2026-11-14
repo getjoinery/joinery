@@ -24,6 +24,7 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.24 - one press turns send protection on where the DNS host takes an API key (protect_press_box)
  * @version 2.23 - a domain_id focus is kept for any registered domain, not only the machine sender's:
  *   the editor's send-lock save and Finish send protection landed on an empty picker
  * @version 2.22 - the DNS Apply handler resolves the plan of the box pressed (dns_plan=signing for the
@@ -139,6 +140,15 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// DNS publish actions (specs/dns_record_management.md). Handled before the
 	// setting saves below so a publish never also writes the hostname form.
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+
+	// The one-press send protection (specs/send_protection_one_press.md WP1):
+	// its box's Apply is not a publish of one plan but the whole ceremony, so it
+	// is taken here, before the ordinary box handler would publish it in one go.
+	if (($posted['dns_action'] ?? '') === 'dns_apply' && ($posted['dns_plan'] ?? '') === 'press') {
+		return _setup_protect_press($posted, $session,
+			_setup_focus_domain_name($selected_alias_id, $selected_domain_id), $state_qs());
+	}
+
 	$dns_redirect = DnsPublishBox::handle($posted, function () use ($posted, $selected_alias_id, $selected_domain_id,
 			$machine_setup) {
 		// The records to publish are the ones the pressed box rendered. Apply
@@ -154,6 +164,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// The strict SPF and DMARC come afterwards, from the ordinary plan, once
 		// the flag is on and protectedShapeApplies() prescribes them.
 		$signing = (($posted['dns_plan'] ?? '') === 'signing');
+		if (($posted['dns_plan'] ?? '') === 'press') {
+			$name = _setup_focus_domain_name($selected_alias_id, $selected_domain_id);
+			return $name !== '' ? (new InboundEmailSetupCheck())->protectPressPlan($name) : null;
+		}
 		return $selected_alias_id
 			? _setup_dns_plan_for_alias($selected_alias_id, $machine_setup, $signing)
 			: _setup_dns_plan_for_domain($selected_domain_id, $signing, $machine_setup);
@@ -490,6 +504,14 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// nothing and is told nothing.
 	$protect_preflight     = array();
 	$protect_dns_box       = null;
+	$protect_press_box     = null;
+	$protect_press_note    = '';
+	// What the last press did, shown once on the page it lands on.
+	$protect_press_result  = null;
+	if ($focus_domain_id > 0 && isset($_SESSION['mailbox_protect_press'][$focus_domain_id])) {
+		$protect_press_result = $_SESSION['mailbox_protect_press'][$focus_domain_id];
+		unset($_SESSION['mailbox_protect_press'][$focus_domain_id]);
+	}
 	$protect_signing_ready = false;
 	$protect_vault_unlocked = false;
 	if ($protect_setup && $protect !== null && $focus_domain_model !== null
@@ -524,8 +546,45 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// domain is not led with an offer to configure it. A record that later
 		// drifts fails its check again and brings the box straight back.
 		$protect_signing_ready = _setup_rows_all_pass($protect_preflight);
+
+		// ONE PRESS, where the DNS host takes an API key: the whole ceremony
+		// behind one confirmation that lists every record it writes. The diff is
+		// shown straight away; it is the consent. An OAuth host keeps the two
+		// presses below (its callback applies a plan frozen at consent time, and
+		// a consent round trip can outlast the vault's idle window), and so does
+		// a host with no driver, which gets the records to copy.
+		//
+		// It is offered only where it can finish: the sealed key has to open for
+		// the person pressing (only its owner's vault opens it), and the change
+		// has to be one a single confirmation can cover — every record checked,
+		// nothing removed, no mail redirected. Otherwise the two presses stay,
+		// with their own confirmations, and the reason is said.
+		$protect_press_note = '';
+		if ($protect_vault_unlocked) {
+			$press = DnsPublishBox::build($checker->protectPressPlan($focus_domain),
+				array('dns_show' => '1') + $input,
+				DnsPublishBox::urlWith($state_qs(), array('dns_plan' => 'press')));
+			$press_class = $press['provider_class'] ?? null;
+			if ($press_class !== null && $press['state'] === DnsPublishBox::STATE_DIFF
+					&& $press_class::credentialMode() !== DnsProvider::CREDENTIAL_OAUTH2) {
+				$unsuitable = mailbox_protect_press_unsuitable($press['rows']);
+				// Asked cheaply: opening the key here would count as using the
+				// vault on every page view and keep it from ever idling out. The
+				// press itself opens it, before it writes anything.
+				if ((int)$focus_domain_model->get('ied_owner_usr_user_id') !== (int)$session->get_user_id()) {
+					$protect_press_note = 'Only the key\'s owner can turn send protection on in one press: the '
+						. 'key opens only in their unlocked vault.';
+				} elseif ($unsuitable !== '') {
+					$protect_press_note = 'One press is not offered here. ' . $unsuitable;
+				} else {
+					$press['press'] = _setup_press_confirmation($press['rows'], $focus_domain);
+					$protect_press_box = $press;
+				}
+			}
+		}
+
 		// dns_plan=signing in its post URL tells the Apply handler this box's plan.
-		if (!$protect_signing_ready) {
+		if (!$protect_signing_ready && $protect_press_box === null) {
 			$protect_dns_box = DnsPublishBox::build(
 				$checker->signingReadinessPlan($focus_domain),
 				$input,
@@ -571,6 +630,9 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'protect_setup'              => $protect_setup,
 		'protect_preflight'          => $protect_preflight,
 		'protect_dns_box'            => $protect_dns_box,
+		'protect_press_box'          => $protect_press_box,
+		'protect_press_note'         => $protect_press_note,
+		'protect_press_result'       => $protect_press_result,
 		'protect_signing_ready'      => $protect_signing_ready,
 		'protect_vault_unlocked'     => $protect_vault_unlocked,
 		// Machine sender ceremony (specs/mailbox_machine_sender_card.md)
@@ -584,6 +646,102 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'machine_replyto_prefill'    => $machine_replyto_prefill,
 		'domain_rows'                => $domain_rows,
 	));
+}
+
+/**
+ * The domain the page is focused on, by mailbox or directly, for a handler that
+ * runs before the page has resolved anything. '' for none, or an IMAP source.
+ */
+function _setup_focus_domain_name(int $alias_id, int $domain_id): string {
+	if ($alias_id > 0) {
+		$alias = new InboundEmailAlias($alias_id, TRUE);
+		$domain_id = $alias->key ? (int)$alias->get('iea_ied_inbound_email_domain_id') : 0;
+	}
+	if ($domain_id <= 0) {
+		return '';
+	}
+	$domain = new InboundEmailDomain($domain_id, TRUE);
+	if (!$domain->key || $domain->get('ied_is_imap_source') || $domain->get('ied_delete_time')) {
+		return '';
+	}
+	return strtolower(trim((string)$domain->get('ied_domain')));
+}
+
+/**
+ * What the press's confirmation says, beyond the table: each live record it
+ * replaces, and any DMARC setting the replacement leaves out.
+ *
+ * keys are consent tokens (mailbox_protect_consent_token()): each binds the
+ * record shown to the live values shown beside it.
+ *
+ * @return array{label:string,confirm:string,lines:string[],keys:string[]}
+ */
+function _setup_press_confirmation(array $rows, string $domain): array {
+	$lines = array();
+	$keys = array();
+	foreach ($rows as $row) {
+		$record = $row['record'];
+		$keys[] = mailbox_protect_consent_token($row);
+		if ($row['outcome'] === DnsReconciler::MATCHES || empty($row['live'])) {
+			continue;
+		}
+		foreach ($row['live'] as $live) {
+			$line = 'Replaces ' . $record->type . ' ' . $record->name . ' "' . $live->value . '" with "'
+				. $record->value . '"';
+			if ($record->txtKind() === 'dmarc') {
+				$dropped = InboundEmailSetupCheck::dmarcDroppedTags($live->value, $record->value);
+				if (!empty($dropped)) {
+					$line .= ', leaving out ' . implode(', ', $dropped)
+						. ' (they would let some forged mail through)';
+				}
+			}
+			$lines[] = $line . '.';
+		}
+	}
+	return array(
+		'label'   => 'Turn on send protection',
+		'confirm' => 'Turn send protection on for ' . $domain . '? This publishes the records above, starts '
+			. 'signing with your key, and then publishes the records that make other servers reject anything '
+			. 'your key did not sign. You will need your vault unlocked to send mail as this domain.',
+		'lines'   => $lines,
+		'keys'    => $keys,
+	);
+}
+
+/**
+ * The press's handler: the credential from the form, one connection, the
+ * ceremony, and its result shown once on the page it lands on.
+ */
+function _setup_protect_press(array $posted, $session, string $domain_name, string $return_url): LogicResult {
+	require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
+	$session->check_permission(Access::level('config:write'));
+	$fail = function (string $msg) use ($session, $return_url) {
+		$session->save_message(new DisplayMessage($msg, 'Send protection is not on',
+			'~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($return_url);
+	};
+	$domain = $domain_name !== '' ? InboundEmailDomain::GetByDomain($domain_name) : false;
+	if (!$domain) {
+		return $fail('That domain no longer exists.');
+	}
+	$driver_class = DnsDriverRegistry::get(DnsPublishBox::chosenProviderKey($posted, $domain_name));
+	if ($driver_class === null || $driver_class::credentialMode() === DnsProvider::CREDENTIAL_OAUTH2) {
+		return $fail('This DNS host cannot be written in one press. Use the steps below.');
+	}
+	$credential = DnsPublishBox::credentialFrom($driver_class, $posted);
+	if ($credential === null) {
+		return $fail('Enter the ' . $driver_class::getLabel() . ' credential to turn send protection on.');
+	}
+	$conn = DnsPublishBox::connect($driver_class, $credential, $domain_name);
+	unset($credential);   // the driver holds the only copy, gone with this request
+	if ($conn['error'] !== '') {
+		return $fail($conn['error']);
+	}
+	$keys = array_values(array_filter(explode(',', (string)($posted['press_keys'] ?? ''))));
+	$result = mailbox_protect_press($domain, (int)$session->get_user_id(), $conn['driver'], $conn['zone'], $keys);
+	unset($conn);
+	$_SESSION['mailbox_protect_press'][(int)$domain->key] = $result;
+	return LogicResult::redirect($return_url);
 }
 
 /**

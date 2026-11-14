@@ -24,6 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
+ * @version 1.9
+ * @changelog 1.9 - credentialFrom() and connect(), so a caller can write two plans with one credential in one request
  * @version 1.8
  * @changelog 1.8 - handle() needs config:write, what publishing a site's DNS is: its floor was 5
  * @version 1.7
@@ -201,22 +203,11 @@ class DnsPublishBox {
 		}
 
 		// API-credential driver: the key exists only inside this request.
-		$credential = array('account_id' => $account_id);
-		foreach ($driver_class::credentialFields() as $field => $spec) {
-			$credential[$field] = trim((string)($input['dns_cred_' . $field] ?? ''));
-		}
-		$required = array_keys(array_filter($driver_class::credentialFields(), function ($spec) {
-			return empty($spec['optional']);
-		}));
-		foreach ($required as $field) {
-			if ($field === 'session_token' || $field === 'client_ip') {
-				continue;   // genuinely optional in their drivers
-			}
-			if ($credential[$field] === '') {
-				self::flash($session, 'Enter the ' . $driver_class::getLabel() . ' credential to publish.',
-					'Credential required', DisplayMessage::MESSAGE_WARNING);
-				return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
-			}
+		$credential = self::credentialFrom($driver_class, $input);
+		if ($credential === null) {
+			self::flash($session, 'Enter the ' . $driver_class::getLabel() . ' credential to publish.',
+				'Credential required', DisplayMessage::MESSAGE_WARNING);
+			return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
 		}
 
 		$results = self::publish($driver_class, $credential, $plan, $decisions, DnsReconciler::APPLY_CONFIRMED);
@@ -225,6 +216,27 @@ class DnsPublishBox {
 		self::flash($session, self::summarizeResults($results), 'DNS publish',
 			self::resultSeverity($results));
 		return LogicResult::redirect(self::urlWith($return_url, array('dns_show' => '1')));
+	}
+
+	/**
+	 * The API credential the box's form posted (dns_cred_*, dns_account), or
+	 * null when a required field is empty. Never stored: the caller holds the
+	 * only copy for the length of its request.
+	 */
+	public static function credentialFrom(string $driver_class, array $input): ?array {
+		$credential = array('account_id' => trim((string)($input['dns_account'] ?? '')));
+		foreach ($driver_class::credentialFields() as $field => $spec) {
+			$credential[$field] = trim((string)($input['dns_cred_' . $field] ?? ''));
+		}
+		foreach ($driver_class::credentialFields() as $field => $spec) {
+			if (!empty($spec['optional']) || $field === 'session_token' || $field === 'client_ip') {
+				continue;   // genuinely optional in their drivers
+			}
+			if ($credential[$field] === '') {
+				return null;
+			}
+		}
+		return $credential;
 	}
 
 	/** The level that may write an OAuth app registration. See saveOauthConfig(). */
@@ -312,6 +324,28 @@ class DnsPublishBox {
 			array $decisions, string $mode): array {
 
 		$out = array('results' => array(), 'error' => '', 'accounts' => array());
+		$conn = self::connect($driver_class, $credential, $plan->getDomain());
+		if ($conn['error'] !== '') {
+			$out['error'] = $conn['error'];
+			$out['accounts'] = $conn['accounts'];
+			return $out;
+		}
+		try {
+			$reconciler = new DnsReconciler();
+			$out['results'] = $reconciler->apply($conn['driver'], $conn['zone'], $plan, $decisions, $mode);
+		} catch (Throwable $e) {
+			$out['error'] = $e->getMessage();
+		}
+		return $out;
+	}
+
+	/**
+	 * A driver for $credential and the zone holding $domain.
+	 *
+	 * @return array{driver:?DnsProvider,zone:string,error:string,accounts:array}
+	 */
+	public static function connect(string $driver_class, array $credential, string $domain): array {
+		$out = array('driver' => null, 'zone' => '', 'error' => '', 'accounts' => array());
 		try {
 			/** @var DnsProvider $driver */
 			$driver = new $driver_class($credential);
@@ -329,15 +363,14 @@ class DnsPublishBox {
 				}
 			}
 
-			$zone = $driver->zoneFor($plan->getDomain());
+			$zone = $driver->zoneFor($domain);
 			if ($zone === null) {
-				$out['error'] = 'This credential can see no zone covering ' . $plan->getDomain()
+				$out['error'] = 'This credential can see no zone covering ' . $domain
 					. '. The records below stay as instructions to publish by hand.';
 				return $out;
 			}
-
-			$reconciler = new DnsReconciler();
-			$out['results'] = $reconciler->apply($driver, $zone, $plan, $decisions, $mode);
+			$out['driver'] = $driver;
+			$out['zone'] = $zone;
 		} catch (Throwable $e) {
 			$out['error'] = $e->getMessage();
 		}

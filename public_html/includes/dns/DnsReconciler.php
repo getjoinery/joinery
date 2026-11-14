@@ -33,6 +33,7 @@
  * claims no ownership when it finds nothing — because the record it deletes is,
  * by definition, one the platform did not write.
  *
+ * @version 1.5 - a TXT slot is ours only when we last wrote the same kind there; a TXT is diffed and replaced only against records of its own kind, so SPF never overwrites a verification record
  * @version 1.4 - the public-DNS diff reads the zone's own nameservers first (DnsResolver::preferAuthoritative)
  * @version 1.3 - the public-DNS diff reads SRV, so a capability record verifies green
  * @version 1.2 - a record type a provider's API cannot express is reported, never written
@@ -127,7 +128,7 @@ class DnsReconciler {
 				$cache[$slot] = $this->resolveSlot($record);
 			}
 			list($live, $resolved) = $cache[$slot];
-			$rows[] = $this->rowFor($plan, $record, $live, $resolved, true);
+			$rows[] = $this->rowFor($plan, $record, self::sameKind($record, $live), $resolved, true);
 		}
 		return $rows;
 	}
@@ -150,10 +151,22 @@ class DnsReconciler {
 				$rows[] = $this->result_row_unsupported($plan, $record, $driver);
 				continue;
 			}
-			$live = $live_by_slot[$record->slotKey()] ?? array();
+			$live = self::sameKind($record, $live_by_slot[$record->slotKey()] ?? array());
 			$rows[] = $this->rowFor($plan, $record, $live, true);
 		}
 		return $rows;
+	}
+
+	/**
+	 * The live records in a slot that $record would replace (DnsRecord::sharesSlotWith).
+	 *
+	 * @param DnsRecord[] $live
+	 * @return DnsRecord[]
+	 */
+	private static function sameKind(DnsRecord $record, array $live): array {
+		return array_values(array_filter($live, function (DnsRecord $l) use ($record) {
+			return $record->sharesSlotWith($l);
+		}));
 	}
 
 	/** The diff row for a record this provider's API cannot express. */
@@ -173,7 +186,7 @@ class DnsReconciler {
 	 */
 	private function rowFor(DnsRecordPlan $plan, DnsRecord $record, array $live, bool $resolved,
 			bool $trust_receipt = false): array {
-		$owned = $this->store->isOwned($plan->getDomain(), $record->type, $record->name);
+		$owned = $this->ownsKind($plan->getDomain(), $record);
 		$written = '';
 
 		if (!$resolved) {
@@ -234,6 +247,34 @@ class DnsReconciler {
 			'cutover_note' => $cutover ? $this->cutoverNote($record, $live) : '',
 			'note'         => $record->note,
 		);
+	}
+
+	/**
+	 * Is the platform responsible for the record $record would replace?
+	 *
+	 * Ownership is kept per type and name, but a TXT name holds records of
+	 * different kinds side by side. Owning the apex SPF says nothing about a
+	 * verification record beside it, so a TXT slot counts as ours only when what
+	 * we last wrote there is the same kind; otherwise the live record is someone
+	 * else's and needs an adopt choice.
+	 */
+	private function ownsKind(string $domain, DnsRecord $record): bool {
+		if (!$this->store->isOwned($domain, $record->type, $record->name)) {
+			return false;
+		}
+		if ($record->type !== DnsRecord::TYPE_TXT || $record->absent) {
+			return true;
+		}
+		$receipt = $this->store->ownedRecord($domain, $record->type, $record->name);
+		if ($receipt === null || (string)($receipt['value'] ?? '') === '') {
+			return true;
+		}
+		try {
+			$written = new DnsRecord(DnsRecord::TYPE_TXT, $record->name, (string)$receipt['value']);
+		} catch (Throwable $e) {
+			return false;
+		}
+		return $written->txtKind() === $record->txtKind();
 	}
 
 	/**

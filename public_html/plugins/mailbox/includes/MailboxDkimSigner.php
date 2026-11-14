@@ -12,6 +12,7 @@
  * Registered into the core MailIdentityGuard at plugin bootstrap so core send
  * code (SmtpProvider, EmailSender) never names a mailbox symbol.
  *
+ * @version 1.5 - proveKeyMatchesRecord() and openSealedKey(), for proving the sealed key before protection goes on
  * @version 1.4 - an ordinary domain's in-app signer always uses the 'mail' selector, never the
  *   sealed key's mailkN (asked-for or lifted send protection left relay-fronted sends unsigned)
  * @version 1.3 - an ordinary domain's key lives under /etc/rspamd/dkim (localKeyFile);
@@ -230,5 +231,64 @@ class MailboxDkimSigner {
 			'private_pem' => $private_pem,
 			'dns_value'   => 'v=DKIM1; k=rsa; p=' . $p,
 		);
+	}
+
+	/**
+	 * Does a signature made with $private_pem verify against the DKIM record
+	 * $published (the TXT value as DNS serves it)? Null when it does, else why not.
+	 *
+	 * The send-protection check compares the stored public text with DNS; this
+	 * proves the key itself. A sealed key that does not match its record would
+	 * have every message fail DKIM the moment strict DMARC demands it.
+	 */
+	public static function proveKeyMatchesRecord(string $private_pem, string $published): ?string {
+		if (!preg_match('/(?:^|;)\s*p\s*=\s*([A-Za-z0-9+\/=\s]+)/', $published, $m)
+				|| trim($m[1]) === '') {
+			return 'The published DKIM record carries no public key.';
+		}
+		$b64 = preg_replace('/\s+/', '', $m[1]);
+		$pem = "-----BEGIN PUBLIC KEY-----\n" . chunk_split($b64, 64, "\n") . "-----END PUBLIC KEY-----\n";
+		$public = @openssl_pkey_get_public($pem);
+		if ($public === false) {
+			return 'The published DKIM record\'s public key does not read.';
+		}
+		$private = @openssl_pkey_get_private($private_pem);
+		if ($private === false) {
+			return 'The sealed signing key does not read.';
+		}
+		$message = 'joinery send-protection proof ' . bin2hex(random_bytes(16));
+		$signature = '';
+		if (!openssl_sign($message, $signature, $private, OPENSSL_ALGO_SHA256)) {
+			return 'The sealed signing key could not sign.';
+		}
+		if (openssl_verify($message, $signature, $public, OPENSSL_ALGO_SHA256) !== 1) {
+			return 'A signature made with your sealed key does not verify against the published DKIM record: '
+				. 'the record is for a different key.';
+		}
+		return null;
+	}
+
+	/**
+	 * The sealed key's plaintext for its owner, while their vault is open, or
+	 * null. For proving the key before protection is switched on; sending goes
+	 * through resolveFor(), which refuses an unprotected domain.
+	 */
+	public static function openSealedKey(InboundEmailDomain $domain): ?string {
+		$sealed   = (string)$domain->get('ied_dkim_sealed_key');
+		$owner_id = (int)$domain->get('ied_owner_usr_user_id');
+		if ($sealed === '' || $owner_id <= 0) {
+			return null;
+		}
+		$key = VaultUnlock::secretKey($owner_id);
+		if ($key === null) {
+			return null;
+		}
+		try {
+			return (new VaultCrypto())->openItemDek($sealed, $key);
+		} catch (Throwable $e) {
+			error_log('MailboxDkimSigner: the sealed key for ' . $domain->get('ied_domain')
+				. ' did not open: ' . $e->getMessage());
+			return null;
+		}
 	}
 }

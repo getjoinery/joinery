@@ -47,6 +47,7 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
+ * @version 1.8 - mailbox_protect_press(): send protection on in one press with an API DNS key
  * @version 1.7 - switching off says nothing signs only when the ordinary key is really gone
  * @version 1.6 - mailbox_protect_state() says whether the owner is obvious and whether the default owner has a vault
  * @version 1.5 - the stored owner switching the lock on is the obvious owner, whoever else holds a mailbox
@@ -311,23 +312,13 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 		// DNS is still ambient here, mail passes on either signature, and the
 		// strict records come afterwards — by which time the signature they demand
 		// is already on every message.
-		$checker = new InboundEmailSetupCheck();
-		$results = $checker->signingReadinessChecks($domain);
-		$blockers = array();
-		foreach ($results as $r) {
-			if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
-					&& in_array($r['status'], array(InboundEmailSetupCheck::FAIL, InboundEmailSetupCheck::UNKNOWN), true)) {
-				$blockers[] = $r['label'] . ' — ' . $r['summary'];
-			}
-		}
+		$blockers = mailbox_protect_signing_blockers($domain, new InboundEmailSetupCheck());
 		if (!empty($blockers)) {
 			return $say('Nothing was turned on and your mail is unaffected. These have to be published and '
 				. 'visible first: ' . implode(' | ', $blockers), 'Not yet');
 		}
 
-		$domain->set('ied_is_protected_identity', true);
-		$domain->set('ied_send_lock_requested', true);
-		$domain->save();
+		mailbox_protect_start_signing($domain);
 
 		// Neither remaining step is named as a command to remember: both are
 		// checked states now (domain.send_protection, domain.local_signing_key),
@@ -440,6 +431,365 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 	}
 
 	return $say('Unknown protection action.', 'Not done');
+}
+
+/**
+ * What still stops the sealed key from signing: each REQUIRED readiness row
+ * that is not passing, as "label — summary". Empty when signing may start.
+ */
+function mailbox_protect_signing_blockers(InboundEmailDomain $domain, InboundEmailSetupCheck $checker): array {
+	$blockers = array();
+	foreach ($checker->signingReadinessChecks($domain) as $r) {
+		if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
+				&& in_array($r['status'], array(InboundEmailSetupCheck::FAIL, InboundEmailSetupCheck::UNKNOWN), true)) {
+			$blockers[] = $r['label'] . ' — ' . $r['summary'];
+		}
+	}
+	return $blockers;
+}
+
+/** Switch send protection on: from here the sealed key is the only signer. */
+function mailbox_protect_start_signing(InboundEmailDomain $domain): void {
+	$domain->set('ied_is_protected_identity', true);
+	$domain->set('ied_send_lock_requested', true);
+	$domain->save();
+}
+
+/**
+ * Turn send protection on in one press (specs/send_protection_one_press.md WP1).
+ *
+ * The order is the completion spec's, walked by the server instead of the
+ * person: publish what lets the key sign, wait until every one of the zone's
+ * nameservers serves it, prove the key, start signing, and only then publish
+ * the records that reject anything else. It stops at the first step that does
+ * not finish, and every stopping point is safe, because no step depends on a
+ * later one: stopped before signing, nothing changed for anyone's mail; stopped
+ * after it, the domain signs with ambient DNS, which still accepts the old
+ * signature.
+ *
+ * $consent are mailbox_protect_consent_token() values of every row the
+ * confirmation showed: what it would write AND what is there now. A record the
+ * press would write, or a live value it would replace, that the person did not
+ * see stops it before anything is written.
+ *
+ * Never removes anything and never moves mail: the old provider's DKIM record
+ * stays up for mail already on its way, the old on-disk key is the person's to
+ * destroy, and a change that redirects mail is left to the two-press steps,
+ * where it carries its own confirmation.
+ *
+ * $deps replaces the parts a test cannot run for real: 'reconciler',
+ * 'vault_open' fn(int $user_id): bool, 'sealed_key' fn(InboundEmailDomain): ?string,
+ * 'blockers' fn(InboundEmailDomain, DnsRecordPlan): string[] (what still stops
+ * signing), 'sleep' fn(int $seconds), 'wait_seconds' int.
+ *
+ * @return array{ok:bool,steps:array[],message:string}
+ */
+function mailbox_protect_press(InboundEmailDomain $domain, int $user_id, DnsProvider $driver, string $zone,
+		array $consent, array $deps = array()): array {
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxDkimSigner.php'));
+
+	$reconciler = $deps['reconciler'] ?? new DnsReconciler();
+	$vault_open = $deps['vault_open'] ?? function (int $uid) { return VaultUnlock::isOpen($uid); };
+	$sealed_key = $deps['sealed_key'] ?? function (InboundEmailDomain $d) { return MailboxDkimSigner::openSealedKey($d); };
+	$sleep      = $deps['sleep'] ?? function (int $seconds) { sleep($seconds); };
+	$silent = array();   // nameserver addresses that did not answer: not asked again this press
+	$blocking   = $deps['blockers'] ?? function (InboundEmailDomain $d, DnsRecordPlan $plan) use (&$silent) {
+		return array_merge(mailbox_protect_not_served_everywhere($plan, $silent),
+			mailbox_protect_signing_blockers($d, new InboundEmailSetupCheck()));
+	};
+	$wait       = (int)($deps['wait_seconds'] ?? 30);
+
+	$name = strtolower(trim((string)$domain->get('ied_domain')));
+	$labels = array(
+		'signing' => 'Publish the records that let your key sign',
+		'served'  => 'Wait until every one of your DNS host\'s nameservers serves them',
+		'proved'  => 'Prove a signature from your key verifies',
+		'on'      => 'Turn signing on',
+		'strict'  => 'Publish the records that make other servers reject forgeries',
+	);
+	$steps = array();
+	foreach ($labels as $id => $label) {
+		$steps[$id] = array('id' => $id, 'label' => $label, 'status' => 'not_reached', 'detail' => '');
+	}
+	$done = function (string $id, string $detail = '') use (&$steps) {
+		$steps[$id]['status'] = 'done';
+		$steps[$id]['detail'] = $detail;
+	};
+	$stop = function (string $id, string $detail, string $message) use (&$steps) {
+		$steps[$id]['status'] = 'failed';
+		$steps[$id]['detail'] = $detail;
+		return array('ok' => false, 'steps' => array_values($steps), 'message' => $message);
+	};
+	$before = 'Nothing was turned on and your mail is unaffected.';
+	$after  = 'Your mail is signed with your sealed key, and your DNS still accepts it either way.';
+
+	if ($domain->is_protected_identity()) {
+		return $stop('signing', 'Send protection is already on.', 'Send protection is already on.');
+	}
+	if ((string)$domain->get('ied_dkim_sealed_key') === '' || !$domain->seals_content()) {
+		return $stop('signing', 'There is no sealed key for this domain.', $before);
+	}
+	// The one place proof of presence matters: from the flag on, only this key
+	// can send as the domain. Asked once, at the press: the wait below holds the
+	// session, so the vault's own heartbeat cannot reach it until the press ends.
+	if (!$vault_open($user_id)) {
+		return $stop('signing', 'Your vault is locked. From the moment signing starts only your key can send '
+			. 'as ' . $name . ', so we need to know you are really here.', $before);
+	}
+	// Opened first, before anything is written: a key this person cannot open
+	// would have the press publish, wait, and then stop at the proof every time.
+	$private = $sealed_key($domain);
+	if ($private === null) {
+		return $stop('signing', 'The sealed key opens only in its owner\'s unlocked vault, so only the key\'s '
+			. 'owner can turn send protection on.', $before);
+	}
+
+	$checker = new InboundEmailSetupCheck();
+	$signing_plan = $checker->signingReadinessPlan($name);
+	$strict_plan  = $checker->strictStagePlan($name);
+	if ($strict_plan->count() < 2) {
+		return $stop('signing', 'The current DMARC record for ' . $name . ' could not be read, so the record '
+			. 'that replaces it cannot be built without losing what you set in it. Try again in a minute.', $before);
+	}
+
+	try {
+		$rows = array_merge($reconciler->diffAgainstProvider($driver, $zone, $signing_plan),
+			$reconciler->diffAgainstProvider($driver, $zone, $strict_plan));
+		$live = $driver->listRecords($zone);
+	} catch (Throwable $e) {
+		return $stop('signing', 'Your DNS host did not answer: ' . $e->getMessage(), $before);
+	}
+	$consented = mailbox_protect_press_decisions($rows, $consent);
+	if ($consented['error'] !== '') {
+		return $stop('signing', $consented['error'], $before);
+	}
+	$decisions = $consented['decisions'];
+
+	// One SPF and one DMARC, or stop. A second would be left standing beside
+	// the new one, and two SPF records fail every check.
+	foreach (array(array('spf', $name, 'SPF'), array('dmarc', '_dmarc.' . $name, 'DMARC')) as $want) {
+		$found = 0;
+		foreach ($live as $r) {
+			if ($r->type === DnsRecord::TYPE_TXT && $r->name === $want[1] && $r->txtKind() === $want[0]) {
+				$found++;
+			}
+		}
+		if ($found > 1) {
+			return $stop('signing', $want[1] . ' has ' . $found . ' ' . $want[2] . ' records, so there is no '
+				. 'telling which one to replace. Delete all but one at your DNS host and press again.', $before);
+		}
+	}
+
+	// 1. The records that let the key sign. None of them rejects anything.
+	$failed = mailbox_protect_press_failures($reconciler->apply($driver, $zone, $signing_plan, $decisions,
+		DnsReconciler::APPLY_CONFIRMED));
+	if (!empty($failed)) {
+		return $stop('signing', implode(' | ', $failed), $before);
+	}
+	$done('signing');
+
+	// 2. Until every nameserver serves them, and the readiness rows agree. The
+	// provider's listing holds a record the moment the write returns, which
+	// says nothing about what a receiving server will be told; and a receiver
+	// that asks a nameserver that has not caught up caches the miss.
+	$deadline = time() + $wait;
+	$blockers = array();
+	while (true) {
+		$blockers = $blocking($domain, $signing_plan);
+		if (empty($blockers) || time() >= $deadline) {
+			break;
+		}
+		$sleep(2);
+	}
+	if (!empty($blockers)) {
+		return $stop('served', 'Published, but not served everywhere yet: ' . implode(' | ', $blockers),
+			$before . ' The records are published; press again in a minute and the press carries on from here.');
+	}
+	$done('served');
+
+	// 3. The key itself, not only its stored public text: a signature made with
+	// it has to verify against the record the world reads. Before the flag, so
+	// a key that does not match its record never starts signing.
+	$proof = mailbox_protect_prove_published_key($domain, $private);
+	unset($private);
+	if ($proof !== null) {
+		return $stop('proved', $proof, $before);
+	}
+	$done('proved');
+
+	// 4. Signing starts.
+	mailbox_protect_start_signing($domain);
+	$done('on');
+
+	// 5. The records that reject anything else. Skipped is not done: apply()
+	// counts a record it chose not to write as ok.
+	$failed = mailbox_protect_press_failures($reconciler->apply($driver, $zone, $strict_plan, $decisions,
+		DnsReconciler::APPLY_CONFIRMED));
+	if (!empty($failed)) {
+		return $stop('strict', implode(' | ', $failed), $after . ' The records that reject forgeries are not '
+			. 'published yet; publish them below.');
+	}
+	$done('strict');
+
+	return array('ok' => true, 'steps' => array_values($steps),
+		'message' => 'Send protection is on. Your mail is signed with your sealed key, and other servers now '
+			. 'reject anything claiming to be from ' . $name . ' that it did not sign. Sending as ' . $name
+			. ' needs your vault unlocked from now on.');
+}
+
+/**
+ * What a confirmation row showed, as one token: the record to write and every
+ * live value in its slot, so a consent covers what is replaced as well as what
+ * is written. Built the same way from the public diff the page showed and from
+ * the provider's diff at the press.
+ */
+function mailbox_protect_consent_token(array $row): string {
+	$live = array();
+	foreach ((array)$row['live'] as $r) {
+		$live[] = $r->type . ' ' . (int)$r->priority . ' ' . $r->value;
+	}
+	sort($live);
+	return substr(sha1($row['key'] . "\n" . implode("\n", $live)), 0, 20);
+}
+
+/**
+ * Whether a confirmation can be a press at all: nothing unresolved, nothing
+ * that moves mail, nothing but TXT to replace. '' when it can, else why not,
+ * said to the person.
+ */
+function mailbox_protect_press_unsuitable(array $rows): string {
+	foreach ($rows as $row) {
+		if ($row['outcome'] === DnsReconciler::UNKNOWN) {
+			return 'Some records could not be checked, so the press cannot show you what it would replace.';
+		}
+		if ($row['outcome'] === DnsReconciler::MATCHES) {
+			continue;
+		}
+		if ($row['record']->absent) {
+			return 'A record would have to be removed, which is never part of one press.';
+		}
+		if (!empty($row['cutover']) || ($row['record']->type !== DnsRecord::TYPE_TXT && !empty($row['live']))) {
+			return $row['record']->describe() . ' would change where mail already goes. That needs its own '
+				. 'confirmation, in the steps below.';
+		}
+	}
+	return '';
+}
+
+/**
+ * The provider's rows checked against the consent, and the decisions apply()
+ * needs: adopt for the TXT records whose current values were shown. Never a
+ * cutover and never a removal.
+ *
+ * @return array{error:string,decisions:array}
+ */
+function mailbox_protect_press_decisions(array $rows, array $consent): array {
+	$decisions = array('adopt' => array(), 'cutover' => array(), 'remove' => array());
+	$unsuitable = mailbox_protect_press_unsuitable($rows);
+	if ($unsuitable !== '') {
+		return array('error' => $unsuitable, 'decisions' => $decisions);
+	}
+	$consented = array_flip($consent);
+	foreach ($rows as $row) {
+		if ($row['outcome'] === DnsReconciler::MATCHES) {
+			continue;   // nothing is written
+		}
+		if (!isset($consented[mailbox_protect_consent_token($row)])) {
+			$held = array();
+			foreach ((array)$row['live'] as $r) { $held[] = $r->value; }
+			return array('error' => $row['record']->describe() . ' is not what you confirmed. Your DNS host holds '
+				. (empty($held) ? 'nothing' : '"' . implode('", "', $held) . '"') . ' at ' . $row['record']->name
+				. ', which is not what this page showed: it changed since you looked, or the page read it '
+				. 'through a wildcard or alias. Review the changes and press again.',
+				'decisions' => $decisions);
+		}
+		$decisions['adopt'][] = $row['key'];
+	}
+	return array('error' => '', 'decisions' => $decisions);
+}
+
+/**
+ * The plan's records that some nameserver of the zone does not serve yet, as
+ * "name — served by n of m nameservers that answered". Empty when every
+ * nameserver that answered serves every record, or when none could be asked
+ * (the readiness rows then decide alone).
+ *
+ * An address that does not answer is not counted as a miss: a box with no IPv6
+ * route never hears from a nameserver's IPv6 address, though that server serves
+ * the record. It is remembered in $silent and not asked again, so each costs
+ * its timeout once per press rather than once per record per poll.
+ */
+function mailbox_protect_not_served_everywhere(DnsRecordPlan $plan, array &$silent = array()): array {
+	require_once(PathHelper::getIncludePath('includes/dns/AuthoritativeDns.php'));
+	$types = array(DnsRecord::TYPE_TXT => DNS_TXT, DnsRecord::TYPE_MX => DNS_MX);
+	$out = array();
+	foreach ($plan->getRecords() as $record) {
+		if ($record->absent || !isset($types[$record->type])) {
+			continue;
+		}
+		$answers = AuthoritativeDns::lookupAll($record->name, $types[$record->type], $plan->getDomain(),
+			array_keys($silent));
+		$answered = 0;
+		$serving = 0;
+		foreach ($answers as $ip => $records) {
+			if ($records === null) {
+				$silent[$ip] = true;
+				continue;
+			}
+			$answered++;
+			foreach ($records as $r) {
+				$value = $record->type === DnsRecord::TYPE_MX ? (string)($r['target'] ?? '') : (string)($r['txt'] ?? '');
+				$live = new DnsRecord($record->type, $record->name, $value === '' ? '.' : $value, null,
+					$record->type === DnsRecord::TYPE_MX ? (int)($r['pri'] ?? 0) : null);
+				if ($record->isSatisfiedBy($live)) {
+					$serving++;
+					break;
+				}
+			}
+		}
+		if ($answered > 0 && $serving < $answered) {
+			$out[] = $record->name . ' — served by ' . $serving . ' of ' . $answered . ' nameservers that answered'
+				. (count($silent) ? ' (' . count($silent) . ' did not answer)' : '');
+		}
+	}
+	return $out;
+}
+
+/**
+ * Null when a signature made with $private verifies against the DKIM record the
+ * world reads for the domain's sealed selector, else why not. Each record at the
+ * name is tried on its own: two records there is its own problem to name.
+ */
+function mailbox_protect_prove_published_key(InboundEmailDomain $domain, string $private): ?string {
+	$rr = trim((string)$domain->get('ied_dkim_selector')) . '._domainkey.'
+		. strtolower(trim((string)$domain->get('ied_domain')));
+	try {
+		$records = DnsResolver::getTxt($rr);
+	} catch (Throwable $e) {
+		return 'The DKIM record at ' . $rr . ' could not be read.';
+	}
+	if (count($records) > 1) {
+		return $rr . ' has ' . count($records) . ' records. Receivers pick one at random, so delete all but the '
+			. 'one this page published.';
+	}
+	if (empty($records)) {
+		return 'No DKIM record is published at ' . $rr . '.';
+	}
+	return MailboxDkimSigner::proveKeyMatchesRecord($private, (string)$records[0]);
+}
+
+/** The records an apply did not write: failed, or skipped for want of a decision. */
+function mailbox_protect_press_failures(array $results): array {
+	$out = array();
+	foreach ($results as $r) {
+		if (!$r['ok'] || $r['action'] === 'skipped' || $r['action'] === 'failed') {
+			$out[] = $r['record']->describe() . ' — ' . ($r['reason'] !== '' ? $r['reason'] : 'not written');
+		}
+	}
+	return $out;
 }
 
 /**

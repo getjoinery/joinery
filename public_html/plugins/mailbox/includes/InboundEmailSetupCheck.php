@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.65 - strictStagePlan() and protectPressPlan() for the one-press ceremony
  * @version 1.64 - a planned DMARC record keeps the owner's own settings, changing only what its stage is about
  * @version 1.63 - every hosted domain is read from its own nameservers, so checks see a publish at once
  * @version 1.62 - the send-protection fix links straight to the task (the owner question or the ceremony)
@@ -590,10 +591,7 @@ class InboundEmailSetupCheck {
 			// reject the domain's own mail. Everything else in this branch is
 			// safe at any time, so it lives in signingStageRecords() and the
 			// ceremony publishes it first.
-			$this->planAdd($plan, 'TXT', $domain, 'v=spf1 -all', null,
-				'SPF — a protected identity authorizes no ambient sender.');
-			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain, $this->dmarcPlanValue($domain, true), null,
-				'DMARC — strict alignment, so only the sealed key can send as this domain.');
+			$this->strictStageRecords($plan, $domain);
 
 			$this->signingStageRecords($plan, $domain, $model, $fronted, $topology, $mx_target);
 
@@ -702,6 +700,45 @@ class InboundEmailSetupCheck {
 		$mx_target = $fronted ? $topology['mx_hostname'] : $this->mailHostname;
 		$this->signingStageRecords($plan, $domain, $model, $fronted, $topology, $mx_target);
 		return $plan;
+	}
+
+	/**
+	 * The records that make other servers reject forgeries — and nothing else.
+	 *
+	 * The mirror of signingReadinessPlan(): the apex SPF and _dmarc that the
+	 * one-press ceremony publishes once the sealed key is signing. The whole
+	 * protected dnsPlan() also carries MX, the mail host, Direct, the fleet proof
+	 * and the removal of a foreign key; one consent to the press must not reach
+	 * any of those.
+	 */
+	public function strictStagePlan($domain): DnsRecordPlan {
+		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+		$domain = strtolower(trim((string)$domain));
+		$plan = new DnsRecordPlan($domain, 'mailbox');
+		if ($domain !== '' && InboundEmailDomain::GetByDomain($domain)) {
+			$this->strictStageRecords($plan, $domain);
+		}
+		return $plan;
+	}
+
+	/**
+	 * Everything the one-press ceremony writes: the signing stage, then the
+	 * strict stage. What its confirmation shows; the press applies the two in
+	 * order, never together.
+	 */
+	public function protectPressPlan($domain): DnsRecordPlan {
+		return $this->signingReadinessPlan($domain)->merge($this->strictStagePlan($domain));
+	}
+
+	/**
+	 * THE REJECTION INSTRUCTION. Shared by dnsPlan()'s protected branch and
+	 * strictStagePlan(), so the press and the finished shape cannot drift.
+	 */
+	private function strictStageRecords(DnsRecordPlan $plan, string $domain): void {
+		$this->planAdd($plan, 'TXT', $domain, 'v=spf1 -all', null,
+			'SPF — a protected identity authorizes no ambient sender.');
+		$this->planAdd($plan, 'TXT', '_dmarc.' . $domain, $this->dmarcPlanValue($domain, true), null,
+			'DMARC — strict alignment, so only the sealed key can send as this domain.');
 	}
 
 	/**
@@ -967,6 +1004,29 @@ class InboundEmailSetupCheck {
 		// _dmarc out of this plan (planAdd skips it), and the check row already
 		// says the lookup failed.
 		return $ok ? self::foldDmarc($domain, $strict, self::firstDmarc((array)$txt)) : '';
+	}
+
+	/**
+	 * The settings in DMARC record $live that $new leaves out, as written
+	 * ("sp=none"), so a confirmation can say what a replacement drops.
+	 */
+	public static function dmarcDroppedTags(string $live, string $new): array {
+		$parse = function (string $record) {
+			$tags = array();
+			foreach (explode(';', $record) as $pair) {
+				if (strpos($pair, '=') === false) { continue; }
+				list($k, $v) = explode('=', $pair, 2);
+				$k = strtolower(trim($k));
+				if ($k !== '' && !isset($tags[$k])) { $tags[$k] = trim($v); }
+			}
+			return $tags;
+		};
+		$kept = $parse($new);
+		$out = array();
+		foreach ($parse($live) as $k => $v) {
+			if (!isset($kept[$k])) { $out[] = $k . '=' . $v; }
+		}
+		return $out;
 	}
 
 	/** The first v=DMARC1 record in a TXT record set, or ''. */

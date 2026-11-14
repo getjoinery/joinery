@@ -16,7 +16,7 @@
  * does not take the others down, re-publishing a correct domain writes nothing,
  * and a domain that already matches is adopted with no DNS write at all.
  *
- * @version 1.0
+ * @version 1.1 - a TXT is compared and replaced only within its own kind (SPF, DMARC, other)
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -406,5 +406,43 @@ $plan = mail_plan();
 $reconciler->apply($driver, ZONE, $plan);
 check(DnsReconciler::allGreen($reconciler->diffAgainstProvider($driver, ZONE, $plan)) === true,
 	'after a successful publish it is');
+
+// ---------------------------------------------------------------------------
+section('One name, unrelated TXT records: SPF replaces only SPF');
+// ---------------------------------------------------------------------------
+
+list($driver, $reconciler) = fixture(array(
+	new DnsRecord('TXT', ZONE, 'google-site-verification=abc123'),
+	new DnsRecord('TXT', ZONE, 'v=spf1 include:old.example ~all'),
+));
+$plan = new DnsRecordPlan(ZONE, 'mailbox');
+$plan->addRecord('TXT', ZONE, 'v=spf1 -all', null, null, 'SPF');
+$row = $reconciler->diffAgainstProvider($driver, ZONE, $plan)[0];
+check(count($row['live']) === 1 && $row['live'][0]->value === 'v=spf1 include:old.example ~all',
+	'the SPF row is compared with the live SPF only, not the verification listed first');
+$reconciler->apply($driver, ZONE, $plan, array('adopt' => array($row['key'])));
+$apex = array();
+foreach ($driver->listRecords(ZONE) as $r) { $apex[] = $r->value; }
+sort($apex);
+check($apex === array('google-site-verification=abc123', 'v=spf1 -all'),
+	'an adopted SPF replaces the old SPF and leaves the verification', implode(' | ', $apex));
+
+list($driver, $reconciler) = fixture(array(new DnsRecord('TXT', ZONE, 'v=spf1 -all')));
+$plan = new DnsRecordPlan(ZONE, 'mailbox');
+$plan->addRecord('TXT', ZONE, 'joinery-verify=xyz', null, null, 'Proof');
+$row = $reconciler->diffAgainstProvider($driver, ZONE, $plan)[0];
+check($row['outcome'] === DnsReconciler::MISSING, 'a verification TXT beside an SPF is a new record, not a replacement of it');
+
+// Owning the apex because we wrote a verification there does not make a
+// foreign SPF beside it ours.
+list($driver, $reconciler) = fixture(array(new DnsRecord('TXT', ZONE, 'v=spf1 include:foreign.example ~all')));
+$proof = new DnsRecordPlan(ZONE, 'mailbox');
+$proof->addRecord('TXT', ZONE, 'joinery-verify=xyz', null, null, 'Proof');
+$reconciler->apply($driver, ZONE, $proof);
+$plan = new DnsRecordPlan(ZONE, 'mailbox');
+$plan->addRecord('TXT', ZONE, 'v=spf1 -all', null, null, 'SPF');
+$row = $reconciler->diffAgainstProvider($driver, ZONE, $plan)[0];
+check($row['outcome'] === DnsReconciler::CONFLICTS && !$row['owned'],
+	'a foreign SPF beside a TXT we own still needs an adopt choice');
 
 harness_finish();

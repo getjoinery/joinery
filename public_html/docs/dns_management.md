@@ -259,6 +259,16 @@ For each planned record, comparing against live state yields exactly one of:
 | **remains** | The plan requires this record gone and it is still published | Nothing, unless explicitly confirmed for removal |
 | **unknown** | The resolver did not answer | Nothing. A failed lookup is not evidence of absence |
 
+**A slot is a type and a name, and a TXT also has a kind.** One name often
+carries unrelated TXT records side by side — an SPF record and a site
+verification at the apex. A planned TXT is compared with, and replaces, only live
+records of its own kind (`DnsRecord::txtKind()`: SPF, DMARC, or anything else),
+so publishing SPF never overwrites a verification record, and a new verification
+record is created beside an existing SPF rather than adopted over it. Ownership is
+kept per type and name, so a TXT slot counts as owned only when the record last
+written there is the same kind as the one planned; a foreign SPF beside a
+verification record the platform wrote still needs an adopt choice.
+
 **Applying is per-record and best-effort.** If one record fails — a rate limit, a
 transient error, a managed-record refusal — the others still land and the failed
 one reports its own reason. There is no transaction, because the only rollback

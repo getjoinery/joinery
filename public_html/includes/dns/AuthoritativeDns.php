@@ -23,6 +23,7 @@
  * The wire format is built and read here; PublicResolvers does the same for
  * DNS-over-HTTPS but reads only A, AAAA and TXT.
  *
+ * @version 1.1 - lookupAll(): every nameserver's own answer, for a caller that must know all of them serve a record
  * @version 1.0
  */
 
@@ -91,6 +92,36 @@ class AuthoritativeDns {
 		self::$dead_zones[$zone] = true;
 		error_log('AuthoritativeDns: no nameserver of ' . $zone . ' answered; using the system resolver');
 		return null;
+	}
+
+	/**
+	 * Every nameserver's answer for $name, as ip => records (dns_get_record's
+	 * shape), or ip => null for one that did not answer cleanly. [] when the
+	 * zone's nameservers cannot be found.
+	 *
+	 * For a caller that must know a record is served everywhere, not only by
+	 * the first server to reply: nameservers that update one after another
+	 * disagree for a while, and a receiver asking the slow one caches the
+	 * miss. A missed reply here marks nothing dead, so a caller can poll; $skip
+	 * names addresses the caller already knows are silent.
+	 */
+	public static function lookupAll(string $name, int $type, string $zone, array $skip = array()): array {
+		$qtype = self::TYPE_NUMBERS[$type] ?? 0;
+		$name = rtrim(strtolower(trim($name)), '.');
+		$zone = rtrim(strtolower(trim($zone)), '.');
+		if ($qtype === 0 || $name === '' || $zone === '') {
+			return array();
+		}
+		$packet = self::query($name, $qtype);
+		if ($packet === null) {
+			return array();
+		}
+		$out = array();
+		foreach (array_diff(self::nameserverIps($zone), $skip) as $ip) {
+			$reply = self::$sender ? (self::$sender)($ip, $packet) : self::send($ip, $packet);
+			$out[$ip] = $reply === null ? null : self::records($reply, $name, $qtype);
+		}
+		return $out;
 	}
 
 	/** Forget what this request learnt about nameservers. Tests only. */

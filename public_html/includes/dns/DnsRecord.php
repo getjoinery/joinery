@@ -23,6 +23,7 @@
  * is finished is the failure this subsystem exists to end, so absence is part of
  * desired state rather than a hand-edit at the provider.
  *
+ * @version 1.4 - TXT records have a kind (SPF, DMARC, other), and only records of one kind share a slot
  * @version 1.3 - a live address record says whether the provider proxies it ($proxied)
  * @version 1.2 - SRV joins the vocabulary (Joinery Direct's capability record)
  */
@@ -218,6 +219,37 @@ class DnsRecord {
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * What a TXT record is for: 'spf', 'dmarc', or '' for anything else (a
+	 * site verification, a DKIM key, an ownership proof). '' for other types.
+	 */
+	public function txtKind(): string {
+		if ($this->type !== self::TYPE_TXT || $this->absent) {
+			return '';
+		}
+		$v = strtolower(ltrim($this->value));
+		if (preg_match('/^v\s*=\s*spf1(\s|$)/', $v)) { return 'spf'; }
+		if (preg_match('/^v\s*=\s*dmarc1(\s|;|$)/', $v)) { return 'dmarc'; }
+		return '';
+	}
+
+	/**
+	 * Is $live a record this one would replace?
+	 *
+	 * Records in one slot are alternatives, except TXT, where one name carries
+	 * unrelated records side by side: an SPF record and a site verification at
+	 * the apex have nothing to do with each other. Updating "the" apex TXT
+	 * replaced whichever came first, so publishing SPF could destroy a
+	 * verification record and leave the old SPF beside the new one. A TXT is
+	 * compared only with records of its own kind.
+	 */
+	public function sharesSlotWith(DnsRecord $live): bool {
+		if ($this->type !== self::TYPE_TXT || $this->absent) {
+			return true;
+		}
+		return $this->txtKind() === $live->txtKind();
 	}
 
 	/** Same slot in the zone: type + name. Two records with the same key are alternatives. */

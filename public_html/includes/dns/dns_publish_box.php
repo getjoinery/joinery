@@ -18,6 +18,8 @@
  * whose API is open to everyone. The gated hosts are also named as such in the
  * provider list — a fact about the vendor, not a tier label.
  *
+ * @version 1.13 - a press box (vars['press']): one confirmed action in place of the ticks, for a ceremony
+ *   that writes the records it lists (specs/send_protection_one_press.md)
  * @version 1.12 - the Apply gate's records are a JSON block and its script is assets/js/dns-boxes.js (no inline script)
  * @version 1.11 - the move offer only renders for a domain that serves nothing
  *                but this deployment (move_veto); a lived-in domain gets the
@@ -404,6 +406,24 @@ function dns_publish_box_diff($page, array $vars): void {
 	}
 	echo '</tbody></table></div>';
 
+	// A PRESS IS ONE DECISION, made about the list above. Its caller writes
+	// exactly the records shown, re-checks each against what was shown, and
+	// stops on any difference, so the ticks below would ask again what the
+	// confirmation already settles. It lists each value it replaces in words,
+	// because a replaced record is the thing worth reading twice.
+	$press = $vars['press'] ?? null;
+	if (is_array($press)) {
+		$form->hiddeninput('press_keys', '', array('value' => implode(',', $press['keys'])));
+		if (!empty($press['lines'])) {
+			echo '<ul class="small mb-3">';
+			foreach ($press['lines'] as $line) {
+				echo '<li>' . htmlspecialchars($line) . '</li>';
+			}
+			echo '</ul>';
+		}
+		$conflicts = $cutovers = $removals = array();
+	}
+
 	// The two decisions that are genuinely the operator's, asked once each.
 	//
 	// NEITHER IS TICKED BY DEFAULT, and that is deliberate. These are the only
@@ -491,18 +511,30 @@ function dns_publish_box_diff($page, array $vars): void {
 			. 'this page works normally.</p>';
 	}
 
-	if (!$blocked) {
+	if (is_array($press)) {
+		$form->submitbutton('btn_dns_apply', $press['label'], array(
+			'class'   => 'btn btn-primary',
+			'confirm' => $press['confirm'],
+		));
+	} elseif (!$blocked) {
 		$form->submitbutton('btn_dns_apply', $needs_oauth_config
 			? 'Connect and publish'
 			: 'Apply');
 	}
 	echo $form->end_form();
 
-	if (!$blocked) {
+	if (!$blocked && !is_array($press)) {
 		dns_publish_box_apply_gate($rows);
 	}
 
 	if ($blocked) {
+		return;
+	}
+
+	if (is_array($press)) {
+		echo '<p class="text-muted small mb-0">The key is used for this one press and discarded when it returns. '
+			. 'The press goes in order and stops at the first step that does not finish; wherever it stops, '
+			. 'your mail keeps flowing, and pressing again carries on.</p>';
 		return;
 	}
 
