@@ -9,9 +9,10 @@
  * implementing this interface. No other files need modification.
  *
  * This file also declares the optional RawMessageRelay, ApiSubmissionRelay,
- * DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider, SendReceiptSource
- * and DeliveryEventSource capabilities (below).
+ * DkimRecordSource, SendingDomainRegistrar, RefusesUnregisteredSenderDomains,
+ * SingleKeyProvider, SendReceiptSource and DeliveryEventSource capabilities (below).
  *
+ * @version 1.9 - RefusesUnregisteredSenderDomains: a provider that refuses a send from a domain it does not hold
  * @version 1.8 - SendReceiptSource / DeliveryEventSource: what the carrier said when it took a
  *                message, and what it can say later about whether the message arrived
  *                (specs/mailbox_message_timeline.md A3, A4)
@@ -213,6 +214,19 @@ interface SendingDomainRegistrar {
      * @return array{status:'ok'|'error'|'unreachable', error?:string}
      */
     public static function createSendingDomain(string $domain): array;
+}
+
+/**
+ * A provider that refuses a send whose From domain is not a sending domain it
+ * holds, rather than sending it signed as another domain. Declaring it is the
+ * whole contract: a check that finds the domain not registered there says the
+ * mail does not leave at all (a required failure), not that it leaves and
+ * fails DMARC alignment. SMTP2GO is one ("From header sender domain not
+ * verified"); Mailgun is not (it signs as its own sending domain).
+ *
+ * @version 1.0
+ */
+interface RefusesUnregisteredSenderDomains {
 }
 
 /**

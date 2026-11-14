@@ -1287,7 +1287,11 @@ public static function getDkimStatus(string $domain): array
 
 `ok` lists what must be published (possibly nothing left); `not_registered`
 means the API answered and the domain is not a sending domain there — the fix
-is at the provider dashboard, not in DNS; `unreachable` means callers must
+is at the provider (its dashboard, or `SendingDomainRegistrar` from here), not
+in DNS. A provider that refuses a send from a domain it does not hold, rather
+than signing it as its own, also declares the empty interface
+`RefusesUnregisteredSenderDomains` (SMTP2GO does; Mailgun does not), and a
+check then reports an unregistered domain as mail that does not leave; `unreachable` means callers must
 render an unknown verdict, never a fabricated one.
 
 Implementers: **Mailgun** (sending DNS records from the domains API — the

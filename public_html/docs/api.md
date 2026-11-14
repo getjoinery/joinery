@@ -158,9 +158,11 @@ An action's `data` is contract only where its keys are documented (in this file 
 Key-authenticated requests use the same two custom headers:
 
 ```
-public_key: {your_public_key}
-secret_key: {your_secret_key}
+public-key: {your_public_key}
+secret-key: {your_secret_key}
 ```
+
+Send them with hyphens. The server also accepts `public_key` / `secret_key`, but Apache drops header names containing underscores before they reach PHP-FPM, so on a site served that way the underscore spelling arrives as no key at all.
 
 There is one auth story with **four credentials**: three key types, distinguished by `apk_type` in the shared `apk_api_keys` table, plus the browser session for page JavaScript. Key headers always take precedence — the browser-session path only runs when a request carries no key headers.
 
@@ -971,8 +973,8 @@ action exists on this deployment, it just is not published.
 ```
 POST /api/v1/action/{action_name}
 Content-Type: application/json
-public_key: {key}
-secret_key: {key}
+public-key: {key}
+secret-key: {key}
 Idempotency-Key: {uuid}          (optional — see Contract § Idempotent writes)
 
 { "field": "value", ... }

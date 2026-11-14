@@ -31,6 +31,9 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.70 - the DKIM row offers Make a signing key where joinery-dkim-add is installed
+ * @version 1.69 - a provider that refuses unregistered sender domains makes the domain's provider DKIM row a
+ *   required failure (its mail does not leave), with the Register button when the provider can register
  * @version 1.68 - behind a relay the on-disk key's record is prescribed and checked: the app signs with it
  * @version 1.67 - domain.test_message: a Send test message button on every enabled hosted domain (MailTestProbe)
  * @version 1.66 - readOnly(): an engine that calls no fleet service or provider API and writes nothing
@@ -2710,7 +2713,9 @@ class InboundEmailSetupCheck {
 				$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
 					$severity, $on ? self::FAIL : self::WARN,
 					$headline . ' But ' . $machine . ' is not registered as a sending domain at ' . $label
-					. ' — its mail is signed as another domain and fails DMARC alignment.',
+					. (in_array('RefusesUnregisteredSenderDomains', class_implements($class) ?: array(), true)
+						? ', which refuses mail from a domain it does not hold — its mail does not leave.'
+						: ' — its mail is signed as another domain and fails DMARC alignment.'),
 					'', $fix);
 			} elseif ($state === '') {
 				$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
@@ -4451,6 +4456,15 @@ class InboundEmailSetupCheck {
 	}
 
 	private function dkimFix($domain) {
+		// Where the box carries the key-making helper, the key is one press away;
+		// otherwise it is made as root.
+		if (is_file(self::localSigningKeyAddHelper())) {
+			return array(
+				'text' => 'Make a DKIM signing key for ' . $domain . ' on this server, then publish the record '
+					. 'this row shows.',
+				'action' => array('action' => 'make_local_key', 'domain' => $domain, 'label' => 'Make a signing key'),
+			);
+		}
 		return array(
 			'text' => 'Generate a DKIM signing key for ' . $domain . ' on the server as root.',
 			'command' => 'sudo bash '
@@ -4638,12 +4652,28 @@ class InboundEmailSetupCheck {
 				'Could not determine ' . $label . '\'s DKIM records for ' . $domain . ' — its API did not answer. Try again.'));
 		}
 		if ($status['status'] === 'not_registered') {
+			$implements = class_implements($class) ?: array();
+			$fix = array('text' => 'Add ' . $domain . ' as a sending domain in the ' . $label
+				. ' dashboard, publish the records it provides, then re-check.');
+			if (in_array('SendingDomainRegistrar', $implements, true)) {
+				$fix = array('text' => 'Register ' . $domain . ' at ' . $label . ', then publish the records it provides and re-check.',
+					'action' => array('action' => 'register_sending_domain', 'domain' => $domain,
+						'label' => 'Register ' . $domain . ' at ' . $label));
+			}
+			// A provider that refuses an unregistered From domain sends none of
+			// this domain's mail: members' own mail included, not only a
+			// signature that fails to align.
+			if (in_array('RefusesUnregisteredSenderDomains', $implements, true)) {
+				return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::REQUIRED, self::FAIL,
+					$domain . ' is not registered as a sending domain at ' . $label . ', and ' . $label
+					. ' refuses mail from addresses at a domain it does not hold — mail from ' . $domain . ' does not leave.',
+					'This includes mail members send from their mailboxes at ' . $domain . '.',
+					$fix));
+			}
 			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::WARN,
 				$domain . ' is not registered as a sending domain at ' . $label
 				. ' — mail sent from ' . $domain . ' addresses is signed as another domain and fails DMARC alignment.',
-				'',
-				array('text' => 'Add ' . $domain . ' as a sending domain in the ' . $label
-					. ' dashboard, publish the records it provides, then re-check.')));
+				'', $fix));
 		}
 		if (empty($status['records'])) {
 			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::PASS,

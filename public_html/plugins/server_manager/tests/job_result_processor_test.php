@@ -2512,6 +2512,12 @@ check(JobResultProcessor::sanitise_mail_test_send(array('domain' => 'example.com
 	&& JobResultProcessor::sanitise_mail_test_send(array('sent' => true)) === array('read' => false),
 	'a refusal outside the set is plain refused; no domain is not read');
 
+// A script word's answer behind the lines its PHP logged to stderr.
+check(JobResultProcessor::script_json_text("PHP message: SmtpProvider: error occurred {x}\nanother line\n{\"domain\":\"example.com\",\"sent\":false}\n")
+	=== array('domain' => 'example.com', 'sent' => false), 'the last JSON line is the answer when logged lines come first');
+check(JobResultProcessor::script_json_text('{"a":1}') === array('a' => 1) && JobResultProcessor::script_json_text("no json here") === null
+	&& JobResultProcessor::script_json_text('') === null, 'a whole-JSON answer still reads; no JSON is no answer');
+
 // relay_status: versions, times, counts, booleans and short words; nothing else.
 $rs_in = array('mailbox' => 'active', 'relay' => 'active', 'relays_enabled' => 1, 'relay_id' => 4, 'route' => 'cloud',
 	'name' => 'relay1.example.com', 'transport_public_key' => 'AAAA',

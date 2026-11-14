@@ -8,6 +8,8 @@
  * the POST here first. Each fix writes through a model or the settings table
  * and redirects, so the next render reads fresh state.
  *
+ * @version 1.3 - make_local_key: Make a signing key on the DKIM row, through joinery-dkim-add
+ * @version 1.2 - register_sending_domain: the Register button on a hosted domain's provider DKIM row
  * @version 1.1 - send_test_message: one fixed test message to the probe mailbox (MailTestProbe)
  * @version 1.0
  */
@@ -100,12 +102,15 @@ function mailbox_setup_fix_action(array $posted, $session, string $redirect_url)
 	// on a registered domain announces success and changes nothing. DKIM
 	// authority stays on the subdomain itself (the provider implementation
 	// guarantees it) so its keys align strictly.
-	if ($action === 'machine_register') {
+	// Register a domain as a sending domain at the outbound provider: the
+	// automated-mail subdomain (machine_register) or a hosted domain whose
+	// provider DKIM row found it missing (register_sending_domain).
+	if ($action === 'machine_register' || $action === 'register_sending_domain') {
 		$machine_domain = strtolower(trim($posted['domain'] ?? ''));
 		$class = EmailSender::activeServiceKey() !== ''
 			? (EmailSender::getDiscoveredProviders()[EmailSender::activeServiceKey()] ?? null) : null;
 		if ($machine_domain === '' || !preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $machine_domain)) {
-			$announce('No valid machine domain to register.', 'Error');
+			$announce('No valid domain to register.', 'Error');
 		} elseif ($class === null
 				|| !in_array('SendingDomainRegistrar', class_implements($class) ?: array(), true)) {
 			$announce('The configured outbound provider cannot register sending domains from here — '
@@ -166,6 +171,30 @@ function mailbox_setup_fix_action(array $posted, $session, string $redirect_url)
 		} catch (Exception $e) {
 			$announce('The test send was refused: ' . $e->getMessage(), 'Refused');
 		}
+		return LogicResult::redirect($redirect_url);
+	}
+
+	// Make an ordinary on-disk signing key for a domain that has none, through
+	// the root helper (joinery-dkim-add). Not for a protected domain: its sealed
+	// key signs, and a second key on disk is what destroy_local_key removes.
+	if ($action === 'make_local_key') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+		$domain_name = strtolower(trim($posted['domain'] ?? ''));
+		$model = $domain_name !== '' ? InboundEmailDomain::GetByDomain($domain_name) : false;
+		if (!$model) {
+			$announce('No such domain on this server.', 'Error');
+			return LogicResult::redirect($redirect_url);
+		}
+		if ($model->is_protected_identity()) {
+			$announce('Send protection is on for ' . $domain_name . ': its sealed key signs its mail, and an '
+				. 'ordinary key on disk would be a second way to sign as it.', 'Not needed');
+			return LogicResult::redirect($redirect_url);
+		}
+		$result = mailbox_provision_local_signing_key($domain_name);
+		$announce($result['ok']
+			? 'A signing key for ' . $domain_name . ' is on this server. Publish its DKIM record '
+				. '(mail._domainkey.' . $domain_name . ') so receivers can check it.'
+			: $result['message'], $result['ok'] ? 'Key made' : 'Error');
 		return LogicResult::redirect($redirect_url);
 	}
 

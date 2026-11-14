@@ -27,6 +27,7 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.7 - RefusesUnregisteredSenderDomains: it refuses a From domain the account does not hold
  * @version 1.6 - dkimSigningDomain(): the domain a send from a given From domain is signed as
  * @version 1.5 - records are read from dkim_expected / rpath_expected / cname_expected, what the provider
  *   asks for; the _value fields are what DNS shows now and are empty until published (B159)
@@ -48,7 +49,7 @@ require_once(PathHelper::getComposerAutoloadPath());
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
-class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider {
+class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, SendingDomainRegistrar, RefusesUnregisteredSenderDomains, SingleKeyProvider {
 
     /** The regionless endpoint, which serves accounts in every region. */
     const API_BASE = 'https://api.smtp2go.com/v3/';

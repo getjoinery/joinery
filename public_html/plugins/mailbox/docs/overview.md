@@ -786,9 +786,15 @@ DKIM record is prescribed as well, and the row verifies exactly that: providers 
 [email_system.md](../../../docs/email_system.md#provider-dkim-records-optional-capability))
 report their required records from their own API, and the Setup tab renders one
 row per record, each checked against live DNS with a copy-paste fix. A domain
-not registered at the provider gets a row saying so (mail from it fails DMARC
-alignment until it is added at the provider dashboard); a provider without the
-capability gets generic guidance naming it.
+not registered at the provider gets a row saying so. For a provider that
+refuses a From domain it does not hold (`RefusesUnregisteredSenderDomains`:
+SMTP2GO) the row is a required failure, because none of the domain's mail
+leaves, members' own mail included; for one that signs as its own domain
+instead (Mailgun) it is a warning that the mail fails DMARC alignment. Either
+row offers **Register {domain} at {provider}** (`register_sending_domain`) when
+the provider implements `SendingDomainRegistrar`, and otherwise names the
+provider's dashboard. A provider without the capability gets generic guidance
+naming it.
 
 ### Firewall
 
@@ -1789,6 +1795,10 @@ ambient DNS. It removes nothing: destroying the old on-disk key is a button on t
 page it lands on, and the old provider's DKIM record is left up for mail already
 on its way. A DNS host signed into with OAuth, or one with no driver, keeps the
 two presses: the Step 1 publish box, then **Check DNS and turn on send protection**.
+A locked vault does not take either button away: each waits behind an **Unlock your
+vault** button that opens the vault in place (`VaultGate`), and shows the moment it
+opens, with no reload; the press and the activate handler check the vault again.
+Only a person with no vault is sent to `/profile/security`, to set one up.
 
 **Raising a level or switching an add-on on runs the protection ceremony**
 (specs/mailbox_protection_ceremony.md, `includes/protection_ceremony.php`).
@@ -2836,6 +2846,10 @@ uses, keeps a key already there, and answers `DKIM_ADDED`. The DNS plan then
 prescribes its `mail._domainkey` record and the switch-off lands on the DNS
 difference. Where the helper is not installed, the switch-off message names the
 `provision_dkim.sh <domain>` command instead.
+The same helper backs the DKIM row of an ordinary domain with no key on disk:
+where it is installed the row offers **Make a signing key** (`make_local_key`,
+refused for a protected domain, whose sealed key signs); elsewhere it shows the
+`provision_dkim.sh <domain>` command.
 
 **Proof of presence sits on enforcement, not on key creation.** Sealing needs
 only the owner's vault public key, and a key that exists publishes nothing and

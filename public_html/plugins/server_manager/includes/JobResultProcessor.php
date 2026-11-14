@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.133 - script_json reads the last JSON line when a script's logged lines come ahead of its answer
  * @version 1.132 - sanitise_mail_test_send: sent with its token, or why it was refused
  * @version 1.131 - sanitise_mailbox_status: the no-domain counts and domain list, or one domain's rows, flags, DNS and send outcomes
  * @version 1.130 - process_site_log_count keeps the scheduled-task log's file names and each log's own coverage
@@ -3832,8 +3833,37 @@ HTML;
 	private static function script_json($job) {
 		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
 		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
-		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
-		return is_array($decoded) ? $decoded : null;
+		return self::script_json_text($text);
+	}
+
+	/**
+	 * A script word's answer: its whole output as one JSON object, or else the
+	 * last line that is one. A PHP script's error_log() lines go to stderr on
+	 * the command line, and the agent hands stdout and stderr back together,
+	 * so a send that logged a provider error arrives with those lines ahead of
+	 * the answer. Pure; the processor test drives it.
+	 */
+	public static function script_json_text(string $text) {
+		$text = trim($text);
+		if ($text === '') {
+			return null;
+		}
+		$decoded = json_decode($text, true);
+		if (is_array($decoded)) {
+			return $decoded;
+		}
+		$lines = preg_split('/\r?\n/', $text);
+		for ($i = count($lines) - 1; $i >= 0; $i--) {
+			$line = trim($lines[$i]);
+			if ($line === '' || $line[0] !== '{') {
+				continue;
+			}
+			$decoded = json_decode($line, true);
+			if (is_array($decoded)) {
+				return $decoded;
+			}
+		}
+		return null;
 	}
 
 	/** The listeners listening_sockets.sh lists at most (its MAX_SOCKETS). */

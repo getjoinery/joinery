@@ -155,4 +155,36 @@ foreach ($rows as $r) { if ($r['id'] === 'domain.test_message') { $tm = $r; } }
 check($tm !== null && ($tm['fix']['action']['action'] ?? '') === 'send_test_message' && $tm['status'] === InboundEmailSetupCheck::INFO,
 	'every enabled hosted domain has a Send test message row, neutral until pressed');
 
+// ---------------------------------------------------------------------------
+section('A provider that refuses an unregistered sender domain: the DKIM row says the mail does not leave');
+
+if (!class_exists('MbwRefusingProvider', false)) {
+	class MbwRefusingProvider implements DkimRecordSource, SendingDomainRegistrar, RefusesUnregisteredSenderDomains {
+		public static function getDkimStatus(string $domain): array { return array('status' => 'not_registered', 'records' => array()); }
+		public static function createSendingDomain(string $domain): array { return array('status' => 'ok'); }
+	}
+	class MbwSigningProvider implements DkimRecordSource {
+		public static function getDkimStatus(string $domain): array { return array('status' => 'not_registered', 'records' => array()); }
+	}
+}
+$rows_for = function (string $class) {
+	$engine = new InboundEmailSetupCheck();
+	return Closure::bind(function () use ($class) {
+		return $this->providerDkimRows($class, 'Stub', 'example.com', 'domain.dkim_provider');
+	}, $engine, InboundEmailSetupCheck::class)();
+};
+$refusing = $rows_for('MbwRefusingProvider')[0];
+check($refusing['status'] === InboundEmailSetupCheck::FAIL && $refusing['severity'] === InboundEmailSetupCheck::REQUIRED
+	&& strpos($refusing['summary'], 'does not leave') !== false,
+	'a refusing provider: a required failure saying the mail does not leave', $refusing['summary']);
+check(($refusing['fix']['action']['action'] ?? '') === 'register_sending_domain' && ($refusing['fix']['action']['domain'] ?? '') === 'example.com',
+	'and, the provider being able to register, a Register button for the domain');
+$signing = $rows_for('MbwSigningProvider')[0];
+check($signing['status'] === InboundEmailSetupCheck::WARN && strpos($signing['summary'], 'fails DMARC alignment') !== false
+	&& !isset($signing['fix']['action']),
+	'a provider that signs as its own domain: a warning about alignment, and no Register button it cannot honour', $signing['summary']);
+check(in_array('RefusesUnregisteredSenderDomains', class_implements('Smtp2GoProvider') ?: array(), true)
+	&& !in_array('RefusesUnregisteredSenderDomains', class_implements('MailgunProvider') ?: array(), true),
+	'SMTP2GO declares it refuses; Mailgun does not');
+
 harness_finish();
