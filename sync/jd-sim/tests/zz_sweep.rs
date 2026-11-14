@@ -8458,3 +8458,49 @@ fn frozen_a_download_of_a_replacements_own_upload_adopts_its_file_seed() {
     let in_vault: Vec<_> = server.iter().filter(|p| p.starts_with("ring-2/")).collect();
     assert_eq!(in_vault.len(), 2, "the moved file stands once on the server, not uploaded a second time: {in_vault:?}");
 }
+
+/// winname 123909: the disk device sends the create for a new folder `Sub 3`,
+/// and the answer is lost. The user then drops `Sub 3` into `Contested
+/// Folder`, which another device has deleted. On the next pass the retry is
+/// answered with the folder the first attempt made, at the top, and the
+/// trash of `Contested Folder` runs in the same pass -- before any scan has
+/// seen that `Sub 3` stands somewhere its agreement does not say -- and took
+/// it whole. The next scan read `Sub 3` and everything in it as deleted here
+/// and trashed them on the server.
+#[test]
+fn frozen_a_folder_created_on_a_retry_where_it_no_longer_stands_is_not_trashed_seed() {
+    never_fires(&["no_file_trashed_without_a_delete_that_reached_it"], || {
+        workload_core(
+            123_909,
+            60,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+            true,
+            Vault::None,
+            false,
+            Names::WindowsHostile,
+        );
+    });
+}
+
+/// plat-four-long 43211: a folder the server deleted is parked aside under a
+/// scratch name for its trash to take, and its trash stands down because a
+/// folder was moved into it unseen. Dropped, the trash stopped holding the
+/// park live, and the walk swept the park as litter with the user's unsent
+/// edits inside. Every oracle, as the arm runs it.
+#[test]
+fn frozen_a_trash_that_stands_down_for_a_folder_moved_in_keeps_its_park_seed() {
+    workload_core(
+        43_211,
+        80,
+        &[
+            ("linux", Platform::Linux),
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        false,
+        Vault::None,
+        false,
+        Names::Ordinary,
+    );
+}

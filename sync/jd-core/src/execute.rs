@@ -8157,6 +8157,26 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             return Ok(OpOutcome::Done);
         }
         no_disk_inside(env, &path)?;
+        // Nor while a folder the user moved in stands inside it unseen: one
+        // whose directory is here, by its id, while both its agreement and the
+        // server keep it elsewhere, and that nothing yet notes as standing
+        // away. The look this op was decided on came before the move -- a
+        // create answered on a retry agreed the folder where its first
+        // attempt asked for it, or the user moved it while the pass ran -- so
+        // the put-back below cannot see it, and trashed with this folder it
+        // goes whole, read by the next scan as deleted here and trashed on
+        // the server with everything in it (winname 123909). Tried again
+        // after the next look, which notes where it stands, and kept queued
+        // meanwhile: a park this trash is to take -- a deleted folder's
+        // directory set aside under a scratch name for it (B-E1) -- counts as
+        // live only while its trash is on the list, and dropped here, the
+        // walk swept the park as litter with the unsent work inside it
+        // (plat-four-long 43211).
+        if let Some(name) = a_folder_moved_in_unseen(env, &path, op.entity.server_id)? {
+            return Ok(OpOutcome::Retry(format!(
+                "{name} was moved into it since this was decided; trying again once the next look notes where it stands"
+            )));
+        }
         // Not while something inside this directory belongs elsewhere on the
         // server. The trash below takes what is under the directory now; the
         // rescue before it saves only what never reached the server; and a
@@ -8524,6 +8544,92 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         return Ok(OpOutcome::Retry(why));
     }
     Ok(OpOutcome::Done)
+}
+
+/// A folder record whose directory stands under `top`, the directory of the
+/// folder `folder`, while its agreement and the server both keep it outside
+/// `folder`, and that is not noted as standing away nor carried by a folder
+/// that is. Read by directory id, on volumes whose ids name directories;
+/// elsewhere `None`.
+fn a_folder_moved_in_unseen(env: &ExecEnv, top: &std::path::Path, folder: i64) -> Result<Option<String>, ExecError> {
+    let personality = env.vfs.personality();
+    if !personality.stable_file_identity || personality.positional_file_ids {
+        return Ok(None);
+    }
+    let agreed_outside = |e: &Entry| -> Result<bool, ExecError> {
+        let mut parent = e.agreed_placement().parent;
+        let mut guard = 0;
+        while let Some(p) = parent {
+            if p == folder {
+                return Ok(false);
+            }
+            guard += 1;
+            if guard > 512 {
+                return Err(ExecError::Contract("folder tree has a loop in it".into()));
+            }
+            parent = env.store.get_entry(EntityId::folder(p))?.and_then(|f| f.agreed_placement().parent);
+        }
+        Ok(true)
+    };
+    // A folder noted as standing away is the put-back's (below), and so is
+    // everything it carries: the walk does not go into it.
+    // Keyed by id and birth, read as the scan reads them: a birth of 0, on
+    // either side, is one the volume did not say, and matches any. An id a
+    // deleted folder left behind and a new directory took has a new birth,
+    // and is no record's.
+    let mut outside: std::collections::HashMap<(u64, u64), String> = std::collections::HashMap::new();
+    let mut standing: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
+    for e in env.store.every_entry()? {
+        if e.id.entity_type != EntityType::Folder
+            || e.id.is_provisional()
+            || e.id.server_id == folder
+            || e.remote_deleted
+        {
+            continue;
+        }
+        let Some(fp) = e.synced_fingerprint.filter(|f| f.file_id != 0) else { continue };
+        let id = (fp.file_id, fp.birth_ns);
+        if e.standing_away().is_some() {
+            standing.insert(id);
+            continue;
+        }
+        if sits_under(env, e.id, folder)? || !agreed_outside(&e)? {
+            continue;
+        }
+        outside.insert(id, e.effective_local_name().to_string());
+    }
+    if outside.is_empty() {
+        return Ok(None);
+    }
+    let mut stack = vec![top.to_path_buf()];
+    let mut guard = 0;
+    while let Some(dir) = stack.pop() {
+        guard += 1;
+        if guard > 100_000 {
+            return Err(ExecError::Contract("folder tree too deep to read".into()));
+        }
+        // A directory gone or unlistable holds nothing to find here; what the
+        // trash makes of it is the trash's to say, as it always has.
+        let Ok(children) = env.vfs.read_dir(&dir) else { continue };
+        for child in children {
+            if child.kind != jd_vfs::EntryKind::Directory {
+                continue;
+            }
+            let at = dir.join(&child.name);
+            let here = env.vfs.directory_identity(&at).ok().flatten();
+            let is = |(file_id, birth): &(u64, u64)| {
+                here.is_some_and(|h| h.file_id == *file_id && (h.birth_ns == 0 || *birth == 0 || h.birth_ns == *birth))
+            };
+            if let Some((_, name)) = outside.iter().find(|(k, _)| is(k)) {
+                return Ok(Some(name.clone()));
+            }
+            if standing.iter().any(is) {
+                continue;
+            }
+            stack.push(at);
+        }
+    }
+    Ok(None)
 }
 
 /// What became of a folder the user moved into a folder being trashed here.
