@@ -25,7 +25,7 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
-foreach (array('OfficeEditor', 'OfficeEditorToken', 'OfficeEditorWopi', 'WopiProof') as $c) {
+foreach (array('OfficeEditor', 'OfficeEditorToken', 'OfficeEditorWopi', 'WopiProof', 'OfficeEditorHealth') as $c) {
 	if (!class_exists($c, false)) {
 		require_once(PathHelper::getIncludePath('plugins/office_editor/includes/' . $c . '.php'));
 	}
@@ -89,6 +89,20 @@ oe_join($off_grp, $off);
 OfficeEditor::forgetMembers();
 check(OfficeEditor::memberMay($unset->key), 'a tier that never set office_editing may edit');
 check(!OfficeEditor::memberMay($off->key), 'a tier that switches office_editing off may not');
+
+// The New menu never hides the editor's items without a reason, and the
+// Plugins page's second check passes while any member may edit.
+if (!OfficeEditor::installed() && !OfficeEditor::refusedHere()) {
+	check(OfficeEditor::creatorAvailable(null, $owner->key) === 'The document editor isn\'t set up on this site yet.',
+		'not installed yet: New lists Document greyed with the reason');
+} elseif (OfficeEditor::installed()) {
+	check(OfficeEditor::creatorAvailable(null, $off->key) === 'Making documents in Drive isn\'t part of your plan.',
+		'a tier switched off: New lists Document greyed with the reason');
+	check(OfficeEditor::creatorAvailable(null, $owner->key) === true, 'an allowed member may make a document');
+}
+$members_ok = true;
+try { OfficeEditorHealth::checkMembersMay(); } catch (ProvisioningCheckFailed $e) { $members_ok = $e->getMessage(); }
+check($members_ok === true, 'members-may-use check passes while a member with no tier exists');
 
 function oe_file($owner_id, $title = 'Paper.docx', $bytes = null) {
 	global $made_files;

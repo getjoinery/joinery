@@ -19,7 +19,16 @@ site, so a file never leaves it.
   has finished. A site that sells editing as a perk switches the tier feature
   `office_editing` (boolean, in `tier_features.json`) off on the tiers that
   should not have it; a member with no tier, or on a tier that never set it,
-  may edit.
+  may edit. The Plugins page's second check, **Members can use the editor**,
+  is unmet when the tiers leave no member able to (every live member is on a
+  tier with it off).
+- **When it can't make a file,** Drive's New menu still lists Document and
+  Spreadsheet, greyed with the reason: "The document editor isn't set up on
+  this site yet." until the installer finishes, "Making documents in Drive
+  isn't part of your plan." for a member whose tier has it off, and the folder
+  reasons (not Standard, view-only). They are left out only where the editor
+  can never run: a container site, or a server the installer refused, which
+  the Plugins page explains.
 
 ## What a member sees
 

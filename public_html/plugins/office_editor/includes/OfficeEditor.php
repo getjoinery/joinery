@@ -17,6 +17,7 @@
  *     or Fortress file would put its plaintext in the editor's memory and temp
  *     files, outside the promise those levels make.
  *
+ * @version 0.4.0 - creatorAvailable(): greyed with the reason instead of hidden; refusedHere()
  * @version 0.3.0 - memberMay(): on unless the member's tier switches office_editing off
  * @version 0.2.0 - hostCommand(): the plugin's deactivate and uninstall hooks switch the editor off and remove it
  * @version 0.1.0
@@ -47,6 +48,17 @@ class OfficeEditor {
 	/** Did the installer finish on this server? */
 	public static function installed() {
 		return is_file(self::INSTALLED_MARK) && is_file(self::CTL);
+	}
+
+	/** Where the installer says why it refused this server. */
+	const REFUSED_MARK = '/etc/joinery/office_editor/refused';
+
+	/** Can the editor never run here: a container site, or the installer refused this server? */
+	public static function refusedHere() {
+		if (Globalvars::get_instance()->get_setting('deployment_environment', true, true) === 'docker') {
+			return true;
+		}
+		return is_file(self::REFUSED_MARK);
 	}
 
 	/** May $user_id use the editor (their tier)? */
@@ -107,10 +119,22 @@ class OfficeEditor {
 		return null;
 	}
 
-	/** DriveHelper creator `available`: true, or why not here. */
+	/**
+	 * DriveHelper creator `available`: true, or why not here. A member who
+	 * cannot make one sees the item greyed with the reason, so the menu never
+	 * leaves them wondering where it went. Hidden only where the editor can
+	 * never run on this server (a refused or container site), which the
+	 * Plugins page explains to the admin.
+	 */
 	public static function creatorAvailable($folder, $user_id) {
-		if (!self::installed() || !self::memberMay($user_id)) {
-			return null;
+		if (!self::installed()) {
+			if (self::refusedHere()) {
+				return null;
+			}
+			return 'The document editor isn\'t set up on this site yet.';
+		}
+		if (!self::memberMay($user_id)) {
+			return 'Making documents in Drive isn\'t part of your plan.';
 		}
 		if ($folder !== null && DriveHelper::folder_level($folder) !== ProtectionLevel::STANDARD) {
 			return 'New documents can be made in Standard folders only.';
