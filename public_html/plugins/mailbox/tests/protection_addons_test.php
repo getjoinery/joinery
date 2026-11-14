@@ -32,6 +32,7 @@
  *
  * Run: php tests/run.php db --filter=protection_addons
  *
+ * @version 1.6 - Step 1 Apply through a mailbox resolves the records Step 1 showed
  * @version 1.5 - follows the mail cards' wording
  * @version 1.4 - the editor offers the Fortress card, its copy from the catalog (WP5)
  * @version 1.3 - Fortress is a settable level (specs/client_custody_mail.md); a
@@ -538,6 +539,35 @@ try {
 	check(pa_has_dkim_record($asked), 'while the lock is asked for, its record is prescribed');
 	$on = pa_domain('standard', array_merge($keyed, array('ied_is_protected_identity' => true)));
 	check(pa_has_dkim_record($on), 'and while it is enforcing, at any level');
+} finally {
+	$db->rollBack();
+}
+
+// ---------------------------------------------------------------------------
+section('Step 1 Apply publishes what Step 1 showed, from a mailbox-focused page too');
+
+// Setup reached through ?alias_id= (every mailbox link) resolved the domain's
+// ordinary plan when Step 1's Apply was pressed: the box showed the sealed key
+// record and the forwarding subdomain, and Apply wrote neither.
+require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_setup_logic.php'));
+function pa_plan_names(?DnsRecordPlan $plan): array {
+	$names = array();
+	foreach ($plan ? $plan->getRecords() : array() as $rec) { $names[] = $rec->type . ' ' . $rec->name; }
+	sort($names);
+	return $names;
+}
+$db->beginTransaction();
+try {
+	$d = pa_domain('private', array('ied_dkim_selector' => 'mailk1', 'ied_dkim_sealed_key' => 'sealed',
+		'ied_dkim_public_dns' => 'v=DKIM1; k=rsa; p=AAAA', 'ied_send_lock_requested' => true));
+	$a = pa_alias($d, 'step1');
+	$name = strtolower((string)$d->get('ied_domain'));
+	$shown = pa_plan_names((new InboundEmailSetupCheck())->signingReadinessPlan($name));
+	check(in_array('TXT mailk1._domainkey.' . $name, $shown, true), 'the Step 1 box shows the sealed key record');
+	check(pa_plan_names(_setup_dns_plan_for_alias(intval($a->key), false, true)) === $shown,
+		'Apply through the mailbox resolves exactly the records Step 1 showed');
+	check(pa_plan_names(_setup_dns_plan_for_domain(intval($d->key), true)) === $shown,
+		'and through the domain too');
 } finally {
 	$db->rollBack();
 }

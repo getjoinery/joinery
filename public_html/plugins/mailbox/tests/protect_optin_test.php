@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.4 - the Step 1 box names its plan to the Apply handler
  * @version 1.3 - who owns the key is asked in the sending-identity panel, which leads Setup until answered
  * @version 1.2 - the sending-identity panel sits at the foot of Setup; no Advanced disclosure
  * @version 1.1 - the send-protection row and the finishing step follow the
@@ -291,6 +292,14 @@ class ProtectOptinTest {
 		check(strpos($resolver, 'dnsPlan($name, $protected)') === false
 				&& strpos($resolver, 'dnsPlan($name, true)') === false,
 			'and can no longer resolve the strict shape for a domain that is not signing');
+
+		// The handler knows which box was pressed from the box's own post URL,
+		// not from the page's focus: keyed on protect_setup plus a focused domain,
+		// a mailbox-focused page published the ordinary plan instead.
+		check(strpos($setup_logic, "array('dns_plan' => 'signing')") !== false,
+			'the Step 1 box posts dns_plan=signing');
+		check(strpos($setup_logic, "(\$posted['dns_plan'] ?? '') === 'signing'") !== false,
+			'and the Apply handler picks the signing plan from it');
 
 		// The heading has to say which step it is, or two publish boxes across
 		// the ceremony read as the same offer repeated.

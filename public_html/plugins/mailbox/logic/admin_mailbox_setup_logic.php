@@ -24,6 +24,8 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.22 - the DNS Apply handler resolves the plan of the box pressed (dns_plan=signing for the
+ *   send-protection step), so a mailbox-focused page publishes the signing records it showed
  * @version 2.21 - server-wide work moved to the Server tab: no Advanced state, no relay
  *   actions, no hostname save, no full health run; the one-click fixes are shared
  * @version 2.20 - its actions run only on a POST: a GET carrying action= changed the relay, domains or keys
@@ -135,23 +137,24 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// DNS publish actions (specs/dns_record_management.md). Handled before the
 	// setting saves below so a publish never also writes the hostname form.
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
-	$dns_redirect = DnsPublishBox::handle($posted, function () use ($selected_alias_id, $selected_domain_id,
-			$protect_setup, $machine_setup) {
-		// Inside the ceremony the records to publish are the SIGNING-STAGE ones —
-		// the same set its publish box rendered. Apply resolves the plan again
-		// rather than trusting the POST, so this branch has to agree with what was
-		// on screen; resolving the finished shape here would write `v=spf1 -all`
-		// and `p=reject` on a domain whose sealed key is still signing nothing,
-		// rejecting its own mail, from a button that showed neither record.
+	$dns_redirect = DnsPublishBox::handle($posted, function () use ($posted, $selected_alias_id, $selected_domain_id,
+			$machine_setup) {
+		// The records to publish are the ones the pressed box rendered. Apply
+		// resolves the plan again rather than trusting the POST, so it has to know
+		// WHICH box was pressed: the ceremony's box carries the SIGNING-STAGE plan
+		// and says so in its post URL (dns_plan=signing). Resolving the finished
+		// shape for it would write `v=spf1 -all` and `p=reject` on a domain whose
+		// sealed key is still signing nothing, from a button that showed neither
+		// record; resolving the ordinary plan publishes none of the records it
+		// showed. Keyed on the box, not on the page's state, so a mailbox-focused
+		// and a domain-focused page resolve the same thing.
 		//
-		// Those two come afterwards, from the ordinary plan below, once the flag
-		// is on and protectedShapeApplies() prescribes them.
-		if ($protect_setup && $selected_domain_id) {
-			return _setup_dns_plan_for_domain($selected_domain_id, true);
-		}
+		// The strict SPF and DMARC come afterwards, from the ordinary plan, once
+		// the flag is on and protectedShapeApplies() prescribes them.
+		$signing = (($posted['dns_plan'] ?? '') === 'signing');
 		return $selected_alias_id
-			? _setup_dns_plan_for_alias($selected_alias_id, $machine_setup)
-			: _setup_dns_plan_for_domain($selected_domain_id, false, $machine_setup);
+			? _setup_dns_plan_for_alias($selected_alias_id, $machine_setup, $signing)
+			: _setup_dns_plan_for_domain($selected_domain_id, $signing, $machine_setup);
 	}, $state_qs());
 	if ($dns_redirect !== null) {
 		return $dns_redirect;
@@ -515,11 +518,12 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// domain is not led with an offer to configure it. A record that later
 		// drifts fails its check again and brings the box straight back.
 		$protect_signing_ready = _setup_rows_all_pass($protect_preflight);
+		// dns_plan=signing in its post URL tells the Apply handler this box's plan.
 		if (!$protect_signing_ready) {
 			$protect_dns_box = DnsPublishBox::build(
 				$checker->signingReadinessPlan($focus_domain),
 				$input,
-				$state_qs()
+				DnsPublishBox::urlWith($state_qs(), array('dns_plan' => 'signing'))
 			);
 		}
 	}
@@ -621,7 +625,8 @@ function _setup_has_dns_work(array ...$groups): bool {
  * handler — which runs before the page has resolved anything and must not pay
  * for the whole mailbox index to find one domain.
  */
-function _setup_dns_plan_for_alias(int $alias_id, bool $machine_stage = false): ?DnsRecordPlan {
+function _setup_dns_plan_for_alias(int $alias_id, bool $machine_stage = false,
+		bool $signing_stage = false): ?DnsRecordPlan {
 	if ($alias_id <= 0) {
 		return null;
 	}
@@ -634,7 +639,9 @@ function _setup_dns_plan_for_alias(int $alias_id, bool $machine_stage = false): 
 	if ($name === '' || $domain->get('ied_is_imap_source')) {
 		return null;   // an IMAP-pull mailbox has no MX/host stack to publish
 	}
-	return (new InboundEmailSetupCheck())->dnsPlan($name, false, $machine_stage);
+	$checker = new InboundEmailSetupCheck();
+	return $signing_stage ? $checker->signingReadinessPlan($name)
+		: $checker->dnsPlan($name, false, $machine_stage);
 }
 
 /**
