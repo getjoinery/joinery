@@ -45,6 +45,7 @@
  * and so is rewritten with the content. imc_level_attempt_time lets a pass go by a row that
  * just failed to convert.
  *
+ * @version 1.7 - sealedOwnerUserIdFor() falls back to imc_usr_user_id (rotation goes through modelReseal)
  * @version 1.6 - imc_sender_fingerprint: the spam filter's contact signal, on sealed rows too
  * @version 1.5 - imc_level_attempt_time; the level-follows-the-mailbox rule stated
  * @version 1.4
@@ -59,6 +60,21 @@ class MailboxContact extends SystemBase {
 	public static $tablename = 'imc_mailbox_contacts';
 	public static $access_class = 'personal';
 	public static $pkey_column = 'imc_mailbox_contact_id';
+
+	/**
+	 * Whose vault: the owner recorded at seal time, else the contact's own
+	 * user, which is who a contact always seals to. A rotation re-seals
+	 * contacts through the generic model path (VaultUnlock::modelReseal()), and
+	 * a row sealed before imc_sealed_owner_user_id existed must still be found.
+	 */
+	protected static function sealedOwnerUserIdFor(array $row): ?int {
+		$owner = parent::sealedOwnerUserIdFor($row);
+		if ($owner !== null) {
+			return $owner;
+		}
+		$user = (int)($row['imc_usr_user_id'] ?? 0);
+		return $user > 0 ? $user : null;
+	}
 
 	// How the row got here. Both are deliberate acts by the user — there is no
 	// traffic-derived source, and adding one would re-open the spam-harvest hole.

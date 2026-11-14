@@ -176,5 +176,80 @@ $threw_locked = false;
 try { InboundEmailMessage::decryptSealedFieldStatic('iem_body_plain', $row['iem_body_plain'], $row); } catch (VaultLockedException $e) { $threw_locked = true; }
 check($threw_locked, 'a sealed field with no open window raises VaultLockedException, never ciphertext');
 
+// ---- A row re-sealed meanwhile keeps its newer wrapping (B7) ---------------
+// The rotation reads a wrapping, re-wraps it and writes it back; anything that
+// re-sealed the row in between wins (MailboxReseal::swap).
+section('Compare-and-swap: a row changed mid-rotation keeps what it holds');
+// The domain's DKIM keys are on generation 3 now (the fail-loud run moved
+// them), so the race runs 3 -> 4, where everything else opens.
+$v_g3 = new UserEncryptionVault(NULL);
+$v_g3->set('uev_usr_user_id', $uid);
+$v_g3->set('uev_public_key', $kp3['public']);
+$v_g3->set('uev_key_generation', 3);
+$kp4 = $box->generateKeypair();
+$msg_d = $make_message($v_g3, 'race message D');
+$d_dek = $crypto->openItemDek((string)$read_msg($msg_d)['iem_sealed_key'], vault_fixture_key($kp3['secret']));
+$kp_race = $box->generateKeypair();
+$newer = $crypto->sealItemDek($d_dek, $kp_race['public']);
+MailboxReseal::$before_write = function (string $table, int $id) use ($db, $msg_d, $newer) {
+	if ($table === 'iem_inbound_email_messages' && $id === $msg_d) {
+		$db->prepare('UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = 7
+			WHERE iem_inbound_email_message_id = ?')->execute(array($newer, $msg_d));
+	}
+};
+$threw = null;
+try {
+	$run_reseal($uid, vault_fixture_key($kp3['secret']), 3, $kp4['public'], 4);
+} catch (Throwable $e) {
+	$threw = $e->getMessage();
+} finally {
+	MailboxReseal::$before_write = null;
+}
+$d_row = $read_msg($msg_d);
+check($d_row['iem_sealed_key'] === $newer && (int)$d_row['iem_key_generation'] === 7,
+	'the newer wrapping survives: the stale one is not written over it');
+check($threw === null, 'and the row is skipped, not failed', (string)$threw);
+check($open_body($d_row, vault_fixture_key($kp_race['secret'])) === 'race message D', 'the message still opens');
+
+$dkim_newer = $crypto->sealItemDek('FAKE-DKIM-NEWER', $kp_race['public']);
+MailboxReseal::$before_write = function (string $table, int $id) use ($db, $domain2, $dkim_newer) {
+	if ($table === 'ied_inbound_email_domains' && $id === (int)$domain2->key) {
+		$db->prepare('UPDATE ied_inbound_email_domains SET ied_dkim_sealed_key = ? WHERE ied_inbound_email_domain_id = ?')
+			->execute(array($dkim_newer, (int)$domain2->key));
+	}
+};
+try {
+	$run_reseal((int)$owner2->key, vault_fixture_key($kpo2['secret']), 2, $kp3['public'], 3);
+} finally {
+	MailboxReseal::$before_write = null;
+}
+$d2 = new InboundEmailDomain((int)$domain2->key, TRUE);
+check((string)$d2->get('ied_dkim_sealed_key') === $dkim_newer, 'a DKIM key re-sealed meanwhile keeps its newer wrapping');
+
+// ---- Contacts re-seal through the generic model path ----------------------
+section('Contacts, including one sealed before its owner was recorded');
+$contact = new MailboxContact(NULL);
+$contact->set('imc_usr_user_id', $uid);
+$contact->set('imc_address_hash', hash('sha256', 'reseal-contact|' . $uid . '|' . random_bytes(8)));
+$contact->save();
+harness_register_row('imc_mailbox_contacts', 'imc_mailbox_contact_id', (int)$contact->key);
+// Generation 4 now holds the domain's DKIM keys and message A, so 4 -> 5
+// opens everything and no callback stops the run before the contacts'.
+$v_g4 = new UserEncryptionVault(NULL);
+$v_g4->set('uev_usr_user_id', $uid);
+$v_g4->set('uev_public_key', $kp4['public']);
+$v_g4->set('uev_key_generation', 4);
+MailboxContact::sealColumns((int)$contact->key, $v_g4, array('imc_address' => 'friend@example.com'));
+$db->prepare('UPDATE imc_mailbox_contacts SET imc_sealed_owner_user_id = NULL, imc_key_generation = 4
+	WHERE imc_mailbox_contact_id = ?')->execute(array((int)$contact->key));
+$kp5 = $box->generateKeypair();
+$run_reseal($uid, vault_fixture_key($kp4['secret']), 4, $kp5['public'], 5);
+$q = $db->prepare('SELECT imc_sealed_key, imc_key_generation FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ?');
+$q->execute(array((int)$contact->key));
+$c_row = $q->fetch(PDO::FETCH_ASSOC);
+check((int)$c_row['imc_key_generation'] === 5, 'a contact with no recorded owner is found by its user and moved');
+$c_dek = $crypto->openItemDek((string)$c_row['imc_sealed_key'], vault_fixture_key($kp5['secret']));
+check(is_string($c_dek) && $c_dek !== '', 'and its key opens under the new vault key');
+
 harness_finish();
 ?>

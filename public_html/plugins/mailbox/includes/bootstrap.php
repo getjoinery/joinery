@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.34 - every rotation re-seal write is a compare-and-swap (MailboxReseal); contacts re-seal through modelReseal
  * @version 1.33 - registers the Direct domain-owner resolver (DirectSigningIdentity::ensureCustody)
  * @version 1.32 - mail parsing registers as foreground work: the mail list waits on it after an unlock
  * @version 1.31 - InlineFlagBackfill: a sealed message's pre-B5 rows are decided by what its body shows, in-window
@@ -233,12 +234,13 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 			if (!$msg->key || !$msg->get('iem_sealed_key')) {
 				continue;
 			}
-			$dek = $crypto->openItemDek((string)$msg->get('iem_sealed_key'), $old_key);
-			$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
-			$upd = $db->prepare(
-				'UPDATE iem_inbound_email_messages SET iem_sealed_key = ?, iem_key_generation = ?
-				 WHERE iem_inbound_email_message_id = ?');
-			$upd->execute(array($new_sealed_key, $new_key_generation, $id));
+			$read = (string)$msg->get('iem_sealed_key');
+			$dek = $crypto->openItemDek($read, $old_key);
+			// Lands only while the row still holds what was read: a message
+			// re-sealed meanwhile keeps its newer wrapping (MailboxReseal).
+			MailboxReseal::swap('iem_inbound_email_messages', 'iem_inbound_email_message_id', $id,
+				'iem_sealed_key', $read, $crypto->sealItemDek($dek, $new_public_key),
+				'iem_key_generation', $old_key_generation, $new_key_generation);
 		} catch (Throwable $e) {
 			$failed++;
 			error_log('Mailbox vault reseal: failed for message ' . $id . ': ' . $e->getMessage());
@@ -252,32 +254,8 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 		$index->purgePersisted($user_id);
 	}
 
-	// Contact store, MailboxContact (specs/mailbox_compose_maturity.md § Phase 4): a sealed contact's
-	// DEK is sealed to the owner's vault, so a rotation must re-wrap it too, or the
-	// contact becomes unreadable. Same envelope re-seal as messages (the address/name
-	// ciphertext under the DEK is untouched).
-	$contact_ids = $db->query('SELECT imc_mailbox_contact_id FROM imc_mailbox_contacts
-		WHERE imc_usr_user_id = ' . intval($user_id) . ' AND imc_content_sealed = true
-		AND imc_key_generation = ' . intval($old_key_generation))->fetchAll(PDO::FETCH_COLUMN);
-	foreach ($contact_ids as $cid) {
-		$cid = intval($cid);
-		try {
-			$row = $db->prepare('SELECT imc_sealed_key FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ?');
-			$row->execute(array($cid));
-			$sealed = (string)$row->fetchColumn();
-			if ($sealed === '') {
-				continue;
-			}
-			$dek = $crypto->openItemDek($sealed, $old_key);
-			$new_sealed_key = $crypto->sealItemDek($dek, $new_public_key);
-			$upd = $db->prepare('UPDATE imc_mailbox_contacts SET imc_sealed_key = ?, imc_key_generation = ?
-				WHERE imc_mailbox_contact_id = ?');
-			$upd->execute(array($new_sealed_key, $new_key_generation, $cid));
-		} catch (Throwable $e) {
-			$failed++;
-			error_log('Mailbox vault reseal: failed for contact ' . $cid . ': ' . $e->getMessage());
-		}
-	}
+	// Contacts (MailboxContact) re-seal through VaultUnlock::modelReseal(),
+	// registered below with the other mailbox models.
 
 	// Protected-domain DKIM keys seal to this same vault public key, so a
 	// rotation must re-seal them alongside the message DEKs or the in-app
@@ -308,11 +286,9 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 				continue;
 			}
 			try {
-				$resealed = $crypto->sealItemDek($private, $new_public_key);
-				$upd = $db->prepare(
-					'UPDATE ied_inbound_email_domains SET ' . $col . ' = ?
-					 WHERE ied_inbound_email_domain_id = ?');
-				$upd->execute(array($resealed, intval($domain->key)));
+				// A key staged or rotated meanwhile keeps what it holds.
+				MailboxReseal::swap('ied_inbound_email_domains', 'ied_inbound_email_domain_id', intval($domain->key),
+					$col, $sealed, $crypto->sealItemDek($private, $new_public_key));
 			} catch (Throwable $e) {
 				$dkim_failed++;
 				error_log('Mailbox vault reseal: failed to re-seal DKIM key (' . $col . ') for domain '
@@ -350,9 +326,9 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 			continue;
 		}
 		try {
-			$upd = $db->prepare('UPDATE jdi_direct_identities SET jdi_sealed_secret_key = ?
-				WHERE jdi_direct_identity_id = ?');
-			$upd->execute(array($crypto->sealItemDek($secret, $new_public_key), intval($identity->key)));
+			// A key moved or replaced meanwhile (DirectSigningIdentity::ensureCustody) keeps what it holds.
+			MailboxReseal::swap('jdi_direct_identities', 'jdi_direct_identity_id', intval($identity->key),
+				'jdi_sealed_secret_key', $sealed, $crypto->sealItemDek($secret, $new_public_key));
 		} catch (Throwable $e) {
 			$direct_failed++;
 			error_log('Mailbox vault reseal: failed to re-seal the Direct signing key for '
@@ -416,13 +392,15 @@ VaultUnlock::onReseal(function (int $user_id, VaultKey $old_key, int $old_key_ge
 	}
 });
 
-// The contact store's blind-index key (MailboxContactIndexKey) is sealed to the
-// vault like a row DEK and re-wraps through the generic model path, so a
-// rotation leaves every address hash valid. A send attempt's recipients and
-// carrier error (MailboxSendAttempt) seal to the owner's vault the same way.
+// Sealed contacts (MailboxContact) and the contact store's blind-index key
+// (MailboxContactIndexKey) are sealed to the vault like a row DEK and re-wrap
+// through the generic model path, so a rotation leaves every contact readable
+// and every address hash valid. A send attempt's recipients and carrier error
+// (MailboxSendAttempt) seal to the owner's vault the same way. The generic
+// path writes only while a row still holds what it read.
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contact_index_keys_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_send_attempts_class.php'));
-VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContactIndexKey::class, MailboxSendAttempt::class)));
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(MailboxContact::class, MailboxContactIndexKey::class, MailboxSendAttempt::class)));
 
 // --- Fortress mail: the `mail` client-custody scope (specs/client_custody_mail.md § R11) ---
 // A Fortress row's DEK is sealed to the owner's `mail` vault, whose secret only
