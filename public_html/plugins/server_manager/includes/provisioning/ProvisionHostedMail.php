@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.9 - the push allowance counts only attempts since the site last took one (B12)
  * @version 1.8 - the mail push carries the DKIM key name from the provider's records (dkim_key_name, B7)
  * @version 1.7 - a test site's mail goes to its plane's trap (server_manager_test_site_mail_trap), sent with
  *   its credential and confirmed by the site before the leg is done
@@ -453,12 +454,21 @@ class ProvisionHostedMail {
 		return true;
 	}
 
-	/** How many mail-settings pushes this node has already been sent. */
+	/**
+	 * How many mail-settings pushes this node has been sent since it last took
+	 * one. A push the site took ends the run of attempts, so a later re-push (a
+	 * new credential, a new key name) starts with its full allowance.
+	 */
 	private function push_attempts($node): int {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT COUNT(*) FROM mjb_management_jobs
-			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL");
+			"SELECT COUNT(*) FROM mjb_management_jobs j
+			 WHERE j.mjb_mgn_managed_node_id = ? AND j.mjb_job_type = ? AND j.mjb_delete_time IS NULL
+			   AND j.mjb_management_job_id > COALESCE((
+				SELECT MAX(c.mjb_management_job_id) FROM mjb_management_jobs c
+				 WHERE c.mjb_mgn_managed_node_id = j.mjb_mgn_managed_node_id
+				   AND c.mjb_job_type = j.mjb_job_type AND c.mjb_delete_time IS NULL
+				   AND c.mjb_status = 'completed'), 0)");
 		$q->execute(array((int)$node->key, self::JOB_TYPE));
 		return (int)$q->fetchColumn();
 	}

@@ -462,6 +462,33 @@ check(!method_exists('ManagementJob', 'latestForNodeWithSubject'),
 	'and the subject-scoped lookup that patched the shared type is gone with it');
 
 // ---------------------------------------------------------------------------
+section('A push the site took ends the run of attempts (B12)');
+
+// The allowance stops a broken site being handed a fresh credential for ever.
+// A push that landed is not part of that run: a later re-push (a new key name,
+// a new credential) gets its full allowance.
+$attempts_of = function ($node) {
+	return (new ReflectionMethod('ProvisionHostedMail', 'push_attempts'))->invoke(new ProvisionHostedMail(), $node);
+};
+$push_node = ht_node('httest-attempts-' . $suffix);
+$push_job = function ($status) use ($push_node) {
+	$job = ManagementJob::createFromBuild($push_node->key, ProvisionHostedMail::JOB_TYPE,
+		JobCommandBuilder::build_hosted_mail_settings($push_node,
+			array('service' => 'smtp', 'host' => 'mail.smtp2go.com', 'port' => 2525)),
+		array('provision_id' => 0), null);
+	$job->set('mjb_status', $status);
+	$job->save();
+	return $job;
+};
+$push_job('failed');
+$push_job('failed');
+check($attempts_of($push_node) === 2, 'two failed pushes are two attempts');
+$push_job('completed');
+check($attempts_of($push_node) === 0, 'a push the site took starts the count again');
+$push_job('failed');
+check($attempts_of($push_node) === 1, 'and a failure after it is the first of a new run');
+
+// ---------------------------------------------------------------------------
 section('The banner is loudest about the thing that is actually urgent');// ---------------------------------------------------------------------------
 section('The banner is loudest about the thing that is actually urgent');
 
