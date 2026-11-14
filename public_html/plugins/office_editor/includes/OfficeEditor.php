@@ -11,11 +11,13 @@
  *
  * Three things decide whether a file opens in the editor:
  *   - the site: the installer finished here (installed()),
- *   - the member: their tier carries `office_editing`,
+ *   - the member: their tier has not switched `office_editing` off (a member
+ *     with no tier, or a tier that never set it, may),
  *   - the file: one of EXTENSIONS, a Drive file at the Standard level. A Private
  *     or Fortress file would put its plaintext in the editor's memory and temp
  *     files, outside the promise those levels make.
  *
+ * @version 0.3.0 - memberMay(): on unless the member's tier switches office_editing off
  * @version 0.2.0 - hostCommand(): the plugin's deactivate and uninstall hooks switch the editor off and remove it
  * @version 0.1.0
  */
@@ -54,7 +56,7 @@ class OfficeEditor {
 			return false;
 		}
 		if (!isset(self::$member_memo[$user_id])) {
-			self::$member_memo[$user_id] = (bool)SubscriptionTier::getUserFeature($user_id, 'office_editing', false);
+			self::$member_memo[$user_id] = (bool)SubscriptionTier::getUserFeature($user_id, 'office_editing', true);
 		}
 		return self::$member_memo[$user_id];
 	}

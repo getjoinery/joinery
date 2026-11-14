@@ -15,9 +15,11 @@ site, so a file never leaves it.
   is not offered the editor: its memory budget is far below what the editor
   needs, and a container has no way for the site to start a root service. The
   installer says so and installs nothing there.
-- **Who may use it:** the tier feature `office_editing` (boolean, in
-  `tier_features.json`). The site must also have the plugin active and its
-  installer finished.
+- **Who may use it:** every member, once the plugin is active and its installer
+  has finished. A site that sells editing as a perk switches the tier feature
+  `office_editing` (boolean, in `tier_features.json`) off on the tiers that
+  should not have it; a member with no tier, or on a tier that never set it,
+  may edit.
 
 ## What a member sees
 

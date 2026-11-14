@@ -78,6 +78,17 @@ $editor = make_user('oe_editor');
 foreach (array($owner, $other, $editor) as $u) { oe_join($grp, $u); }
 OfficeEditor::forgetMembers();
 check(OfficeEditor::memberMay($owner->key), 'the owner\'s tier carries office_editing');
+$tierless = make_user('oe_tierless');
+check(OfficeEditor::memberMay($tierless->key), 'a member with no tier may edit');
+$unset_grp = oe_tier(array('drive_versioning_depth' => 5));
+$unset = make_user('oe_unset');
+oe_join($unset_grp, $unset);
+$off_grp = oe_tier(array('office_editing' => false));
+$off = make_user('oe_off');
+oe_join($off_grp, $off);
+OfficeEditor::forgetMembers();
+check(OfficeEditor::memberMay($unset->key), 'a tier that never set office_editing may edit');
+check(!OfficeEditor::memberMay($off->key), 'a tier that switches office_editing off may not');
 
 function oe_file($owner_id, $title = 'Paper.docx', $bytes = null) {
 	global $made_files;
