@@ -149,6 +149,16 @@
 		}
 	}
 
+	// What in this page's content the site's browser policy will stop (a
+	// pasted script, or a form sending to an address the site does not allow).
+	$content_problems = [];
+	foreach ($layout_components as $component) {
+		$problems = ContentScriptCheck::problems(ContentScriptCheck::component_html($component));
+		if ($problems) {
+			$content_problems[] = array('component' => $component, 'problems' => $problems);
+		}
+	}
+
 	// Components available to add (not already in this page's layout)
 	$available_components_ms = new MultiPageContent(
 		['components_only' => true, 'deleted' => false],
@@ -233,6 +243,23 @@
 			</table>
 		</div>
 	</div>
+
+	<?php if (!empty($content_problems)): ?>
+	<div class="alert alert-warning">
+		<strong>Part of this page will not work for visitors.</strong>
+		<?php foreach ($content_problems as $cp):
+			$c = $cp['component'];
+			$name = $c->get('pac_title') ?: ($c->get('pac_location_name') ?: '#' . $c->key); ?>
+		<div class="mt-2">In <a href="/admin/admin_component_edit?pac_page_content_id=<?php echo (int)$c->key; ?>&amp;pag_page_id=<?php echo (int)$page->key; ?>"><?php echo htmlspecialchars($name); ?></a>:
+			<ul class="mb-0">
+			<?php foreach ($cp['problems'] as $problem): ?>
+				<li><?php echo htmlspecialchars($problem); ?></li>
+			<?php endforeach; ?>
+			</ul>
+		</div>
+		<?php endforeach; ?>
+	</div>
+	<?php endif; ?>
 
 	<!-- Page Layout: drag-reorder picker over pag_component_layout -->
 	<div class="card mb-3">

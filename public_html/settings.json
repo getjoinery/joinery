@@ -2928,7 +2928,7 @@
     {
       "name": "csp_strict_scripts",
       "clearsPages": ["/"],
-      "default": "report",
+      "default": "enforce",
       "group": "protocol",
       "label": "Strict script policy",
       "type": "select",
@@ -2937,7 +2937,24 @@
         "report": "Report what it would block",
         "enforce": "Enforce"
       },
-      "helptext": "The strict policy lets the browser run only script files from the site itself and the vendor hosts, so no script written into a page runs: not one in stored content, and not one a bug lets in. Report sends it beside the standard policy: nothing more is blocked, and every inline script or handler it would refuse is recorded in the error log. Enforce makes it the policy. Has no effect until Send Content-Security-Policy is on."
+      "helptext": "The strict policy lets the browser run only script files from the site itself and the vendor hosts, so no script written into a page runs: not one in stored content, and not one a bug lets in. Enforce, the default, makes it the policy. Report sends it beside the standard policy instead: nothing more is blocked, and every inline script or handler it would refuse is recorded in the error log. Has no effect until Send Content-Security-Policy is on."
+    },
+    {
+      "name": "csp_form_hosts",
+      "clearsPages": [
+        "/"
+      ],
+      "default": "",
+      "group": "protocol",
+      "label": "Other addresses this site's forms may send to",
+      "type": "textarea",
+      "validation": {
+        "pattern": "#^(\\s*https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?/?\\s*)*$#i",
+        "messages": {
+          "pattern": "List one full https address per line, such as https://example.us14.list-manage.com, with no path and no *."
+        }
+      },
+      "helptext": "A form pasted into this site's content may only send what visitors type to this site and the payment and sign-in providers the platform uses. List another address here, one per line, to let forms post to it too, for example the sign-up address of a Mailchimp form (https://yourname.us14.list-manage.com). Name the exact address: anything injected into a page could send to it as well. A script pasted with such a form still does not run."
     },
     {
       "name": "csp_report_only",

@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/**.php, public_html/**.js, public_html/tests/security/inline_script_sweep_ceilings.json]
  */
 /**
  * Content-Security-Policy — sent according to two settings, and says what the
@@ -23,6 +24,8 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.14 - declares the tree it sweeps (covers:), so a new or changed PHP or JS file reruns it instead of reusing an older pass
+ * @version 1.13 - the site's own form addresses (csp_form_hosts): exact https origins only, and the live check expects them
  * @version 1.12 - a report-only header carries no frame-ancestors
  * @version 1.11 - the enforced strict script-src holds only 'self', hosts, 'wasm-unsafe-eval' and 'report-sample'
  * @version 1.10 - the option patterns name event handlers only, so an array of names ("onedrive") is not counted
@@ -210,6 +213,26 @@ foreach (array('https://*.evil.test', "https://evil.test; script-src *", '*', "'
 $hdr = PublicPageBase::csp_header(true, false, array(), array($site));
 check(strpos($hdr[1], 'form-action ' . implode(' ', $with_form['form-action'])) !== false, 'the header carries it in form-action');
 
+section('The operator may list exact https addresses forms post to (csp_form_hosts)');
+// A form pasted into content, such as a Mailchimp sign-up, posts off-site.
+$listed = PublicPageBase::site_form_origins("https://Acme.us14.list-manage.com/\n\n  https://forms.example.test:8443 ,https://acme.us14.list-manage.com");
+check($listed === array('https://acme.us14.list-manage.com', 'https://forms.example.test:8443'),
+	'one origin per line, lower-cased, trailing slash dropped, duplicates once', json_encode($listed));
+foreach (array('http://plain.example.test', 'https://*.list-manage.com', '*', "'self'", 'https://evil.test/path',
+		"https://evil.test;script-src", 'data:', 'javascript:alert(1)') as $bad) {
+	check(PublicPageBase::site_form_origins($bad) === array(), 'dropped: ' . json_encode($bad));
+}
+check(PublicPageBase::site_form_origins('') === array(), 'an empty setting adds nothing');
+$decl = SettingsDeclarations::get('csp_form_hosts');
+$pattern = $decl['validation']['pattern'] ?? '';
+check($decl !== null && ($decl['clearsPages'] ?? null) === array('/'), 'declared, and a change clears every cached page');
+foreach (array("https://acme.us14.list-manage.com", "https://a.example.test\nhttps://b.example.test/\n", '') as $ok) {
+	check($pattern !== '' && preg_match($pattern, $ok) === 1, 'the setting accepts ' . json_encode($ok));
+}
+foreach (array('http://a.example.test', 'https://*.list-manage.com', 'https://a.example.test/subscribe', 'list-manage.com') as $no) {
+	check($pattern !== '' && preg_match($pattern, $no) === 0, 'the setting refuses ' . json_encode($no));
+}
+
 section('Every external host the tree loads is in the policy (the standing inventory)');
 // Walk the browser-facing code for <script src>, stylesheet <link>, @import,
 // <iframe src> and CSS url() that name another https host, and hold each one
@@ -353,7 +376,9 @@ $strict_mode = (string)$settings->get_setting('csp_strict_scripts', false, true)
 $expected_all = PublicPageBase::csp_headers(
 	(bool)$settings->get_setting('enable_csp', false, true),
 	(bool)$settings->get_setting('csp_report_only', false, true),
-	$strict_mode
+	$strict_mode,
+	array(),
+	PublicPageBase::site_form_origins((string)$settings->get_setting('csp_form_hosts', false, true))
 );
 $fold = function ($v) { return trim($v); };
 $r = harness_request('GET', '/', array('accept' => 'text/html', 'follow' => 3));

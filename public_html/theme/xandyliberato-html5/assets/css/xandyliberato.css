@@ -6,6 +6,7 @@
  * in theme.json, so an admin's colour settings still win. Everything here is
  * layout and the home page's own sections.
  *
+ * @version 1.1.1 - a Mailchimp embed form pasted into content takes the site's look
  * @version 1.0.0
  */
 
@@ -185,3 +186,40 @@ body.jy-default { background: var(--jy-color-surface); color: var(--jy-color-tex
 .xl-quote-text p { position: relative; margin: 0; }
 .xl-quote footer { margin: 32px 0 0 16px; font-size: 16px; font-weight: 500; }
 .xl-quote footer span { display: block; color: #c7d2fe; }
+
+/* ─── Mailchimp sign-up form ───────────────────────────────────── */
+
+/* Pasted into page content as Mailchimp's embed code. Its stylesheet and
+   script come from Mailchimp's hosts, which the site's policy refuses, so the
+   form takes its look from here. The embed's own style block (which sets a
+   fixed 600px width) comes after this file, hence the body prefix. */
+body #mc_embed_signup { width: auto; max-width: 560px; margin: 32px 0; padding: 32px;
+  background: var(--jy-color-surface); border: 1px solid var(--jy-color-border); border-radius: 12px;
+  font: 16px/1.5 var(--jy-font-sans); color: var(--jy-color-text); box-sizing: border-box; }
+#mc_embed_signup h2 { margin: 0 0 4px; font-size: 24px; font-weight: 700; line-height: 1.25; }
+#mc_embed_signup .indicates-required { margin-bottom: 20px; font-size: 14px; color: var(--jy-color-text-muted); }
+#mc_embed_signup .asterisk { color: #dc2626; }
+#mc_embed_signup .mc-field-group { margin-bottom: 16px; }
+#mc_embed_signup .mc-field-group > label { display: block; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
+#mc_embed_signup input[type="email"],
+#mc_embed_signup input[type="text"] { width: 100%; box-sizing: border-box; padding: 10px 12px;
+  border: 1px solid var(--jy-color-border); border-radius: 8px; background: var(--jy-color-bg);
+  font: inherit; color: inherit; }
+#mc_embed_signup input[type="email"]:focus,
+#mc_embed_signup input[type="text"]:focus { outline: 2px solid var(--jy-color-primary); outline-offset: 1px;
+  border-color: var(--jy-color-primary); }
+#mc_embed_signup .datefield { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--jy-color-text-muted); }
+#mc_embed_signup .datefield .subfield input { width: 64px; text-align: center; }
+#mc_embed_signup .datefield .yearfield input { width: 88px; }
+#mc_embed_signup .small-meta { font-size: 13px; }
+#mc_embed_signup .clear.foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 16px; margin-top: 8px; }
+#mc_embed_signup input[type="submit"] { padding: 12px 28px; border: 0; border-radius: 8px; cursor: pointer;
+  background: var(--jy-color-primary); color: var(--jy-color-primary-text); font: 600 16px/1.25 var(--jy-font-sans); }
+#mc_embed_signup input[type="submit"]:hover { background: var(--jy-color-primary-hover); }
+#mc_embed_signup .brandingLogo { margin: 0; }
+#mc_embed_signup .brandingLogo img { display: block; height: 28px; width: auto; opacity: 0.7; }
+#mc_embed_signup .response:empty { display: none; }
+@media (max-width: 640px) {
+  body #mc_embed_signup { padding: 20px; margin: 24px 0; }
+}

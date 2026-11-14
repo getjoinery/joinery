@@ -1186,7 +1186,8 @@ abstract class PublicPageBase {
 			(bool)$settings->get_setting('csp_report_only', false, true),
 			(string)$settings->get_setting('csp_strict_scripts', false, true),
 			$this->csp_connect_origins,
-			$this->csp_form_origins
+			array_merge($this->csp_form_origins,
+				self::site_form_origins((string)$settings->get_setting('csp_form_hosts', false, true)))
 		);
 		// This runs twice for some pages, so whatever an earlier call sent
 		// goes first. Then each is added without replacing: two Report-Only
@@ -1338,6 +1339,25 @@ abstract class PublicPageBase {
 			return null;
 		}
 		return $origin;
+	}
+
+	/**
+	 * The addresses the operator lets this site's forms post to (setting
+	 * csp_form_hosts, one per line), for a form pasted into content such as a
+	 * Mailchimp sign-up. Only an exact https origin counts: anything else,
+	 * a wildcard or http included, is dropped. A trailing slash is ignored.
+	 *
+	 * @return string[]
+	 */
+	public static function site_form_origins(string $value): array {
+		$origins = array();
+		foreach (preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) as $line) {
+			$origin = self::normalize_connect_origin(rtrim($line, '/'));
+			if ($origin !== null && strpos($origin, 'https://') === 0 && !in_array($origin, $origins, true)) {
+				$origins[] = $origin;
+			}
+		}
+		return $origins;
 	}
 
 	/** Origins this render adds to connect-src (allow_connect_origin()). */

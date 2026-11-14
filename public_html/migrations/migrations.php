@@ -2001,3 +2001,14 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'node_dir';";
 	$migrations[] = $migration;
+
+	// The strict script policy (csp_strict_scripts) enforces on every site. A
+	// site in report mode moves to enforce; one an operator set to off is left
+	// as it is. Report mode ran fleet-wide from migration 234 with no refusal
+	// from the platform's own pages.
+	$migration = array();
+	$migration['database_version'] = '236';
+	$migration['test'] = "SELECT CASE WHEN EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'csp_strict_scripts' AND stg_value = 'report') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'enforce', stg_update_time = now() WHERE stg_name = 'csp_strict_scripts' AND stg_value = 'report';";
+	$migrations[] = $migration;

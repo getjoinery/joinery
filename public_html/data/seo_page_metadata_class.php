@@ -300,9 +300,24 @@ class SeoPageMetadata extends SystemBase {
 		return null;
 	}
 
+	/**
+	 * Content HTML with what a reader never sees as text removed: style and
+	 * script blocks (a pasted embed carries both), templates, comments, and
+	 * forms (a pasted sign-up form's labels and vendor badge are not what the
+	 * page is about).
+	 */
+	public static function visible_html($html) {
+		$html = preg_replace('#<!--.*?-->#s', ' ', (string)$html);
+		return preg_replace('#<(style|script|noscript|template|form)\b[^>]*>.*?</\1\s*>#is', ' ', $html);
+	}
+
 	public static function summarize_html($html, $max_length = 160) {
 		if (!$html) return null;
-		$text = strip_tags($html);
+		// A block or line break between two pieces of text is a space between
+		// them once the tags go ("Valencia, Spain" / "Phone" is not "SpainPhone").
+		$text = preg_replace('#<(br|/?(p|div|li|ul|ol|h[1-6]|tr|td|th|section|article|blockquote|header|footer|table))\b[^>]*>#i',
+			' $0', self::visible_html($html));
+		$text = strip_tags($text);
 		$text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 		$text = preg_replace('/\s+/u', ' ', $text);
 		$text = trim($text);
@@ -323,7 +338,7 @@ class SeoPageMetadata extends SystemBase {
 			return null;
 		}
 		if (!empty($options['entity_body_html'])) {
-			$body = $options['entity_body_html'];
+			$body = self::visible_html($options['entity_body_html']);
 			if (preg_match('/<img[^>]+src\s*=\s*["\']([^"\']+)["\']/i', $body, $m)) {
 				$src = $m[1];
 				if (strpos($src, 'data:') === 0) return null;

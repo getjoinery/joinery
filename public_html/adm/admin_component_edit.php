@@ -210,6 +210,19 @@ if ($version_notice) {
 	echo '</div>';
 }
 
+// What in this content the site's browser policy will stop (a pasted
+// script, or a form sending to an address the site does not allow).
+if ($content->key) {
+	$content_problems = ContentScriptCheck::problems(ContentScriptCheck::component_html($content));
+	if ($content_problems) {
+		echo '<div class="alert alert-warning"><strong>Part of this content will not work for visitors.</strong><ul class="mb-0">';
+		foreach ($content_problems as $problem) {
+			echo '<li>' . htmlspecialchars($problem) . '</li>';
+		}
+		echo '</ul></div>';
+	}
+}
+
 // Pre-fill layout fields from component type defaults for new instances
 if (!$content->key && $component_type) {
 	$ld_raw = $component_type->get('com_layout_defaults');
