@@ -793,7 +793,12 @@ leaves, members' own mail included; for one that signs as its own domain
 instead (Mailgun) it is a warning that the mail fails DMARC alignment. Either
 row offers **Register {domain} at {provider}** (`register_sending_domain`) when
 the provider implements `SendingDomainRegistrar`, and otherwise names the
-provider's dashboard. A provider without the capability gets generic guidance
+provider's dashboard. For a refusing provider the records alone are not
+enough: the provider must also have verified the domain on its side, so a
+**Sending domain verified** row reads its state (`getSendingDomainState()`):
+active passes; anything else is a required failure with **Ask {provider} to
+check {domain} again** (`verify_sending_domain`, the provider's
+`verifySendingDomain()`). A provider without the capability gets generic guidance
 naming it.
 
 ### Firewall

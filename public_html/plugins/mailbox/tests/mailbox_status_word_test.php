@@ -183,6 +183,34 @@ $signing = $rows_for('MbwSigningProvider')[0];
 check($signing['status'] === InboundEmailSetupCheck::WARN && strpos($signing['summary'], 'fails DMARC alignment') !== false
 	&& !isset($signing['fix']['action']),
 	'a provider that signs as its own domain: a warning about alignment, and no Register button it cannot honour', $signing['summary']);
+if (!class_exists('MbwUnverifiedProvider', false)) {
+	class MbwUnverifiedProvider implements DkimRecordSource, RefusesUnregisteredSenderDomains {
+		public static $state = 'unverified';
+		public static function getDkimStatus(string $domain): array {
+			return array('status' => 'ok', 'records' => array(array('type' => 'CNAME', 'name' => 's1._domainkey.example.com', 'value' => 'dkim.example.net')));
+		}
+		public static function getSendingDomainState(string $domain): string { return self::$state; }
+		public static function verifySendingDomain(string $domain): string { return 'active'; }
+	}
+}
+$verified_row = function (array $rows) {
+	foreach ($rows as $r) { if (substr($r['id'], -9) === '.verified') { return $r; } }
+	return null;
+};
+$v = $verified_row($rows_for('MbwUnverifiedProvider'));
+check($v !== null && $v['status'] === InboundEmailSetupCheck::FAIL && $v['severity'] === InboundEmailSetupCheck::REQUIRED
+	&& ($v['fix']['action']['action'] ?? '') === 'verify_sending_domain',
+	'records published but the provider has not verified the domain: a required failure with Ask it to check again', var_export($v, true));
+MbwUnverifiedProvider::$state = 'active';
+$v = $verified_row($rows_for('MbwUnverifiedProvider'));
+check($v !== null && $v['status'] === InboundEmailSetupCheck::PASS, 'once the provider reports it active, the row passes');
+check($verified_row($rows_for('MbwSigningProvider')) === null, 'a provider that does not refuse gets no verification row');
+$ro = InboundEmailSetupCheck::readOnly();
+$ro_rows = Closure::bind(function () { return $this->providerDkimRows('MbwUnverifiedProvider', 'Stub', 'example.com', 'domain.dkim_provider'); }, $ro, InboundEmailSetupCheck::class)();
+check(count($ro_rows) === 1 && $ro_rows[0]['status'] === InboundEmailSetupCheck::UNKNOWN && $verified_row($ro_rows) === null
+	&& in_array('provider_api', $ro->notAsked(), true),
+	'the read-only engine asks the provider nothing: one unknown row, named as not asked');
+
 check(in_array('RefusesUnregisteredSenderDomains', class_implements('Smtp2GoProvider') ?: array(), true)
 	&& !in_array('RefusesUnregisteredSenderDomains', class_implements('MailgunProvider') ?: array(), true),
 	'SMTP2GO declares it refuses; Mailgun does not');

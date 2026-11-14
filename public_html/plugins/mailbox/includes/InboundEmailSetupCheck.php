@@ -31,6 +31,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.71 - a refusing provider's sending domain must also be verified there: a row says so, with Ask it to re-check
  * @version 1.70 - the DKIM row offers Make a signing key where joinery-dkim-add is installed
  * @version 1.69 - a provider that refuses unregistered sender domains makes the domain's provider DKIM row a
  *   required failure (its mail does not leave), with the Register button when the provider can register
@@ -4676,8 +4677,13 @@ class InboundEmailSetupCheck {
 				'', $fix));
 		}
 		if (empty($status['records'])) {
-			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::PASS,
+			$rows = array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::PASS,
 				$label . ' reports DKIM configured for ' . $domain . ' with no records left to publish.'));
+			$verified = $this->providerSendingDomainRow($class, $label, $domain, $id_base);
+			if ($verified !== null) {
+				$rows[] = $verified;
+			}
+			return $rows;
 		}
 
 		$rows = array();
@@ -4686,7 +4692,51 @@ class InboundEmailSetupCheck {
 			$rows[] = $this->providerDkimRecordRow($id_base . ($i > 0 ? '.' . $i : ''), $label, $domain, $rec);
 			$i++;
 		}
+		$verified = $this->providerSendingDomainRow($class, $label, $domain, $id_base);
+		if ($verified !== null) {
+			$rows[] = $verified;
+		}
 		return $rows;
+	}
+
+	/**
+	 * For a provider that refuses a From domain it does not hold, published
+	 * records are not enough: the provider must also have verified the domain,
+	 * or it still refuses every send. Null for a provider this does not apply to.
+	 */
+	private function providerSendingDomainRow(string $class, string $label, string $domain, string $id_base): ?array {
+		$implements = class_implements($class) ?: array();
+		if (!in_array('RefusesUnregisteredSenderDomains', $implements, true) || !is_callable(array($class, 'getSendingDomainState'))) {
+			return null;
+		}
+		$id = $id_base . '.verified';
+		$row_label = 'Sending domain verified (' . $label . ')';
+		if ($this->read_only) {
+			$this->not_asked[] = 'provider_api';
+			return $this->r($id, $domain, 'domain', $row_label, self::REQUIRED, self::UNKNOWN,
+				'Not asked: a read-only check does not call ' . $label . '.');
+		}
+		try {
+			$state = (string)$class::getSendingDomainState($domain);
+		} catch (\Throwable $e) {
+			$state = '';
+		}
+		if ($state === 'active') {
+			return $this->r($id, $domain, 'domain', $row_label, self::REQUIRED, self::PASS,
+				$label . ' has verified ' . $domain . ' and sends its mail.');
+		}
+		if ($state === '') {
+			return $this->r($id, $domain, 'domain', $row_label, self::REQUIRED, self::UNKNOWN,
+				'Could not reach ' . $label . ' to read whether it has verified ' . $domain . ' — try again.');
+		}
+		$fix = array('text' => 'Once the records above are published, ask ' . $label . ' to check them again.');
+		if (is_callable(array($class, 'verifySendingDomain'))) {
+			$fix['action'] = array('action' => 'verify_sending_domain', 'domain' => $domain,
+				'label' => 'Ask ' . $label . ' to check ' . $domain . ' again');
+		}
+		return $this->r($id, $domain, 'domain', $row_label, self::REQUIRED, self::FAIL,
+			$label . ' has not verified ' . $domain . ' yet (' . $state . '), and refuses its mail until it does.',
+			'Publishing the records is not enough on its own: ' . $label . ' checks them on its side.', $fix);
 	}
 
 	/**

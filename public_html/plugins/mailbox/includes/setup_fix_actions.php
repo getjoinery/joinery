@@ -8,6 +8,7 @@
  * the POST here first. Each fix writes through a model or the settings table
  * and redirects, so the next render reads fresh state.
  *
+ * @version 1.4 - verify_sending_domain: ask the outbound provider to check a sending domain's records again
  * @version 1.3 - make_local_key: Make a signing key on the DKIM row, through joinery-dkim-add
  * @version 1.2 - register_sending_domain: the Register button on a hosted domain's provider DKIM row
  * @version 1.1 - send_test_message: one fixed test message to the probe mailbox (MailTestProbe)
@@ -102,6 +103,27 @@ function mailbox_setup_fix_action(array $posted, $session, string $redirect_url)
 	// on a registered domain announces success and changes nothing. DKIM
 	// authority stays on the subdomain itself (the provider implementation
 	// guarantees it) so its keys align strictly.
+	// Ask the outbound provider to check a sending domain's records again: the
+	// Setup row for a provider that refuses a domain it has not verified.
+	if ($action === 'verify_sending_domain') {
+		$domain_name = strtolower(trim($posted['domain'] ?? ''));
+		$class = EmailSender::activeServiceKey() !== ''
+			? (EmailSender::getDiscoveredProviders()[EmailSender::activeServiceKey()] ?? null) : null;
+		if ($domain_name === '' || !preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $domain_name)) {
+			$announce('No valid domain to check.', 'Error');
+		} elseif ($class === null || !is_callable(array($class, 'verifySendingDomain'))) {
+			$announce('The configured outbound provider cannot be asked from here — check the domain in its dashboard.', 'Not available');
+		} else {
+			$state = (string)$class::verifySendingDomain($domain_name);
+			$announce($state === 'active'
+				? $class::getLabel() . ' has verified ' . $domain_name . '.'
+				: $class::getLabel() . ' has not verified ' . $domain_name . ' yet' . ($state !== '' ? ' (' . $state . ')' : '')
+					. '. Records can take a few minutes to reach it; try again shortly.',
+				$state === 'active' ? 'Verified' : 'Not yet');
+		}
+		return LogicResult::redirect($redirect_url);
+	}
+
 	// Register a domain as a sending domain at the outbound provider: the
 	// automated-mail subdomain (machine_register) or a hosted domain whose
 	// provider DKIM row found it missing (register_sending_domain).
