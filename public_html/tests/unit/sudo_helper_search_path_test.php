@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php --only=tests/unit/sudo_helper_search_path_test.php
  *
+ * @version 1.1 - joinery-dkim-add is listed
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -43,6 +44,7 @@ $known = array(
 	'public_html/plugins/mailbox/provisioning/provision_relay_main.sh' => array(
 		'joinery-mail-listener' => array('public_html/plugins/mailbox/provisioning/provision_relay_main.sh', 'LISTENERHELPER'),
 		'joinery-dkim-remove'   => array('public_html/plugins/mailbox/provisioning/provision_relay_main.sh', 'DKIMREMOVEHELPER'),
+		'joinery-dkim-add'      => array('public_html/plugins/mailbox/provisioning/provision_relay_main.sh', 'DKIMADDHELPER'),
 	),
 );
 

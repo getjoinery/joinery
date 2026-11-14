@@ -3,6 +3,7 @@
 # remove_email.sh - the Mailbox plugin's host remover: takes off a machine what
 # install_email.sh put on it for this site, and nothing else.
 #
+# Version: 1.2 - joinery-dkim-add is one of the relay helpers it takes off.
 # Version: 1.1 - a postconf that fails counts as left, and the map files stay while any Postfix setting
 #                still names them in any spelling; the postgres probe is made with no pair in hand too
 #                (reviewer2 F1, F2, F3)
@@ -78,7 +79,7 @@ CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
 MAP_FILE="${FS}/etc/postfix/joinery-domains.cf"
 RCPT_MAP_FILE="${FS}/etc/postfix/joinery-recipient-access.cf"
 RCPT_MAP="proxy:pgsql:/etc/postfix/joinery-recipient-access.cf"
-RELAY_HELPERS=("${FS}/usr/local/sbin/joinery-mail-listener" "${FS}/usr/local/sbin/joinery-dkim-remove" "${FS}/etc/sudoers.d/joinery-relay")
+RELAY_HELPERS=("${FS}/usr/local/sbin/joinery-mail-listener" "${FS}/usr/local/sbin/joinery-dkim-remove" "${FS}/usr/local/sbin/joinery-dkim-add" "${FS}/etc/sudoers.d/joinery-relay")
 
 # What this run could not take off. Every step runs whatever an earlier one
 # found; the exit code says whether anything is left.

@@ -2,6 +2,7 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.32 - the relay helper converge names joinery-dkim-add too (comment only).
 # Version: 2.31 - The Postfix role is created and its attributes and password set as postgres (the pair
 #                from the root-only config/db_admin.php), since the site's own database role may not
 #                manage roles; the grants stay with the site's role, which owns the tables
@@ -864,8 +865,8 @@ else
 fi
 
 # --- 9. relay helpers: converge them if this box fronts a relay -----------------
-# provision_relay_main.sh writes two root helpers (joinery-mail-listener,
-# joinery-dkim-remove) into /usr/local/sbin. Those are INSTALLED COPIES, so
+# provision_relay_main.sh writes three root helpers (joinery-mail-listener,
+# joinery-dkim-remove, joinery-dkim-add) into /usr/local/sbin. Those are INSTALLED COPIES, so
 # shipping a corrected script does not correct a helper already sitting on disk:
 # without this step a fix can deploy and still never take effect. This installer
 # IS the declared host_installer and runs on deploys, so converge the helpers

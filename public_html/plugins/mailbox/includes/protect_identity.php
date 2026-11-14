@@ -47,6 +47,7 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
+ * @version 1.9 - switching off puts a fresh ordinary key back where it was destroyed (WP2)
  * @version 1.8 - mailbox_protect_press(): send protection on in one press with an API DNS key
  * @version 1.7 - switching off says nothing signs only when the ordinary key is really gone
  * @version 1.6 - mailbox_protect_state() says whether the owner is obvious and whether the default owner has a vault
@@ -801,11 +802,28 @@ function mailbox_protect_press_failures(array $results): array {
  * strict records are stranded and the operator should land on the DNS
  * difference.
  */
-function mailbox_protect_lift(InboundEmailDomain $domain): array {
+function mailbox_protect_lift(InboundEmailDomain $domain, array $deps = array()): array {
 	$name = strtolower(trim((string)$domain->get('ied_domain')));
 	$domain->set('ied_is_protected_identity', false);
 	$domain->set('ied_send_lock_requested', false);
 	$domain->save();
+
+	// With the sealed key no longer signing, the domain's ordinary key signs
+	// again: on a mail server rspamd signs with it, and behind a relay the app
+	// does. Where it was destroyed, put a fresh one back first, so the plan
+	// below prescribes its record (sendingRecords()) and something signs.
+	$needs_key = $deps['needs_key'] ?? function (InboundEmailDomain $d) {
+		return (new InboundEmailSetupCheck())->signsWithLocalKey()
+			&& !file_exists(MailboxDkimSigner::standardKeyPath($d));
+	};
+	$provision = $deps['provision'] ?? 'mailbox_provision_local_signing_key';
+	$key_note = '';
+	$key_made = false;
+	if ($needs_key($domain)) {
+		$made = $provision($name);
+		$key_made = !empty($made['ok']);
+		$key_note = ' ' . $made['message'];
+	}
 
 	// Recomputed AFTER the flag is cleared, so dnsPlan() yields the ordinary
 	// shape — the records this domain now needs, not the ones it is leaving.
@@ -821,15 +839,49 @@ function mailbox_protect_lift(InboundEmailDomain $domain): array {
 
 	$message = 'Send protection is off. This server can send as ' . $name . ' again without you signed in — '
 		. 'and so can anyone who breaks into it. Arriving mail is still sealed and still needs your vault; '
-		. 'this only affected sending.' . $tail;
-	// Only true when the ordinary key was destroyed: otherwise it signs again
-	// from this moment, and saying nothing signs would be false.
-	if (!file_exists(MailboxDkimSigner::standardKeyPath($domain))) {
-		$message .= ' Nothing on this server is signing for ' . $name . ' until you re-run provision_dkim.sh to '
-			. 'put an ordinary signing key back on disk.';
+		. 'this only affected sending.' . $tail . $key_note;
+
+	// A fresh key's record is new to the DNS: land on the difference with it.
+	return array('message' => $message, 'land_dns' => !$reverted['ok'] || $key_made);
+}
+
+/**
+ * Give one domain a fresh ordinary on-disk signing key, where it has none.
+ *
+ * The other half of mailbox_destroy_local_signing_key(), in the same shape: a
+ * fixed-verb root helper (joinery-dkim-add, provision_relay_main.sh), one
+ * argument validated against the registered domains, a success marker the
+ * caller demands, and the file checked afterwards. Where the box has no helper,
+ * the message names the command to run as root instead.
+ *
+ * @return array{ok:bool,message:string}
+ */
+function mailbox_provision_local_signing_key(string $domain): array {
+	$domain = strtolower(trim($domain));
+	if ($domain === '' || !InboundEmailDomain::GetByDomain($domain)) {
+		return array('ok' => false, 'message' => 'No such domain on this server — no signing key was made.');
+	}
+	$by_hand = 'sudo bash ' . PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh')
+		. ' ' . $domain;
+	$helper = InboundEmailSetupCheck::localSigningKeyAddHelper();
+	if (!is_file($helper)) {
+		return array('ok' => false, 'message' => 'Nothing on this server signs ' . $domain . '\'s mail with a key '
+			. 'of its own: its ordinary signing key was destroyed, and this server cannot make one for you. '
+			. 'Run once as root: ' . $by_hand . ' — then publish the DKIM record the Setup page shows.');
 	}
 
-	return array('message' => $message, 'land_dns' => !$reverted['ok']);
+	$output = array();
+	$code = 1;
+	exec('sudo -n ' . escapeshellarg($helper) . ' ' . escapeshellarg($domain) . ' 2>&1', $output, $code);
+	$text = trim(implode("\n", $output));
+	$record = InboundEmailSetupCheck::localSigningKeyPath($domain);
+	if ($code !== 0 || strpos($text, 'DKIM_ADDED') === false || !is_readable($record)) {
+		return array('ok' => false, 'message' => 'Nothing on this server signs ' . $domain . '\'s mail with a key '
+			. 'of its own, and making a fresh one failed (exit ' . intval($code) . '): '
+			. ($text !== '' ? $text : 'no output') . '. Run once as root: ' . $by_hand . '.');
+	}
+	return array('ok' => true, 'message' => 'Its ordinary signing key was destroyed, so this server made a fresh '
+		. 'one. Publish its DKIM record (mail._domainkey.' . $domain . ', below) so receivers can check it.');
 }
 
 /**

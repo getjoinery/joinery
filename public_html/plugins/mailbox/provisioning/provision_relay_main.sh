@@ -15,7 +15,11 @@
 #   - /usr/local/sbin/joinery-dkim-remove <domain>, which destroys one domain's
 #     ordinary on-disk signing key once its sending is locked to a vault-sealed
 #     key (specs/mailbox_relay_surface_simplification.md)
+#   - /usr/local/sbin/joinery-dkim-add <domain>, which gives one domain a fresh
+#     ordinary signing key when it has none, so switching send protection off
+#     leaves something signing (specs/send_protection_one_press.md WP2)
 #
+# Version: 3.5 - joinery-dkim-add: a fresh ordinary key for a domain whose key was destroyed.
 # Version: 3.4 - both helpers start #!/bin/bash and set their own PATH, so a sudoers file without
 #                secure_path cannot hand root a tool from the caller's path (shell_command_audit D8).
 # Version: 3.3 - rspamd is the only mail checker (mail_checking_in_rspamd.md):
@@ -198,7 +202,89 @@ echo "DKIM_REMOVED ${DOMAIN}"
 DKIMREMOVEHELPER
 chmod 755 "${DKIM_REMOVE_HELPER}"
 
-# --- 3. sudoers: the web user may run exactly these two helpers -----------------
+# --- 2b. DKIM key, put back ---------------------------------------------------------
+# Switching send protection off after the ordinary key was destroyed leaves
+# nothing signing the domain with a key of its own. This puts one back, in the
+# layout provision_dkim.sh makes, and the Setup tab prescribes its record.
+DKIM_ADD_HELPER="/usr/local/sbin/joinery-dkim-add"
+cat > "${DKIM_ADD_HELPER}" <<'DKIMADDHELPER'
+#!/bin/bash
+# Its own search path, the one stock sudo hands it (secure_path): the web user
+# runs this as root, so no tool it calls by name is looked up where the caller says.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin; export PATH
+# joinery-dkim-add <domain>
+# Gives <domain> an ordinary signing key when it has none: a 2048-bit RSA key at
+# /etc/rspamd/dkim/<domain>/mail.private with its DNS record beside it in
+# mail.txt, then rewrites the list of domains rspamd signs for. A key already
+# there is kept, since its record may be published. Nothing is restarted.
+#                                              -> DKIM_ADDED <domain>
+# Installed by provision_relay_main.sh; invoked via sudo by the web user, which
+# validates the domain against the registered set before calling.
+set -euo pipefail
+DOMAIN="${1:-}"
+
+# The argument reaches a path, so it is checked here too rather than trusted
+# from the caller: letters, digits, dots and hyphens, no leading dot, one dot at least.
+if [[ ! "${DOMAIN}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ || "${DOMAIN}" != *.* ]]; then
+    echo "joinery-dkim-add: refusing malformed domain" >&2
+    exit 2
+fi
+DOMAIN="$(echo "${DOMAIN}" | tr '[:upper:]' '[:lower:]')"
+
+KEY_ROOT="/etc/rspamd/dkim"
+KEY_DIR="${KEY_ROOT:?}/${DOMAIN:?}"
+PRIVATE_KEY="${KEY_DIR}/mail.private"
+TXT_FILE="${KEY_DIR}/mail.txt"
+SIGNING_MAP="${KEY_ROOT}/signing.map"
+# rspamd reads the key; the web server's group reads it too, because the app
+# signs with it where a relay fronts the box (MailboxDkimSigner).
+WEB_GROUP="www-data"
+getent group "${WEB_GROUP}" >/dev/null 2>&1 || WEB_GROUP="apache"
+KEY_OWNER="_rspamd"
+id "${KEY_OWNER}" >/dev/null 2>&1 || KEY_OWNER="root"
+
+mkdir -p "${KEY_DIR}"
+chown root:root "${KEY_ROOT}" "${KEY_DIR}"
+chmod 755 "${KEY_ROOT}" "${KEY_DIR}"
+if [[ ! -f "${PRIVATE_KEY}" ]]; then
+    # Made under a name the signing list never reads, and renamed in only after
+    # its record is written: a key that exists is a key that signs.
+    NEW_KEY="$(mktemp "${KEY_DIR}/.mail.private.XXXXXX")"
+    trap 'rm -f "${NEW_KEY:-}" "${TXT_FILE}.new"' EXIT
+    if ! openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "${NEW_KEY}" 2>/dev/null; then
+        echo "joinery-dkim-add: openssl did not make a key" >&2
+        exit 3
+    fi
+    PUBLIC="$(openssl pkey -in "${NEW_KEY}" -pubout -outform DER 2>/dev/null | base64 -w0)"
+    if [[ -z "${PUBLIC}" ]]; then
+        echo "joinery-dkim-add: could not read the new key's public half" >&2
+        exit 3
+    fi
+    printf 'mail._domainkey IN TXT ( "v=DKIM1; k=rsa; p=%s" ) ;\n' "${PUBLIC}" > "${TXT_FILE}.new"
+    chown root:root "${TXT_FILE}.new"
+    chmod 644 "${TXT_FILE}.new"
+    mv -f "${TXT_FILE}.new" "${TXT_FILE}"
+    chown "${KEY_OWNER}:${WEB_GROUP}" "${NEW_KEY}"
+    chmod 640 "${NEW_KEY}"
+    mv -f "${NEW_KEY}" "${PRIVATE_KEY}"
+    trap - EXIT
+fi
+if [[ ! -s "${TXT_FILE}" ]]; then
+    echo "joinery-dkim-add: ${PRIVATE_KEY} has no record file beside it" >&2
+    exit 4
+fi
+MAP_TMP="$(mktemp "${SIGNING_MAP}.joinery-XXXXXX")"
+for key in "${KEY_ROOT}"/*/mail.private; do
+    [[ -f "${key}" ]] || continue
+    printf '%s %s\n' "$(basename "$(dirname "${key}")")" "${key}"
+done | LC_ALL=C sort > "${MAP_TMP}"
+chmod 644 "${MAP_TMP}"
+mv -f "${MAP_TMP}" "${SIGNING_MAP}"
+echo "DKIM_ADDED ${DOMAIN}"
+DKIMADDHELPER
+chmod 755 "${DKIM_ADD_HELPER}"
+
+# --- 3. sudoers: the web user may run exactly these three helpers ---------------
 # Validated before it is installed: a rule that fails visudo must never sit in
 # /etc/sudoers.d at all - sudo reads the directory, and a broken file there
 # breaks sudo for everyone. sudo ignores names containing a dot, so the staging
@@ -208,6 +294,7 @@ SUDOERS_TMP="$(mktemp /etc/sudoers.d/.joinery-relay.XXXXXX)"
     echo "# joinery-managed - the main box's relay helpers (provision_relay_main.sh)"
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${LISTENER_HELPER} off, ${LISTENER_HELPER} on, ${LISTENER_HELPER} status"
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${DKIM_REMOVE_HELPER} *"
+    echo "${WEB_USER} ALL=(root) NOPASSWD: ${DKIM_ADD_HELPER} *"
 } > "${SUDOERS_TMP}"
 chmod 440 "${SUDOERS_TMP}"
 if ! visudo -cf "${SUDOERS_TMP}" >/dev/null; then
@@ -217,7 +304,7 @@ if ! visudo -cf "${SUDOERS_TMP}" >/dev/null; then
 fi
 mv -f "${SUDOERS_TMP}" "${SUDOERS_FILE}"
 chmod 440 "${SUDOERS_FILE}"
-echo "sudoers: ${WEB_USER} may run ${LISTENER_HELPER} and ${DKIM_REMOVE_HELPER}"
+echo "sudoers: ${WEB_USER} may run ${LISTENER_HELPER}, ${DKIM_REMOVE_HELPER} and ${DKIM_ADD_HELPER}"
 
 echo ""
 echo "Main box relay helpers are ready. Create a relay from the mailbox Setup tab's"

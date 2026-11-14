@@ -126,7 +126,7 @@ site() {   # $1 = deployment_environment or empty
     echo 'password = s3cret' > "$FS/etc/postfix/joinery-recipient-access.cf"
     echo key > "$FS/etc/rspamd/dkim/gee.example/mail.private"; echo key > "$FS/etc/rspamd/dkim/other.example/mail.private"
     printf 'gee.example %s/etc/rspamd/dkim/gee.example/mail.private\nother.example %s/etc/rspamd/dkim/other.example/mail.private\n' "$FS" "$FS" > "$FS/etc/rspamd/dkim/signing.map"
-    : > "$FS/usr/local/sbin/joinery-mail-listener"; : > "$FS/usr/local/sbin/joinery-dkim-remove"; : > "$FS/etc/sudoers.d/joinery-relay"
+    : > "$FS/usr/local/sbin/joinery-mail-listener"; : > "$FS/usr/local/sbin/joinery-dkim-remove"; : > "$FS/usr/local/sbin/joinery-dkim-add"; : > "$FS/etc/sudoers.d/joinery-relay"
     # The machine's Postfix and PostgreSQL as the installer left them.
     : > "$D/log"; rm -f "$D/pgdown" "$D/postconf_fail"; touch "$D/postfix_running" "$D/table"
     printf 'virtual_mailbox_domains = proxy:pgsql:/etc/postfix/joinery-domains.cf\nvirtual_transport = joinery\nsmtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination, reject_rbl_client zen.spamhaus.org=127.0.0.[2..11], check_recipient_access proxy:pgsql:/etc/postfix/joinery-recipient-access.cf, permit\nproxy_read_maps = $local_recipient_maps $mydestination proxy:pgsql:/etc/postfix/joinery-recipient-access.cf\nmyhostname = mail.gee.example\n' > "$D/main.cf"
@@ -162,7 +162,7 @@ chk "the machine's own hostname setting is untouched" "$(sed -n 's/^myhostname =
 chk "a running Postfix is reloaded, once" "$(logged '^postfix reload')" "1"
 chk "the site's domain's DKIM key goes, another domain's stays" "$(there /etc/rspamd/dkim/gee.example)|$(there /etc/rspamd/dkim/other.example/mail.private)" "no|yes"
 chk "and the signing list is rewritten from what is left" "$(cat "$FS/etc/rspamd/dkim/signing.map")" "other.example $FS/etc/rspamd/dkim/other.example/mail.private"
-chk "the relay helpers and their sudoers rule go" "$(there /usr/local/sbin/joinery-mail-listener)|$(there /usr/local/sbin/joinery-dkim-remove)|$(there /etc/sudoers.d/joinery-relay)" "no|no|no"
+chk "the relay helpers and their sudoers rule go" "$(there /usr/local/sbin/joinery-mail-listener)|$(there /usr/local/sbin/joinery-dkim-remove)|$(there /usr/local/sbin/joinery-dkim-add)|$(there /etc/sudoers.d/joinery-relay)" "no|no|no|no"
 chk "it says what stays" "$(grep -c 'left in place as the machine.s own: the mail packages, Postfix itself' "$T/out")" "1"
 chk "no secret in the transcript" "$(grep -c 's3cret\|adminpw\|rolepw' "$T/out")" "0"
 

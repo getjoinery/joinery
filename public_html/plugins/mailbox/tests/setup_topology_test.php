@@ -35,6 +35,7 @@
  *
  * Run: php tests/run.php db --filter=setup_topology
  *
+ * @version 1.2 - behind a relay where the app signs, the on-disk key is prescribed beside the provider's
  * @version 1.1
  */
 
@@ -58,6 +59,8 @@ function topo_checker(?array $topology, ?array $fleet_state = null): InboundEmai
 		'mailHostname'      => 'mail.box.example',
 		'topology'          => $topology,
 		'fleet_state'       => $fleet_state,
+		// Asked of the live database otherwise; a case that needs it true says so.
+		'signs_standard_in_app' => false,
 	);
 	foreach ($props as $name => $value) {
 		$p = $ref->getProperty($name);
@@ -69,6 +72,10 @@ function topo_checker(?array $topology, ?array $fleet_state = null): InboundEmai
 function topo(string $mode, string $mx = '', string $ip = '', bool $enabled = false): array {
 	return array('mode' => $mode, 'relay' => null, 'mx_hostname' => $mx,
 		'public_ip' => $ip, 'enabled' => $enabled);
+}
+
+function set_private($obj, string $name, $value): void {
+	(new ReflectionProperty(get_class($obj), $name))->setValue($obj, $value);
 }
 
 function call_private($obj, string $method, ...$args) {
@@ -271,11 +278,26 @@ try {
 		'colocated + API provider: provider records verified too');
 
 	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
+	set_private($c, 'signs_standard_in_app', false);
 	$plan = call_private($c, 'dkimPlan');
-	check($plan['local'] === false, 'fronted: a local signing key is never prescribed');
+	check($plan['local'] === false, 'fronted, the app not signing: no local signing key is prescribed');
 	check($plan['provider'] === true && $plan['class'] === 'MailgunProvider',
 		'fronted provider outbound: the provider is the signer');
 	check(!array_key_exists('smarthost', $plan), 'fronted: the relay sends nothing, so there is no smarthost gap to state');
+
+	// Behind a relay the app signs ordinary mail with the on-disk key too
+	// (MailboxDkimSigner::standardFilesystemSigner), so its record is prescribed
+	// beside the provider's, or that signature names a record nobody published.
+	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
+	set_private($c, 'signs_standard_in_app', true);
+	if (call_private($c, 'hasMailServer')) {
+		$plan = call_private($c, 'dkimPlan');
+		check($plan['local'] === true && $plan['provider'] === true && $plan['class'] === 'MailgunProvider',
+			'fronted, the app signing with the on-disk key: that key and the provider\'s records both');
+		check($c->signsWithLocalKey(), 'so a domain with no key here has nothing of its own signing it');
+	} else {
+		harness_skip('this box has no mail server, so nothing here signs with an on-disk key');
+	}
 
 	harness_set_setting_mem('email_service', 'smtp');
 	$c = topo_checker(topo('self_hosted', SELF_MX, RELAY_IP, true));
