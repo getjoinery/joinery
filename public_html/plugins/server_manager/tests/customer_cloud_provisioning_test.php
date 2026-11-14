@@ -288,6 +288,24 @@ class CustomerCloudProvisioningTest {
 			$label = $shape[0] . '/' . $shape[1];
 			check($ok->get('cvp_status') === 'booting' && is_array($fake->lastCreateOpts),
 				"{$label}: an instance is created and the provision boots", (string)$probe->lastFailReason);
+			if ($shape[0] === 'bare') {
+				// A machine with no site has no URL for an uptime check; its agent watches it.
+				$bare_ip = '198.51.100.' . random_int(20, 240);
+				$fake->getInstanceResult = ['id' => '77002', 'ip' => $bare_ip, 'status' => 'running'];
+				$probe->probeBooting($ok);
+				$ok->load();
+				$bare_node_id = (int)$ok->get('cvp_mgn_managed_node_id');
+				$bare_node = $bare_node_id ? new ManagedNode($bare_node_id, TRUE) : null;
+				check($bare_node && $bare_node->get('mgn_skip_joinery_checks') && !$bare_node->get('mgn_uptime_enabled'),
+					'bare/docker: its node has no Joinery checks and no uptime check', (string)$probe->lastFailReason);
+				if ($bare_node_id) {
+					$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$bare_node_id]);
+					$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id = ?')->execute([$bare_node_id]);
+					$db->prepare('UPDATE cvp_customer_cloud_provisions SET cvp_mgn_managed_node_id = NULL WHERE cvp_customer_cloud_provision_id = ?')->execute([$ok->key]);
+					$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$bare_node_id]);
+				}
+				$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$bare_ip]);
+			}
 			$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$ok->key]);
 		}
 	}
@@ -881,6 +899,12 @@ class CustomerCloudProvisioningTest {
 		$bare->set('cvp_install_mode', 'bare');
 		$bare->save();
 		check($bare->key > 0, 'bare admin-origin provision saves without site parameters');
+		// A bare install holds no site, so a buyer's sites list leaves it out.
+		$with = []; $sites = [];
+		foreach (new MultiCustomerCloudProvision(['user_id' => $this->user_id, 'deleted' => false]) as $r) { $with[] = (int)$r->key; }
+		foreach (new MultiCustomerCloudProvision(['user_id' => $this->user_id, 'has_site' => true, 'deleted' => false]) as $r) { $sites[] = (int)$r->key; }
+		check(in_array((int)$bare->key, $with, true) && !in_array((int)$bare->key, $sites, true),
+			'has_site leaves a bare install out of a user\'s sites');
 
 		// Bare mode is an infrastructure decision an order can never make.
 		try {

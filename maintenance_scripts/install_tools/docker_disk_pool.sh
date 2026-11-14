@@ -3,6 +3,7 @@
 # docker_disk_pool.sh - a Docker host's disk pool, and each site's allowance in
 # it (specs/multi_tenant_docker_hosts.md WP4).
 #
+# Version: 2.8 - create all passes through: the data root takes the whole givable disk (hosting_launch B4)
 # Version: 2.7 - create --encrypted --no-tpm2 passes through: the TPM2 chip never opens the data root (B43).
 # Version: 2.6 - can-cap on the site container engine refuses a volumes folder whose project is in the sites'
 #                range or above: each new volume's folder would inherit it (reviewer2 V3).
@@ -45,7 +46,7 @@
 #                the whole pool as its own use and refused every upload (reviewer2 B1).
 # Version: 1.0
 #
-#   docker_disk_pool.sh create [SIZE|DEVICE]
+#   docker_disk_pool.sh create [SIZE|all|DEVICE]
 #                                        Root, on a host Docker is not on yet.
 #                                        Makes the host's data root when it has
 #                                        none (joinery_data_root.sh create: XFS
@@ -267,7 +268,7 @@ do_create() {
         esac
     done
     [[ -z "$notpm" || -n "$enc" ]] || die "--no-tpm2 goes with --encrypted: only an encrypted data root has a TPM2 slot"
-    if [[ -n "$want" && "$want" != /dev/* ]]; then
+    if [[ -n "$want" && "$want" != /dev/* && "$want" != "all" ]]; then
         [[ "$want" =~ ^[0-9]+[KMGT]?$ ]] || die "the size is a number with G, M or T (68G), or a device under /dev, not '${want}'"
     fi
     [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"
@@ -487,5 +488,5 @@ case "${1:-}" in
     allow)   do_allow "${2:-}" "${3:-}" ;;
     release) do_release "${2:-}" ;;
     show)    do_show "${2:-}" ;;
-    *) die "usage: docker_disk_pool.sh create [SIZE|DEVICE] | check | can-cap | allow SITE SIZE | release SITE | show SITE" ;;
+    *) die "usage: docker_disk_pool.sh create [SIZE|all|DEVICE] | check | can-cap | allow SITE SIZE | release SITE | show SITE" ;;
 esac

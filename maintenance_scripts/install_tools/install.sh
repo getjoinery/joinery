@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.48 - a multi-tenant host's data root takes the whole givable disk at install (create all), so the
+#               sites' disk allowances, promised out of its size, fit: a 4th Starter site was refused (B4)
 #VERSION 3.47 - --new-site-only marks its install unfinished (/etc/joinery/new-site/NAME) until it ends: a run
 #               killed outright leaves the mark beside its remains, and the next run of that install clears
 #               them instead of being refused for ever; a container engine that does not answer is a refusal,
@@ -2983,6 +2985,12 @@ do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUT
     bash "$SCRIPT_DIR/install_site_engine.sh" preflight || exit 1
 
     print_step "Making the data root (/srv/joinery) for the engine's storage..."
+    # A multi-tenant host's data is its sites, and each site's disk allowance is
+    # promised out of the data root's size now: it takes the whole disk up front
+    # rather than a modest first size grown as it fills (hosting_launch B4).
+    if [ "$multi" -eq 1 ] && [ -z "$data_root" ]; then
+        data_root="all"
+    fi
     bash "$SCRIPT_DIR/joinery_data_root.sh" check > /dev/null 2>&1 || rc=$?
     case "$rc" in
         0) print_success "The data root is mounted" ;;
@@ -3150,6 +3158,11 @@ do_docker_install() {
     # the package starts the daemon, which would make its data on the root
     # disk, with no disk limits.
     print_step "Making the data root (/srv/joinery) for Docker's data..."
+    # A multi-tenant host takes the whole disk up front: its sites' allowances
+    # are promised out of the data root's size now (hosting_launch B4).
+    if [ "$MULTI_TENANT" -eq 1 ] && [ -z "$DATA_ROOT" ]; then
+        DATA_ROOT="all"
+    fi
     if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
         encrypted_data_root_prepare || exit 1
         bash "$SCRIPT_DIR/docker_disk_pool.sh" create --encrypted $(no_tpm2_flag) ${DATA_ROOT:+"$DATA_ROOT"} || exit 1

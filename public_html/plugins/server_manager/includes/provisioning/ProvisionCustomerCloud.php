@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.25 - a bare machine's node has no uptime check (no URL to fetch); its agent watches it (hosting_launch S3 run)
  * @version 2.24 - a starter host (bare, cvp_starter_host) installs with --site-engine --multi-tenant, and its finish
  *                makes its host record a starter host with 8 places, provisioning off (make_starter_host)
  * @version 2.23 - takes only rows that land on an instance of their own; a container site is its host's to install
@@ -496,6 +497,9 @@ class ProvisionCustomerCloud {
 			// no domain to certify. The domain is the node's name/DNS identity
 			// (e.g. a relay MX hostname), not a site.
 			$node->set('mgn_skip_joinery_checks', true);
+			// Nor any URL for an uptime check to fetch: the machine's own agent
+			// is what watches it, and a silent one is an incident (plane:agent_silent).
+			$node->set('mgn_uptime_enabled', false);
 		} else {
 			$node->set('mgn_web_root',  "/var/www/html/{$sitename}/public_html");
 			$node->set('mgn_site_url',  'https://' . $domain);

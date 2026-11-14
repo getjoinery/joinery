@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.129 - the welcome email goes into this site's own mail queue when the store is this site, with no API key;
+ *                 a remote store with no credentials alerts the operator instead of dropping it (hosting_launch S3 run)
  * @version 1.128 - process_site_create: a new Starter site's install on its host
  * @version 1.127 - status_recovery_key(): root's record of the site's recovery key, reported by check_status
  *                  (agent 1.116.0)
@@ -1934,6 +1936,19 @@ class JobResultProcessor {
 		$job->save();
 	}
 
+	/** A person's task, never silent: logged, and mailed to the provisioning alert address. */
+	private static function alert_operator(string $subject, string $body): void {
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionManagedDomains.php'));
+			$to = ProvisionManagedDomains::resolve_alert_recipient();
+			if ($to !== '') {
+				EmailSender::quickSend($to, '[provisioning] ' . $subject, $body . "\n");
+			}
+		} catch (Throwable $e) {
+			error_log('JobResultProcessor alert_operator failed: ' . $e->getMessage());
+		}
+	}
+
 	/**
 	 * Send the post-provisioning welcome email to the customer via getjoinery's
 	 * QueuedEmail API. Reads credentials from Server Manager plugin settings.
@@ -1953,7 +1968,19 @@ class JobResultProcessor {
 		$from_email = $settings->get_setting('server_manager_provisioning_welcome_from_email') ?: 'support@getjoinery.com';
 		$from_name  = $settings->get_setting('server_manager_provisioning_welcome_from_name')  ?: 'Get Joinery Support';
 
-		if (!$api_url || !$pub_key || !$sec_key) return;
+		// The store this plane sells through may be this same site (getjoinery
+		// is both): its own mail queue then takes the email, and no API key is
+		// needed. A remote store needs its key; without one nothing is sent, and
+		// a person is told rather than a buyer silently getting no email.
+		$is_self = $api_url === '' || $api_url === null || rtrim((string)$api_url, '/') === ProvisioningSetup::selfApiUrl();
+		if (!$is_self && (!$pub_key || !$sec_key)) {
+			error_log('send_provisioning_welcome_email: the store API at ' . $api_url
+				. ' has no credentials (Provisioning Setup); no welcome email for node #' . (int)$node->key);
+			self::alert_operator('Welcome email not sent: ' . $node->get('mgn_name'),
+				'The store API at ' . $api_url . ' has no credentials, so the welcome email for node #' . (int)$node->key
+				. ' (' . $node->get('mgn_name') . ') was not sent. Set them on Provisioning Setup, then send the buyer their welcome by hand.');
+			return;
+		}
 
 		$params = $job->get('mjb_parameters');
 		$params = is_string($params) ? json_decode($params, true) : $params;
@@ -1987,19 +2014,27 @@ class JobResultProcessor {
 			$needs_dns = !self::plane_registered_domain($provision);
 		}
 
-		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);
-		$client->post('QueuedEmail', [
+		$email = [
 			'equ_from'      => $from_email,
-			'equ_from_name' => $from_name,
+			'equ_from_name' => mb_substr($from_name, 0, 70),
 			'equ_to'        => $admin_email,
-			'equ_to_name'   => $user_name,
-			'equ_subject'   => 'Your site is ready: ' . $domain,
+			'equ_to_name'   => mb_substr($user_name, 0, 70),
+			'equ_subject'   => mb_substr('Your site is ready: ' . $domain, 0, 128),
 			'equ_body'      => $hosted
 				? self::build_hosted_welcome_email_body($domain, $user_name, $sites_url,
 					$provision->admin_password_state() === 'sealed', $needs_dns ? $host_ip : '')
 				: self::build_welcome_email_body($domain, $host_ip, $user_name),
-			'equ_status'    => 2, // READY_TO_SEND
-		]);
+			'equ_status'    => QueuedEmail::READY_TO_SEND,
+		];
+		if ($is_self) {
+			$queued = new QueuedEmail(NULL);
+			foreach ($email as $col => $val) { $queued->set($col, $val); }
+			$queued->set('equ_retry_count', 0);
+			$queued->save();
+			return;
+		}
+		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);
+		$client->post('QueuedEmail', $email);
 	}
 
 	/**

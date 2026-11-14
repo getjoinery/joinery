@@ -4,6 +4,8 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.36 - create all: the data root takes everything the root disk can give, for a multi-tenant
+#                host whose sites' disk allowances are promised out of its size (hosting_launch B4)
 # Version: 1.35 - PHP's sessions and temporary files move onto the data root with PHP-FPM, Apache and cron
 #                stopped and the folder closed to all but root, so nothing the web user runs can put a
 #                link in it between the two copies for root's second copy to follow
@@ -148,8 +150,9 @@
 #                     Root. Makes the data root. With DEVICE (a path under
 #                     /dev, holding no filesystem) it is formatted there;
 #                     otherwise it is a fully allocated file, /srv/joinery.img,
-#                     of SIZE (16G, 500M), or of the first size D7 gives when
-#                     SIZE is left out. XFS, mounted at /srv/joinery with
+#                     of SIZE (16G, 500M, or all: everything the root disk can
+#                     give above its reserve and an install's room), or of the
+#                     first size D7 gives when SIZE is left out. XFS, mounted at /srv/joinery with
 #                     project quotas through /etc/fstab, and every service
 #                     whose data lives there waits for it. --encrypted puts
 #                     a LUKS2 volume under the XFS, opened at boot by
@@ -1248,8 +1251,15 @@ do_create() {
     else
         [[ ! -e "$IMAGE" ]] || die "${IMAGE_REAL} exists but no data root is recorded. Mount it or remove it, then run this again."
         givable="$(root_givable)" || die "could not read the root disk's free space"
-        if [[ -n "$want" ]]; then
-            bytes="$(size_bytes "$want")" || die "the size is a number with G, M or T (16G), not '${want}'"
+        if [[ "$want" == "all" ]]; then
+            # A host whose data is all sites (a multi-tenant host) gives the data
+            # root everything up front: each site's disk allowance is promised out
+            # of what the data root holds now, not what it could grow to.
+            local room=$(( givable > INSTALL_ROOM ? givable - INSTALL_ROOM : 0 ))
+            bytes=$(( room / GIB * GIB ))
+            (( bytes >= CREATE_FLOOR )) || die "the root disk can give the data root only $(gib "$room") above its reserve and the $(gib "$INSTALL_ROOM") an install still needs; a data root needs at least $(gib "$CREATE_FLOOR")"
+        elif [[ -n "$want" ]]; then
+            bytes="$(size_bytes "$want")" || die "the size is a number with G, M or T (16G), or all, not '${want}'"
             (( bytes <= givable )) || die "a data root of ${want} would leave the root disk under its reserve; it can give $(gib "$givable"). Choose a smaller size."
         else
             # D7: modest, and grown as it fills.

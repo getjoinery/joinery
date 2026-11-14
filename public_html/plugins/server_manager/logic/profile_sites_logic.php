@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.7 - lists only rows that hold a site: a starter host or relay shard made by an admin is not one of their sites
  * @version 1.6 - a draft's price and payment button are its own plan's product; the page offers a new site while any plan is on sale
  * @version 1.5 - mail_records: a Managed site on the buyer's own domain lists the email records SMTP2GO
  *                asked for that do not resolve yet, so its mail can be signed (B3)
@@ -94,7 +95,7 @@ function profile_sites_logic(array $input): LogicResult {
 	}
 
 	$provisions = new MultiCustomerCloudProvision(
-		array('user_id' => $user_id, 'deleted' => false), array('cvp_customer_cloud_provision_id' => 'DESC'));
+		array('user_id' => $user_id, 'has_site' => true, 'deleted' => false), array('cvp_customer_cloud_provision_id' => 'DESC'));
 	$provisions->load();
 
 	// The reveal. A POST, and the method is checked rather than assumed.

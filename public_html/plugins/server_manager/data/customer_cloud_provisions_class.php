@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.33 - option has_site: leaves out bare installs (a machine with no site)
  * @version 1.32 - cvp_starter_host: a bare instance installed as a multi-tenant starter host
  * @version 1.31 - stamp_unstamped_default() leaves container rows alone: no server of a cloud account is made for them
  * @version 1.30 - cvp_install_job_id: a container site's site_create job on its host
@@ -1008,6 +1009,12 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 
 		if (isset($this->options['origin'])) {
 			$filters['cvp_origin'] = [$this->options['origin'], PDO::PARAM_STR];
+		}
+
+		// Rows that hold a site: a bare install is a machine with none (a
+		// starter host, a relay shard), never one of anybody's sites.
+		if (!empty($this->options['has_site'])) {
+			$filters['cvp_install_mode'] = "<> 'bare'";
 		}
 
 		if (isset($this->options['domain'])) {

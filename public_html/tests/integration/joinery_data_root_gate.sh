@@ -18,7 +18,7 @@
 #     mounted, and a device that carries anything. Otherwise the file is
 #     allocated whole and formatted, recorded, given one fstab line, its
 #     target, direct I/O unit and every consumer's drop-in, and mounted. Left
-#     without a size, the first size is D7's. A device is formatted and
+#     without a size, the first size is D7's; all is the whole givable disk. A device is formatted and
 #     mounted by UUID.
 #   - tick: keeps the units (quietly when they are right), grows the file by
 #     D7's step when it is filling, grows only as far as the root disk can
@@ -176,6 +176,21 @@ out="$(run create 2>&1)"; rc=$?
 chk "25 GiB root, 20 free: reserve 6 and 2 for the install, so 12 GiB (not 14)" \
     "$rc|$(grep -c "^fallocate -l $((12 * G)) $T/root/srv/joinery.img$" "$LOG")" "0|1"
 unmount
+rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/etc/systemd" "$T/root/run"
+: > "$LOG"
+figs root 100*G 20*G 80*G
+
+echo "=== create all: the whole givable disk, for a multi-tenant host (hosting_launch B4) ==="
+out="$(run create all 2>&1)"; rc=$?
+chk "100 GiB root, 80 free: reserve 15 and 2 for the install, so 63 GiB" \
+    "$rc|$(grep -c "^fallocate -l $((63 * G)) $T/root/srv/joinery.img$" "$LOG")" "0|1"
+unmount
+rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/etc/systemd" "$T/root/run"
+: > "$LOG"
+figs root 25*G 22*G 3*G
+out="$(run create all 2>&1)"; rc=$?
+chk "create all with too little to give: refused, nothing allocated" \
+    "$rc|$(grep -c 'needs at least' <<< "$out")|$(grep -c '^fallocate' "$LOG")" "1|1|0"
 rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/etc/systemd" "$T/root/run"
 : > "$LOG"
 figs root 100*G 20*G 80*G

@@ -14,11 +14,20 @@
  *   4. the provider says the instance is running at that address, and
  *   5. nothing is already there (the site node has no agent; no host agent is paired).
  *
+ * A Starter site in a container shares its host's address with the host and
+ * the other sites, so it is found the other way round: by the key its install
+ * recorded, then its name, and the join must come from that site's host
+ * (container_verdict). Check 4 is then the host's, where this plane made it.
+ *
  * Checks 1-3 and 5 are database reads (verdict(), pure, no provider call) and run
  * first, so a stranger on the public join endpoint cannot make this plane call the
  * provider. Check 4 runs inside the existing approval paths. Everything fails
  * closed: any doubt leaves the request pending, and nothing here ever rejects.
  *
+ * @version 1.3 - A Starter site in a container is found by the key its install recorded and approved when its join
+ *                comes from its host, IPv4 or IPv6 (container_verdict; hosting_launch S4)
+ * @version 1.2 - A bare install's machine agent (no site) joins under the site-agent name; its key, printed
+ *                as an adopt request, is recorded as the site key (specs/hosting_launch.md S3 run)
  * @version 1.1 - site_key_from_output(): the site agent's key an install printed, for a copy onto a host,
  *                whose join SiteCopyRunner approves the same way (specs/site_container_engine.md D9)
  * @version 1.0
@@ -49,14 +58,22 @@ class JoinAutoApproval {
 		$output = str_replace("\r", '', preg_replace('/\x1b\[[0-9;]*m/', '', $output));
 
 		$host_name = $provision->host_agent_name();
-		if ($host_name !== null && preg_match_all(
+		// A bare install (no site) has one agent, the machine's, and it joins
+		// under the provision's site-agent name; verdict() takes it as the site
+		// agent. Its key is printed the host agent's way, never as SITE_AGENT_KEY=.
+		$machine_name = $host_name === null ? $provision->site_agent_name() : null;
+		if (preg_match_all(
 				'/Asked\s+\S+\s+to adopt this machine as "([^"\n]+)"\.\s*\n+\s*Key fingerprint:\s+([0-9a-f]{16})\b/i',
 				$output, $m, PREG_SET_ORDER)) {
 			foreach ($m as $hit) {
-				if ($hit[1] === $host_name) { $out['host'] = strtolower($hit[2]); } // the last one wins: a retry mints a new agent
+				// The last one wins: a retry mints a new agent.
+				if ($host_name !== null && $hit[1] === $host_name) { $out['host'] = strtolower($hit[2]); }
+				if ($machine_name !== null && $machine_name !== '' && $hit[1] === $machine_name) { $out['site'] = strtolower($hit[2]); }
 			}
 		}
-		$out['site'] = self::site_key_from_output($output);
+		if ($machine_name === null) {
+			$out['site'] = self::site_key_from_output($output);
+		}
 		return $out;
 	}
 
@@ -103,6 +120,13 @@ class JoinAutoApproval {
 		if ($request->get('ajr_status') !== AgentJoinRequest::STATUS_PENDING || $request->is_expired()) {
 			$v['reason'] = 'not pending';
 			return $v;
+		}
+		// A Starter site in a container shares its host's address with up to
+		// seven others, so it is found by the key its install recorded, and the
+		// join must come from that site's host (hosting_launch S4).
+		$container = class_exists('CustomerCloudProvision') ? self::container_verdict($request, $v) : null;
+		if ($container !== null) {
+			return $container;
 		}
 		$provision = class_exists('CustomerCloudProvision')
 			? CustomerCloudProvision::for_machine_address((string)$request->get('ajr_source_ip')) : null;
@@ -166,6 +190,88 @@ class JoinAutoApproval {
 	}
 
 	/**
+	 * A container site's join: the provision whose recorded site key is the
+	 * request's key, in a container on a host. Null when no container site
+	 * recorded this key, and the address-based path decides.
+	 *
+	 * Eligible only when the claimed name is the site's, the request comes from
+	 * the site's host (its IPv4 on the host record, or either address of the
+	 * host's own machine), and the site's node has no agent yet.
+	 */
+	public static function container_verdict($request, array $v): ?array {
+		$fingerprint = strtolower(trim((string)$request->get('ajr_fingerprint')));
+		if ($fingerprint === '') {
+			return null;
+		}
+		$provision = null;
+		foreach (new MultiCustomerCloudProvision(['cvp_expected_site_key' => $fingerprint, 'cvp_landing' => 'container', 'deleted' => false],
+				['cvp_customer_cloud_provision_id' => 'DESC'], 1) as $row) {
+			$provision = $row;
+		}
+		if ($provision === null) {
+			return null;
+		}
+		$v['provision'] = $provision;
+		$v['agent'] = 'container';
+		if (!in_array((string)$provision->get('cvp_status'), self::PROVISION_STATUSES, true)) {
+			$v['reason'] = "the provision is '" . $provision->get('cvp_status') . "', not installing or done";
+			return $v;
+		}
+		if (trim((string)$request->get('ajr_claimed_name')) !== $provision->site_agent_name()) {
+			$v['reason'] = 'the name is not the one this site\'s agent joins as';
+			return $v;
+		}
+		$source = CustomerCloudProvision::normalize_address((string)$request->get('ajr_source_ip'));
+		if ($source === '' || !in_array($source, self::container_host_addresses($provision), true)) {
+			$v['reason'] = 'the join does not come from the host this site is on';
+			return $v;
+		}
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
+		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
+			$v['reason'] = 'the provision has no site node yet';
+			return $v;
+		}
+		if (trim((string)$node->get('mgn_agent_public_key')) !== '') {
+			$v['reason'] = 'the site node already has an agent';
+			return $v;
+		}
+		$v['eligible'] = true;
+		return $v;
+	}
+
+	/**
+	 * The addresses a container site's agent can reach this plane from: its
+	 * host record's (IPv4), and its host machine's IPv4 and IPv6, from that
+	 * machine's node and the provision that made it, where one did.
+	 *
+	 * @return string[] normalized addresses
+	 */
+	public static function container_host_addresses($provision): array {
+		$out = array();
+		$host_id = (int)$provision->get('cvp_mgh_managed_host_id');
+		$host = $host_id ? new ManagedHost($host_id, TRUE) : null;
+		if (!$host || !$host->key || $host->get('mgh_delete_time')) {
+			return $out;
+		}
+		$out[] = (string)$host->get('mgh_host');
+		$machine_id = (int)$host->get('mgh_mgn_managed_node_id');
+		if ($machine_id) {
+			$machine = new ManagedNode($machine_id, TRUE);
+			if ($machine->key && !$machine->get('mgn_delete_time')) {
+				$out[] = (string)$machine->get('mgn_host');
+			}
+			$made = CustomerCloudProvision::latest_for_node($machine_id);
+			if ($made) {
+				$out[] = (string)$made->get('cvp_instance_ip');
+				$out[] = (string)$made->get('cvp_instance_ipv6');
+			}
+		}
+		$out = array_map(function ($a) { return CustomerCloudProvision::normalize_address($a); }, $out);
+		return array_values(array_unique(array_filter($out)));
+	}
+
+	/**
 	 * Approve every pending request that is eligible. Returns how many were approved.
 	 * A failure on one request (provider down, refused) leaves it pending and never
 	 * stops the others.
@@ -182,14 +288,16 @@ class JoinAutoApproval {
 					continue;
 				}
 				$provision = $v['provision'];
-				if ($v['agent'] === 'site') {
+				if ($v['agent'] === 'container') {
+					AgentChannelEndpoint::approveContainerSiteJoin($request, (int)$provision->get('cvp_mgn_managed_node_id'));
+				} elseif ($v['agent'] === 'site') {
 					AgentChannelEndpoint::approveProvisionSiteJoin($request);
 				} else {
 					AgentChannelEndpoint::adoptJoin($request);
 				}
 				// Consume the key: a second request with the same key must not approve again.
 				$provision = new CustomerCloudProvision((int)$provision->key, TRUE);
-				$provision->set($v['agent'] === 'host' ? 'cvp_expected_host_key' : 'cvp_expected_site_key', null);
+				$provision->set($v['agent'] === 'host' ? 'cvp_expected_host_key' : 'cvp_expected_site_key', null); // a container site's is its site key
 				$provision->save();
 				$request = new AgentJoinRequest((int)$request->key, TRUE);
 				$request->set('ajr_decided_by', 'auto');

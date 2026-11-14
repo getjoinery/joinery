@@ -25,6 +25,8 @@
  *
  * Run: php plugins/server_manager/tests/join_auto_approval_test.php
  *
+ * @version 1.3 - a Starter site in a container: found by its recorded key, approved from its host over IPv4 or IPv6
+ * @version 1.2 - a bare install's machine agent is recorded from its adopt line and approved
  * @version 1.1 - a host approval that fails at its last write rolls its node back
  * @version 1.0
  */
@@ -89,6 +91,8 @@ class JoinAutoApprovalTest {
 		try {
 			$this->test_install_output();
 			$this->test_site_agent();
+			$this->test_bare_machine_agent();
+			$this->test_container_site();
 			$this->test_host_agent_over_ipv6();
 			$this->test_failed_host_approval();
 			$this->test_held_cases();
@@ -239,6 +243,140 @@ class JoinAutoApprovalTest {
 		$v = JoinAutoApproval::verdict($again);
 		check(!$v['eligible'], 'after approval nothing is left for a second request to match', $v['reason']);
 		$this->reject($again);
+	}
+
+	private function test_bare_machine_agent() {
+		section('A bare install\'s machine agent (a starter host) is recorded from its adopt line and approved');
+
+		$p = $this->provision('done', ['cvp_install_mode' => 'bare']);
+		$name = $p['prov']->site_agent_name();
+		check($p['prov']->host_agent_name() === null, 'a bare install has no separate host agent');
+		[$jr, $fp] = $this->join($name, $p['ip']);
+		$out = "Asked https://dev.example.test to adopt this machine as \"{$name}\".\n\n    Key fingerprint:  {$fp}\n\n"
+			. "Approve the request on the management node.\nINSTALL_SUCCESS\n";
+		$keys = JoinAutoApproval::keys_from_install_output($out, $p['prov']);
+		check($keys['site'] === strtolower($fp) && $keys['host'] === null, 'the machine agent\'s key is read as the site key', json_encode($keys));
+		$keys = JoinAutoApproval::keys_from_install_output("Asked https://x to adopt this machine as \"someone-else\".\n\n    Key fingerprint:  0123456789abcdef\n", $p['prov']);
+		check($keys['site'] === null, 'a key printed for another name is not taken');
+
+		JoinAutoApproval::record_from_install($p['site'], $out);
+		$prov = new CustomerCloudProvision((int)$p['prov']->key, TRUE);
+		check(strtolower((string)$prov->get('cvp_expected_site_key')) === strtolower($fp), 'recording stores it on the provision');
+
+		$this->running($p);
+		$v = JoinAutoApproval::verdict($jr);
+		check($v['eligible'] && $v['agent'] === 'site', 'the verdict is eligible', $v['reason']);
+		check(JoinAutoApproval::run() >= 1, 'a run approves it');
+		$jr = new AgentJoinRequest((int)$jr->key, TRUE);
+		$site = new ManagedNode((int)$p['site']->key, TRUE);
+		check($jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
+			&& trim((string)$site->get('mgn_agent_public_key')) === (string)$jr->get('ajr_public_key'),
+			'the request is approved and its key bound to the machine\'s node');
+	}
+
+	/** A starter host this plane made (its machine's provision and node), and a container site on it. */
+	private function starter_fixture(string $key): array {
+		$h = $this->provision('done', ['cvp_install_mode' => 'bare', 'cvp_starter_host' => true]);
+		$host = new ManagedHost(NULL);
+		$host->set('mgh_slug', 'jaa-sh-' . $h['sfx']);
+		$host->set('mgh_name', 'HarnessTest jaa starter host ' . $h['sfx']);
+		$host->set('mgh_host', $h['ip']);
+		$host->set('mgh_tier', 'starter');
+		$host->set('mgh_max_sites', 8);
+		$host->set('mgh_mgn_managed_node_id', (int)$h['site']->key);
+		$host->save();
+		$host->load();
+		harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $host->key);
+
+		$sfx = substr(bin2hex(random_bytes(4)), 0, 8);
+		$site = new ManagedNode(NULL);
+		$site->set('mgn_name', 'HarnessTest jaa starter site ' . $sfx);
+		$site->set('mgn_slug', 'jaa-st-' . $sfx);
+		$site->set('mgn_host', $h['ip']);
+		$site->set('mgn_container_name', 'st' . $sfx);
+		$site->set('mgn_mgh_managed_host_id', (int)$host->key);
+		$site->set('mgn_uptime_enabled', false);
+		$site->save();
+		$site->load();
+		harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $site->key);
+
+		$prov = new CustomerCloudProvision(NULL);
+		$prov->set('cvp_origin', 'admin');
+		$prov->set('cvp_usr_user_id', $this->user_id);
+		$prov->set('cvp_domain', 'jaa-st-' . $sfx . '.example.com');
+		$prov->set('cvp_slug', 'jaa-st-' . $sfx);
+		$prov->set('cvp_sitename', 'st' . $sfx);
+		$prov->set('cvp_hosting_mode', 'operator');
+		$prov->set('cvp_landing', 'container');
+		$prov->set('cvp_status', 'done');
+		$prov->set('cvp_mgh_managed_host_id', (int)$host->key);
+		$prov->set('cvp_mgn_managed_node_id', (int)$site->key);
+		$prov->set('cvp_expected_site_key', $key);
+		$prov->save();
+		harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $prov->key);
+		return ['host' => $h, 'mgh' => $host, 'site' => $site, 'prov' => $prov];
+	}
+
+	private function test_container_site() {
+		section('A Starter site in a container is found by its recorded key and approved from its host, over IPv4 or IPv6');
+
+		// Over the host machine's IPv6: the host record holds only its IPv4.
+		$pub = sodium_crypto_sign_publickey(sodium_crypto_sign_keypair());
+		$fp = AgentJoinRequest::fingerprint($pub);
+		$f = $this->starter_fixture($fp);
+		$name = $f['prov']->site_agent_name();
+		[$jr] = $this->join($name, $f['host']['ip6']);
+		$j = new AgentJoinRequest((int)$jr->key, TRUE);
+		$j->set('ajr_public_key', base64_encode($pub));
+		$j->set('ajr_fingerprint', $fp);
+		$j->save();
+		$this->running($f['host']);
+		$v = JoinAutoApproval::verdict($j);
+		check($v['eligible'] && $v['agent'] === 'container' && (int)$v['provision']->key === (int)$f['prov']->key,
+			'the verdict names the site\'s own provision, not the host\'s', $v['reason']);
+		check(JoinAutoApproval::run() >= 1, 'a run approves it');
+		$j = new AgentJoinRequest((int)$jr->key, TRUE);
+		$site = new ManagedNode((int)$f['site']->key, TRUE);
+		$hostnode = new ManagedNode((int)$f['host']['site']->key, TRUE);
+		check($j->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED && $j->get('ajr_decided_by') === 'auto'
+			&& trim((string)$site->get('mgn_agent_public_key')) === base64_encode($pub),
+			'the request is approved and its key bound to the site\'s node');
+		check(trim((string)$hostnode->get('mgn_agent_public_key')) === '', 'the host\'s node is left alone');
+		$prov = new CustomerCloudProvision((int)$f['prov']->key, TRUE);
+		check(trim((string)$prov->get('cvp_expected_site_key')) === '', 'the recorded key is consumed');
+
+		// Over the host record's IPv4, from a host made by hand (no provision of its own).
+		[$jr2, $fp2] = $this->join('placeholder', '203.0.113.1');
+		$g = $this->starter_fixture($fp2);
+		$g_ip = '198.51.100.' . random_int(2, 250);
+		$g['mgh']->set('mgh_host', $g_ip);
+		$g['mgh']->save();
+		$hand = new ManagedNode((int)$g['host']['site']->key, TRUE);
+		$hand->set('mgn_host', $g_ip);
+		$hand->save();
+		$j2 = new AgentJoinRequest((int)$jr2->key, TRUE);
+		$j2->set('ajr_claimed_name', 'someone-else');
+		$j2->set('ajr_source_ip', $g_ip);
+		$j2->save();
+		$v = JoinAutoApproval::verdict($j2);
+		check(!$v['eligible'] && $v['agent'] === 'container' && strpos($v['reason'], 'name') !== false,
+			'a join with the right key and another name is held', $v['reason']);
+		$j2->set('ajr_claimed_name', $g['prov']->site_agent_name());
+		$j2->set('ajr_source_ip', '203.0.113.' . random_int(2, 250));
+		$j2->save();
+		$v = JoinAutoApproval::verdict($j2);
+		check(!$v['eligible'] && strpos($v['reason'], 'host') !== false, 'a join from an address that is not its host is held', $v['reason']);
+		$j2->set('ajr_source_ip', $g_ip);
+		$j2->save();
+		$v = JoinAutoApproval::verdict($j2);
+		check($v['eligible'] && $v['agent'] === 'container', 'the same join from the host record\'s IPv4 is eligible', $v['reason']);
+		$this->reject($j2);
+
+		// A key no container site recorded is left to the address-based path.
+		[$jr3] = $this->join('nobody', $f['host']['ip']);
+		check(JoinAutoApproval::container_verdict($jr3, array('provision' => null, 'agent' => null, 'eligible' => false, 'key_mismatch' => false, 'reason' => '')) === null,
+			'a key no Starter site recorded is not a Starter site\'s join');
+		$this->reject($jr3);
 	}
 
 	private function test_host_agent_over_ipv6() {

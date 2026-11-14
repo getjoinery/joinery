@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.106 - no Move to customer's Linode panel on a Starter site: it has no server of its own (B8, hosting_launch S3 run)
  * @version 1.105 - the sentinel alarm links to the node's replace-after-a-break-in list
  * @version 1.104 - a Vault key safety row: the node's unmet vault host checks, by name, and the ones it could not read (security_weak_spots_2026_11 WP3)
  * @version 1.103 - no inline script or handlers: confirms are kit attributes, Hold stopped is data-jy-prompt, the rest assets/js/node-overview.js
@@ -2950,7 +2951,8 @@
 		$xfer_row = null;
 	}
 	// Sold sites only: a relay shard and an operator-account site copy are on our account too.
-	$xfer_sold = $xfer_provision && $xfer_provision->is_sold();
+	// A Starter site has no server of its own to hand over; it moves by a site copy.
+	$xfer_sold = $xfer_provision && $xfer_provision->is_sold() && !$xfer_provision->is_container();
 	if ($xfer_sold && ($xfer_provision->is_operator_hosted() || $xfer_row !== null)) {
 		$page->begin_box(['title' => 'Move to customer\'s Linode']);
 		if ($xfer_row !== null && $xfer_row->state() !== InstanceTransfer::STATE_CANCELED) {

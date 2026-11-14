@@ -3,6 +3,8 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.10 - The path trigger's text is built only for a site: with no site there is no STATE_DIR, and
+#                 set -u stopped a machine install (a starter host, a relay shard) before its timer was written
 # Version: 1.9 - In a site container the converger's log is ${STATE_DIR}/host_converger.log, in the state
 #                volume (_site_run_spec.sh 1.19), where it outlives a rebuild and the host reads it
 # Version: 1.8 - Root's state for the site is /var/lib/joinery/sites/SITENAME (made here with its modes: the queue
@@ -281,7 +283,13 @@ WantedBy=timers.target"
     # unit early boot waits for would be an ordering cycle
     # (specs/hosted_data_promise_disk_encryption.md D10). It starts once its
     # folder is there.
-    PATH_TEXT="[Unit]
+    changed=0
+    write_if_changed "${SERVICE_FILE}" "${SERVICE_TEXT}" 644 && changed=1
+    write_if_changed "${TIMER_FILE}" "${TIMER_TEXT}" 644 && changed=1
+    # The path trigger watches the site's queue, so only a site has one; a
+    # machine with no site has no STATE_DIR to name.
+    if [[ "${MACHINE}" == "0" ]]; then
+        PATH_TEXT="[Unit]
 Description=Joinery host converger path trigger for ${SITENAME}: carry out a queued root request at once
 DefaultDependencies=no
 After=sysinit.target
@@ -294,10 +302,6 @@ Unit=${UNIT_NAME}.service
 
 [Install]
 WantedBy=paths.target"
-    changed=0
-    write_if_changed "${SERVICE_FILE}" "${SERVICE_TEXT}" 644 && changed=1
-    write_if_changed "${TIMER_FILE}" "${TIMER_TEXT}" 644 && changed=1
-    if [[ "${MACHINE}" == "0" ]]; then
         write_if_changed "${PATH_FILE}" "${PATH_TEXT}" 644 && changed=1
     fi
     # A stale cron entry from a box that moved to systemd would run twice.

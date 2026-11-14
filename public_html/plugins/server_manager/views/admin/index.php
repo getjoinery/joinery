@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.66 - a Starter site's join is tagged as its own and approved for its own node (adopt_container_join, hosting_launch S4)
  * @version 1.65 - no inline script: the row click and status refresh are assets/js/admin-dashboard.js
  * @version 1.64 - the Discard test site confirmation asks for the domain once (confirmTyped adds the request)
  * @version 1.63 - a provision whose server is in the test cloud account offers Discard test site (TestSiteDiscard):
@@ -115,7 +116,7 @@ SmActionLevels::refuse_post('index', $session, '/admin/server_manager');
 // Approve or reject a join request from the banner. Approval makes the node
 // record from the request and binds the key to it — the same act as approval
 // on a node's API Keys tab, without the hand-typed record first.
-if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'adopt_provision_join', 'reject_join', 'reopen_join'], true)) {
+if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'adopt_provision_join', 'adopt_container_join', 'reject_join', 'reopen_join'], true)) {
 	$page_regex = '/\/admin\/server_manager/';
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
 	$jr = new AgentJoinRequest((int)($_POST['ajr_agent_join_request_id'] ?? 0), TRUE);
@@ -140,6 +141,30 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'adopt_provision_j
 		$jr->save();
 		$session->save_message(new DisplayMessage('Join request from ' . $jr->get('ajr_claimed_name') . ' rejected.',
 			'Rejected', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	}
+	if ($_POST['action'] === 'adopt_container_join') {
+		try {
+			$jr_v = JoinAutoApproval::container_verdict($jr, array('provision' => null, 'agent' => null, 'eligible' => false, 'key_mismatch' => false, 'reason' => ''));
+			if ($jr_v === null) {
+				throw new Exception('No Starter site recorded this key.');
+			}
+			if (!$jr_v['eligible']) {
+				throw new Exception(ucfirst($jr_v['reason']) . '.');
+			}
+			$adopted = AgentChannelEndpoint::approveContainerSiteJoin($jr, (int)$jr_v['provision']->get('cvp_mgn_managed_node_id'));
+			$jr_prov_row = new CustomerCloudProvision((int)$jr_v['provision']->key, TRUE);
+			$jr_prov_row->set('cvp_expected_site_key', null);
+			$jr_prov_row->save();
+			$session->save_message(new DisplayMessage(
+				'Agent connected. ' . $jr->get('ajr_claimed_name') . ' (key '
+				. AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint')) . ') is now the agent of '
+				. $adopted['node']->get('mgn_name') . '; it will pick the approval up on its next check.',
+				'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage('Join not approved. ' . $e->getMessage(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		}
 		header('Location: /admin/server_manager'); exit;
 	}
 	if ($_POST['action'] === 'adopt_provision_join') {
@@ -1024,7 +1049,14 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 				$jr_host_claim = $jr_prov && trim($jr_name) === trim((string)$jr_prov->get('cvp_slug')) . '-host';
 				$jr_site_claim = $jr_prov && !$jr_host_claim;
 				$jr_verdict = JoinAutoApproval::verdict($jr); // why this one is still here for a person
-				if ($jr_self) {
+				// A Starter site joins from its host's address; it is its own site, not the host's provision's.
+				$jr_container = ($jr_verdict['agent'] ?? null) === 'container';
+				if ($jr_container) {
+					$jr_site_claim = false;
+				}
+				if ($jr_container) {
+					$jr_tag = ['starter site', 'primary', 'Starter site of provision #' . (int)$jr_verdict['provision']->key . ' (' . $jr_verdict['provision']->get('cvp_domain') . '), in a container on its host. Approving binds the agent to that site\'s node.'];
+				} elseif ($jr_self) {
 					$jr_tag = ['this machine', 'primary', 'This management node\'s own machine, asking to be managed like any other. Approving names the record after this site.'];
 				} elseif ($jr_host_claim) {
 					$jr_tag = ['host agent', 'primary', 'Host agent of provision #' . (int)$jr_prov->key . ' (' . $jr_prov->get('cvp_domain') . '). Approving confirms with the provider that the instance is running, then makes the host node at ' . $jr_prov->get('cvp_instance_ip') . '.'];
@@ -1051,7 +1083,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 					<?php endif; ?>
 					<div class="svm-join-actions">
 						<form method="post" action="/admin/server_manager" id="adopt_join_<?php echo (int)$jr->key; ?>" class="svm-inline-form">
-							<input type="hidden" name="action" value="<?php echo $jr_site_claim ? 'adopt_provision_join' : 'adopt_join'; ?>">
+							<input type="hidden" name="action" value="<?php echo $jr_container ? 'adopt_container_join' : ($jr_site_claim ? 'adopt_provision_join' : 'adopt_join'); ?>">
 							<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
 							<?php echo SmAdminCsrf::field(); ?>
 							<button type="button" class="btn btn-sm btn-primary"

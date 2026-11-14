@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.62 - approveContainerSiteJoin(): a Starter site's join, approved for its own node after the host check (hosting_launch S4)
  * @version 1.61 - a site_create job's admin password slot (__SM_ADMIN_PASSWORD_<provision>__) is opened from the
  *                 provision's sealed column at hand-out, never stored in the job (specs/starter_tier.md)
  * @version 1.60 - the claim takes the site's unseal daemon in one word (agent 1.112.0) and keeps it (specs/unseal_daemon.md WP3)
@@ -969,6 +970,34 @@ class AgentChannelEndpoint {
 	/** The provision whose machine a join's address belongs to, or null. */
 	public static function provisionForAddress(string $ip) {
 		return class_exists('CustomerCloudProvision') ? CustomerCloudProvision::for_machine_address($ip) : null;
+	}
+
+	/**
+	 * Approve a Starter site's join for its own node: a site in a container,
+	 * found by the key its install recorded (JoinAutoApproval::container_verdict).
+	 * Its host is checked as the manual approval checks it: a host this plane
+	 * made must be running at the join's address at the provider.
+	 */
+	public static function approveContainerSiteJoin($request, int $node_id): array {
+		if ($request->get('ajr_status') !== AgentJoinRequest::STATUS_PENDING) {
+			throw new Exception('That join request is no longer pending.');
+		}
+		if ($request->is_expired()) {
+			throw new Exception('That join request has expired. Run the join again on the machine.');
+		}
+		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
+		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
+			throw new Exception('That site has no node to connect its agent to.');
+		}
+		if ($node->get('mgn_agent_public_key')) {
+			throw new Exception($node->get('mgn_name') . ' already has a connected agent. Disconnect it first if you mean to replace it.');
+		}
+		$checker = (self::$provisioner instanceof ProvisionCustomerCloud) ? self::$provisioner : new ProvisionCustomerCloud();
+		$check = $checker->join_approval_check((string)$request->get('ajr_source_ip'), $node);
+		if (!$check['ok']) {
+			throw new Exception($check['reason']);
+		}
+		return ['node' => $node, 'host' => self::approveJoin($request, $node)];
 	}
 
 	/**

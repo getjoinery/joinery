@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.10 - adopt_container_join on the dashboard (10)
  * @version 1.9 - discard_test_provision on the dashboard (10)
  * @version 1.8 - never_do_clear clears the never-do review list and resets what is expected (10)
  * @version 1.7 - approve_held_provision and refuse_held_provision on the dashboard (10)
@@ -54,7 +55,7 @@ final class SmActionLevels {
 			'copy_retry_start' => 10, 'copy_retry_settle' => 10, 'copy_go_back' => 10, 'copy_finish' => 10,
 		),
 		'index' => array(
-			'adopt_join' => 10, 'adopt_provision_join' => 10, 'reject_join' => 10, 'reopen_join' => 10,
+			'adopt_join' => 10, 'adopt_provision_join' => 10, 'adopt_container_join' => 10, 'reject_join' => 10, 'reopen_join' => 10,
 			'break_glass_reveal' => 10, 'break_glass_retire' => 10, 'break_glass_retire_all' => 10,
 			'escrow_approve' => 10, 'escrow_refuse' => 10,
 			'upgrade_host_sites' => 8, 'dismiss_provision' => 8,

@@ -244,9 +244,25 @@ check((string)$p->get('cvp_status') === 'installing', 'while the host has not an
 section('The host answers: done, and the agent key kept');
 
 $job->set('mjb_status', 'completed');
+$job->set('mjb_external_order_item_id', 990000 + random_int(0, 9999)); // a paid order's job, as a live one is
 $job->set('mjb_output', json_encode(array('api_version' => 1, 'data' => array('output' => "building...\nSITE_AGENT_KEY=0123456789abcdef\ndone\n"))));
 $job->save();
+// The store is this site (no API URL): the welcome goes into this site's own
+// mail queue, with no API key needed.
+harness_set_setting_mem('server_manager_getjoinery_api_url', '');
+harness_set_setting_mem('server_manager_getjoinery_api_public_key', '');
+$welcome_params = json_decode((string)$job->get('mjb_parameters'), true) ?: array();
+$welcome_before = (int)$db->query("SELECT max(equ_queued_email_id) FROM equ_queued_emails")->fetchColumn();
 $worker->run(array());
+$welcome = $db->prepare("SELECT equ_to, equ_subject, equ_status FROM equ_queued_emails WHERE equ_queued_email_id > ? AND equ_subject LIKE '%Your site is ready:%'");
+$welcome->execute(array($welcome_before));
+$welcome = $welcome->fetchAll(PDO::FETCH_ASSOC);
+// A test site's mail is trapped: it goes to the test inbox, its subject naming the real recipient.
+$welcome_to = $welcome_params['admin_email'] ?? '';
+check(count($welcome) === 1 && $welcome_to !== ''
+		&& ($welcome[0]['equ_to'] === $welcome_to || strpos($welcome[0]['equ_subject'], '[for ' . $welcome_to . ']') === 0)
+		&& (int)$welcome[0]['equ_status'] === QueuedEmail::READY_TO_SEND,
+	'the welcome email is queued on this site when the store is this site', json_encode($welcome));
 $p->load();
 $node->load();
 check((string)$p->get('cvp_status') === 'done', 'the provision is done', (string)$p->get('cvp_error'));
