@@ -35,6 +35,7 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.13 - the cached ping answer and the first transport key save as server-initiated writes: a Setup page view makes both
  * @version 1.12 - the transport key is X-Wing only: mrl_transport_secret_retired_sealed, mrl_transport_replaced_time, transportKeyIsOld(),
  *                 retiredTransportSecretMayGo() and transportSecretFor() are gone
  * @version 1.11 - mrl_last_push_attempt_time, mrl_last_push_result, mrl_last_push_reason: the last map push attempt's outcome
@@ -213,7 +214,9 @@ class MailboxRelay extends SystemBase {
 		$sealed_secret = (new SecretBox())->seal('mrl_mailbox_relays.mrl_transport_secret_sealed', $kp['secret']);
 		$this->set('mrl_transport_public_key', $kp['public']);
 		$this->set('mrl_transport_secret_sealed', $sealed_secret);
-		$this->save();
+		// Minted the first time the address list needs it, which can be a
+		// Setup page view building that list: the platform's key, no person's act.
+		SystemBase::server_initiated_write(function () { $this->save(); });
 		return $kp['public'];
 	}
 
@@ -398,7 +401,9 @@ class MailboxRelay extends SystemBase {
 			if ((string)$this->get('mrl_last_health_failure') !== $failure) {
 				$this->set('mrl_last_health_failure', $failure);
 			}
-			$this->save();
+			// The Setup page's reachability check pings on every view and keeps
+			// the answer: an observation cached, not a change anyone made.
+			SystemBase::server_initiated_write(function () { $this->save(); });
 		}
 		return $health;
 	}

@@ -24,7 +24,14 @@
  * Answers follow the editor's reading of them: 401/403/404 mean "not allowed",
  * 409 with COOLStatusCode 1010 means "changed underneath you", 413 "too large".
  *
+ * The editor's request carries no signed-in user: the token names the member,
+ * and the checks here (can_read, can_write, the level, the plan) decide what
+ * they may do. PutFile's writes therefore run under rule_checked_write(), as a
+ * Drive upload's do behind can_write(); without it the model check sees a
+ * visitor and refuses the version row.
+ *
  * @version 0.1.0
+ * @version 0.2.0 - PutFile's writes run under rule_checked_write(); $body_path lets the suite send a body
  */
 class OfficeEditorWopi {
 
@@ -32,6 +39,9 @@ class OfficeEditorWopi {
 
 	/** The status of the last answer (the suite reads it; a CLI has no response line). */
 	public static $last_status = null;
+
+	/** A file the suite reads a PutFile body from; php://input cannot be fed in the CLI. */
+	public static $body_path = null;
 
 	/** Entry point from the route handler, which has left the page's output buffers. */
 	public static function handle($file_id, $contents) {
@@ -69,7 +79,11 @@ class OfficeEditorWopi {
 				return self::getFile($file);
 			}
 			if ($contents && $method === 'POST' && strtoupper((string)($_SERVER['HTTP_X_WOPI_OVERRIDE'] ?? '')) === 'PUT') {
-				return self::putFile($file, $user, $claims);
+				// The token and putFile()'s can_write() admit the member; the
+				// file, its versions and the change feed are the owner's rows.
+				return SystemBase::rule_checked_write(function () use ($file, $user, $claims) {
+					return self::putFile($file, $user, $claims);
+				});
 			}
 			return self::reply(501, array('error' => 'not supported'));
 		} catch (Throwable $e) {
@@ -203,7 +217,7 @@ class OfficeEditorWopi {
 			return self::reply(500, array('error' => 'no temp space'));
 		}
 		try {
-			$in = fopen('php://input', 'rb');
+			$in = fopen(self::$body_path !== null ? self::$body_path : 'php://input', 'rb');
 			$out = fopen($tmp, 'wb');
 			$size = ($in && $out) ? stream_copy_to_stream($in, $out) : false;
 			if ($in) { fclose($in); }

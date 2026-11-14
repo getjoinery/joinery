@@ -312,6 +312,7 @@ $permitted = array(
 	'includes/joinery_direct/DirectIdentity.php' => 'the site\'s own signing key, minted the first time anything needs it and moved when its domain\'s custody changes',
 	'data/content_versions_class.php' => 'the oldest content versions pruned to the cap, after whoever\'s save added the newest',
 	'plugins/event_manager/data/event_sessions_class.php' => 'a course session visit counted as the page is shown: the view\'s bookkeeping, not the viewer\'s change',
+	'plugins/mailbox/data/mailbox_relays_class.php' => 'the relay\'s ping answer cached as the Setup page checks it, and its transport key minted the first time the address list needs it',
 );
 
 $found = array();
@@ -396,6 +397,7 @@ $rule_permitted = array(
 	'plugins/dns_filtering/logic/scheduled_block_edit_logic.php' => 'the owner\'s block delete and toggle removals behind assert_can_write',
 	'plugins/forum/includes/ForumPosting.php' => 'topic, counter and change-log writes behind mayPost and the author or moderator checks',
 	'plugins/joinery_ai/includes/ChatAttachmentIngest.php' => 'dropping a broken upload in the member\'s own chat',
+	'plugins/office_editor/includes/OfficeEditorWopi.php' => 'the document editor saving a member\'s edit (PutFile): the signed token, the proof and can_write() admit it; the file, its versions and the change feed are the owner\'s',
 	'plugins/mailbox/data/inbound_email_filters_class.php' => 'a device-run rule\'s match log and forward bookkeeping (confirmation request and its queued email, attempt record), the mailbox\'s own records, for a message its callers checked the caller holds',
 	'plugins/mailbox/includes/MailboxDrafts.php' => 'a draft\'s own purges after the grant and authorship checks (loadDraftInScope, canAccess)',
 	'plugins/mailbox/includes/MailboxFortressParse.php' => 'a refused device parse removes the part Files it made; standing() checked the sealed owner',

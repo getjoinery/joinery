@@ -142,18 +142,33 @@ function oe_request($method, $file_id, $contents, $token, array $headers = array
 	foreach ($headers as $k => $v) { $_SERVER[$k] = $v; }
 	$_GET = array('access_token' => $token);
 	$tmp_input = null;
+	if ($body !== null) {
+		// php://input cannot be fed in the CLI; the host reads this file instead.
+		$tmp_input = tempnam(sys_get_temp_dir(), 'oe_body_test_');
+		file_put_contents($tmp_input, $body);
+		OfficeEditorWopi::$body_path = $tmp_input;
+	}
+	// As the web request it is: the model write check applies, and no one is
+	// signed in (the editor carries the token, not a session).
+	$web = !empty($opts['web']);
+	$session = SessionControl::get_instance();
+	if ($web) {
+		Access::$sapi = 'fpm-fcgi';
+		$session->set_api_user(0, null, 0);
+	}
 	ob_start();
 	try {
-		if ($body !== null) {
-			// php://input cannot be fed in the CLI: the save is driven through
-			// OfficeEditorWopi::save() for bodies (oe_put below).
-			throw new LogicException('use oe_put for a body');
-		}
 		OfficeEditorWopi::$last_status = null;
 		OfficeEditorWopi::handle((int)$file_id, $contents);
 	} finally {
 		$out = ob_get_clean();
 		list($_SERVER, $_GET) = $saved;
+		OfficeEditorWopi::$body_path = null;
+		if ($tmp_input !== null && is_file($tmp_input)) { @unlink($tmp_input); }
+		if ($web) {
+			Access::$sapi = PHP_SAPI;
+			$session->clear_api_user();
+		}
 	}
 	return array(OfficeEditorWopi::$last_status, $out);
 }
@@ -258,6 +273,25 @@ $r4 = oe_put($file->key, $editor, 'editor save ' . bin2hex(random_bytes(8)), $r3
 check($r4['status'] === 200 && oe_versions($file->key) === $v0 + 1, 'a save made with the other participant\'s token stays in the same version');
 $r5 = oe_put($file->key, $owner, 'owner again ' . bin2hex(random_bytes(8)), $r4['body']['LastModifiedTime'], true);
 check($r5['status'] === 200 && oe_versions($file->key) === $v0 + 1, 'the exit save too');
+
+section('PutFile as the editor sends it, a signed-out web request');
+$put_file = oe_file($owner->key, 'Typed.docx');
+$t_put = OfficeEditorToken::mint($owner->key, $put_file->key, true, 'https://example.org');
+list(, $out) = oe_request('GET', $put_file->key, false, $t_put['token'], array(), null, array('web' => true));
+$put_info = json_decode($out, true);
+list($st) = oe_request('GET', $put_file->key, true, $t_put['token'], array(), null, array('web' => true));
+check($st === 200, 'GetFile answers on the web path (' . $st . ')');
+$pv0 = oe_versions($put_file->key);
+$typed = 'typed in the editor ' . bin2hex(random_bytes(8));
+list($st, $out) = oe_request('POST', $put_file->key, true, $t_put['token'],
+	array('HTTP_X_WOPI_OVERRIDE' => 'PUT', 'HTTP_X_COOL_WOPI_TIMESTAMP' => (string)$put_info['LastModifiedTime']),
+	$typed, array('web' => true));
+check($st === 200 && !empty(json_decode($out, true)['LastModifiedTime']), 'the editor\'s save is accepted (' . $st . ' ' . $out . ')');
+check(oe_head_bytes($put_file->key) === $typed, 'the head holds what was typed');
+check(oe_versions($put_file->key) === $pv0 + 1, 'the loaded head was kept as a version');
+$t_put_view = OfficeEditorToken::mint($owner->key, $put_file->key, false, 'https://example.org');
+list($st) = oe_request('POST', $put_file->key, true, $t_put_view['token'], array('HTTP_X_WOPI_OVERRIDE' => 'PUT'), 'nope', array('web' => true));
+check($st === 403 && oe_head_bytes($put_file->key) === $typed, 'a view-only token is still refused (' . $st . ')');
 check(OfficeEditorSession::current($file->key) === null, 'the exit save ends the span');
 
 section('A new span is a new version');
