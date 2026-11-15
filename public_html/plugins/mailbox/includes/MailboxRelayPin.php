@@ -19,6 +19,7 @@
  * check (not list a mailbox, not answer) or delete a pin, which the browser
  * then makes again on first use; the Fortress card says so.
  *
+ * @version 1.2 - sealTarget() passes the browser's challenge to the relay
  * @version 1.1 - setPin() writes the pin as rule_checked_write(): grantedAlias() checked the caller holds the mailbox
  * @version 1.0
  */
@@ -73,11 +74,17 @@ class MailboxRelayPin {
 	 * (the identity this server pinned the relay's TLS to, for a first use),
 	 * pin (the stored pin, or null)}.
 	 *
+	 * $challenge: the browser's, for the relay to sign into the statement
+	 * (base64url, 22-64 characters), or '' for none.
 	 * $relay: the relay to ask, when not the active one (tests).
 	 *
 	 * @throws MailboxRelayPinException
 	 */
-	public static function sealTarget(int $user_id, int $alias_id, ?MailboxRelay $relay = null): array {
+	public static function sealTarget(int $user_id, int $alias_id, ?MailboxRelay $relay = null,
+			string $challenge = ''): array {
+		if ($challenge !== '' && !preg_match('/^[A-Za-z0-9_-]{22,64}$/', $challenge)) {
+			throw new MailboxRelayPinException('That is not a challenge this check can pass to the relay.');
+		}
 		$alias = self::ownAlias($user_id, $alias_id);
 		$relay = $relay ?? self::relay();
 		if ($alias === null || $relay === null) {
@@ -85,7 +92,7 @@ class MailboxRelayPin {
 		}
 		$address = $alias->get_full_address();
 		try {
-			$answer = $relay->withApi(function (RelayClient $c) use ($address) { return $c->sealTarget($address); });
+			$answer = $relay->withApi(function (RelayClient $c) use ($address, $challenge) { return $c->sealTarget($address, $challenge); });
 		} catch (\Throwable $e) {
 			error_log('MailboxRelayPin: seal-target for mailbox ' . $alias_id . ' failed: ' . $e->getMessage());
 			throw new MailboxRelayPinException('The relay could not be asked which key it seals to. Try again later.');

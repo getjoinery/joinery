@@ -2097,9 +2097,18 @@ first and its relay's Update follows.
   browser accepts) and checks the key named is one it derived itself from the
   secret it holds (a pending key counts only once opened through the root). The
   first check pins (trust on first use; each device also keeps its own record, so
-  a pin deleted on the server is noticed). A bad signature, another key, or a
-  different relay stops with a dialog showing both fingerprints; "Trust the new
-  relay" re-pins, after a step-up on an account with a second factor.
+  a pin deleted on the server is noticed). Each check sends a one-time challenge
+  (`challenge`, 18 random bytes, base64url) that relay 3.18 and later sign into the
+  statement as its last field, so an answer is good for the one check that asked
+  for it and a kept answer cannot be shown again. A relay older than 3.18 signs no
+  challenge; its answer passes only if `signed_at` is within 5 minutes of the
+  device's clock, and only from a relay that device has never seen sign one (each
+  device remembers the relays that have, so a relay rolled back below 3.18 with the
+  same identity alarms as an old answer on every device that saw it sign one, with
+  no approve). A bad signature, another key, an old
+  answer, or a different relay stops with a dialog showing both fingerprints;
+  "Trust the new relay" re-pins, after a step-up on an account with a second
+  factor.
 
 **Phone apps.** The iOS and Android apps read, search, draft and reply to
 Fortress mail. The phone is handed the mail key once from a computer — enrollment

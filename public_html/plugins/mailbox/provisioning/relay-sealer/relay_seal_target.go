@@ -16,15 +16,25 @@ package main
 // bytes the browser verifies. It answers from the live routing entry, and only
 // for a recipient of the requesting tenant: anyone else's address answers the
 // same 404 as an address that does not exist.
+//
+// The browser sends a challenge it made for this one check, and the relay
+// signs it into the statement (relay 3.18): an answer can then be shown to
+// that browser once, never kept and shown again after the relay has moved on.
+// An ask without one gets the statement without the field, byte for byte what
+// relays before 3.18 signed.
 
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
 
 const relaySealTargetSigningPrefix = "joinery-relay:seal-target:v1\n"
+
+// A browser's challenge: base64url, 22 to 64 characters (16 to 48 random bytes).
+var sealTargetChallengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{22,64}$`)
 
 // sealTargetStatement is what the relay signs. FIELD ORDER IS THE CONTRACT.
 type sealTargetStatement struct {
@@ -36,11 +46,14 @@ type sealTargetStatement struct {
 	MapVersion             int64  `json:"map_version"`
 	RelayIdentityPublicKey string `json:"relay_identity_public_key"`
 	SignedAt               string `json:"signed_at"`
+	Challenge              string `json:"challenge,omitempty"`
 }
 
-// buildSealTarget resolves a recipient for a tenant and signs the statement.
-// ok=false: no such recipient for this tenant, or it stores nothing.
-func buildSealTarget(m *routingMap, tenant, recipient string, id *relayIdentity, now time.Time) (string, string, bool) {
+// buildSealTarget resolves a recipient for a tenant and signs the statement,
+// with the asker's challenge when there is one (already checked against
+// sealTargetChallengePattern). ok=false: no such recipient for this tenant, or
+// it stores nothing.
+func buildSealTarget(m *routingMap, tenant, recipient, challenge string, id *relayIdentity, now time.Time) (string, string, bool) {
 	recipient = strings.ToLower(strings.TrimSpace(recipient))
 	entry, matched := m.resolve(recipient)
 	if !matched || entry.Tenant != tenant || entry.PublicKey == "" ||
@@ -56,6 +69,7 @@ func buildSealTarget(m *routingMap, tenant, recipient string, id *relayIdentity,
 		MapVersion:             m.Version,
 		RelayIdentityPublicKey: id.publicKeyB64(),
 		SignedAt:               now.UTC().Format(time.RFC3339),
+		Challenge:              challenge,
 	}
 	raw, err := json.Marshal(st)
 	if err != nil {
@@ -72,7 +86,12 @@ func (s *relayServer) sealTarget(w http.ResponseWriter, r *http.Request, tenant 
 		refuse(w, http.StatusServiceUnavailable, "no routing map yet")
 		return
 	}
-	statement, signature, ok := buildSealTarget(m, tenant, r.URL.Query().Get("recipient"), s.identity, time.Now())
+	challenge := r.URL.Query().Get("challenge")
+	if challenge != "" && !sealTargetChallengePattern.MatchString(challenge) {
+		refuse(w, http.StatusBadRequest, "malformed challenge")
+		return
+	}
+	statement, signature, ok := buildSealTarget(m, tenant, r.URL.Query().Get("recipient"), challenge, s.identity, time.Now())
 	if !ok {
 		refuse(w, http.StatusNotFound, "no such recipient")
 		return

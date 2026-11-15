@@ -39,6 +39,7 @@
  * request detail. The agent's site_log_count counts these (marker
  * dns_reconciler_failed); the reason itself stays on the result row.
  *
+ * @version 1.8 - a removal forgets a receipt for the record it was written for, or when nothing of its kind is left at the name; a zone counts as all ours by value
  * @version 1.7 - ownership is looked up, removed and withdrawn per TXT kind (the store keeps one receipt per kind at a name)
  * @version 1.6 - every failed record write logs one line naming its operation, type and name
  * @version 1.5 - a TXT slot is ours only when we last wrote the same kind there; a TXT is diffed and replaced only against records of its own kind, so SPF never overwrites a verification record
@@ -553,9 +554,7 @@ class DnsReconciler {
 			// Only if the platform was claiming this slot. Forgetting a slot it
 			// never owned is harmless but dishonest bookkeeping.
 			if (!empty($row['owned'])) {
-				foreach ($row['live'] as $live) {
-					$this->store->forget($plan->getDomain(), $live->type, $live->name, $live->txtKind());
-				}
+				$this->forgetDeleted($driver, $zone, $plan->getDomain(), $record, $row['live']);
 			}
 			$count = count($row['live']);
 			return $this->result($key, $record, 'deleted', true,
@@ -563,6 +562,46 @@ class DnsReconciler {
 		} catch (Throwable $e) {
 			self::logFailure('delete', $record, $zone, $e);
 			return $this->result($key, $record, 'failed', false, $e->getMessage());
+		}
+	}
+
+	/**
+	 * Drop the receipts a removal leaves with nothing to stand for. Per kind of
+	 * record deleted: the receipt goes when it is for a record just deleted, or
+	 * when no record of its kind is left at the name (we wrote X, someone
+	 * edited it to Y, Y was deleted: keeping X's receipt would make a foreign
+	 * record added there later read as ours). Two other-kind TXT records share
+	 * a slot, so deleting the one we never wrote keeps the receipt of the one
+	 * we did. If the zone cannot be read back, only the first rule applies.
+	 *
+	 * @param DnsRecord[] $deleted
+	 */
+	private function forgetDeleted(DnsProvider $driver, string $zone, string $domain, DnsRecord $record, array $deleted): void {
+		$left = null;
+		try {
+			$left = array();
+			foreach ($driver->listRecords($zone) as $live) {
+				if ($live->type === $record->type && $live->name === $record->name) {
+					$left[$live->txtKind()] = true;
+				}
+			}
+		} catch (Throwable $e) {
+			$left = null;
+		}
+		$kinds = array();
+		foreach ($deleted as $live) {
+			$kinds[$live->txtKind()][] = $live->value;
+		}
+		foreach ($kinds as $kind => $values) {
+			$kind = (string)$kind;
+			$receipt = $this->store->ownedRecord($domain, $record->type, $record->name, $kind);
+			if ($receipt === null) {
+				continue;
+			}
+			$written = DnsRecord::canonicalValue($record->type, (string)($receipt['value'] ?? ''));
+			if (in_array($written, $values, true) || ($left !== null && !isset($left[$kind]))) {
+				$this->store->forget($domain, $record->type, $record->name, $kind);
+			}
 		}
 	}
 
@@ -636,13 +675,15 @@ class DnsReconciler {
 	 * the platform is for it.
 	 */
 	public function zoneHoldsOnlyOurRecords(DnsProvider $driver, string $zone, string $domain): bool {
+		// By value, as withdraw() deletes: a foreign verification beside an
+		// other-kind TXT of ours at one name shares its slot but is not ours.
 		$owned = array();
 		foreach ($this->store->ownedFor($domain) as $row) {
 			$owned[strtoupper($row['type']) . '|' . DnsRecord::normalizeName($row['name'])
-				. '|' . (string)($row['kind'] ?? '')] = true;
+				. '|' . DnsRecord::canonicalValue($row['type'], (string)$row['value'])] = true;
 		}
 		foreach ($driver->listRecords($zone) as $live) {
-			if (!isset($owned[$live->slotKey() . '|' . $live->txtKind()])) {
+			if (!isset($owned[$live->slotKey() . '|' . $live->value])) {
 				return false;
 			}
 		}

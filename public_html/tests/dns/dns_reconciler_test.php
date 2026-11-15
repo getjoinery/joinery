@@ -16,6 +16,7 @@
  * does not take the others down, re-publishing a correct domain writes nothing,
  * and a domain that already matches is adopted with no DNS write at all.
  *
+ * @version 1.3 - a removal keeps the receipt of the record it did not delete; the zone check compares values
  * @version 1.2 - two TXT kinds at one name keep two receipts; withdrawal and removal work per kind (B5)
  * @version 1.1 - a TXT is compared and replaced only within its own kind (SPF, DMARC, other)
  */
@@ -507,5 +508,44 @@ foreach ($driver->listRecords(ZONE) as $r) { $left[] = $r->value; }
 check($left === array('joinery-verify=xyz'), 'the SPF is deleted and the verification stays', implode(' | ', $left));
 check(!$store->isOwned(ZONE, 'TXT', ZONE, 'spf') && $store->isOwned(ZONE, 'TXT', ZONE, ''),
 	'removing the SPF forgets only its receipt; the verification is still ours');
+
+// Two other-kind TXT records share a slot: ours, then a foreign one someone
+// added beside it later. The foreign one is not ours for the zone check (B5-1),
+// and removing it keeps our receipt (B5-3).
+list($driver, $reconciler) = fixture();
+$proof = new DnsRecordPlan(ZONE, 'mailbox');
+$proof->addRecord('TXT', ZONE, 'joinery-verify=xyz', null, null, 'Proof');
+$reconciler->apply($driver, ZONE, $proof);
+check($reconciler->getStore()->isOwned(ZONE, 'TXT', ZONE, ''), 'our verification is published and ours');
+$driver->seed(ZONE, array(new DnsRecord('TXT', ZONE, 'google-site-verification=abc123')));
+check($reconciler->zoneHoldsOnlyOurRecords($driver, ZONE, ZONE) === false,
+	'a foreign verification beside our own other-kind TXT is not ours (B5-1)');
+$strip = new DnsRecordPlan(ZONE, 'mailbox');
+$strip->addAbsent('TXT', ZONE, 'google-site-verification=abc123', 'Foreign');
+$strip_row = $reconciler->diffAgainstProvider($driver, ZONE, $strip)[0];
+$reconciler->apply($driver, ZONE, $strip, array('remove' => array($strip_row['key'])));
+$left = array();
+foreach ($driver->listRecords(ZONE) as $r) { $left[] = $r->value; }
+check($left === array('joinery-verify=xyz') && $reconciler->getStore()->isOwned(ZONE, 'TXT', ZONE, ''),
+	'deleting the record we never wrote keeps the receipt for the one we did (B5-3)', implode(' | ', $left));
+check($reconciler->zoneHoldsOnlyOurRecords($driver, ZONE, ZONE) === true, 'and the zone now holds only ours');
+
+// We wrote an SPF, someone edited it by hand, and the edited one is removed:
+// nothing of that kind is left, so the receipt goes too (B5-4).
+list($driver, $reconciler) = fixture();
+$spf = new DnsRecordPlan(ZONE, 'mailbox');
+$spf->addRecord('TXT', ZONE, 'v=spf1 -all', null, null, 'SPF');
+$reconciler->apply($driver, ZONE, $spf);
+$driver->zones[ZONE] = array();
+$driver->seed(ZONE, array(new DnsRecord('TXT', ZONE, 'v=spf1 include:hand.example ~all'),
+	new DnsRecord('TXT', ZONE, 'joinery-verify=xyz')));
+$reconciler->getStore()->remember(ZONE, new DnsRecord('TXT', ZONE, 'joinery-verify=xyz'), 'mailbox', 'fake', ZONE, false);
+$cut = new DnsRecordPlan(ZONE, 'mailbox');
+$cut->addAbsent('TXT', ZONE, 'v=spf1 include:hand.example ~all', 'Edited SPF');
+$cut_row = $reconciler->diffAgainstProvider($driver, ZONE, $cut)[0];
+$reconciler->apply($driver, ZONE, $cut, array('remove' => array($cut_row['key'])));
+$store = $reconciler->getStore();
+check(!$store->isOwned(ZONE, 'TXT', ZONE, 'spf'), 'the hand-edited SPF removed, no SPF receipt is left behind (B5-4)');
+check($store->isOwned(ZONE, 'TXT', ZONE, ''), 'and the verification beside it is still ours');
 
 harness_finish();

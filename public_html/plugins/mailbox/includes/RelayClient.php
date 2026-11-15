@@ -21,6 +21,7 @@
  * that answered something this code cannot read. MailboxRelay::pollHealth
  * records the class so the Setup tab can say which.
  *
+ * @version 1.4 - sealTarget() passes the browser's challenge for the relay to sign (relay 3.18)
  * @version 1.3 - tenantAdd() carries the slot's mail name (mx_hostname) for a shard (relay 3.13)
  * @version 1.2 - mailAppsCertificate(): the mail gateway's certificate for the relay's name, from a CSR
  * @version 1.1 - sealTarget(): the signed seal-target statement, raw
@@ -127,9 +128,14 @@ class RelayClient {
 	 * raw body, unread and unchanged: the owner's browser verifies it against
 	 * the relay identity it pinned, so nothing here may re-encode it. Null when
 	 * the relay has no storing recipient by that address for this tenant (404).
+	 * $challenge is the asking browser's, signed into the statement by relay
+	 * 3.18 and later; an older relay ignores it and the browser judges the
+	 * answer by its age.
 	 */
-	public function sealTarget(string $recipient): ?string {
-		list($status, $answer) = $this->request('GET', '/relay/seal-target?recipient=' . rawurlencode($recipient), '',
+	public function sealTarget(string $recipient, string $challenge = ''): ?string {
+		$query = 'recipient=' . rawurlencode($recipient)
+			. ($challenge !== '' ? '&challenge=' . rawurlencode($challenge) : '');
+		list($status, $answer) = $this->request('GET', '/relay/seal-target?' . $query, '',
 			self::REQUEST_TIMEOUT, null, array(404));
 		return ($status === 404) ? null : $answer;
 	}

@@ -41,7 +41,8 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
- * @version 1.18 - a relay answer is refused unless signed within 5 minutes of this device's clock (B4: an old signed answer cannot be shown again)
+ * @version 1.18 - each relay check sends a one-time challenge; an answer is current only if the relay signed it back, or, from a relay
+ *   that has never signed one, if signed within 5 minutes of this device's clock (B4: an old signed answer cannot be shown again)
  * @version 1.17 - a mailbox whose move to Fortress has not reached the relay yet gets a quiet note and a
  *   recheck every 30 s for up to 5 min before the alarm; a key's fingerprint reads base64url keys
  * @version 1.16 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
@@ -921,10 +922,13 @@ window.MailboxFortress = (function () {
 
 	var SEAL_TARGET_PREFIX = 'joinery-relay:seal-target:v1\n';
 	var PIN_PREFIX = 'joinery-relay-pin:v1\n';
-	// The relay signs the time it answers (signed_at). An answer older than
-	// this, or this far ahead of this device's clock, is refused: a hacked
-	// server could otherwise keep a statement the relay signed while it sealed
+	// A hacked server could keep a statement the relay signed while it sealed
 	// to this device's key and show it again after moving the relay to its own.
+	// Each check sends a challenge made for it, which relay 3.18 and later sign
+	// into the statement; only an answer carrying it is current. An older
+	// relay signs no challenge, so its answer is current only if signed within
+	// this long of this device's clock, and only from a relay this browser has
+	// never seen sign one.
 	var SEAL_TARGET_FRESH_MS = 5 * 60 * 1000;
 	var pinsChecked = false;
 
@@ -950,18 +954,33 @@ window.MailboxFortress = (function () {
 	 * {ok, firstUse, identity} or {ok: false, reason, expected, reported,
 	 * approvable}: reason 'pin' (a pin this vault did not make), 'identity'
 	 * (a relay other than the pinned one; approvable when its own statement is
-	 * signed, fresh and names this vault's key), 'signature', 'stale' (signed,
-	 * but not within SEAL_TARGET_FRESH_MS of now), 'key' (the relay seals to
-	 * another key), 'unreadable'. now is this device's clock in ms (Date.now()
-	 * unless given).
+	 * signed, current and names this vault's key), 'signature', 'replayed'
+	 * (signed for another check: its challenge is not the one sent, or it has
+	 * none from a relay this browser has seen sign one), 'stale' (signed with no
+	 * challenge, not within SEAL_TARGET_FRESH_MS of now), 'key' (the relay seals
+	 * to another key), 'unreadable'. An ok verdict says challenged when the
+	 * relay signed the challenge. Whether a challenge is required is decided by
+	 * the relay that signed the statement (st.relay_identity_public_key), never
+	 * by an identity the server supplies: a stripped answer cannot dodge it by
+	 * arriving beside an old pin for another relay. opts: {challenge (the one
+	 * sent, '' for none), seenSigning(identity) (has that relay signed one
+	 * before: relaySignsChallenges unless given), now (this device's clock in
+	 * ms, Date.now() unless given)}.
 	 */
-	async function judgeSealTarget(answer, box, mac, keys, now) {
+	async function judgeSealTarget(answer, box, mac, keys, opts) {
+		opts = opts || {};
+		var seenSigning = opts.seenSigning || relaySignsChallenges;
 		var relay, st;
 		try { relay = JSON.parse(answer.relay_answer); st = JSON.parse(relay.statement); } catch (e) { relay = null; }
 		if (!relay || !st || typeof relay.signature !== 'string') return { ok: false, reason: 'unreadable' };
 		var signedAt = (typeof st.signed_at === 'string') ? Date.parse(st.signed_at) : NaN;
-		var clock = (typeof now === 'number') ? now : Date.now();
+		var clock = (typeof opts.now === 'number') ? opts.now : Date.now();
 		var fresh = !isNaN(signedAt) && Math.abs(clock - signedAt) <= SEAL_TARGET_FRESH_MS;
+		var signedChallenge = (typeof st.challenge === 'string') ? st.challenge : '';
+		var sent = String(opts.challenge || '');
+		var challenged = signedChallenge !== '' && sent !== '' && sameText(signedChallenge, sent);
+		var needsChallenge = seenSigning(String(st.relay_identity_public_key || ''));
+		var current = (signedChallenge !== '') ? challenged : (fresh && !needsChallenge);
 
 		var pinned, firstUse = false;
 		if (answer.pin) {
@@ -983,13 +1002,14 @@ window.MailboxFortress = (function () {
 		if (!sameText(st.relay_identity_public_key, pinned)) {
 			var selfSigned = await VaultCrypto.verifyEd25519(st.relay_identity_public_key, signed, relay.signature);
 			return { ok: false, reason: 'identity', expected: pinned, reported: st.relay_identity_public_key,
-				approvable: selfSigned && names && fresh, identity: st.relay_identity_public_key };
+				approvable: selfSigned && names && current, challenged: challenged, identity: st.relay_identity_public_key };
 		}
 		if (!await VaultCrypto.verifyEd25519(pinned, signed, relay.signature)) {
 			return { ok: false, reason: 'signature', expected: pinned, reported: pinned };
 		}
-		if (!fresh) {
-			return { ok: false, reason: 'stale', expected: pinned, reported: pinned, signedAt: st.signed_at };
+		if (!current) {
+			return { ok: false, reason: (signedChallenge !== '' || needsChallenge) ? 'replayed' : 'stale',
+				expected: pinned, reported: pinned, signedAt: st.signed_at };
 		}
 		if (!names) {
 			// The relay this device trusts, in its own signed words, still seals
@@ -999,7 +1019,7 @@ window.MailboxFortress = (function () {
 			var switching = st.recipient === String(box.address).toLowerCase() && st.key_kind === 'transport';
 			return { ok: false, reason: 'key', expected: keys[0], reported: st.public_key, switching: switching };
 		}
-		return { ok: true, firstUse: firstUse, identity: pinned };
+		return { ok: true, firstUse: firstUse, identity: pinned, challenged: challenged };
 	}
 
 	/** A key's fingerprint for people: SHA-256, the first 16 bytes in groups of four hex digits. */
@@ -1048,6 +1068,22 @@ window.MailboxFortress = (function () {
 		try { window.localStorage.setItem(LOCAL_PIN + aliasId, identity); } catch (e) { /* no storage here */ }
 	}
 
+	// The relays this browser has seen sign its challenge: from then on an
+	// answer from one without the challenge is an old one, whatever the server
+	// says about the relay's version.
+	var LOCAL_CHALLENGES = 'joinery-relay-challenges:';
+	function relaySignsChallenges(identity) {
+		try { return !!identity && window.localStorage.getItem(LOCAL_CHALLENGES + identity) === '1'; } catch (e) { return false; }
+	}
+	function rememberChallenges(identity) {
+		try { window.localStorage.setItem(LOCAL_CHALLENGES + identity, '1'); } catch (e) { /* no storage here */ }
+	}
+
+	/** A one-time challenge for one relay check: 18 random bytes, base64url (24 characters). */
+	function newChallenge() {
+		return VaultCrypto.b64urlEncode(crypto.getRandomValues(new Uint8Array(18)));
+	}
+
 	/**
 	 * Check every mailbox the relay seals for this browser (MAILBOX_READER
 	 * .relayPinMailboxes), once per page, while the mail vault is open.
@@ -1084,8 +1120,9 @@ window.MailboxFortress = (function () {
 
 	async function checkOne(box, session, accepted) {
 		var answer;
+		var challenge = newChallenge();
 		try {
-			answer = await window.joineryApi.post('mailbox/relay_seal_target', { alias_id: box.alias_id });
+			answer = await window.joineryApi.post('mailbox/relay_seal_target', { alias_id: box.alias_id, challenge: challenge });
 		} catch (e) {
 			// The server can withhold the check; it cannot forge its answer.
 			if (window.console) console.warn('MailboxFortress: the relay could not be asked about ' + box.address + ': ' + (e && e.message));
@@ -1097,7 +1134,7 @@ window.MailboxFortress = (function () {
 		// has: judged against what this browser pinned, not as a first use.
 		var local = localPin(box.alias_id);
 		if (!answer.pin && local) answer = Object.assign({}, answer, { relay_identity_public_key: local });
-		var verdict = await judgeSealTarget(answer, box, accepted.macs, accepted.keys);
+		var verdict = await judgeSealTarget(answer, box, accepted.macs, accepted.keys, { challenge: challenge });
 		// The grace is for a mailbox this browser has never seen sealed to its
 		// key: no pin anywhere, since a pin is made only by an ok check. A relay
 		// put back on the transport key after that is what the alarm is for.
@@ -1119,6 +1156,7 @@ window.MailboxFortress = (function () {
 		switchingNotice(box, false);
 		if (verdict.ok) {
 			rememberPin(box.alias_id, verdict.identity);
+			if (verdict.challenged) rememberChallenges(verdict.identity);
 			if (verdict.firstUse) {
 				await savePin(session, box, verdict.identity).catch(function (e) {
 					if (window.console) console.warn('MailboxFortress: could not pin the relay for ' + box.address + ': ' + (e && e.message));
@@ -1202,6 +1240,7 @@ window.MailboxFortress = (function () {
 		identity: 'A different relay is answering for this mailbox than the one this device trusts.',
 		signature: 'The relay\'s answer is not signed by the relay this device trusts.',
 		stale: 'The relay\'s signed answer is not a current one: it is an old answer shown again, or this device\'s clock is wrong.',
+		replayed: 'The relay\'s signed answer was made for an earlier check: it is an old answer shown again.',
 		key: 'The relay is sealing this mailbox\'s mail to a key that is not this device\'s.',
 		unreadable: 'The relay\'s answer could not be read.'
 	};
@@ -1250,6 +1289,7 @@ window.MailboxFortress = (function () {
 					return stepUp().then(function () { return savePin(session, box, verdict.identity); });
 				}).then(function () {
 					rememberPin(box.alias_id, verdict.identity);
+					if (verdict.challenged) rememberChallenges(verdict.identity);
 					dlg.close();
 					dlg.remove();
 				}, function (e) {
@@ -1576,34 +1616,64 @@ window.MailboxFortress = (function () {
 			var at = Date.parse('2026-09-28T12:00:00Z') + 30 * 1000;
 			var answer = { relay_answer: JSON.stringify({ statement: v.statement, signature: v.signature }),
 				relay_identity_public_key: v.identity, pin: { relay_identity_public_key: v.identity, mac: v.mac } };
-			var ok = await judgeSealTarget(answer, box, mac, keys, at);
+			var ok = await judgeSealTarget(answer, box, mac, keys, { now: at });
 			note('a signed statement under the pinned relay passes', ok.ok && !ok.firstUse);
-			var first = await judgeSealTarget(Object.assign({}, answer, { pin: null }), box, mac, keys, at);
+			var first = await judgeSealTarget(Object.assign({}, answer, { pin: null }), box, mac, keys, { now: at });
 			note('with no pin, it passes as a first use', first.ok && first.firstUse);
-			var other = await judgeSealTarget(answer, box, mac, ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='], at);
+			var other = await judgeSealTarget(answer, box, mac, ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='], { now: at });
 			note('a statement naming another key fails', !other.ok && other.reason === 'key');
 			var bad = await judgeSealTarget(Object.assign({}, answer, { relay_answer: JSON.stringify({
-				statement: v.statement.replace('"map_version":7', '"map_version":8'), signature: v.signature }) }), box, mac, keys, at);
+				statement: v.statement.replace('"map_version":7', '"map_version":8'), signature: v.signature }) }), box, mac, keys, { now: at });
 			note('a changed statement fails the signature', !bad.ok && bad.reason === 'signature');
 			var forged = await judgeSealTarget(Object.assign({}, answer, { pin: { relay_identity_public_key: v.identity,
-				mac: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' } }), box, mac, keys, at);
+				mac: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' } }), box, mac, keys, { now: at });
 			note('a pin this vault did not make is refused', !forged.ok && forged.reason === 'pin');
-			var replayed = await judgeSealTarget(answer, box, mac, keys, at + 6 * 60 * 1000);
+			var replayed = await judgeSealTarget(answer, box, mac, keys, { now: at + 6 * 60 * 1000 });
 			note('the same signed statement shown again six minutes later is refused (B4)', !replayed.ok && replayed.reason === 'stale');
-			var ahead = await judgeSealTarget(answer, box, mac, keys, at - 6 * 60 * 1000);
+			var ahead = await judgeSealTarget(answer, box, mac, keys, { now: at - 6 * 60 * 1000 });
 			note('and so is one dated six minutes ahead of this device', !ahead.ok && ahead.reason === 'stale');
 			// A pin this vault made for some other relay: the answering relay is a new one.
 			var elsewhere = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 			var movedAnswer = Object.assign({}, answer, { pin: { relay_identity_public_key: elsewhere,
 				mac: VaultCrypto.b64encode(await mac(pinMessage(v.aliasId, elsewhere))) } });
-			var moved = await judgeSealTarget(movedAnswer, box, mac, keys, at);
+			var moved = await judgeSealTarget(movedAnswer, box, mac, keys, { now: at });
 			note('a current statement from a new relay may be approved', !moved.ok && moved.reason === 'identity' && moved.approvable);
-			var movedOld = await judgeSealTarget(movedAnswer, box, mac, keys, at + 6 * 60 * 1000);
+			var movedOld = await judgeSealTarget(movedAnswer, box, mac, keys, { now: at + 6 * 60 * 1000 });
 			note('an old one may not', !movedOld.ok && movedOld.reason === 'identity' && !movedOld.approvable);
+			var seenV = function (id) { return id === v.identity; };
+			var noted = await judgeSealTarget(answer, box, mac, keys, { now: at, seenSigning: seenV });
+			note('a current answer without a challenge, from a relay seen signing one, is refused', !noted.ok && noted.reason === 'replayed');
+			var dodged = await judgeSealTarget(movedAnswer, box, mac, keys, { now: at, seenSigning: seenV });
+			note('and is not approvable beside an old pin for another relay (B4-1)',
+				!dodged.ok && dodged.reason === 'identity' && !dodged.approvable);
+
+			// Relay 3.18 signs the browser's challenge (the vector's challenge_vector).
+			var cv = {
+				identity: 'beLRmH6k7NuV/nZUn/k7bG0xw022H71XCBnqdgjArS4=',
+				challenge: 'q3Jx0mVb_k2n-Lp8ZtR4wA',
+				statement: '{"recipient":"box@fortress.test","public_key":"YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=",'
+					+ '"key_kind":"client","key_scope":"mail","key_generation":1,"map_version":8,'
+					+ '"relay_identity_public_key":"beLRmH6k7NuV/nZUn/k7bG0xw022H71XCBnqdgjArS4=","signed_at":"2026-11-15T12:00:00Z",'
+					+ '"challenge":"q3Jx0mVb_k2n-Lp8ZtR4wA"}',
+				signature: 'VLhweEzu8PYtTjy43M6kPwd/5c1LS6OShMxkTgHlP402WCbDSwu4OdzopOyFc2IP+NNRPR/Ix48j71Q67MtfCg=='
+			};
+			var cvAnswer = { relay_answer: JSON.stringify({ statement: cv.statement, signature: cv.signature }),
+				relay_identity_public_key: cv.identity, pin: { relay_identity_public_key: cv.identity,
+					mac: VaultCrypto.b64encode(await mac(pinMessage(v.aliasId, cv.identity))) } };
+			var cvAt = Date.parse('2026-11-15T12:00:00Z');
+			var signedBack = await judgeSealTarget(cvAnswer, box, mac, keys, { now: cvAt, challenge: cv.challenge,
+				seenSigning: function (id) { return id === cv.identity; } });
+			note('an answer carrying the challenge sent passes, and says so', signedBack.ok && signedBack.challenged);
+			var skewed = await judgeSealTarget(cvAnswer, box, mac, keys, { now: cvAt + 3 * 3600 * 1000, challenge: cv.challenge });
+			note('whatever this device\'s clock says', skewed.ok);
+			var otherCheck = await judgeSealTarget(cvAnswer, box, mac, keys, { now: cvAt, challenge: 'zzzzzzzzzzzzzzzzzzzzzz' });
+			note('an answer carrying another check\'s challenge is refused, however recent', !otherCheck.ok && otherCheck.reason === 'replayed');
+			var unasked = await judgeSealTarget(cvAnswer, box, mac, keys, { now: cvAt });
+			note('and so is one carrying a challenge this check never sent', !unasked.ok && unasked.reason === 'replayed');
 			var other = function () { return Promise.resolve(new Uint8Array(32)); };
-			var either = await judgeSealTarget(answer, box, [other, mac], keys, at);
+			var either = await judgeSealTarget(answer, box, [other, mac], keys, { now: at });
 			note('a pin re-made under the rotation\'s new key still passes (B48)', either.ok);
-			var neither = await judgeSealTarget(answer, box, [other], keys, at);
+			var neither = await judgeSealTarget(answer, box, [other], keys, { now: at });
 			note('and one neither key made does not', !neither.ok && neither.reason === 'pin');
 			var pair = await VaultCrypto.generateVaultKeypair();
 			note('a vault\'s public key is worked out from its own secret (B47)',

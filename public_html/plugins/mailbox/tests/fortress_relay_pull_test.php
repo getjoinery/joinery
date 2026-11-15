@@ -55,6 +55,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_relay_pull
  *
+ * @version 1.6 - the proxy passes the browser's challenge to the relay, and refuses a malformed one
  * @version 1.5 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.4 - mail rules run by the parsing device
  * @version 1.3 - carries the relay pin checks (fortress_relay_pin folded in)
@@ -77,6 +78,7 @@ if (!extension_loaded('sodium')) {
 class FortressPinStubRelay extends MailboxRelay {
 	public $answer;
 	public $asked = array();
+	public $challenges = array();
 	public function withApi(callable $fn) {
 		$client = (new ReflectionClass('FortressPinStubClient'))->newInstanceWithoutConstructor();
 		$client->relay = $this;
@@ -85,8 +87,9 @@ class FortressPinStubRelay extends MailboxRelay {
 }
 class FortressPinStubClient extends RelayClient {
 	public $relay;
-	public function sealTarget(string $recipient): ?string {
+	public function sealTarget(string $recipient, string $challenge = ''): ?string {
 		$this->relay->asked[] = $recipient;
+		$this->relay->challenges[] = $challenge;
 		return $this->relay->answer;
 	}
 }
@@ -578,6 +581,14 @@ try {
 	$pin_js = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/assets/mailbox_fortress.js'));
 	check(strpos($pin_js, $pin_v['pin_mac']) !== false && strpos($pin_js, $pin_v['signature']) !== false && strpos($pin_js, $pin_v['vault_secret_hex']) !== false,
 		'mailbox_fortress.js selfCheck carries the same vector');
+	$pin_cv = $pin_v['challenge_vector'];
+	$pin_cv_st = json_decode($pin_cv['statement'], true);
+	check(sodium_crypto_sign_verify_detached(base64_decode($pin_cv['signature']), "joinery-relay:seal-target:v1\n" . $pin_cv['statement'],
+			base64_decode($pin_cv['relay_identity_public_key']))
+		&& ($pin_cv_st['challenge'] ?? '') === $pin_cv['challenge'],
+		'the challenge vector verifies, with the challenge under the signature');
+	check(strpos($pin_js, $pin_cv['signature']) !== false && strpos($pin_js, $pin_cv['challenge']) !== false,
+		'and mailbox_fortress.js selfCheck carries it');
 
 	section('Fixtures');
 	$pin_box = new SealedBox();
@@ -646,6 +657,14 @@ try {
 	check($pin_answer['relay_answer'] === $pin_relay->answer, 'the relay\'s body comes back byte for byte');
 	check($pin_relay->asked === array('harnesstest_pin@' . $pin_domain->get('ied_domain')), 'asked about this mailbox\'s address');
 	check($pin_answer['relay_identity_public_key'] === $pin_identity && $pin_answer['pin'] === $pin_stored, 'with the relay identity and the stored pin');
+	check($pin_relay->challenges === array(''), 'an ask without a challenge passes none');
+	$pin_challenge = rtrim(strtr(base64_encode(random_bytes(18)), '+/', '-_'), '=');
+	MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay, $pin_challenge);
+	check(end($pin_relay->challenges) === $pin_challenge, 'the browser\'s challenge reaches the relay unchanged');
+	$pin_before = count($pin_relay->asked);
+	check($pin_refused(function () use ($pin_owner_id, $pin_alias_id, $pin_relay) {
+		MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay, 'not a challenge&x=1');
+	}) && count($pin_relay->asked) === $pin_before, 'a malformed challenge is refused before the relay is asked');
 	check($pin_refused(function () use ($pin_stranger, $pin_alias_id, $pin_relay) {
 		MailboxRelayPin::sealTarget(intval($pin_stranger->key), $pin_alias_id, $pin_relay);
 	}), 'not for someone else\'s mailbox');
