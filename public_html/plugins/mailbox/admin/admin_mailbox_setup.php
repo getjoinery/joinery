@@ -27,6 +27,7 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.24 - when system mail sends as the domain, the ceremony leads with moving it, and returns there (one press WP6)
  * @version 3.23 - without a press, the records are one ordered table in two groups that rechecks itself every
  *   30 seconds, and the turn-on button is enabled when the records pass
  * @version 3.22 - Unlock your vault opens it in place, and the turn-on button shows without a reload
@@ -158,8 +159,12 @@ $setup_open  = !empty($protect_setup) && !empty($protect)
 // protection can start until that is answered, so it is the task too.
 $owner_needed = !empty($protect) && $focus_domain !== ''
 	&& empty($protect['is_protected']) && empty($protect['has_key']);
+// The machine sender steps, when opened, are the task: send protection's
+// first step sends the owner there, and it waits at the foot meanwhile.
+$machine_open = !empty($machine_setup) && $focus_domain !== '';
 // Signing just went on and group 2 is still to publish: still the task.
-$si_at_top   = $setup_open || $owner_needed || (!empty($protect['is_protected']) && !empty($protect_record_list));
+$si_at_top   = !$machine_open
+	&& ($setup_open || $owner_needed || (!empty($protect['is_protected']) && !empty($protect_record_list)));
 $focus_qs    = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
 	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
 $focus_base  = $base . $focus_qs;
@@ -190,7 +195,7 @@ $render_sending_identity = function () use ($page, $protect, $focus_domain, $foc
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
 		$protect_preflight, $protect_vault_unlocked, $render_check, $render_owner_form,
 		$protect_press_box, $protect_press_result, $protect_press_note, $acting_has_vault,
-		$protect_record_list) {
+		$protect_record_list, $machine_open) {
 // --- Sending identity (the sending-lock add-on) ---
 // THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
 // (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
@@ -292,6 +297,35 @@ if (!empty($protect) && $focus_domain !== '') {
 		echo '<p class="mb-2"><strong>Setting up send protection for ' . htmlspecialchars($focus_domain)
 			. '.</strong> Nothing is enforced and your mail is unaffected until the last step, and you can '
 			. 'stop at any point. <a href="' . htmlspecialchars($leave_url) . '">Leave this for now</a></p>';
+		// AUTOMATED MAIL FIRST (specs/send_protection_one_press.md WP6). When the
+		// site's system mail sends as this domain, protection refuses every one of
+		// those sends from the moment it is on, so moving it is the step to take
+		// before any other. It leads the ceremony rather than sitting among the
+		// readiness rows, and stays a warning: the owner may go on past it.
+		$lead_rows = array_filter((array)$protect_preflight, function ($r) {
+			return ($r['id'] ?? '') === 'domain.system_mail_readiness';
+		});
+		// While the machine sender steps are open above, they are this step.
+		if (!empty($lead_rows) && !$machine_open) {
+			echo '<h5 class="mt-3 mb-2">First, automated mail</h5>';
+			foreach ($lead_rows as $r) {
+				// The way out is the point of the row, so it is a button of its
+				// own, not folded inside the row's details. It carries
+				// protect_setup, so finishing or leaving the machine sender
+				// returns here, with this step gone.
+				$link = $r['fix']['link'] ?? null;
+				unset($r['fix']['link']);
+				$render_check($r);
+				if (!empty($link['url'])) {
+					echo '<p class="mb-3"><a class="btn btn-sm btn-primary" href="'
+						. htmlspecialchars($link['url'] . '&protect_setup=1') . '">'
+						. htmlspecialchars($link['label']) . '</a></p>';
+				}
+			}
+		}
+		$protect_preflight = array_filter((array)$protect_preflight, function ($r) {
+			return ($r['id'] ?? '') !== 'domain.system_mail_readiness';
+		});
 		// THE ORDER IS THE SAFETY, so it is stated rather than left to be inferred
 		// from whichever controls happen to be on screen. Publishing the records
 		// that reject unsigned mail before anything signs takes the domain's own
@@ -346,7 +380,7 @@ if (!empty($protect) && $focus_domain !== '') {
 		// The readiness cards that gate the button. The REQUIRED ones are the
 		// records above, checked once at render; the page's recheck hides them
 		// once they pass, rather than leave a red card beside a live record.
-		// Anything else (the system mail warning) stays.
+		// Anything else stays (the system mail warning leads the ceremony instead).
 		if (!empty($protect_preflight)) {
 			$required = array_filter($protect_preflight, function ($r) {
 				return ($r['severity'] ?? '') === InboundEmailSetupCheck::REQUIRED;
@@ -518,8 +552,13 @@ if ($si_at_top) {
 // protected without breaking reminders and receipts. Opened from the
 // Automated mail identity card; like the protect ceremony, the open task
 // renders at the top of the page.
-if (!empty($machine_setup) && $focus_domain !== '') {
-	$machine_leave_url = $focus_base;
+if ($machine_open) {
+	// Opened from send protection's first step: leaving goes back to it.
+	$machine_leave_url = $setup_open ? $setup_url : $focus_base;
+	// Its forms post back with both flags, so the Switch lands back in send
+	// protection's steps when that is where the owner came from.
+	$machine_post_url = $self_url . (strpos($self_url, '?') !== false ? '&' : '?') . 'machine_setup=1'
+		. ($setup_open ? '&protect_setup=1' : '');
 	$page->begin_box(array(
 		'title'   => 'Automated mail identity — ' . $focus_domain,
 		'variant' => 'focus',
@@ -529,7 +568,8 @@ if (!empty($machine_setup) && $focus_domain !== '') {
 			. 'identity under ' . htmlspecialchars($focus_domain) . '; its health reads as cards below, and a '
 			. 'record that drifts fails its check there.</p>';
 		echo '<p class="mb-0"><a class="btn btn-sm btn-outline-secondary" href="'
-			. htmlspecialchars($machine_leave_url) . '">Back to the checks</a></p>';
+			. htmlspecialchars($machine_leave_url) . '">'
+			. ($setup_open ? 'Back to send protection' : 'Back to the checks') . '</a></p>';
 	} else {
 		echo '<p class="mb-2"><strong>Setting up a machine sender for ' . htmlspecialchars($focus_domain)
 			. '.</strong> Automated mail (reminders, receipts, notifications) moves to its own identity under '
@@ -550,7 +590,7 @@ if (!empty($machine_setup) && $focus_domain !== '') {
 			echo '<p class="mb-2">Already done — ' . htmlspecialchars($machine_domain)
 				. ' is registered as a sending domain.</p>';
 		} elseif (!empty($machine_can_register)) {
-			echo '<form method="post" action="' . htmlspecialchars($self_url . (strpos($self_url, '?') !== false ? '&' : '?') . 'machine_setup=1') . '" class="mb-2">';
+			echo '<form method="post" action="' . htmlspecialchars($machine_post_url) . '" class="mb-2">';
 			echo '<input type="hidden" name="action" value="machine_register">';
 			echo '<input type="hidden" name="domain" value="' . htmlspecialchars($machine_domain) . '">';
 			echo '<button type="submit" class="btn btn-sm btn-primary">Register '
@@ -585,7 +625,7 @@ if (!empty($machine_setup) && $focus_domain !== '') {
 			echo '<p class="text-muted mb-2">Offered once the checks above verify.</p>';
 		} else {
 			$ms_form = $page->getFormWriter('machine_switch_form', array(
-				'action' => $self_url . (strpos($self_url, '?') !== false ? '&' : '?') . 'machine_setup=1'));
+				'action' => $machine_post_url));
 			echo $ms_form->begin_form();
 			$ms_form->hiddeninput('action', '', array('value' => 'machine_switch'));
 			$ms_form->hiddeninput('domain', '', array('value' => $focus_domain));

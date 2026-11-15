@@ -19,6 +19,7 @@
  *  - The recheck action reads and writes nothing, and the script it feeds
  *    enables the button on signing_ready.
  *
+ * @version 1.3 - automated mail leads the ceremony (WP6)
  * @version 1.2 - rows keyed by place, not value; two SPF records at the forwarding name block signing
  * @version 1.1 - reviewer2's review: both strict records always listed, a second SPF or DMARC record is
  *   not live, two apex SPF records fail the SPF row, a Standard domain is not ready
@@ -211,6 +212,48 @@ try {
 		'and a finished domain\'s ordinary view pays no lookups for it');
 	$button = PublicPageBase::action_button('Go', '/x', array('disabled' => true));
 	check(strpos($button, ' disabled>') !== false, 'action_button draws a disabled button when asked');
+
+	section('automated mail leads the ceremony (WP6)');
+
+	harness_set_setting_mem('defaultemail', 'robot@' . $name);
+	$rows = (new InboundEmailSetupCheck())->signingReadinessChecks($fresh());
+	$sys = array_values(array_filter($rows, function ($r) { return $r['id'] === 'domain.system_mail_readiness'; }));
+	check(count($sys) === 1 && $sys[0]['severity'] === InboundEmailSetupCheck::RECOMMENDED
+			&& ($sys[0]['fix']['link']['label'] ?? '') === 'Set up the machine sender first',
+		'system mail on the domain gives one warning row with the machine sender link');
+	check(count(array_filter(mailbox_protect_blockers_in($rows), function ($b) {
+			return strpos($b, 'System mail has somewhere to go') === 0; })) === 0,
+		'and it is not a blocker');
+	harness_set_setting_mem('defaultemail', 'robot@elsewhere.example');
+	$rows = (new InboundEmailSetupCheck())->signingReadinessChecks($fresh());
+	check(!in_array('domain.system_mail_readiness', array_column($rows, 'id'), true),
+		'system mail elsewhere gives no such row');
+
+	$open = strpos($view, 'Leave this for now</a></p>');
+	$lead = strpos($view, "echo '<h5 class=\"mt-3 mb-2\">First, automated mail</h5>';");
+	$press = strpos($view, "dns_publish_box_render(\$page, \$protect_press_box, 'Turn on send protection'");
+	$table = strpos($view, "Publish the records in group 1 where your domain");
+	check($open !== false && $lead !== false && $press !== false && $table !== false
+			&& $open < $lead && $lead < $press && $lead < $table,
+		'the page draws that row first in the ceremony, above the press and above group 1');
+	check(substr_count($view, "=== 'domain.system_mail_readiness'") === 1
+			&& substr_count($view, "!== 'domain.system_mail_readiness'") === 1,
+		'and takes it out of the readiness lists below, so it is said once');
+	$unset = strpos($view, "unset(\$r['fix']['link']);");
+	check($unset !== false && $unset > $lead && $unset < strpos($view, '$render_check($r);', $lead)
+			&& strpos($view, "htmlspecialchars(\$link['url'] . '&protect_setup=1')") !== false,
+		'its link is one button, not also in the details, and it comes back to the ceremony');
+	check(strpos($view, "\$si_at_top   = !\$machine_open") !== false
+			&& strpos($view, "if (!empty(\$lead_rows) && !\$machine_open)") !== false,
+		'while the machine sender steps are open they take the top, and the ceremony waits below without its lead');
+	check(strpos($view, "\$machine_leave_url = \$setup_open ? \$setup_url : \$focus_base;") !== false
+			&& strpos($view, "(\$setup_open ? '&protect_setup=1' : '')") !== false
+			&& substr_count($view, 'htmlspecialchars($machine_post_url)') === 1
+			&& substr_count($view, "'action' => \$machine_post_url") === 1,
+		'leaving or finishing the machine sender returns to the ceremony it was opened from');
+	$logic = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_setup_logic.php'));
+	check(strpos($logic, "return LogicResult::redirect(\$state_qs(array('machine_setup' => false)));") !== false,
+		'the Switch redirect keeps every other flag, protect_setup among them');
 } finally {
 	DnsResolver::clearBackend();
 }

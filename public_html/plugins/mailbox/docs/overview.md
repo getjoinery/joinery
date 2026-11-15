@@ -1776,7 +1776,11 @@ own when `iea_security_level` says so.
 **Turning send protection on.** The Sending identity box's ceremony runs the
 completion order: publish the signing-stage records (the sealed key's DKIM record and
 the forwarding subdomain), start signing (`ied_is_protected_identity`), then publish
-the strict SPF and DMARC. Where the domain's DNS host takes an API key (Cloudflare,
+the strict SPF and DMARC. When the site's system mail (`defaultemail`) sends as the
+domain, the ceremony opens with that warning (`domain.system_mail_readiness`) and its
+**Set up the machine sender first** button: the machine sender steps open above it,
+and leaving or finishing them returns to the ceremony. It is a warning, not a block.
+Where the domain's DNS host takes an API key (Cloudflare,
 for one), the ceremony is **one press** (`mailbox_protect_press()`): the box shows
 every record it writes or replaces, from `protectPressPlan()`, and the press
 publishes `signingReadinessPlan()`, waits up to 30 s until every one of the zone's
