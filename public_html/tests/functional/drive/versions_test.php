@@ -282,10 +282,9 @@ try {
 }
 WORKER;
 	$worker_src = str_replace('__ROOT__', PathHelper::getRootDir(), $worker_src);
-	$worker_path = tempnam(sys_get_temp_dir(), 'dvc_') . '.php';
+	$worker_path = harness_scratch_dir('drive_versions') . '/hot_blob_worker.php';
 	file_put_contents($worker_path, $worker_src);
 	@chmod($worker_path, 0666);
-	harness_defer(function () use ($worker_path) { @unlink($worker_path); });
 
 	$N = 6;
 	$descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));

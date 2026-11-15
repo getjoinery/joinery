@@ -42,6 +42,7 @@
  *
  * Run: php plugins/server_manager/tests/agent_artifact_channel_test.php
  *
+ * @version 1.1 - the throwaway site is harness_scratch_dir(), removed however the run ends
  * @version 1.0
  */
 
@@ -322,7 +323,7 @@ check(ReleaseManifestSource::valid_version('../0.8.370') === false,
 section('The support bundle is signed with the release key and is byte-stable');
 // ======================================================================
 
-$site = sys_get_temp_dir() . '/joinery_bundle_test_' . getmypid();
+$site = harness_scratch_dir('agent_artifact_bundle');
 $made_ok = true;
 foreach (['config', 'public_html'] as $dir) {
 	if (!is_dir($site . '/' . $dir) && !mkdir($site . '/' . $dir, 0755, true)) { $made_ok = false; }

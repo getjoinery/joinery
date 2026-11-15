@@ -1849,6 +1849,19 @@ mod tests {
         /// Its exit, when it comes, with every op it left open, as
         /// `kind State attempts=N`.
         exited: Receiver<(Exit, Vec<String>)>,
+        /// The folder it syncs in, removed when the test lets go of it. Bind
+        /// it by name (`dir: _dir`): `..` would drop it, and delete the
+        /// folder, while the daemon is still running.
+        dir: TestDir,
+    }
+
+    /// A scratch folder that is removed when dropped, a failed test included.
+    struct TestDir(std::path::PathBuf);
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     fn a_daemon_syncing_with(drive: &Drive, tag: &str) -> Running {
@@ -1857,6 +1870,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("Drive")).unwrap();
         // Canonical: on a Mac the temporary directory is a symlink.
         let dir = std::fs::canonicalize(&dir).unwrap();
+        let guard = TestDir(dir.clone());
         let root = dir.join("Drive");
         let config = Config {
             base_url: drive.base_url.clone(),
@@ -1889,7 +1903,7 @@ mod tests {
                 .collect();
             let _ = done.send((exit, open));
         });
-        Running { shared, root, exited }
+        Running { shared, root, exited, dir: guard }
     }
 
     fn wait_for(what: &str, within: Duration, done: impl Fn() -> bool) {
@@ -1909,7 +1923,7 @@ mod tests {
         drive.slow.store(false, Ordering::SeqCst);
         drive.spoil.store(true, Ordering::SeqCst);
         drive.server.seed_file(None, "spoiled.bin", &[7u8; 4096]);
-        let Running { shared, root: _root, exited } = a_daemon_syncing_with(&drive, "outage");
+        let Running { shared, root: _root, exited, dir: _dir } = a_daemon_syncing_with(&drive, "outage");
         wait_for("the download failing a few times", Duration::from_secs(40), || drive.sent() >= 4 * 4096);
         std::thread::sleep(Duration::from_millis(1500));
         drive.down.store(true, Ordering::SeqCst);
@@ -1928,7 +1942,7 @@ mod tests {
         drive.slow.store(false, Ordering::SeqCst);
         drive.spoil.store(true, Ordering::SeqCst);
         drive.server.seed_file(None, "spoiled.bin", &[7u8; 4096]);
-        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "backoff");
+        let Running { shared, root, exited, dir: _dir } = a_daemon_syncing_with(&drive, "backoff");
         // The attempts come quickly at first: past them, the backoff is
         // longer than the watch below.
         wait_for("the download failing a few times", Duration::from_secs(40), || drive.sent() >= 4 * 4096);
@@ -1954,7 +1968,7 @@ mod tests {
         for n in 0..20 {
             drive.server.seed_file(None, &format!("f{n}.bin"), &[7u8; 64 << 10]);
         }
-        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "revoked");
+        let Running { shared, root, exited, dir: _dir } = a_daemon_syncing_with(&drive, "revoked");
         wait_for("the downloads starting", Duration::from_secs(30), || drive.sent() > 0);
 
         drive.revoked.store(true, Ordering::SeqCst);
@@ -1989,7 +2003,7 @@ mod tests {
         // so, and the person who raised it should not wait out the hour.
         let drive = Drive::start();
         drive.server.set_quota_bytes(Some(1024));
-        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "quota");
+        let Running { shared, root, exited, dir: _dir } = a_daemon_syncing_with(&drive, "quota");
         std::fs::write(root.join("big.bin"), vec![7u8; 64 << 10]).unwrap();
         let open_issues = || handle_control(&shared, &req("GET", "/status", Value::Null)).1["issues_total"].as_u64();
         wait_for("the refusal being said", Duration::from_secs(45), || open_issues().is_some_and(|n| n > 0));
@@ -2017,7 +2031,7 @@ mod tests {
         let drive = Drive::start();
         let body = vec![7u8; 8 << 20];
         drive.server.seed_file(None, "big.bin", &body);
-        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "stop");
+        let Running { shared, root, exited, dir: _dir } = a_daemon_syncing_with(&drive, "stop");
         wait_for("the download starting", Duration::from_secs(30), || drive.sent() > 0);
 
         let asked = std::time::Instant::now();
@@ -2039,7 +2053,7 @@ mod tests {
         let drive = Drive::start();
         let body: Vec<u8> = (0..4u32 << 20).map(|i| (i % 251) as u8).collect();
         drive.server.seed_file(None, "big.bin", &body);
-        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "pause");
+        let Running { shared, root, exited, dir: _dir } = a_daemon_syncing_with(&drive, "pause");
         wait_for("the download starting", Duration::from_secs(30), || drive.sent() > 0);
 
         // Paused is published only once the pass is out and the loop has read

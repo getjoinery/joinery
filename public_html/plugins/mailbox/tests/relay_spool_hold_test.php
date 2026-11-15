@@ -26,6 +26,7 @@
  *
  * Run: php plugins/mailbox/tests/relay_spool_hold_test.php  (schema synced).
  *
+ * @version 1.2 - the stage is harness_scratch_dir(), removed however the run ends
  * @version 1.1
  */
 
@@ -73,8 +74,8 @@ class RelaySpoolHoldTest {
 		$d->save();
 		$this->disabled_domain_id = intval($d->key);
 
-		$this->stage = sys_get_temp_dir() . '/rsh-' . $this->suffix;
-		@mkdir($this->stage, 0777, true);
+		// The run's own scratch, removed whole when the run ends (however it ends).
+		$this->stage = harness_scratch_dir('relay_spool_hold');
 
 		// ingestOne never touches $this->relay on the hold/unroutable branches, so
 		// an unsaved relay is enough to construct the consumer.
@@ -250,10 +251,6 @@ class RelaySpoolHoldTest {
 			}
 			if ($this->direct_spool_id) {
 				$this->db->exec("DELETE FROM jdp_direct_spool WHERE jdp_direct_spool_id = " . intval($this->direct_spool_id));
-			}
-			if ($this->stage && is_dir($this->stage)) {
-				foreach (glob($this->stage . '/*') ?: array() as $f) { @unlink($f); }
-				@rmdir($this->stage);
 			}
 		} catch (\Throwable $e) {}
 	}

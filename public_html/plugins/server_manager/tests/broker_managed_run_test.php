@@ -31,6 +31,7 @@
  *
  * Run: php plugins/server_manager/tests/broker_managed_run_test.php
  *
+ * @version 1.3 - fixture files live in the run's scratch directory, removed however the run ends
  * @version 1.2 - a locking space (F8): links sign the lock, the node's writes and the ledger file land locked
  * @version 1.1 - the review's pins: a lost finish reply at the engine, a manifest or envelope already in the
  *                bucket, an adopted row left as it was, the recorded manifest preferred, ledger-only spaces
@@ -82,7 +83,8 @@ $track_runs = function (int $node_id) {
 	}
 };
 $file = function (string $bytes) {
-	$f = tempnam(sys_get_temp_dir(), 'brk');
+	// In the run's own scratch, removed whole when the run ends (however it ends).
+	$f = tempnam(harness_scratch_dir('broker_managed_run'), 'brk');
 	file_put_contents($f, $bytes);
 	return $f;
 };

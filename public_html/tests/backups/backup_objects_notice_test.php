@@ -37,14 +37,8 @@ require_once(PathHelper::getIncludePath('includes/BackupObjectsStatus.php'));
 require_once(PathHelper::getIncludePath('includes/BackupObjectsNotice.php'));
 require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
 
-$tmp = sys_get_temp_dir() . '/jy_objects_notice_' . getmypid();
-@mkdir($tmp, 0700, true);
-register_shutdown_function(function () use ($tmp) {
-	foreach (glob($tmp . '/*/*/*') ?: array() as $f) { @unlink($f); }
-	foreach (glob($tmp . '/*/*') ?: array() as $f) { is_dir($f) ? @rmdir($f) : @unlink($f); }
-	foreach (glob($tmp . '/*') ?: array() as $f) { is_dir($f) ? @rmdir($f) : @unlink($f); }
-	@rmdir($tmp);
-});
+// The run's own scratch, removed whole when the run ends (however it ends).
+$tmp = harness_scratch_dir('backup_objects_notice');
 
 $GB = 1000000000;
 $MB = 1000000;

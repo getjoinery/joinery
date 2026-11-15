@@ -3550,8 +3550,24 @@ mod tests {
         assert!(check_no_loss_coverage(Coverage { claims: 60, at_dead_paths: 5, sealed: 5 }).ok);
     }
 
-    fn store(tag: &str, rows: &[(&str, i64, Option<i64>, &str, Option<i64>, Option<&str>, Option<i64>, i64)]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("jd-soak-store-{tag}-{}", std::process::id()));
+    /// The folder every `store()` of this process lives under, removed when
+    /// dropped, a failed test included.
+    struct StoreRoot(std::path::PathBuf);
+
+    impl StoreRoot {
+        fn new() -> StoreRoot {
+            StoreRoot(std::env::temp_dir().join(format!("jd-soak-store-{}", std::process::id())))
+        }
+    }
+
+    impl Drop for StoreRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn store(root: &StoreRoot, tag: &str, rows: &[(&str, i64, Option<i64>, &str, Option<i64>, Option<&str>, Option<i64>, i64)]) -> std::path::PathBuf {
+        let dir = root.0.join(tag);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let db = dir.join("state.db");
@@ -3575,17 +3591,18 @@ mod tests {
     #[test]
     fn a_store_with_a_stranded_record_or_a_directory_held_twice_fails() {
         let p = Personality::linux();
-        let stranded = store("stranded", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("file", 10, Some(2), "x.txt", Some(2), Some("x.txt"), Some(5), 0)]);
+        let root = StoreRoot::new();
+        let stranded = store(&root, "stranded", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("file", 10, Some(2), "x.txt", Some(2), Some("x.txt"), Some(5), 0)]);
         let found = store_findings(&stranded, &p).unwrap();
         assert!(found.iter().any(|f| f.contains("stranded")), "{found:?}");
-        let by_id = store("byid", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("folder", 2, None, "B", None, Some("B"), Some(100), 0)]);
+        let by_id = store(&root, "byid", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("folder", 2, None, "B", None, Some("B"), Some(100), 0)]);
         assert!(store_findings(&by_id, &p).unwrap().iter().any(|f| f.contains("directory 100")));
-        let by_slot = store("byslot", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("folder", 2, None, "A", None, Some("A"), Some(101), 0)]);
+        let by_slot = store(&root, "byslot", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("folder", 2, None, "A", None, Some("A"), Some(101), 0)]);
         assert!(store_findings(&by_slot, &p).unwrap().iter().any(|f| f.contains("both claim")));
         let verdict = check_stores(&[("device-a".into(), by_id)], &p);
         assert!(!verdict.ok, "{}", verdict.detail);
         // A server-deleted record is a tombstone, not a hole; and a whole store is clean.
-        let whole = store("whole", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("file", 10, Some(1), "x.txt", Some(1), Some("x.txt"), Some(5), 0), ("file", 11, Some(9), "gone.txt", Some(9), Some("gone.txt"), Some(6), 1)]);
+        let whole = store(&root, "whole", &[("folder", 1, None, "A", None, Some("A"), Some(100), 0), ("file", 10, Some(1), "x.txt", Some(1), Some("x.txt"), Some(5), 0), ("file", 11, Some(9), "gone.txt", Some(9), Some("gone.txt"), Some(6), 1)]);
         assert!(store_findings(&whole, &p).unwrap().is_empty());
         assert!(check_stores(&[("device-a".into(), whole)], &p).ok);
     }

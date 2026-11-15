@@ -81,14 +81,8 @@ foreach (array(0, -1, -100, '0', 'nonsense') as $bad) {
 // ── Local sweep ─────────────────────────────────────────────────────────────
 section('Local sweep');
 
-$work = sys_get_temp_dir() . '/jy_runner_test_' . getmypid();
-@mkdir($work, 0700, true);
-register_shutdown_function(function () use ($work) {
-	foreach (glob($work . '/*/*') ?: array() as $f) { @unlink($f); }
-	foreach (glob($work . '/*') ?: array() as $f) { is_dir($f) ? @rmdir($f) : @unlink($f); }
-	foreach (glob($work . '/.*.snar') ?: array() as $f) { @unlink($f); }
-	@rmdir($work);
-});
+// The run's own scratch, removed whole when the run ends (however it ends).
+$work = harness_scratch_dir('backup_runner');
 
 $make = function ($name, $age_days) use ($work) {
 	$path = $work . '/' . $name;
@@ -379,7 +373,7 @@ section('A standalone run in the same profile does not end the open chain');
 // took a 464 MB full where a 70 MB incremental would have done.
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 $cc_slug  = 'chaintest-' . substr(bin2hex(random_bytes(3)), 0, 6);
-$cc_dir   = sys_get_temp_dir() . '/jy-chaintest-' . getmypid() . '-' . bin2hex(random_bytes(2));
+$cc_dir   = harness_scratch_dir('backup_runner_chain');
 $cc_chain = 'chain-20260830_044517';
 @mkdir($cc_dir . '/' . $cc_chain, 0700, true);
 $cc_manifest_path = $cc_dir . '/' . $cc_chain . '/' . BackupChain::MANIFEST_NAME;

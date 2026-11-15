@@ -39,13 +39,8 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/BackupFetch.php'));
 
-$tmp = sys_get_temp_dir() . '/joinery_fetch_test_' . getmypid();
-@mkdir($tmp, 0755, true);
-harness_defer(function () use ($tmp) {
-	foreach (glob($tmp . '/*') ?: array() as $f) { @unlink($f); }
-	foreach (glob($tmp . '/.*') ?: array() as $f) { if (is_file($f)) { @unlink($f); } }
-	@rmdir($tmp);
-});
+// The run's own scratch, removed whole when the run ends (however it ends).
+$tmp = harness_scratch_dir('backup_fetch');
 
 // ── The link ────────────────────────────────────────────────────────────────
 section('Only a signed https link is followed');

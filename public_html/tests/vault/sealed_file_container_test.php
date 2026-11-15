@@ -11,12 +11,9 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
 
-$work = sys_get_temp_dir() . '/sfc_test_' . bin2hex(random_bytes(4));
-@mkdir($work, 0777, true);
-harness_defer(function () use ($work) {
-	foreach (glob($work . '/*') as $f) { @unlink($f); }
-	@rmdir($work);
-});
+// The run's own scratch, removed whole when the run ends (however it ends),
+// and swept by the next run if this one was killed.
+$work = harness_scratch_dir('sealed_file_container');
 
 /** Deterministic filler, so a recovered range can be asserted without holding a copy. */
 function sfc_pattern($size, $seed = 31) {

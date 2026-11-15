@@ -21,6 +21,7 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.9 - scratch queue and site are harness_scratch_dir(), removed however the run ends
  * @version 1.8 - the PHP-side checks run against a scratch RootState directory, with the outcomes beside the queue
  *                as root keeps them (specs/shell_command_audit.md D1)
  * @version 1.7 - fifteen kinds: run_plugin_remover, the uninstall moment of a plugin with a host_remover, carried
@@ -264,7 +265,7 @@ section('Submitting writes one request and nothing else');
 // A scratch queue: RootState points every submit, status and transcript read
 // at it, so nothing lands in this box's real queue for its converger to carry
 // out, and the test may move files between queued and running itself.
-$rq_scratch = sys_get_temp_dir() . '/joinery_rq_state_' . bin2hex(random_bytes(4));
+$rq_scratch = harness_scratch_dir('root_request_state');
 foreach (array('/root_requests', '/root_request_outcomes/running', '/root_request_outcomes/done',
                '/root_request_outcomes/failed', '/root_request_logs') as $sub) {
 	@mkdir($rq_scratch . $sub, 0700, true);
@@ -361,7 +362,7 @@ section('The runner carries requests out, and refuses what it does not know');
 // Executed, not read: a scratch site with its own queue, the runner's root gate
 // stripped so the harness can drive it, and a stand-in for the dispatcher so
 // nothing real is installed.
-$site = sys_get_temp_dir() . '/joinery_rq_' . bin2hex(random_bytes(4));
+$site = harness_scratch_dir('root_request_site');
 foreach (array('/public_html/plugins', '/public_html/utils', '/config',
                '/cache/root_requests', '/logs', '/maintenance_scripts/install_tools') as $sub) {
 	@mkdir($site . $sub, 0700, true);

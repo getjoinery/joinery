@@ -28,6 +28,7 @@
  * The code's root twin is spent in the same transaction (specs/
  * one_vault_experience.md § R6), so exactly one twin may end up used too.
  *
+ * @version 1.3.0 - the worker lives in the run's scratch directory, removed however the run ends
  * @version 1.2.0 - workers use the harness's RAM store, not the site's (reviewer2 WP4 B3); no APCu flag
  * @version 1.1.0 - the posted account half of the code's KEK; the root twin is counted
  * @version 1.0.0
@@ -104,10 +105,9 @@ try {
 WORKER;
 
 $worker_src = str_replace('__ROOT__', PathHelper::getRootDir(), $worker_src);
-$worker_path = tempnam(sys_get_temp_dir(), 'vrc_') . '.php';
+$worker_path = harness_scratch_dir('vault_recovery_concurrency') . '/recovery_worker.php';
 file_put_contents($worker_path, $worker_src);
 @chmod($worker_path, 0666);
-harness_defer(function () use ($worker_path) { @unlink($worker_path); });
 
 $N = 8;
 $php = PHP_BINARY;

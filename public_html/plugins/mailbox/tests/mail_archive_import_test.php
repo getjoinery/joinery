@@ -30,6 +30,7 @@
  *
  * Run: php tests/run.php db --filter=mail_archive_import
  *
+ * @version 1.6 - teardown removes each run's working area before its row
  * @version 1.5 - a batch that died part way leaves no message uncounted (B68)
  * @version 1.4
  * @changelog 1.4 - Teardown matches labels on an id floor rather than getByName(),
@@ -929,6 +930,11 @@ class MailArchiveImportTest {
 				. MailArchiveImporter::RUN_EVENT . "%' AND evl_note LIKE '%takeout%'");
 
 			foreach ($this->run_ids as $rid) {
+				// A run that stopped at `scanned` keeps its working area for the
+				// user's choice; with the row gone nothing would ever claim it.
+				try {
+					(new MailArchiveImporter(new MailImportRun(intval($rid), TRUE)))->cleanup();
+				} catch (\Throwable $e) {}
 				$this->db->exec('DELETE FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id = ' . intval($rid));
 				$this->db->exec('DELETE FROM mir_mail_import_runs WHERE mir_mail_import_run_id = ' . intval($rid));
 			}

@@ -683,11 +683,18 @@ if (!$overlap) {
 		$payload[] = $d;
 	}
 
+	// A lane file still in use is written to all run long; one untouched for
+	// six hours belongs to a runner that was killed before it could unlink it.
+	foreach (glob(sys_get_temp_dir() . '/joinery-lane-*') ?: array() as $stale) {
+		if (is_file($stale) && time() - (int)@filemtime($stale) > 6 * 3600) { @unlink($stale); }
+	}
+
 	// The worker's stdout goes to a named file the parent tails through a
 	// SEPARATE read handle. Sharing one handle would share the file offset with
 	// the child's writes (proc_open dups the descriptor), and a parent read
 	// mid-file could put the child's next write there too.
 	$lane_path = tempnam(sys_get_temp_dir(), 'joinery-lane-');
+	register_shutdown_function(function () use ($lane_path) { @unlink($lane_path); });
 	$lane_wf = fopen($lane_path, 'wb');
 	$lane_ef = tmpfile();
 	$lane_proc = proc_open(

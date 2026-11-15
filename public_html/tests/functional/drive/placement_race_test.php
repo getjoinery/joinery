@@ -32,6 +32,7 @@
  * A build without the placement lock leaves a live file under a trashed folder
  * and fails the invariant below.
  *
+ * @version 1.3.0 - the workers live in the run's scratch directory, removed however the run ends
  * @version 1.2.0 - the dedup race holds the owner's trash lock, which a write takes before the placement lock
  * @version 1.1.0
  */
@@ -173,10 +174,9 @@ if ($r->error !== null) {
 WORKER;
 
 $worker_src = str_replace('__ROOT__', PathHelper::getRootDir(), $worker_src);
-$worker_path = tempnam(sys_get_temp_dir(), 'dpr_') . '.php';
+$worker_path = harness_scratch_dir('placement_race') . '/race_worker.php';
 file_put_contents($worker_path, $worker_src);
 @chmod($worker_path, 0666);
-harness_defer(function () use ($worker_path) { @unlink($worker_path); });
 
 /**
  * Run the worker with the quota lock held, trash $folder the moment the worker
@@ -451,10 +451,9 @@ if ($r->error !== null) {
 IWORKER;
 
 $init_worker_src = str_replace('__ROOT__', PathHelper::getRootDir(), $init_worker_src);
-$init_worker_path = tempnam(sys_get_temp_dir(), 'dpi_') . '.php';
+$init_worker_path = harness_scratch_dir('placement_race') . '/init_worker.php';
 file_put_contents($init_worker_path, $init_worker_src);
 @chmod($init_worker_path, 0666);
-harness_defer(function () use ($init_worker_path) { @unlink($init_worker_path); });
 
 // Bytes the server already holds, so the second attempt takes the short-circuit
 // rather than staging an upload.

@@ -170,7 +170,23 @@ fn classify(attempt: Result<(), TryLockError>) -> Attempt {
 mod tests {
     use super::*;
 
-    fn temp(tag: &str) -> PathBuf {
+    /// A scratch folder that is removed when dropped, a failed test included.
+    struct TempDir(PathBuf);
+
+    impl std::ops::Deref for TempDir {
+        type Target = Path;
+        fn deref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn temp(tag: &str) -> TempDir {
         let dir = std::env::temp_dir().join(format!(
             "jd-instance-{tag}-{}-{:?}",
             std::process::id(),
@@ -178,7 +194,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        dir
+        TempDir(dir)
     }
 
     /// Let go is not always the same instant as released: a process another
@@ -214,7 +230,6 @@ mod tests {
         assert!(holder_pid(&state).is_none(), "the id outlived its guard");
         assert!(released(&state), "the lock outlived its guard");
         assert!(matches!(take(&state, Duration::from_secs(2)), Taken::Held(_)));
-        let _ = std::fs::remove_dir_all(&state);
     }
 
     /// The lock tells a held home from a let-go one, and says when it cannot
@@ -230,7 +245,6 @@ mod tests {
         drop(first);
         assert!(released(&state), "the lock outlived its guard");
         assert_eq!(holder(&state), Holder::Gone);
-        let _ = std::fs::remove_dir_all(&state);
     }
 
     /// A starting copy waits for one that is on its way out.
@@ -246,7 +260,6 @@ mod tests {
         });
         assert!(matches!(take(&state, Duration::from_secs(5)), Taken::Held(_)));
         letting_go.join().unwrap();
-        let _ = std::fs::remove_dir_all(&state);
     }
 
     /// Only a held lock is "already running"; a volume that cannot lock at all
@@ -261,7 +274,8 @@ mod tests {
             Attempt::Unsupported(_)
         ));
         // And a state folder that cannot even hold the file.
-        let missing = temp("missing").join("not-made");
+        let home = temp("missing");
+        let missing = home.join("not-made");
         assert!(matches!(take(&missing, Duration::ZERO), Taken::Unguarded(_)));
     }
 
@@ -289,6 +303,5 @@ mod tests {
         assert!(child.try_wait().unwrap().is_none(), "the child had already gone");
         let _ = child.kill();
         let _ = child.wait();
-        let _ = std::fs::remove_dir_all(&state);
     }
 }
