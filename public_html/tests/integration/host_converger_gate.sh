@@ -519,7 +519,9 @@ chk "the installer takes --machine ROOT" "$(grep -c '^if \[\[ "\${1:-}" == "--ma
 chk "and names the machine host" "$(sed -n '/^if \[\[ "\${1:-}" == "--machine" \]\]; then$/,/^else$/p' "$INSTALLER" | grep -c '^    SITENAME="host"$')" "1"
 chk "the machine unit runs the entry point with --when-changed --machine and the bundle root" "$(grep -c '^\[\[ "\${MACHINE}" == "0" \]\] || COMMAND="/bin/bash \${RUN_TARGET} --when-changed --machine --site-root=\${SITE_ROOT}"$' "$INSTALLER")" "1"
 chk "the machine log is under /var/log/joinery" "$(grep -c '^    LOG_FILE="/var/log/joinery/host_converger.log"$' "$INSTALLER")" "1"
-chk "no path unit on a machine (nothing queues a root request)" "$(grep -B1 'write_if_changed "\${PATH_FILE}"' "$INSTALLER" | grep -c '^    if \[\[ "\${MACHINE}" == "0" \]\]; then$')" "1"
+# The PATH_FILE write sits in a block opened by the MACHINE == 0 test: the
+# nearest four-space if/fi above it is that if.
+chk "no path unit on a machine (nothing queues a root request)" "$(awk '/^    (if |fi$)/ { last = $0 } /write_if_changed "\$\{PATH_FILE\}"/ { print last }' "$INSTALLER" | grep -c '^    if \[\[ "\${MACHINE}" == "0" \]\]; then$')" "1"
 chk "nor is one enabled" "$(grep -c '^    if \[\[ "\${MACHINE}" == "0" \]\] && ! systemctl is-active --quiet "\${UNIT_NAME}.path"' "$INSTALLER")" "1"
 chk "a site's unit is left alone" "$(grep -c "a site's converger owns \${UNIT_NAME}.service - leaving it" "$INSTALLER")" "1"
 chk "decided by whether the unit already says --machine" "$(grep -c "grep -q -- '--machine' \"\${SERVICE_FILE}\"" "$INSTALLER")" "1"

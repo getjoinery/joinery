@@ -135,11 +135,16 @@ gate.
 its result contract carries the repo files its process included (`files` in
 the JSON contract). Every run folds those into the coverage map at
 `{site root}/cache/test_coverage_map.json`, so the map is never older than
-the last time each suite ran, and a full run refreshes all of it. Files a
-suite reaches *without* loading them — a manifest it reads, a script it runs,
-the code a shell gate builds — are declared in its header as `covers:` globs
-(`**` crosses directories, `*` stays within one segment); a shell gate's
-`covers:` is its whole declaration.
+the last time each suite ran, and a full run refreshes all of it. A non-PHP
+repo file the suite's own source names as a string literal — a script it
+hands to node, a manifest or fixture it reads — is in `files` too
+(`harness_named_repo_files()`: the literal is tried against `public_html/`,
+the site root and the suite's directory, and counts when such a file
+exists). Files a suite reaches any other way — a path it builds at run time,
+a PHP script it runs in another process, the code a shell gate builds — are
+declared in its header as `covers:` globs (`**` crosses directories, `*`
+stays within one segment); a shell gate's `covers:` is its whole
+declaration.
 
 **Finer reach: the functions a suite ran.** Where the PHP extension xhprof is
 loaded (on dev: `sudo apt install php8.3-xhprof`; nothing installs it

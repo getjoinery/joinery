@@ -1675,7 +1675,7 @@ function harness_emit_json($sections = null) {
 		// The suite's reach: every repo file this process loaded. The runner
 		// records it into the coverage map so --changed can select the suites
 		// a change can actually affect.
-		'files'       => harness_loaded_repo_files(),
+		'files'       => array_values(array_unique(array_merge(harness_loaded_repo_files(), harness_named_repo_files()))),
 	);
 	// Finer reach: the functions this process ran, when the runner started the
 	// function trace (tests/lib/function_trace.php).
@@ -1704,6 +1704,40 @@ function harness_loaded_repo_files() {
 		$out[] = $rel;
 	}
 	return $out;
+}
+
+/**
+ * Repo-relative paths of the non-PHP repo files the suite's own source names
+ * as string literals ('plugins/mailbox/assets/mailbox_fortress.js',
+ * '/fixtures/x.json' beside it): what a suite hands to node, reads as a
+ * manifest or runs as a script, which loading never records. A literal is
+ * tried against public_html, the site root and the suite's directory, and
+ * counts only when it names a file that exists there. PHP files are left
+ * out: one this process loaded is already in its files, and one it runs in
+ * another process ran no function this process's trace could show, so it
+ * must not be judged by that trace. A path the suite builds at run time is
+ * not seen here and still belongs in its covers: header.
+ */
+function harness_named_repo_files() {
+	$main = get_included_files()[0] ?? '';
+	$src = $main !== '' ? @file_get_contents($main) : false;
+	if (!is_string($src)) return array();
+	$root = rtrim(PathHelper::getSiteRoot(), '/') . '/';
+	$bases = array($root . 'public_html/', $root, dirname($main) . '/');
+	$ext = 'js|mjs|cjs|json|sh|go|rs|txt|html|css|py|swift|kt|yml|yaml|toml|sql';
+	preg_match_all('#([\'"])([A-Za-z0-9_@./-]+\.(?:' . $ext . '))\1#', $src, $m);
+	$out = array();
+	foreach (array_unique($m[2]) as $lit) {
+		foreach ($bases as $base) {
+			$abs = realpath($base . ltrim($lit, '/'));
+			if ($abs === false || !is_file($abs) || strpos($abs, $root) !== 0) continue;
+			$rel = substr($abs, strlen($root));
+			if (strpos($rel, 'vendor/') === 0) continue;
+			$out[$rel] = true;
+			break;
+		}
+	}
+	return array_keys($out);
 }
 
 /**

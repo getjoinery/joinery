@@ -24,6 +24,7 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.27 - the one-press handler drops its own level check: the page header (class=restricted, level 8) is the gate
  * @version 2.26 - without a press, the records come as one ordered list that rechecks itself (protect_record_list);
  *   after the flag, while the ceremony is open, the same list with group 2 active
  * @version 2.25 - the press box is offered while the vault is locked; its button waits behind an in-place unlock
@@ -738,7 +739,6 @@ function _setup_press_confirmation(array $rows, string $domain): array {
  */
 function _setup_protect_press(array $posted, $session, string $domain_name, string $return_url): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
-	$session->check_permission(Access::level('config:write'));
 	$fail = function (string $msg) use ($session, $return_url) {
 		$session->save_message(new DisplayMessage($msg, 'Send protection is not on',
 			'~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
