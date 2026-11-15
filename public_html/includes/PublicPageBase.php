@@ -1778,6 +1778,8 @@ abstract class PublicPageBase {
 	 * confirm_label and confirm_style (the modal's confirm button: its words,
 	 * and its style, e.g. 'danger' or 'primary'), and requires, or model and
 	 * verb (action_refusal(): below them the button is drawn disabled).
+	 * disabled draws it disabled for a page script to enable once it may be
+	 * pressed; the handler still decides.
 	 *
 	 * @return string HTML
 	 */
@@ -1814,7 +1816,8 @@ abstract class PublicPageBase {
 		}
 		$btn_class = ($extra_class !== '') ? ltrim($extra_class) : 'btn btn-soft-default btn-sm';
 		$btn_type  = $confirm_msg ? 'button' : 'submit';
-		$html .= '<button type="' . $btn_type . '" class="' . htmlspecialchars($btn_class) . '"' . $btn_confirm . '>' . htmlspecialchars($label) . '</button>';
+		$html .= '<button type="' . $btn_type . '" class="' . htmlspecialchars($btn_class) . '"' . $btn_confirm
+			. (!empty($options['disabled']) ? ' disabled' : '') . '>' . htmlspecialchars($label) . '</button>';
 		$html .= '</form>';
 
 		return $html;

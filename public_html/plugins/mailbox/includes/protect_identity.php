@@ -47,6 +47,7 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
+ * @version 1.10 - mailbox_protect_record_list(): every record in one ordered list, in two groups, with what is live
  * @version 1.9 - switching off puts a fresh ordinary key back where it was destroyed (WP2)
  * @version 1.8 - mailbox_protect_press(): send protection on in one press with an API DNS key
  * @version 1.7 - switching off says nothing signs only when the ordinary key is really gone
@@ -439,14 +440,173 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
  * that is not passing, as "label — summary". Empty when signing may start.
  */
 function mailbox_protect_signing_blockers(InboundEmailDomain $domain, InboundEmailSetupCheck $checker): array {
+	return mailbox_protect_blockers_in($checker->signingReadinessChecks($domain));
+}
+
+/** The blockers among readiness rows already computed (signingReadinessChecks()). */
+function mailbox_protect_blockers_in(array $rows): array {
 	$blockers = array();
-	foreach ($checker->signingReadinessChecks($domain) as $r) {
+	foreach ($rows as $r) {
 		if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
 				&& in_array($r['status'], array(InboundEmailSetupCheck::FAIL, InboundEmailSetupCheck::UNKNOWN), true)) {
 			$blockers[] = $r['label'] . ' — ' . $r['summary'];
 		}
 	}
 	return $blockers;
+}
+
+/**
+ * Every record send protection needs, as one ordered list in two groups
+ * (specs/send_protection_one_press.md WP4), for a person publishing them by
+ * hand.
+ *
+ *  - 'now': the signing stage (signingReadinessPlan()). Safe to publish at
+ *    any time: none of them asks anyone to reject anything.
+ *  - 'after': the strict stage (strictStagePlan()), the records that reject
+ *    forgeries. Greyed out until signing is on: published first, they would
+ *    reject the domain's own mail. Not looked up until then, so the list never
+ *    reads as an invitation to publish them early.
+ *
+ * Each row's status is read from the zone's own nameservers
+ * (DnsReconciler::diffAgainstPublicDns(), WP0), so a record published a moment
+ * ago reads as live even while this server's resolver still remembers it
+ * missing. 'signing_ready' is the activate gate's own answer
+ * (mailbox_protect_blockers_in()), so the page enables the button exactly when
+ * pressing it would pass. Plain arrays throughout: the API action returns it as
+ * it is.
+ *
+ * $readiness is signingReadinessChecks() for the domain when the caller has it.
+ */
+function mailbox_protect_record_list(InboundEmailDomain $domain, ?InboundEmailSetupCheck $checker = null,
+		?array $readiness = null): array {
+	require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
+	$checker = $checker ?? new InboundEmailSetupCheck();
+	$name = strtolower(trim((string)$domain->get('ied_domain')));
+	$protected = (bool)$domain->is_protected_identity();
+	$reconciler = new DnsReconciler();
+
+	$now = array();
+	foreach ($reconciler->diffAgainstPublicDns($checker->signingReadinessPlan($name)) as $row) {
+		$now[] = mailbox_protect_record_row($row['record'], $row['outcome'], $row['live']);
+	}
+	$strict = $checker->strictStagePlan($name);
+	$after = array();
+	if ($protected) {
+		foreach ($reconciler->diffAgainstPublicDns($strict) as $row) {
+			$after[] = mailbox_protect_record_row($row['record'], $row['outcome'], $row['live']);
+		}
+	} else {
+		foreach ($strict->getRecords() as $record) {
+			$after[] = mailbox_protect_record_row($record, 'waiting', array());
+		}
+	}
+	// BOTH STRICT RECORDS, ALWAYS. The _dmarc value is built from the live
+	// record, so a failed lookup leaves it out of the plan; a list without it
+	// would read as finished on SPF alone.
+	foreach (array($name, '_dmarc.' . $name) as $expected) {
+		if (!in_array($expected, array_column($after, 'name'), true)) {
+			$after[] = array(
+				'key' => mailbox_protect_record_key(DnsRecord::TYPE_TXT, $expected, false), 'type' => DnsRecord::TYPE_TXT,
+				'name' => $expected, 'value' => '', 'absent' => false, 'note' => '',
+				'hint' => 'The live record could not be read, and the value to publish is built from it. '
+					. 'It is read again on the next check.',
+				'status' => $protected ? 'unknown' : 'waiting',
+				'label' => $protected ? 'Could not check' : 'After signing is on',
+				'live' => array(),
+			);
+		}
+	}
+
+	$blockers = $protected ? array()
+		: mailbox_protect_blockers_in($readiness ?? $checker->signingReadinessChecks($domain));
+	// The activate gate's one condition that is not DNS.
+	if (!$protected && !$domain->seals_content()) {
+		$blockers[] = 'Send protection is for a Private domain, and this one is Standard.';
+	}
+	$strict_live = $protected;
+	foreach ($after as $r) {
+		if ($r['status'] !== 'live') {
+			$strict_live = false;
+		}
+	}
+	return array(
+		'domain'        => $name,
+		'protected'     => $protected,
+		'groups'        => array(
+			array('key' => 'now', 'active' => true, 'rows' => $now),
+			array('key' => 'after', 'active' => $protected, 'rows' => $after),
+		),
+		'signing_ready' => !$protected && empty($blockers),
+		'blockers'      => $blockers,
+		'strict_live'   => $strict_live,
+	);
+}
+
+/**
+ * A row's key: its place in the zone, not its value. The _dmarc value is
+ * folded from the live record, so it changes as the person publishes; keyed by
+ * value, the page could not find the row to repaint.
+ */
+function mailbox_protect_record_key(string $type, string $name, bool $absent): string {
+	return substr(sha1(($absent ? 'absent|' : '') . $type . '|' . $name), 0, 16);
+}
+
+/**
+ * One row of mailbox_protect_record_list(): what to publish, and whether it
+ * is live. $outcome is a DnsReconciler outcome, or 'waiting' for a strict
+ * record before signing is on.
+ */
+function mailbox_protect_record_row(DnsRecord $record, string $outcome, array $live): array {
+	$labels = array(
+		DnsReconciler::MATCHES   => array('live', 'Live'),
+		DnsReconciler::PENDING   => array('pending', 'Published, not served yet'),
+		DnsReconciler::MISSING   => array('missing', 'Not published yet'),
+		DnsReconciler::DIFFERS   => array('differs', 'A different value is live'),
+		DnsReconciler::CONFLICTS => array('differs', 'A different value is live'),
+		DnsReconciler::REMAINS   => array('remove', 'Still there: remove it'),
+		'waiting'                => array('waiting', 'After signing is on'),
+	);
+	list($status, $label) = $labels[$outcome] ?? array('unknown', 'Could not check');
+	// ONE SPF AND ONE DMARC RECORD PER NAME. A second one is an error to every
+	// receiver, so the right value added beside the old one is not live; it is
+	// the most likely slip when publishing by hand.
+	$kind = $record->txtKind();
+	if (($kind === 'spf' || $kind === 'dmarc') && count($live) > 1) {
+		$status = 'differs';
+		$label = 'More than one: keep only this one';
+	}
+	$value = $record->value;
+	if ($record->type === DnsRecord::TYPE_MX && $record->priority !== null) {
+		$value = $record->priority . ' ' . $value;
+	}
+	// The apex holds other TXT records too (site verifications), so the one to
+	// change is named: replacing the wrong one breaks something else.
+	$hint = '';
+	if ($record->type === DnsRecord::TYPE_TXT && stripos($record->value, 'v=spf1') === 0) {
+		$hint = 'Replaces the TXT record that starts v=spf1. Leave the other TXT records alone.';
+	} elseif ($status === 'differs') {
+		$hint = 'Replace the value live now with this one.';
+	}
+	if (($kind === 'spf' || $kind === 'dmarc') && count($live) > 1) {
+		$hint = 'There are ' . count($live) . ' ' . strtoupper($kind) . ' records at this name, and receivers '
+			. 'treat that as an error. Remove every one but this.';
+	}
+	$live_values = array();
+	foreach ($live as $l) {
+		$live_values[] = (string)$l->value;
+	}
+	return array(
+		'key'    => mailbox_protect_record_key($record->type, $record->name, (bool)$record->absent),
+		'type'   => $record->type,
+		'name'   => $record->name,
+		'value'  => $value,
+		'absent' => (bool)$record->absent,
+		'note'   => (string)$record->note,
+		'hint'   => $hint,
+		'status' => $status,
+		'label'  => $label,
+		'live'   => $status === 'live' ? array() : $live_values,
+	);
 }
 
 /** Switch send protection on: from here the sealed key is the only signer. */

@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.7 - the ceremony is one ordered table; its publish box is named for group 1
  * @version 1.6 - the strict records come from strictStageRecords(), shared with the one press
  * @version 1.5 - the strict DMARC value is built by foldDmarc(), read through its helper
  * @version 1.4 - the Step 1 box names its plan to the Apply handler
@@ -316,8 +317,8 @@ class ProtectOptinTest {
 		// the ceremony read as the same offer repeated.
 		$view = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/admin/admin_mailbox_setup.php'));
-		check(strpos($view, 'Step 1 — publish the records that let your key sign') !== false,
-			'the ceremony publish box says which step it is');
+		check(strpos($view, 'Or publish group 1 through your DNS host') !== false,
+			'the ceremony publish box says which group of records it is for');
 
 		// NOTHING TO CONFIGURE MEANS NO CONFIGURE BOX. The publish box does not
 		// read live DNS until its button is pressed, so on a domain whose records
@@ -328,8 +329,8 @@ class ProtectOptinTest {
 			'the ceremony asks whether step one has any work left');
 		check(strpos($setup_logic, "if (!\$protect_signing_ready && \$protect_press_box === null) {\n\t\t\t\$protect_dns_box = DnsPublishBox::build(") !== false,
 			'and builds the publish box only when it does (and the one press is not offered)');
-		check(strpos($view, 'Step 1 is already done.') !== false,
-			'a step with nothing to do says so rather than rendering an empty gap');
+		check(strpos($view, 'data-protect-required-ready><strong>Confirmed') !== false,
+			'a group with nothing left to do says so rather than rendering an empty gap');
 
 		// UNKNOWN is not PASS: a row whose lookup failed is an open question, and
 		// counting it as settled would hide the control that could close it.
@@ -675,8 +676,8 @@ class ProtectOptinTest {
 		// exists to remove.
 		check(substr_count($view, '$render_sending_identity();') === 2,
 			'the panel is called from exactly two places');
-		check(strpos($view, '$si_at_top   = $setup_open || $owner_needed;') !== false,
-			'the top is for the open ceremony and the unanswered owner');
+		check(strpos($view, "\$si_at_top   = \$setup_open || \$owner_needed || (!empty(\$protect['is_protected']) && !empty(\$protect_record_list));") !== false,
+			'the top is for the open ceremony, the unanswered owner, and group 2 still to publish after the flag');
 		check(strpos($view, "if (\$si_at_top) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
 			'rendered at the top of the page while it is the task');
 		check(strpos($view, "if (!\$si_at_top) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
@@ -689,7 +690,7 @@ class ProtectOptinTest {
 		// provider-supplied table was removed for, reintroduced by another route.
 		check(substr_count($view, 'if (!$setup_open && ') >= 2,
 			'the page suppresses its own publish box while the ceremony is open');
-		check(strpos($view, "'Step 1 — publish the records that let your key sign'") !== false,
+		check(strpos($view, "'Or publish group 1 through your DNS host'") !== false,
 			'and the ceremony box names its step rather than repeating a generic heading');
 		$box = (string)file_get_contents(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
 		check(strpos($box, 'string $title = \'\'') !== false,

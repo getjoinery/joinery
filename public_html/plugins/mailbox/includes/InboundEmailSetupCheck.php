@@ -31,6 +31,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.73 - two SPF records at a name fail its SPF row (apex, forwarding subdomain, machine identity):
+ *   receivers treat them as an error
  * @version 1.72 - a read-only check lists the Sending domain verified row as not asked
  * @version 1.71 -a refusing provider's sending domain must also be verified there: a row says so, with Ask it to re-check
  * @version 1.70 - the DKIM row offers Make a signing key where joinery-dkim-add is installed
@@ -2156,9 +2158,10 @@ class InboundEmailSetupCheck {
 		// SPF — fetch the domain's TXT once; both branches read it.
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
 		$spf = $txtOk ? $this->extractSpf($txt) : '';
+		$spf_count = $txtOk ? $this->spfCount($txt) : 0;
 
 		if ($protected) {
-			foreach ($this->protectedShapeResults($model, $domain, $txtOk, $spf) as $r) {
+			foreach ($this->protectedShapeResults($model, $domain, $txtOk, $spf, $spf_count) as $r) {
 				$out[] = $r;
 			}
 			// The last step of the ceremony, and the only one that used to leave no
@@ -2176,6 +2179,9 @@ class InboundEmailSetupCheck {
 			if (!$txtOk) {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
 					'DNS TXT lookup for ' . $domain . ' failed — try again.');
+			} elseif ($spf_count > 1) {
+				$out[] = $this->spfDuplicateResult($domain, 'SPF record', $spf_count,
+					$plan['prescribe'] === 'none' ? '' : (string)($plan['value'] ?? ''));
 			} elseif ($plan['prescribe'] === 'switch_provider') {
 				// No record can both authorize this outbound path and keep the
 				// box's address out of DNS — the fix is the outbound path itself.
@@ -2816,6 +2822,10 @@ class InboundEmailSetupCheck {
 		if ($spf === '') {
 			return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, $bad,
 				$machine . ' has no SPF (v=spf1) record.', '', $this->dnsFix('TXT', $machine, $want));
+		}
+		if ($this->spfCount($txt) > 1) {
+			return $this->spfDuplicateResult($machine, $row_label, $this->spfCount($txt), $want,
+				'domain.machine_sender.spf', $machine, $severity, $bad);
 		}
 		if ($mech !== '' && !$this->spfCoversMechanism($spf, $mech)) {
 			return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, $bad,
@@ -3802,7 +3812,7 @@ class InboundEmailSetupCheck {
 		$domain = strtolower(trim((string)$model->get('ied_domain')));
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
 		$spf = $txtOk ? $this->extractSpf($txt) : '';
-		return $this->protectedShapeResults($model, $domain, $txtOk, $spf);
+		return $this->protectedShapeResults($model, $domain, $txtOk, $spf, $txtOk ? $this->spfCount($txt) : 0);
 	}
 
 	/**
@@ -3909,6 +3919,31 @@ class InboundEmailSetupCheck {
 		return (strcasecmp($body, '-all') === 0);
 	}
 
+	/** How many v=spf1 records a TXT record set holds. */
+	private function spfCount(array $txt): int {
+		$n = 0;
+		foreach ($txt as $t) {
+			if (stripos($t, 'v=spf1') === 0) { $n++; }
+		}
+		return $n;
+	}
+
+	/**
+	 * More than one SPF record at a name is an error to every receiver
+	 * (RFC 7208 4.5, permerror), so SPF fails for all of the domain's mail
+	 * whatever either record says. Reading the first one alone would grade a
+	 * record the world ignores. $want is the one record to keep, or ''.
+	 */
+	private function spfDuplicateResult(string $domain, string $label, int $count, string $want,
+			string $id = 'domain.spf', string $scope = '', string $severity = self::REQUIRED, string $status = self::FAIL) {
+		return $this->r($id, $scope !== '' ? $scope : $domain, 'domain', $label, $severity, $status,
+			$domain . ' has ' . $count . ' SPF records — receivers treat that as an error, so SPF fails for all '
+			. 'of its mail. Keep one.',
+			'Remove every TXT record at ' . $domain . ' that starts v=spf1 except one'
+			. ($want !== '' ? ', and make that one ' . $want : '') . '.',
+			$want !== '' ? $this->dnsFix('TXT', $domain, $want) : null);
+	}
+
 	/** The first v=spf1 record in a TXT record set, or ''. */
 	private function extractSpf(array $txt) {
 		foreach ($txt as $t) {
@@ -3923,12 +3958,12 @@ class InboundEmailSetupCheck {
 	 * pre-activation verify) both emit exactly this list, so the ceremony can
 	 * never pass a shape the Setup tab would fail, or vice versa.
 	 */
-	private function protectedShapeResults(InboundEmailDomain $model, $domain, $txtOk, $spf) {
+	private function protectedShapeResults(InboundEmailDomain $model, $domain, $txtOk, $spf, int $spf_count = 1) {
 		list($dmarcTxt, $dmarcOk) = $this->dns(function () use ($domain) {
 			return DnsResolver::getTxt('_dmarc.' . $domain);
 		});
 		return array(
-			$this->protectedSpfResult($domain, $txtOk, $spf),
+			$this->protectedSpfResult($domain, $txtOk, $spf, $spf_count),
 			$this->providerVerificationResult($domain, $txtOk, $spf, $model),
 			$this->forwardingSubdomainSpfResult($model),
 			$this->forwardingSubdomainMxResult($model),
@@ -3943,11 +3978,14 @@ class InboundEmailSetupCheck {
 	 * FAIL when it authorizes the box. REQUIRED: a box-authorizing SPF hands an
 	 * attacker an aligned ambient send path with no key at all.
 	 */
-	private function protectedSpfResult($domain, $txtOk, $spf) {
+	private function protectedSpfResult($domain, $txtOk, $spf, int $spf_count = 1) {
 		$suggested = 'v=spf1 -all';
 		if (!$txtOk) {
 			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::UNKNOWN,
 				'DNS TXT lookup for ' . $domain . ' failed — try again.');
+		}
+		if ($spf_count > 1) {
+			return $this->spfDuplicateResult($domain, 'SPF excludes this server', $spf_count, $suggested);
 		}
 		if ($spf === '') {
 			return $this->r('domain.spf', $domain, 'domain', 'SPF excludes this server', self::REQUIRED, self::PASS,
@@ -4199,12 +4237,15 @@ class InboundEmailSetupCheck {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::UNKNOWN,
 				'DNS TXT lookup for ' . $sub . ' failed — try again.');
 		}
-		$spf = '';
-		foreach ($txt as $t) { if (stripos($t, 'v=spf1') === 0) { $spf = $t; break; } }
+		$spf = $this->extractSpf($txt);
 		if ($spf === '') {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::FAIL,
 				$sub . ' has no SPF record — forwarded mail will fail SPF at the destination.', '',
 				$this->dnsFix('TXT', $sub, $spfValue));
+		}
+		if ($this->spfCount($txt) > 1) {
+			return $this->spfDuplicateResult($sub, 'Forwarding subdomain SPF', $this->spfCount($txt),
+				strpos($spfValue, 'YOUR_') === false ? $spfValue : '', 'domain.fwd_spf', $domain);
 		}
 		if ($sender_ip === '') {
 			return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::UNKNOWN,

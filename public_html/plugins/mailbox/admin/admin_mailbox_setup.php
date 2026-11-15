@@ -27,6 +27,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.23 - without a press, the records are one ordered table in two groups that rechecks itself every
+ *   30 seconds, and the turn-on button is enabled when the records pass
  * @version 3.22 - Unlock your vault opens it in place, and the turn-on button shows without a reload
  * @version 3.21 - one press turns send protection on where the DNS host takes an API key, and the
  *   page it lands on says what each step did
@@ -156,7 +158,8 @@ $setup_open  = !empty($protect_setup) && !empty($protect)
 // protection can start until that is answered, so it is the task too.
 $owner_needed = !empty($protect) && $focus_domain !== ''
 	&& empty($protect['is_protected']) && empty($protect['has_key']);
-$si_at_top   = $setup_open || $owner_needed;
+// Signing just went on and group 2 is still to publish: still the task.
+$si_at_top   = $setup_open || $owner_needed || (!empty($protect['is_protected']) && !empty($protect_record_list));
 $focus_qs    = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
 	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
 $focus_base  = $base . $focus_qs;
@@ -185,8 +188,9 @@ $render_owner_form = function (string $button, int $value) use ($page, $protect,
 
 $render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
-		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check, $render_owner_form,
-		$protect_press_box, $protect_press_result, $protect_press_note, $acting_has_vault) {
+		$protect_preflight, $protect_vault_unlocked, $render_check, $render_owner_form,
+		$protect_press_box, $protect_press_result, $protect_press_note, $acting_has_vault,
+		$protect_record_list) {
 // --- Sending identity (the sending-lock add-on) ---
 // THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
 // (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
@@ -239,6 +243,25 @@ if (!empty($protect) && $focus_domain !== '') {
 	if ($protect['is_protected']) {
 		echo '<p class="mb-2">Send protection is on. While you are signed out, nothing on this server can send '
 			. 'mail as ' . htmlspecialchars($focus_domain) . ' that anyone will accept.</p>';
+		// THE SAME ORDERED LIST, GROUP 2 NOW ACTIVE: signing is on, so the
+		// records that reject forgeries are safe, and the list keeps checking
+		// until they are live. Absent once they are.
+		if (!empty($protect_record_list)) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_record_table.php'));
+			// Said from the rows: right after a one press group 2 is published
+			// and only waiting on the nameservers, and telling the person to
+			// publish it again would send them to redo what is done.
+			$to_publish = array_filter($protect_record_list['groups'][1]['rows'], function ($r) {
+				return !in_array($r['status'], array('live', 'pending'), true);
+			});
+			echo empty($to_publish)
+				? '<p class="mb-2"><strong>Group 2 is published.</strong> It is waiting for your domain\'s '
+					. 'nameservers to serve it; this page checks again by itself.</p>'
+				: '<p class="mb-2"><strong>One step is left:</strong> publish the records in group 2 where your '
+					. 'domain\'s DNS is managed. Until they are live, other servers still accept mail that your key '
+					. 'did not sign.</p>';
+			echo mailbox_protect_record_table($protect_record_list, (int)$focus_domain_id);
+		}
 	} elseif ($protect['has_key'] && !$setup_open) {
 		// ASKED FOR, NOT YET FINISHED. The domain editor's "Only send while
 		// I'm signed in" switch sealed a key the moment it was turned on, so
@@ -296,15 +319,17 @@ if (!empty($protect) && $focus_domain !== '') {
 		if (!empty($protect_press_note)) {
 			echo '<p class="text-muted small mb-2">' . htmlspecialchars($protect_press_note) . '</p>';
 		}
-		echo '<p class="text-muted small mb-2">This happens in two steps, and taking them in this order is what '
-			. 'keeps your mail flowing the whole way through:</p>';
-		echo '<ol class="text-muted small mb-3">';
-		echo '<li><strong>Now:</strong> publish the records below, then turn signing on. None of them asks any '
-			. 'mail server to reject anything, so nothing changes for the mail you send today.</li>';
-		echo '<li><strong>After that:</strong> publish the SPF and DMARC records that make other servers reject '
-			. 'forgeries. This page offers them once signing is on — by which time the signature they demand '
-			. 'is already on every message you send.</li>';
-		echo '</ol>';
+		// ONE ORDERED LIST (WP4). The order is the safety, so the table is the
+		// order: group 1 now, group 2 greyed out until signing is on. Publishing
+		// the records that reject unsigned mail before anything signs takes the
+		// domain's own mail down for as long as DNS takes to travel.
+		$ready = !empty($protect_record_list['signing_ready']);
+		if (!empty($protect_record_list)) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_record_table.php'));
+			echo '<p class="mb-2">Publish the records in group 1 where your domain\'s DNS is managed, then turn '
+				. 'signing on below. Group 2 comes after that.</p>';
+			echo mailbox_protect_record_table($protect_record_list, (int)$focus_domain_id);
+		}
 
 		if (!empty($protect_dns_box)) {
 			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
@@ -315,19 +340,27 @@ if (!empty($protect) && $focus_domain !== '') {
 			// the strict SPF and DMARC: Apply is one click, and one click is all
 			// it would take to start rejecting the domain's own mail.
 			dns_publish_box_render($page, $protect_dns_box,
-				'Step 1 — publish the records that let your key sign', 'nested');
-		} elseif (!empty($protect_signing_ready)) {
-			// The box is absent because there is nothing for it to do. Say that,
-			// rather than leaving a gap where a step used to be — a numbered step
-			// that renders nothing reads as one that failed to load.
-			echo '<p class="mb-2"><strong>Step 1 is already done.</strong> Every record your key needs is '
-				. 'published and live, so there is nothing to configure here.</p>';
+				'Or publish group 1 through your DNS host', 'nested');
 		}
 
+		// The readiness cards that gate the button. The REQUIRED ones are the
+		// records above, checked once at render; the page's recheck hides them
+		// once they pass, rather than leave a red card beside a live record.
+		// Anything else (the system mail warning) stays.
 		if (!empty($protect_preflight)) {
-			echo '<h5 class="mt-3 mb-2">' . (!empty($protect_signing_ready)
-					? 'Confirmed live' : 'What has to be live before signing starts') . '</h5>';
-			foreach ($protect_preflight as $r) { $render_check($r); }
+			$required = array_filter($protect_preflight, function ($r) {
+				return ($r['severity'] ?? '') === InboundEmailSetupCheck::REQUIRED;
+			});
+			$others = array_filter($protect_preflight, function ($r) {
+				return ($r['severity'] ?? '') !== InboundEmailSetupCheck::REQUIRED;
+			});
+			echo '<div' . ($ready ? ' hidden' : '') . ' data-protect-required>';
+			echo '<h5 class="mt-3 mb-2">What has to be live before signing starts</h5>';
+			foreach ($required as $r) { $render_check($r); }
+			echo '</div>';
+			echo '<p class="mt-3 mb-2"' . ($ready ? '' : ' hidden') . ' data-protect-required-ready><strong>Confirmed '
+				. 'live:</strong> every record your key needs to sign.</p>';
+			foreach ($others as $r) { $render_check($r); }
 		}
 
 		// THE UNLOCK GATE IS SHOWN, NOT DISCOVERED. A button that accepts a
@@ -335,7 +368,8 @@ if (!empty($protect) && $focus_domain !== '') {
 		// checklist step that is already done.
 		// Unlocked in place (VaultGate): the button is on the page behind the
 		// Unlock, and shows the moment the vault opens. Only a person with no
-		// vault is sent away, to set one up.
+		// vault is sent away, to set one up. Drawn disabled until group 1 is
+		// live; the recheck enables it, and the press checks again.
 		$locked = empty($protect_vault_unlocked);
 		if ($locked && empty($acting_has_vault)) {
 			echo '<p class="alert alert-warning mb-2">You have no vault. Turning send protection on decides what '
@@ -346,12 +380,17 @@ if (!empty($protect) && $focus_domain !== '') {
 				. 'protection on decides what the rest of the world will accept as this domain, so we need to know '
 				. 'you are really here. ' . VaultGate::unlockButton('Unlock your vault',
 					'to turn send protection on', 'btn btn-sm btn-primary ms-2') . '</p>', $locked);
-			echo VaultGate::behind('<div class="mb-2">' . PublicPageBase::action_button(
+			echo VaultGate::behind('<div class="mb-2" data-protect-turn-on>' . PublicPageBase::action_button(
 				'Check DNS and turn on send protection', $self_url,
-				array('hidden' => $prot_hidden + array('action' => 'protect_activate'),
+				// protect_setup keeps the ceremony open on the page it lands on,
+				// where group 2 is now the step to take.
+				array('hidden' => $prot_hidden + array('action' => 'protect_activate', 'protect_setup' => '1'),
 					'class' => 'btn btn-primary',
+					'disabled' => !$ready,
 					'confirm' => 'Turn send protection on for ' . $focus_domain . '? From this moment only your '
 						. 'key can send as this domain, and you will need your vault unlocked to send mail.'))
+				. ($ready ? '' : '<div class="small text-muted mt-1" data-protect-waiting>This turns on once every '
+					. 'record in group 1 is live.</div>')
 				. '</div>', $locked, 'div');
 		}
 	}

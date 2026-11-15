@@ -24,6 +24,8 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.26 - without a press, the records come as one ordered list that rechecks itself (protect_record_list);
+ *   after the flag, while the ceremony is open, the same list with group 2 active
  * @version 2.25 - the press box is offered while the vault is locked; its button waits behind an in-place unlock
  * @version 2.24 - one press turns send protection on where the DNS host takes an API key (protect_press_box)
  * @version 2.23 - a domain_id focus is kept for any registered domain, not only the machine sender's:
@@ -515,6 +517,18 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	}
 	$protect_signing_ready = false;
 	$protect_vault_unlocked = false;
+	$protect_record_list   = null;
+	// Signing is on and the records that reject forgeries are not all live
+	// yet: the same list, group 2 now active, until they are. Only while the
+	// ceremony is open (turning it on lands back here with protect_setup), so a
+	// finished domain's ordinary view pays no lookups for it.
+	if ($protect_setup && $protect !== null && $focus_domain_model !== null && $focus_is_protected) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+		$after_flag = mailbox_protect_record_list($focus_domain_model, $checker);
+		if (!$after_flag['strict_live']) {
+			$protect_record_list = $after_flag;
+		}
+	}
 	if ($protect_setup && $protect !== null && $focus_domain_model !== null
 			&& !$focus_is_protected && !empty($protect['has_key'])) {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -585,6 +599,13 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			}
 		}
 
+		// WITHOUT A PRESS, ONE ORDERED LIST (WP4): every record in publish
+		// order, the strict ones greyed out, rechecked every 30 seconds by the
+		// page until the button may be pressed.
+		if ($protect_press_box === null) {
+			$protect_record_list = mailbox_protect_record_list($focus_domain_model, $checker, $protect_preflight);
+		}
+
 		// dns_plan=signing in its post URL tells the Apply handler this box's plan.
 		if (!$protect_signing_ready && $protect_press_box === null) {
 			$protect_dns_box = DnsPublishBox::build(
@@ -636,6 +657,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'protect_press_note'         => $protect_press_note,
 		'protect_press_result'       => $protect_press_result,
 		'protect_signing_ready'      => $protect_signing_ready,
+		'protect_record_list'        => $protect_record_list,
 		'protect_vault_unlocked'     => $protect_vault_unlocked,
 		// Machine sender ceremony (specs/mailbox_machine_sender_card.md)
 		'machine_setup'              => $machine_setup,
