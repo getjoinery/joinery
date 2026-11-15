@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 # install_office_editor.sh - host installer for the office_editor plugin.
+# Version: 0.1.4 - /cool is proxied with nocanon, so the document address in its path
+#                reaches the editor as the browser sent it (inserting a picture
+#                failed: Apache refused or re-encoded the %2F in it; the site's
+#                vhost keeps %2F, default_virtualhost.conf 2.11). /cool admits only
+#                the four request forms the editor's page sends, checked on the
+#                request line as sent; the deny list it held could be passed with
+#                a dot segment (/cool/getMetrics/../x) or a 0x hex-encoded path.
+#                The query carries no '/' but a trailing /ws (the editor splits it
+#                into path segments too).
 # Version: 0.1.3 - a refusal exits 78, so the runner records it as refused with its reason, not as ok
 # Version: 0.1.2 - the web user may also run office-editor-ctl off and remove (the
 #                plugin's deactivate and uninstall hooks). Every setting is written
@@ -269,15 +278,29 @@ cat > "${CANDIDATE}" <<APACHE
 </Location>
 <Location /cool>
     ProxyPreserveHost On
-    ProxyPass http://127.0.0.1:9980/cool upgrade=websocket retry=0 disablereuse=On
+    ProxyPass http://127.0.0.1:9980/cool upgrade=websocket retry=0 disablereuse=On nocanon
     ProxyPassReverse http://127.0.0.1:9980/cool
+    # Only what the editor's own page asks for, checked on the request line as
+    # the browser sent it - nocanon hands the editor that line, not the path
+    # Apache tidies for its own matching:
+    #   /cool/ws?...                          the document's websocket
+    #   /cool/clipboard?...                   copy and paste
+    #   /cool/<document>/insertfile?...       an inserted picture
+    #   /cool/<document>/download/<id>?...    save a copy, print
+    # <document> is this site's WOPI address for the file, encoded. The
+    # conversion endpoints, metrics (served to anyone: the site reads them
+    # without a login), admin console, search rendering, a dot segment and a
+    # 0x hex-encoded path are all outside it. The editor splits the query on
+    # '/' too, so the query may carry none but the trailing /ws the page adds
+    # (every value in it is URL-encoded).
+    <If "%{THE_REQUEST} !~ m#^(GET|POST) /cool/(ws|clipboard|http%3A%2F%2F127\.0\.0\.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F[0-9]+/(insertfile|download/[A-Za-z0-9_-][A-Za-z0-9._~-]*))(\?[^ /]*(/ws)?)? HTTP/#">
+        Require all denied
+    </If>
 </Location>
-# The editor's conversion endpoints, its metrics and its admin console are
-# not offered to anyone. (The console is on only because the metrics need it;
-# with no admin user configured it admits nobody, even on loopback.)
-<LocationMatch "^/cool/(convert-to|extract-|get-thumbnail|render-search-result|getMetrics|adminws)">
-    Require all denied
-</LocationMatch>
+# nocanon: the document's own address rides, encoded, in the path
+# (/cool/<address>/insertfile) and must reach the editor exactly as the browser
+# sent it; re-encoded, %2F becomes %252F and the editor no longer knows the
+# document. The site's vhost keeps %2F in a path (AllowEncodedSlashes NoDecode).
 <LocationMatch "^/browser/[^/]+/admin/|^/browser/dist/admin/">
     Require all denied
 </LocationMatch>

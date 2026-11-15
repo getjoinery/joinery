@@ -604,7 +604,30 @@ check(strpos($t210, 'RewriteCond %{REQUEST_URI} !^/(server-status|fpm-status)$')
     'the status pages are kept out of the route rewrite');
 check(is_file($history_dir . '/default_virtualhost-2.09.conf'), 'vhost_history carries 2.09');
 
-foreach (array('default_virtualhost.conf' => '2.10', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
+// 2.11: the main site's two hosts keep %2F in a path (the document editor's
+// /cool/<document address>/insertfile was answered 404 by Apache). Per host:
+// a server-level AllowEncodedSlashes does not reach a VirtualHost. The office
+// editor's /cool proxy passes the path on as sent (nocanon).
+check(preg_match_all('/^\s*ServerName \{\{DOMAIN_NAME\}\}\s*\n(?:\s*\S.*\n){0,4}?\s*AllowEncodedSlashes NoDecode\s*$/m', $t210) === 2,
+    'AllowEncodedSlashes NoDecode on the main site\'s two hosts');
+check(substr_count($t210, "\n        AllowEncodedSlashes NoDecode\n") === 2, 'and nowhere else');
+check(is_file($history_dir . '/default_virtualhost-2.10.conf'), 'vhost_history carries 2.10');
+$oe = (string)file_get_contents(PathHelper::getIncludePath('plugins/office_editor/provisioning/install_office_editor.sh'));
+check(strpos($oe, "ProxyPass http://127.0.0.1:9980/cool upgrade=websocket retry=0 disablereuse=On nocanon\n") !== false,
+    'the office editor proxies /cool with nocanon');
+// /cool admits only what the editor's page sends, on the request line as
+// sent: nocanon hands the editor that line, so a deny list matched against
+// Apache's tidied path was passed by /cool/getMetrics/../x and by a 0x
+// hex-encoded first segment (reviewer2 B1, B2).
+check(strpos($oe, '<If "%{THE_REQUEST} !~ m#^(GET|POST) /cool/(ws|clipboard|http%3A%2F%2F127\\.0\\.0\\.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F[0-9]+/(insertfile|download/[A-Za-z0-9_-][A-Za-z0-9._~-]*))(\\?[^ /]*(/ws)?)? HTTP/#">') !== false,
+    '/cool admits only the websocket, clipboard, insertfile and download forms, on the request line as sent');
+check(strpos($oe, 'getMetrics|adminws') === false && strpos($oe, 'getmetrics|adminws') === false,
+    'no deny list of editor endpoints is left beside the allow list');
+$cool = preg_match('#<Location /cool>(.*?)</Location>#s', $oe, $m) ? $m[1] : '';
+check(strpos($cool, "Require all denied") !== false && strpos($cool, '<If "%{THE_REQUEST}') !== false,
+    'the allow list sits inside the /cool proxy block');
+
+foreach (array('default_virtualhost.conf' => '2.11', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);

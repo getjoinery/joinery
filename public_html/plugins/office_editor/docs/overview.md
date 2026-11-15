@@ -185,7 +185,16 @@ root by the host converger once the plugin is active):
 4. Adds `conf-available/joinery-office-editor.conf`: `/browser`,
    `/hosting/capabilities` and `/cool` (websocket included) proxied to the
    editor with the visitor's Host kept, its conversion endpoints, metrics and
-   admin console refused, and the loopback listener. The listener checks the
+   admin console refused, and the loopback listener. `/cool` is proxied with
+   `nocanon`: the document's own address rides encoded in its paths
+   (`/cool/<address>/insertfile` for an inserted picture,
+   `/cool/<address>/download/<id>`) and reaches the editor as sent. `/cool`
+   admits only the four forms the editor's page sends (those two,
+   `/cool/ws?...` and `/cool/clipboard?...`), checked on the request line as
+   sent (`THE_REQUEST`), since that is what the editor reads; everything else
+   under it, the conversion endpoints and metrics included, is refused. The site's vhost keeps `%2F` in a path (`AllowEncodedSlashes
+   NoDecode`, `default_virtualhost.conf`); without it Apache answers 404 to
+   those paths. The listener checks the
    request line as sent (`THE_REQUEST`): the site's rewrite hands a request on
    to serve.php internally, and the check runs again for that. Every proxy line has `retry=0` (a refused
    connection while the editor was stopped must not hold Apache off for a
