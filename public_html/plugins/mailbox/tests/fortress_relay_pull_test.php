@@ -55,6 +55,8 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_relay_pull
  *
+ * @version 1.7 - the site's account of the relay's identity (updateFor), the code people compare (fingerprint)
+ *                and the Relay section's trust box (trustBox) (specs/relay_update_trust_step.md)
  * @version 1.6 - the proxy passes the browser's challenge to the relay, and refuses a malformed one
  * @version 1.5 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.4 - mail rules run by the parsing device
@@ -673,6 +675,61 @@ try {
 		MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay);
 	}), 'a relay that does not know the mailbox is an error, not an empty answer');
 	check(count(MailboxRelayPin::mailboxesToCheck($pin_owner_id, $pin_relay)) === 1, 'the owner\'s page checks this mailbox');
+
+	section('the site\'s account of a relay change, and the code people compare');
+	check(MailboxRelayPin::updateFor($pin_relay) === null, 'no run gave the relay its identity: the site has no account');
+	$pin_run = new RelayCloudProvision(NULL);
+	$pin_run->set('rcl_kind', 'upgrade');
+	$pin_run->set('rcl_status', 'booting');
+	$pin_run->set('rcl_usr_user_id_started', $pin_owner_id);
+	$pin_run->set('rcl_identity_public_key', $pin_identity);
+	$pin_run->save();
+	harness_register_row('rcl_relay_cloud_provisions', 'rcl_relay_cloud_provision_id', intval($pin_run->key));
+	$pin_upd = MailboxRelayPin::updateFor($pin_relay);
+	check($pin_upd !== null && $pin_upd['run_id'] === intval($pin_run->key) && $pin_upd['status'] === 'booting'
+		&& $pin_upd['done_time'] === null && $pin_upd['identity_public_key'] === $pin_identity,
+		'a run still going that wrote the identity is the account, with its status');
+	check($pin_upd['started_by'] === (string)$pin_owner->display_name() && preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', (string)$pin_upd['started_time']) === 1,
+		'it names who started it, and when (UTC)');
+	$pin_run->set('rcl_status', 'done');
+	$pin_run->set('rcl_done_time', '2026-11-15 12:07:00');
+	$pin_run->save();
+	$pin_upd = MailboxRelayPin::updateFor($pin_relay);
+	check($pin_upd['status'] === 'done' && $pin_upd['done_time'] === '2026-11-15T12:07:00Z', 'a finished run says when it finished');
+	$pin_relay->answer = '{"statement":"{\\"a\\":1}","signature":"c2ln"}';
+	check((MailboxRelayPin::sealTarget($pin_owner_id, $pin_alias_id, $pin_relay)['update'] ?? null) === $pin_upd,
+		'relay_seal_target carries the account');
+	$pin_relay->answer = null;
+	check(MailboxRelayPin::fingerprint($pin_identity) === '6fd2 c2b8 7aa2 d51d 3eb8 1a12 2ab1 8df5'
+		&& MailboxRelayPin::fingerprint('not a key!') === '',
+		'the code: SHA-256 of the raw key, 16 bytes in groups of four (what provision_relay.sh writes to /etc/issue)');
+	check(strpos((string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_relay.sh')),
+		"base64 -d 2>/dev/null | sha256sum | cut -c1-32 | sed 's/..../& /g; s/ \$//'") !== false,
+		'the relay computes the same code for its console');
+
+	$pin_run->set('rcl_delete_time', gmdate('Y-m-d H:i:s'));
+	$pin_run->save();
+	check((MailboxRelayPin::updateFor($pin_relay)['run_id'] ?? 0) === intval($pin_run->key),
+		'a run dismissed from the Relay section is still the site\'s account (reviewer2 B1)');
+
+	section('the Relay section\'s trust box');
+	check(MailboxRelayPin::trustBox($pin_owner_id, $pin_relay) === null, 'nothing to offer while every mailbox is pinned to the new identity');
+	$db->prepare('UPDATE iea_inbound_email_aliases SET iea_relay_identity_pin = NULL WHERE iea_inbound_email_alias_id = ?')->execute(array($pin_alias_id));
+	check(MailboxRelayPin::trustBox($pin_owner_id, $pin_relay) === null
+		&& MailboxRelayPin::trustBox(intval($pin_stranger->key), $pin_relay) === null,
+		'a mailbox with no pin yet is not offered, nor counted for others: its first check pins without asking (reviewer2 B2)');
+	MailboxRelayPin::setPin($pin_owner_id, $pin_alias_id, $pin_other_identity, $pin_a_mac);
+	$pin_tb = MailboxRelayPin::trustBox($pin_owner_id, $pin_relay);
+	check($pin_tb !== null && count($pin_tb['mine']) === 1 && $pin_tb['mine'][0]['alias_id'] === $pin_alias_id
+		&& $pin_tb['code'] === MailboxRelayPin::fingerprint($pin_identity) && $pin_tb['run_id'] === intval($pin_run->key),
+		'a mailbox pinned to the old relay is offered, with the new relay\'s code');
+	$pin_tb_other = MailboxRelayPin::trustBox(intval($pin_stranger->key), $pin_relay);
+	check($pin_tb_other !== null && $pin_tb_other['mine'] === array() && $pin_tb_other['others'] === 1,
+		'someone with no mailbox under the relay is told how many others will be asked');
+	$pin_run->set('rcl_status', 'provisioning');
+	$pin_run->save();
+	check(MailboxRelayPin::trustBox($pin_owner_id, $pin_relay) === null, 'nor while the run is still going');
+	MailboxRelayPin::setPin($pin_owner_id, $pin_alias_id, $pin_identity, $pin_a_mac);
 
 	$pin_domain->set('ied_relay_seals_to_owner', false);
 	$pin_domain->save();

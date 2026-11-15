@@ -41,6 +41,12 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.20.1 - the relay check takes what it reaches (records, API, step-up, challenge) as an argument, so
+ *   selfCheck swaps nothing on the page (reviewer2 N1)
+ * @version 1.20 - a relay change is one plain popup per new relay, for every mailbox it covers: what happened,
+ *   what the site says (marked as the site's word), what this device checked, the code to check off-site, and
+ *   one press for them all; the other alarms say in plain words what happened and what to do
+ *   (specs/relay_update_trust_step.md R2, R3, R6)
  * @version 1.19 - an answer without the challenge this check sent is refused: every relay runs 3.18 or later, so there is no
  *   time-window fallback and no per-relay record of which relays sign one (owner decision Q1)
  * @version 1.18 - each relay check sends a one-time challenge; an answer is current only if the relay signed it back, or, from a relay
@@ -1043,12 +1049,48 @@ window.MailboxFortress = (function () {
 
 	// This browser's own record of the relay each mailbox was pinned to (B49):
 	// a pin the server deleted then cannot pass for a first use here.
+	// What the relay check reaches outside itself: this browser's records,
+	// the API, the step-up and the challenge. The page uses RELAY_ENV;
+	// selfCheck hands in its own, so a check it runs never touches the page's
+	// records, API or challenge, even while a real check is in flight.
+	var RELAY_ENV = {
+		store: function () { return window.localStorage; },
+		post: function (action, data) { return window.joineryApi.post(action, data); },
+		stepUp: function () { return stepUp(); },
+		challenge: function () { return newChallenge(); }
+	};
+
 	var LOCAL_PIN = 'joinery-relay-pin:';
-	function localPin(aliasId) {
-		try { return window.localStorage.getItem(LOCAL_PIN + aliasId) || null; } catch (e) { return null; }
+	function localPin(aliasId, env) {
+		try { return (env || RELAY_ENV).store().getItem(LOCAL_PIN + aliasId) || null; } catch (e) { return null; }
 	}
-	function rememberPin(aliasId, identity) {
-		try { window.localStorage.setItem(LOCAL_PIN + aliasId, identity); } catch (e) { /* no storage here */ }
+	function rememberPin(aliasId, identity, env) {
+		try { (env || RELAY_ENV).store().setItem(LOCAL_PIN + aliasId, identity); } catch (e) { /* no storage here */ }
+	}
+	// When this browser last saw a mailbox's relay answer as it should: shown
+	// when the relay changes, for information only (R6).
+	var LOCAL_PIN_TIME = 'joinery-relay-pin-time:';
+	function rememberPinTime(aliasId, env) {
+		try { (env || RELAY_ENV).store().setItem(LOCAL_PIN_TIME + aliasId, String(Date.now())); } catch (e) { /* no storage here */ }
+	}
+	function pinTime(aliasId, env) {
+		try { return parseInt((env || RELAY_ENV).store().getItem(LOCAL_PIN_TIME + aliasId), 10) || null; } catch (e) { return null; }
+	}
+	// This browser's own note that it started a relay update (relay_grant.js,
+	// R3): {run_id, at}, good for a day, used up by the trust it explains.
+	var UPDATE_NOTE = 'joinery-relay-update:', UPDATE_NOTE_MS = 24 * 60 * 60 * 1000;
+	function updateNote(update, now, env) {
+		if (!update || !update.relay_id) return null;
+		var note = null;
+		try { note = JSON.parse((env || RELAY_ENV).store().getItem(UPDATE_NOTE + update.relay_id) || 'null'); } catch (e) { return null; }
+		var clock = (typeof now === 'number') ? now : Date.now();
+		if (!note || typeof note.at !== 'number' || clock - note.at > UPDATE_NOTE_MS || note.at > clock) return null;
+		if (note.run_id !== update.run_id) return null;
+		return note;
+	}
+	function forgetUpdateNote(update, env) {
+		if (!update || !update.relay_id) return;
+		try { (env || RELAY_ENV).store().removeItem(UPDATE_NOTE + update.relay_id); } catch (e) { /* no storage here */ }
 	}
 
 	/** A one-time challenge for one relay check: 18 random bytes, base64url (24 characters). */
@@ -1082,19 +1124,24 @@ window.MailboxFortress = (function () {
 			return;
 		}
 		try {
+			var changes = {};   // new relay identity => [{box, verdict, update}]
 			for (var i = 0; i < boxes.length; i++) {
-				await checkOne(boxes[i], session, accepted);
+				await checkOne(boxes[i], session, accepted, changes);
+			}
+			for (var id in changes) {
+				if (Object.prototype.hasOwnProperty.call(changes, id)) await relayChangePopup(changes[id], session);
 			}
 		} finally {
 			accepted.done();   // the pending key's secret leaves memory with the check
 		}
 	}
 
-	async function checkOne(box, session, accepted) {
+	async function checkOne(box, session, accepted, changes, env) {
+		env = env || RELAY_ENV;
 		var answer;
-		var challenge = newChallenge();
+		var challenge = env.challenge();
 		try {
-			answer = await window.joineryApi.post('mailbox/relay_seal_target', { alias_id: box.alias_id, challenge: challenge });
+			answer = await env.post('mailbox/relay_seal_target', { alias_id: box.alias_id, challenge: challenge });
 		} catch (e) {
 			// The server can withhold the check; it cannot forge its answer.
 			if (window.console) console.warn('MailboxFortress: the relay could not be asked about ' + box.address + ': ' + (e && e.message));
@@ -1104,7 +1151,7 @@ window.MailboxFortress = (function () {
 		}
 		// A mailbox this browser pinned before whose pin the server no longer
 		// has: judged against what this browser pinned, not as a first use.
-		var local = localPin(box.alias_id);
+		var local = localPin(box.alias_id, env);
 		if (!answer.pin && local) answer = Object.assign({}, answer, { relay_identity_public_key: local });
 		var verdict = await judgeSealTarget(answer, box, accepted.macs, accepted.keys, { challenge: challenge });
 		// The grace is for a mailbox this browser has never seen sealed to its
@@ -1126,10 +1173,15 @@ window.MailboxFortress = (function () {
 		}
 		forgetSwitching(box.alias_id);
 		switchingNotice(box, false);
+		if (!verdict.ok && verdict.reason === 'identity' && verdict.approvable && changes) {
+			collectChange(changes, box, verdict, answer.update || null);
+			return;
+		}
 		if (verdict.ok) {
-			rememberPin(box.alias_id, verdict.identity);
+			rememberPin(box.alias_id, verdict.identity, env);
+			rememberPinTime(box.alias_id, env);
 			if (verdict.firstUse) {
-				await savePin(session, box, verdict.identity).catch(function (e) {
+				await savePin(session, box, verdict.identity, env).catch(function (e) {
 					if (window.console) console.warn('MailboxFortress: could not pin the relay for ' + box.address + ': ' + (e && e.message));
 				});
 			}
@@ -1194,9 +1246,9 @@ window.MailboxFortress = (function () {
 		else document.body.appendChild(el);
 	}
 
-	function savePin(session, box, identity) {
+	function savePin(session, box, identity, env) {
 		return session.mac(pinMessage(box.alias_id, identity)).then(function (m) {
-			return window.joineryApi.post('mailbox/relay_pin_set', { alias_id: box.alias_id,
+			return (env || RELAY_ENV).post('mailbox/relay_pin_set', { alias_id: box.alias_id,
 				relay_identity_public_key: identity, mac: VaultCrypto.b64encode(m) });
 		});
 	}
@@ -1206,78 +1258,239 @@ window.MailboxFortress = (function () {
 		return window.JoineryPasskeys.stepUp();
 	}
 
-	var ALARM_REASONS = {
-		pin: 'The relay this mailbox trusts was changed without this device.',
-		identity: 'A different relay is answering for this mailbox than the one this device trusts.',
-		signature: 'The relay\'s answer is not signed by the relay this device trusts.',
-		stale: 'The relay\'s signed answer is not a current one: it is an old answer shown again, or this device\'s clock is wrong.',
-		replayed: 'The relay\'s signed answer was made for an earlier check: it is an old answer shown again.',
-		key: 'The relay is sealing this mailbox\'s mail to a key that is not this device\'s.',
-		unreadable: 'The relay\'s answer could not be read.'
+	// Every alarm says what happened, what it can mean and what to do, for
+	// someone who has never heard the word relay.
+	var RELAY_INTRO = 'Your mail passes through a relay on its way to this site, and the relay seals it so only you can read it.';
+	var ALARMS = {
+		pin: { title: 'Your mail protection was changed without your devices',
+			what: 'Your devices keep a record, made with your own key, of which relay protects this mail. The record this site holds now was not made by any of your devices.' },
+		identity: { title: 'A different relay is answering, and it did not pass this device\'s check',
+			what: 'A different relay is answering for this mailbox, and it did not sign this device\'s one-time question, or it does not say it seals your mail to your own key.' },
+		signature: { title: 'The relay\'s answer could not be confirmed',
+			what: 'The answer that should come from your relay is not signed by it. Someone may be answering in its place.' },
+		replayed: { title: 'The relay\'s answer was not made for this check',
+			what: 'This device asked your relay a one-time question, and the answer it got back was made for another one: an old answer shown again. That can hide a change to your relay.' },
+		key: { title: 'Your mail is not being sealed to your key',
+			what: 'Your relay says it seals mail to this address with a key that is not yours, so whoever holds that key could read new mail.' },
+		unreadable: { title: 'This device could not read the relay\'s answer',
+			what: 'This can be a passing fault. If it keeps happening, tell your site admin.' }
 	};
 
-	/** The alarm: what is wrong, both fingerprints, and Approve only for a new relay that seals to this key. */
-	async function relayAlarm(box, verdict, session) {
-		if (typeof document === 'undefined') return;
+	function el(tag, text, cls) {
+		var n = document.createElement(tag);
+		if (text) n.textContent = text;
+		if (cls) n.className = cls;
+		return n;
+	}
+	function dateText(ms) {
+		if (!ms) return '';
+		return new Date(ms).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+	}
+	function dialogShell(kind) {
 		var dlg = document.createElement('dialog');
 		dlg.className = 'mbx-relay-alarm';
-		dlg.setAttribute('data-relay-alarm', verdict.reason);
-		dlg.style.maxWidth = '34rem';
-		var h = document.createElement('h3');
-		h.textContent = 'Mail arriving at your relay is not being sealed to this device\'s key';
-		dlg.appendChild(h);
-		var p = document.createElement('p');
-		p.textContent = box.address + ': ' + (ALARM_REASONS[verdict.reason] || ALARM_REASONS.unreadable)
-			+ ' Until this is settled, mail to this address may be readable by whoever runs this server.';
-		dlg.appendChild(p);
+		dlg.setAttribute('data-relay-alarm', kind);
+		dlg.style.maxWidth = '36rem';
+		return dlg;
+	}
+	function showDialog(dlg) {
+		document.body.appendChild(dlg);
+		if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+	}
+	function closeButton(dlg, label) {
+		var b = el('button', label || 'Close', 'btn btn-secondary');
+		b.type = 'button';
+		b.addEventListener('click', function () { dlg.close(); dlg.remove(); });
+		return b;
+	}
+
+	/** Every alarm but a new relay that passed this device's check (that is relayChangePopup). */
+	async function relayAlarm(box, verdict, session) {
+		if (typeof document === 'undefined') return;
+		var a = ALARMS[verdict.reason] || ALARMS.unreadable;
+		var dlg = dialogShell(verdict.reason);
+		dlg.appendChild(el('h3', a.title));
+		dlg.appendChild(el('p', RELAY_INTRO + ' ' + a.what));
+		if (verdict.reason !== 'unreadable') {
+			dlg.appendChild(el('p', 'This can mean that someone who controls this site is trying to read your mail.'));
+		}
+		dlg.appendChild(el('p', 'Mailbox: ' + box.address));
 		if (verdict.expected || verdict.reported) {
 			var dl = document.createElement('dl');
 			var row = function (label, value) {
-				var dt = document.createElement('dt'); dt.textContent = label;
-				var dd = document.createElement('dd'); dd.textContent = value; dd.style.fontFamily = 'monospace';
+				var dt = el('dt', label), dd = el('dd', value);
+				dd.style.fontFamily = 'monospace';
 				dl.appendChild(dt); dl.appendChild(dd);
 			};
 			row(verdict.reason === 'key' ? 'This device\'s key' : 'The relay this device trusts', await fingerprint(verdict.expected));
 			row(verdict.reason === 'key' ? 'The key the relay seals to' : 'The relay answering now', await fingerprint(verdict.reported));
 			dlg.appendChild(dl);
 		}
-		var msg = document.createElement('p');
-		msg.className = 'mbx-relay-alarm-status';
-		dlg.appendChild(msg);
-		var buttons = document.createElement('div');
+		dlg.appendChild(el('p', 'What to do: do not trust anything new yet. Show this message to your site admin. '
+			+ 'Your existing mail is safe; this is about new mail.'));
+		var buttons = el('div');
 		buttons.style.display = 'flex';
 		buttons.style.gap = '.5rem';
-		if (verdict.approvable) {
-			var approve = document.createElement('button');
-			approve.type = 'button';
-			approve.className = 'btn btn-primary';
-			approve.textContent = 'Trust the new relay';
-			approve.addEventListener('click', function () {
-				approve.disabled = true;
-				msg.textContent = 'Confirm it is you to trust the new relay…';
-				savePin(session, box, verdict.identity).catch(function (e) {
-					if (!(e && e.data && e.data.requires_stepup)) throw e;
-					return stepUp().then(function () { return savePin(session, box, verdict.identity); });
-				}).then(function () {
-					rememberPin(box.alias_id, verdict.identity);
-					dlg.close();
-					dlg.remove();
-				}, function (e) {
-					approve.disabled = false;
-					msg.textContent = 'The new relay was not trusted: ' + ((e && e.message) || 'the confirmation did not finish') + '.';
-				});
-			});
-			buttons.appendChild(approve);
-		}
-		var close = document.createElement('button');
-		close.type = 'button';
-		close.className = 'btn btn-secondary';
-		close.textContent = 'Close';
-		close.addEventListener('click', function () { dlg.close(); dlg.remove(); });
-		buttons.appendChild(close);
+		buttons.appendChild(closeButton(dlg));
 		dlg.appendChild(buttons);
-		document.body.appendChild(dlg);
-		if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+		showDialog(dlg);
+	}
+
+	/**
+	 * What one new relay's popup says (R2), worked out from what this device
+	 * checked and what the site says, without touching the page: the state
+	 * ('explained' when the site's account names this identity and is done,
+	 * 'finishing' or 'unfinished' when its run is still going or failed,
+	 * 'unexplained' when it names none or another), and every line. The
+	 * site's account picks words only; every state says the device cannot
+	 * check it, and none trusts anything until the owner presses.
+	 */
+	function relayChangeView(identity, update, note, lastSeen, code) {
+		var named = !!(update && update.identity_public_key && sameText(update.identity_public_key, identity));
+		var state = !named ? 'unexplained'
+			: (update.status === 'done' ? 'explained' : (update.status === 'failed' ? 'unfinished' : 'finishing'));
+		var who = (update && update.started_by) ? update.started_by + ' (site admin)' : 'the site admin';
+		var started = named ? dateText(Date.parse(update.started_time)) : '';
+		var done = named ? dateText(Date.parse(update.done_time)) : '';
+		var v = { state: state, intro: RELAY_INTRO, site: '', checked: [], lastSeen: '', code: code, trustPlain: state !== 'unexplained' };
+		if (state === 'explained') {
+			v.title = 'Your mail relay was replaced';
+			v.site = 'This site says ' + who + ' started an update of the relay' + (started ? ' on ' + started : '')
+				+ (done ? ', and it finished ' + done : '') + '. An update gives the relay a new identity.';
+		} else if (state === 'finishing') {
+			v.title = 'Your mail relay is being updated';
+			v.site = 'This site says ' + who + ' started an update of the relay' + (started ? ' on ' + started : '')
+				+ ', and it is still finishing. An update gives the relay a new identity.';
+		} else if (state === 'unfinished') {
+			v.title = 'Your mail relay was being updated';
+			v.site = 'This site says ' + who + ' started an update of the relay' + (started ? ' on ' + started : '')
+				+ ', and it did not finish. Ask your site admin to look at the relay page; the update may need to be run again.';
+		} else {
+			v.title = 'Your mail relay changed, and this site has no record of why';
+			v.site = '';
+			v.warning = 'A different relay is answering now, and this site has no record of an update that would explain it. '
+				+ 'This can mean that someone who controls this site is trying to read your mail.';
+		}
+		v.checked.push('The new relay answered this device just now, with its own signature.');
+		v.checked.push('The new relay says it seals your mail to your own key, which this site does not have.');
+		if (note && named) {
+			v.checked.push('You started this update from this browser at '
+				+ new Date(note.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '.');
+		}
+		if (lastSeen) v.lastSeen = 'This device last confirmed your old relay on ' + dateText(lastSeen) + '.';
+		v.independent = 'This device cannot check what the site says. The code below is the only check that does not '
+			+ 'depend on this site.';
+		// Who to ask is never taken from the site's record (reviewer2 Q4).
+		v.ask = 'If you want to be sure, ask your site admin'
+			+ ' to read you the relay\'s code from the provider\'s console, not from this site. It should end in '
+			+ code.slice(-4) + '.';
+		return v;
+	}
+
+	/**
+	 * A new relay that signed this check and seals to this key: one popup per
+	 * new relay, for every mailbox it covers (R2). Only an approvable
+	 * `identity` verdict is ever collected.
+	 */
+	function collectChange(changes, box, verdict, update) {
+		if (verdict.ok || verdict.reason !== 'identity' || !verdict.approvable) return false;
+		(changes[verdict.identity] = changes[verdict.identity] || []).push({ box: box, verdict: verdict, update: update });
+		return true;
+	}
+
+	/**
+	 * The popup's press: a pin for every mailbox under one confirmation. The
+	 * first refused save asks for the step-up, and the rest ride on it; then
+	 * this browser's records, and the note the trust used up.
+	 */
+	function trustAll(items, identity, update, session, env) {
+		env = env || RELAY_ENV;
+		var pinAll = function () {
+			var p = Promise.resolve();
+			items.forEach(function (it) { p = p.then(function () { return savePin(session, it.box, identity, env); }); });
+			return p;
+		};
+		return pinAll().catch(function (e) {
+			if (!(e && e.data && e.data.requires_stepup)) throw e;
+			return env.stepUp().then(pinAll);
+		}).then(function () {
+			items.forEach(function (it) { rememberPin(it.box.alias_id, identity, env); rememberPinTime(it.box.alias_id, env); });
+			forgetUpdateNote(update, env);
+		});
+	}
+
+	/**
+	 * One new relay, every mailbox of this owner it covers (R2): the popup,
+	 * and one press that trusts them all after one confirmation. Only
+	 * verdicts that are `identity` and approvable come here: the new relay
+	 * signed this check's challenge and names this vault's key.
+	 */
+	async function relayChangePopup(items, session) {
+		if (typeof document === 'undefined' || !items.length) return;
+		var identity = items[0].verdict.identity;
+		var update = items[0].update;
+		var note = updateNote(update);
+		var lastSeen = null;
+		items.forEach(function (it) { var t = pinTime(it.box.alias_id); if (t && (!lastSeen || t > lastSeen)) lastSeen = t; });
+		var v = relayChangeView(identity, update, note, lastSeen, await fingerprint(identity));
+
+		var dlg = dialogShell('identity');
+		dlg.setAttribute('data-relay-change', v.state);
+		dlg.appendChild(el('h3', v.title));
+		dlg.appendChild(el('p', v.intro));
+		if (v.site) dlg.appendChild(el('p', 'ⓘ ' + v.site, 'mbx-relay-site-says'));
+		if (v.warning) dlg.appendChild(el('p', v.warning));
+		dlg.appendChild(el('p', 'What this device checked', 'fw-bold'));
+		var ul = el('ul');
+		ul.style.listStyle = 'none';
+		ul.style.paddingLeft = '0';
+		v.checked.forEach(function (line) { ul.appendChild(el('li', '✓ ' + line)); });
+		dlg.appendChild(ul);
+		if (v.lastSeen) dlg.appendChild(el('p', v.lastSeen, 'small'));
+		dlg.appendChild(el('p', v.independent));
+		var code = el('p', v.ask);
+		dlg.appendChild(code);
+		var full = el('p', 'The full code: ' + v.code, 'small');
+		full.style.fontFamily = 'monospace';
+		dlg.appendChild(full);
+		dlg.appendChild(el('p', 'Mailboxes: ' + items.map(function (it) { return it.box.address; }).join(', ')));
+		if (v.state === 'unexplained') {
+			dlg.appendChild(el('p', 'What to do: do not trust it yet. Show this message to your site admin. '
+				+ 'Your existing mail is safe; this is about new mail.'));
+		}
+		var msg = el('p', '', 'mbx-relay-alarm-status');
+		var trust = el('button', v.trustPlain ? 'Trust the new relay' : 'Trust it anyway', 'btn btn-primary');
+		trust.type = 'button';
+		trust.addEventListener('click', function () {
+			trust.disabled = true;
+			msg.textContent = 'Confirm it is you to trust the new relay…';
+			trustAll(items, identity, update, session).then(function () {
+				dlg.close();
+				dlg.remove();
+			}, function (e) {
+				trust.disabled = false;
+				msg.textContent = 'The new relay was not trusted: ' + ((e && e.message) || 'the confirmation did not finish') + '.';
+			});
+		});
+		var buttons = el('div');
+		buttons.style.display = 'flex';
+		buttons.style.gap = '.5rem';
+		buttons.style.flexWrap = 'wrap';
+		if (v.trustPlain) {
+			buttons.appendChild(trust);
+			buttons.appendChild(closeButton(dlg, 'Not now'));
+			dlg.appendChild(el('p', 'Trusting it asks you to confirm it is you. Until you confirm it, this device cannot '
+				+ 'promise that new mail to these addresses is private, and it will ask again next time.', 'small'));
+		} else {
+			buttons.appendChild(closeButton(dlg));
+			var det = el('details');
+			det.appendChild(el('summary', 'I have checked with my admin'));
+			det.appendChild(trust);
+			buttons.appendChild(det);
+		}
+		dlg.appendChild(msg);
+		dlg.appendChild(buttons);
+		showDialog(dlg);
 	}
 
 	// ---- search text (the sealed iem_search_text) ------------------------------
@@ -1638,6 +1851,101 @@ window.MailboxFortress = (function () {
 			note('a pin re-made under the rotation\'s new key still passes (B48)', either.ok);
 			var neither = await judgeSealTarget(answer, box, [two], keys, sent);
 			note('and one neither key made does not', !neither.ok && neither.reason === 'pin');
+			// The relay-change popup's words (R2): the site's account picks them,
+			// and never earns a tick.
+			var nid = cv.identity, other2 = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+			var run = function (status, idk) { return { relay_id: 4, run_id: 9, kind: 'upgrade', status: status,
+				started_by: 'Pat Admin', started_time: '2026-11-15T11:52:00Z', done_time: status === 'done' ? '2026-11-15T12:07:00Z' : null,
+				identity_public_key: idk || nid }; };
+			var noTick = function (view) { return view.checked.every(function (l) { return l.indexOf('This site says') === -1 && l.indexOf('Pat Admin') === -1; }); };
+			var vDone = relayChangeView(nid, run('done'), null, null, '6fd2 c2b8');
+			note('a done run that names the new identity gives the explained popup, with a plain Trust',
+				vDone.state === 'explained' && vDone.trustPlain && vDone.site.indexOf('This site says Pat Admin') === 0);
+			note('the site\'s account is never a tick, and the popup says the device cannot check it',
+				noTick(vDone) && vDone.independent.indexOf('cannot check what the site says') !== -1);
+			note('the code is asked for from the provider\'s console', vDone.ask.indexOf('provider\'s console, not from this site') !== -1
+				&& vDone.ask.indexOf('c2b8') !== -1);
+			note('a run still going, or failed, gives the finishing words without the accusation',
+				relayChangeView(nid, run('booting'), null, null, 'x').state === 'finishing'
+				&& relayChangeView(nid, run('failed'), null, null, 'x').state === 'unfinished'
+				&& relayChangeView(nid, run('failed'), null, null, 'x').trustPlain);
+			var vNone = relayChangeView(nid, null, null, null, 'x'), vOther = relayChangeView(nid, run('done', other2), null, null, 'x');
+			note('no run, or a run naming another identity, is unexplained, with no plain Trust',
+				vNone.state === 'unexplained' && !vNone.trustPlain && vOther.state === 'unexplained' && !vOther.trustPlain
+				&& vNone.warning.indexOf('no record') !== -1);
+			note('the last good check is information only: it never changes the state',
+				relayChangeView(nid, run('done'), null, Date.parse('2026-11-15T12:30:00Z'), 'x').state === 'explained'
+				&& relayChangeView(nid, null, null, Date.parse('2026-11-14T09:00:00Z'), 'x').state === 'unexplained');
+			var started = { run_id: 9, at: Date.parse('2026-11-15T11:52:00Z') };
+			note('this browser\'s note adds its own tick, and only when the site\'s account names the identity',
+				relayChangeView(nid, run('done'), started, null, 'x').checked.length === 3
+				&& relayChangeView(nid, null, started, null, 'x').checked.length === 2);
+
+			// The mail page's path (checkOne -> collectChange -> trustAll), with
+			// this check's own store, API and step-up, so nothing real is touched.
+			var mem = {}, store = { getItem: function (k) { return Object.prototype.hasOwnProperty.call(mem, k) ? mem[k] : null; },
+				setItem: function (k, val) { mem[k] = String(val); }, removeItem: function (k) { delete mem[k]; } };
+			var stepped = 0, pinPosts = [];
+			var upd = run('done');
+			var movedFor = async function (aliasId, pinned) {
+				return { relay_answer: JSON.stringify({ statement: cv.statement, signature: cv.signature }),
+					relay_identity_public_key: cv.identity, update: upd,
+					pin: pinned ? { relay_identity_public_key: other2, mac: VaultCrypto.b64encode(await mac(pinMessage(aliasId, other2))) } : null };
+			};
+			var answers = { 42: await movedFor(42, true), 43: await movedFor(43, true), 44: await movedFor(44, false) };
+			var env = {
+				store: function () { return store; },
+				challenge: function () { return cv.challenge; },
+				stepUp: function () { stepped++; return Promise.resolve(); },
+				post: function (action, data) {
+					if (action === 'mailbox/relay_seal_target') return Promise.resolve(answers[data.alias_id]);
+					if (action === 'mailbox/relay_pin_set') {
+						if (!stepped) { var err = new Error('step-up'); err.data = { requires_stepup: true }; return Promise.reject(err); }
+						pinPosts.push(data);
+						return Promise.resolve({ pinned: true });
+					}
+					return Promise.reject(new Error('unexpected ' + action));
+				}
+			};
+			try {
+				var acc = { macs: [mac], keys: keys };
+				var changes = {};
+				var bx = function (id) { return { alias_id: id, address: 'box@fortress.test' }; };
+				rememberPin(44, other2, env);   // pinned here before; the server lost its pin
+				await checkOne(bx(42), null, acc, changes, env);
+				await checkOne(bx(43), null, acc, changes, env);
+				await checkOne(bx(44), null, acc, changes, env);
+				var batch = changes[nid] || [];
+				note('two mailboxes moved to one new relay are one popup', batch.length === 3 && Object.keys(changes).length === 1);
+				note('a mailbox whose server pin is gone is judged by this browser\'s own pin, not as a first use',
+					batch.some(function (it) { return it.box.alias_id === 44 && it.verdict.reason === 'identity' && !it.verdict.firstUse; }));
+				var oldStatement = await judgeSealTarget({ relay_answer: JSON.stringify({ statement: v.statement, signature: v.signature }),
+					relay_identity_public_key: v.identity, pin: { relay_identity_public_key: other2,
+						mac: VaultCrypto.b64encode(await mac(pinMessage(45, other2))) } }, bx(45), mac, keys, { challenge: cv.challenge });
+				var none2 = {};
+				note('a new relay that did not pass the check is never batched',
+					oldStatement.reason === 'identity' && !oldStatement.approvable && !collectChange(none2, bx(45), oldStatement, upd)
+					&& Object.keys(none2).length === 0);
+				var two = {};
+				collectChange(two, bx(1), { ok: false, reason: 'identity', approvable: true, identity: 'X' }, null);
+				collectChange(two, bx(2), { ok: false, reason: 'identity', approvable: true, identity: 'Y' }, null);
+				note('two new relays are two popups', Object.keys(two).length === 2);
+
+				var now = Date.now();
+				store.setItem('joinery-relay-update:4', JSON.stringify({ run_id: 9, at: now - 3600 * 1000 }));
+				note('this browser\'s note counts for its own relay and run, inside a day',
+					!!updateNote(upd, now, env) && !updateNote(Object.assign({}, upd, { relay_id: 5 }), now, env)
+					&& !updateNote(Object.assign({}, upd, { run_id: 10 }), now, env) && !updateNote(upd, now + 24 * 3600 * 1000, env));
+				await trustAll(batch, nid, upd, { mac: function (b) { return mac(b); } }, env);
+				note('one press pins every mailbox after one step-up', stepped === 1 && pinPosts.length === 3
+					&& pinPosts.every(function (d) { return d.relay_identity_public_key === nid; }));
+				note('and the trust uses up the note, and this browser records the new relay',
+					store.getItem('joinery-relay-update:4') === null && localPin(42, env) === nid && localPin(44, env) === nid
+					&& !!pinTime(43, env));
+			} catch (e) {
+				note('the mail page\'s relay path runs', false);
+			}
+
 			var pair = await VaultCrypto.generateVaultKeypair();
 			note('a vault\'s public key is worked out from its own secret (B47)',
 				(await VaultCrypto.publicKeyFromSecret(pair.secretKeyBytes)) === pair.publicKeyB64);

@@ -10,8 +10,11 @@
  * Returns {address, relay_answer, relay_identity_public_key, pin}: the relay's
  * body byte for byte (JSON {statement, signature}), the relay identity this
  * server pins the relay's TLS to (what a first use pins), and the stored pin
- * ({relay_identity_public_key, mac}) or null.
+ * ({relay_identity_public_key, mac}) or null, and update: the site's account
+ * of the run that gave the relay its identity (MailboxRelayPin::updateFor), or
+ * null. The browser shows update as what the site says, never as a check.
  *
+ * @version 1.3 - the answer carries update (specs/relay_update_trust_step.md R6)
  * @version 1.2 - passes the browser's challenge to the relay
  * @version 1.1 - reachable with an app session key too (requires_person_credential,
  * specs/fortress_mobile_apps.md § R8)

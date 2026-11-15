@@ -19,6 +19,11 @@
  * check (not list a mailbox, not answer) or delete a pin, which the browser
  * then makes again on first use; the Fortress card says so.
  *
+ * @version 1.3.1 - updateFor() keeps a dismissed run; trustBox() counts only mailboxes pinned elsewhere and
+ *                  offers an admin with none of their own the count of others (reviewer2 B1, B2, Q2)
+ * @version 1.3 - sealTarget()'s answer carries 'update', the site's account of the run that gave the relay its
+ *                identity; fingerprint(), the code people compare; trustBox(), the Relay section's trust box
+ *                (specs/relay_update_trust_step.md R1, R4, R6)
  * @version 1.2 - sealTarget() passes the browser's challenge to the relay
  * @version 1.1 - setPin() writes the pin as rule_checked_write(): grantedAlias() checked the caller holds the mailbox
  * @version 1.0
@@ -105,6 +110,109 @@ class MailboxRelayPin {
 			'relay_answer'              => $answer,
 			'relay_identity_public_key' => (string)$relay->get('mrl_identity_public_key'),
 			'pin'                       => self::pinOf($alias),
+			'update'                    => self::updateFor($relay),
+		);
+	}
+
+	/**
+	 * The site's account of how $relay came by its identity: the provision or
+	 * update run that produced it, whatever its status, or null when none did.
+	 * {relay_id, run_id, kind, status, started_by, started_time, done_time,
+	 * identity_public_key}, times as UTC ISO 8601. The owner's browser shows it
+	 * as what "this site says"; it is never a trust input
+	 * (specs/relay_update_trust_step.md R2, R6).
+	 */
+	public static function updateFor(MailboxRelay $relay): ?array {
+		$identity = (string)$relay->get('mrl_identity_public_key');
+		if ($identity === '') {
+			return null;
+		}
+		// A dismissed run (soft-deleted from the Relay section) is still the
+		// site's record of how the relay came by its identity.
+		$runs = new MultiRelayCloudProvision(array('identity_public_key' => $identity),
+			array('rcl_relay_cloud_provision_id' => 'DESC'), 1);
+		foreach ($runs as $run) {
+			$by = '';
+			$uid = intval($run->get('rcl_usr_user_id_started'));
+			if ($uid > 0) {
+				$user = new User($uid, TRUE);
+				if ($user->key && !$user->get('usr_delete_time')) {
+					$by = (string)$user->display_name();
+				}
+			}
+			$iso = function ($t) { return $t ? gmdate('Y-m-d\\TH:i:s\\Z', strtotime($t . ' UTC')) : null; };
+			return array(
+				'relay_id'            => intval($relay->key),
+				'run_id'              => intval($run->key),
+				'kind'                => (string)$run->get('rcl_kind'),
+				'status'              => (string)$run->get('rcl_status'),
+				'started_by'          => $by,
+				'started_time'        => $iso($run->get('rcl_create_time')),
+				'done_time'           => $iso($run->get('rcl_done_time')),
+				'identity_public_key' => $identity,
+			);
+		}
+		return null;
+	}
+
+	/**
+	 * A relay identity as people compare it: SHA-256 over the raw Ed25519
+	 * public key, its first 16 bytes as hex in groups of four. The same string
+	 * the mail page's popup, the provider console's login screen
+	 * (provision_relay.sh) and the Relay section show
+	 * (specs/relay_update_trust_step.md R4). '' for a key that does not decode.
+	 */
+	public static function fingerprint(string $public_key_b64): string {
+		$raw = base64_decode(strtr(trim($public_key_b64), '-_', '+/'), true);
+		if ($raw === false || $raw === '') {
+			return '';
+		}
+		return implode(' ', str_split(substr(hash('sha256', $raw), 0, 32), 4));
+	}
+
+	/**
+	 * The Relay section's trust box for $user_id, or null when it has nothing
+	 * to offer: the run that gave the active relay its identity is done and a
+	 * mailbox under the relay is pinned to another identity, the user's own or
+	 * someone else's. A mailbox with no pin yet is not counted: its first
+	 * check pins without asking. {relay_id, run_id, code, mine (the user's
+	 * mailboxes pinned elsewhere), others (how many other people's are)}.
+	 */
+	public static function trustBox(int $user_id, ?MailboxRelay $relay = null): ?array {
+		$relay = $relay ?? self::relay();
+		if ($relay === null || $user_id <= 0) {
+			return null;
+		}
+		$update = self::updateFor($relay);
+		if ($update === null || $update['status'] !== 'done') {
+			return null;
+		}
+		$identity = $update['identity_public_key'];
+		$mine = array();
+		foreach (self::mailboxesToCheck($user_id, $relay) as $box) {
+			$pin = self::pinOf(new InboundEmailAlias($box['alias_id'], TRUE));
+			if ($pin !== null && $pin['relay_identity_public_key'] !== $identity) {
+				$mine[] = $box;
+			}
+		}
+		$others = 0;
+		$aliases = new MultiInboundEmailAlias(array('deleted' => false));
+		foreach ($aliases as $alias) {
+			if (!$alias->is_fortress()) continue;
+			$owner = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+			if ($owner <= 0 || $owner === $user_id || self::ownAlias($owner, intval($alias->key)) === null) continue;
+			$pin = self::pinOf($alias);
+			if ($pin !== null && $pin['relay_identity_public_key'] !== $identity) $others++;
+		}
+		if (!$mine && $others === 0) {
+			return null;
+		}
+		return array(
+			'relay_id' => intval($relay->key),
+			'run_id'   => $update['run_id'],
+			'code'     => self::fingerprint($identity),
+			'mine'     => $mine,
+			'others'   => $others,
 		);
 	}
 

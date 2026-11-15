@@ -177,6 +177,36 @@ final class FortressFlowTests: XCTestCase {
 
     // MARK: The relay pin
 
+    func testRelayChangeWords() throws {
+        let id = "beLRmH6k7NuV/nZUn/k7bG0xw022H71XCBnqdgjArS4="
+        func run(_ status: String, _ idk: String? = nil) -> JSONValue {
+            .object([(key: "relay_id", value: .number(4)), (key: "run_id", value: .number(9)), (key: "status", value: .string(status)),
+                     (key: "started_by", value: .string("Pat Admin")), (key: "started_time", value: .string("2026-11-15T11:52:00Z")),
+                     (key: "done_time", value: .string("2026-11-15T12:07:00Z")), (key: "identity_public_key", value: .string(idk ?? id))])
+        }
+        let date: (String?) -> String = { $0 ?? "" }
+        let done = FortressWork.relayChangeText(identity: id, update: run("done"), addresses: ["a@x.test", "b@x.test"], lastSeen: nil, dateText: date)
+        XCTAssertEqual(done.title, "Your mail relay was replaced")
+        XCTAssertTrue(done.body.contains("ⓘ This site says Pat Admin (site admin) started an update"))
+        XCTAssertFalse(done.body.split(separator: "\n").contains { $0.hasPrefix("✓") && $0.contains("Pat Admin") }, "the site's account is never a tick")
+        XCTAssertTrue(done.body.contains("cannot check what the site says") && done.body.contains("provider's console, not from this site"))
+        XCTAssertTrue(done.body.contains("a@x.test, b@x.test") && done.body.contains("open your mail on a computer"))
+        XCTAssertEqual(FortressWork.relayChangeText(identity: id, update: run("booting"), addresses: ["a"], lastSeen: nil, dateText: date).title,
+                       "Your mail relay is being updated")
+        XCTAssertEqual(FortressWork.relayChangeText(identity: id, update: run("failed"), addresses: ["a"], lastSeen: nil, dateText: date).title,
+                       "Your mail relay was being updated")
+        let none = FortressWork.relayChangeText(identity: id, update: nil, addresses: ["a"], lastSeen: nil, dateText: date)
+        let other = FortressWork.relayChangeText(identity: id, update: run("done", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+                                                 addresses: ["a"], lastSeen: nil, dateText: date)
+        XCTAssertEqual(none.title, "Your mail relay changed, and this site has no record of why")
+        XCTAssertEqual(other.title, none.title)
+        XCTAssertEqual(FortressWork.relayChangeText(identity: id, update: run("done"), addresses: ["a"], lastSeen: Date(), dateText: date).title,
+                       done.title, "the last good check never changes the words' state")
+        let pin = FortressWork.alarmText(reason: "pin", address: "a@x.test")
+        XCTAssertEqual(pin.title, "Your mail protection was changed without your devices")
+        XCTAssertTrue(pin.body.contains("Show this message to your site admin"))
+    }
+
     func testRelayPinJudgementMatchesTheBrowser() throws {
         let v = try PortVectorTests.vector("relay_pin_vector.json")
         // The vector's secret is a pre-X-Wing PKCS#8; the MAC takes the bytes held.
@@ -229,6 +259,17 @@ final class FortressFlowTests: XCTestCase {
                                        (key: "mac", value: .string("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))])
         XCTAssertEqual(reason(FortressWork.judge(answer: answer(statement: statement, signature: signature, id: id, pin: forged),
                                                  aliasID: alias, address: address, secret: secret, keys: keys, challenge: challenge)), "pin")
+        // A pin this vault made for another relay: the answering relay is new.
+        let elsewhere = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        let moved = answer(statement: statement, signature: signature, id: id, pin: pinFor(elsewhere))
+        XCTAssertEqual(FortressWork.judge(answer: moved, aliasID: alias, address: address, secret: secret, keys: keys, challenge: challenge),
+                       .newRelay(identity: id), "a new relay that signed this check and names this key passes the phone's check")
+        XCTAssertEqual(reason(FortressWork.judge(answer: moved, aliasID: alias, address: address, secret: secret, keys: keys,
+                                                 challenge: "zzzzzzzzzzzzzzzzzzzzzz")), "identity", "one signed for another check does not")
+        XCTAssertEqual(reason(FortressWork.judge(answer: moved, aliasID: alias, address: address, secret: secret,
+                                                 keys: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="], challenge: challenge)), "identity",
+                       "nor one naming another key")
+
         // A challenge is 24 base64url characters, fresh each time.
         let a = FortressWork.newChallenge()
         XCTAssertNotNil(a.range(of: "^[A-Za-z0-9_-]{24}$", options: .regularExpression), a)

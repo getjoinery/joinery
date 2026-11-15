@@ -14,10 +14,12 @@ public final class FortressWork: ObservableObject {
     @Published public private(set) var aiLine: String?
     @Published public private(set) var relayAlarm: RelayAlarm?
 
+    /// What the alarm says (specs/relay_update_trust_step.md R2): a title and
+    /// its text, and for a relay that failed the check the two codes.
     public struct RelayAlarm: Identifiable, Equatable {
         public let id = UUID()
-        public let address: String
-        public let reason: String
+        public let title: String
+        public let body: String
         public let expected: String
         public let reported: String
     }
@@ -269,6 +271,9 @@ public final class FortressWork: ObservableObject {
 
     enum PinVerdict: Equatable {
         case ok(firstUse: Bool, identity: String)
+        /// A new relay that signed this check's challenge and names this
+        /// phone's key. A phone never trusts it; a computer does.
+        case newRelay(identity: String)
         case bad(reason: String, expected: String, reported: String)
     }
 
@@ -300,28 +305,97 @@ public final class FortressWork: ObservableObject {
         let signed = Data((sealTargetPrefix + statement).utf8)
         let names = st["recipient"]?.stringValue == address.lowercased() && st["key_scope"]?.stringValue == "mail"
             && st["key_kind"]?.stringValue == "client" && keys.contains(st["public_key"]?.stringValue ?? "")
+        let signedChallenge = st["challenge"]?.stringValue ?? ""
+        let current = !signedChallenge.isEmpty && !challenge.isEmpty && VaultCrypto.sameText(signedChallenge, challenge)
         if !VaultCrypto.sameText(reportedID, pinned) {
+            if names && current && VaultCrypto.verifyEd25519(publicKeyB64: reportedID, message: signed, signatureB64: signature) {
+                return .newRelay(identity: reportedID)
+            }
             return .bad(reason: "identity", expected: pinned, reported: reportedID)
         }
         if !VaultCrypto.verifyEd25519(publicKeyB64: pinned, message: signed, signatureB64: signature) {
             return .bad(reason: "signature", expected: pinned, reported: pinned)
         }
-        let signedChallenge = st["challenge"]?.stringValue ?? ""
-        if signedChallenge.isEmpty || challenge.isEmpty || !VaultCrypto.sameText(signedChallenge, challenge) {
+        if !current {
             return .bad(reason: "replayed", expected: pinned, reported: pinned)
         }
         if !names { return .bad(reason: "key", expected: keys.first ?? "", reported: st["public_key"]?.stringValue ?? "") }
         return .ok(firstUse: firstUse, identity: pinned)
     }
 
-    static let alarmReasons = [
-        "pin": "The relay this mailbox trusts was changed without this device.",
-        "identity": "A different relay is answering for this mailbox than the one this device trusts.",
-        "signature": "The relay's answer is not signed by the relay this device trusts.",
-        "key": "The relay is sealing this mailbox's mail to a key that is not this device's.",
-        "replayed": "The relay's answer was not made for this check: an old answer may have been shown again.",
-        "unreadable": "The relay's answer could not be read.",
+    nonisolated static let intro = "Your mail passes through a relay on its way to this site, and the relay seals it so only you can read it."
+    nonisolated static let toTrust = "To trust a new relay, open your mail on a computer: it asks you to confirm it is you."
+
+    /// Every alarm but a new relay that passed this phone's check: what happened, what it can mean, what to do.
+    nonisolated static let alarms: [String: (title: String, what: String)] = [
+        "pin": ("Your mail protection was changed without your devices",
+                "Your devices keep a record, made with your own key, of which relay protects this mail. The record this site holds now was not made by any of your devices."),
+        "identity": ("A different relay is answering, and it did not pass this phone's check",
+                     "A different relay is answering for this mailbox, and it did not sign this phone's one-time question, or it does not say it seals your mail to your own key."),
+        "signature": ("The relay's answer could not be confirmed",
+                      "The answer that should come from your relay is not signed by it. Someone may be answering in its place."),
+        "replayed": ("The relay's answer was not made for this check",
+                     "This phone asked your relay a one-time question, and the answer it got back was made for another one: an old answer shown again. That can hide a change to your relay."),
+        "key": ("Your mail is not being sealed to your key",
+                "Your relay says it seals mail to this address with a key that is not yours, so whoever holds that key could read new mail."),
+        "unreadable": ("This phone could not read the relay's answer",
+                       "This can be a passing fault. If it keeps happening, tell your site admin."),
     ]
+
+    nonisolated static func alarmText(reason: String, address: String) -> (title: String, body: String) {
+        let a = alarms[reason] ?? alarms["unreadable"]!
+        var lines = [intro + " " + a.what]
+        if reason != "unreadable" { lines.append("This can mean that someone who controls this site is trying to read your mail.") }
+        lines.append("Mailbox: \(address)")
+        lines.append("What to do: do not trust anything new yet. Show this message to your site admin. Your existing mail is safe; this is about new mail.")
+        return (a.title, lines.joined(separator: "\n\n"))
+    }
+
+    /// A new relay that signed this phone's check and names its key. `update`
+    /// is the site's account (relay_seal_target's update), shown as what the
+    /// site says and never as a check; `lastSeen` is when this phone last saw
+    /// the old relay answer as it should, for information only.
+    nonisolated static func relayChangeText(identity: String, update: JSONValue?, addresses: [String], lastSeen: Date?,
+                                            dateText: (String?) -> String) -> (title: String, body: String) {
+        let u = (update?.isNull ?? true) ? nil : update
+        let named = u.map { VaultCrypto.sameText($0["identity_public_key"]?.stringValue ?? "", identity) } ?? false
+        let status = u?["status"]?.stringValue ?? ""
+        let byName = u?["started_by"]?.stringValue ?? ""
+        let by = byName.isEmpty ? "the site admin" : "\(byName) (site admin)"
+        let started = named ? dateText(u?["started_time"]?.stringValue) : ""
+        let done = named ? dateText(u?["done_time"]?.stringValue) : ""
+        let on = started.isEmpty ? "" : " on \(started)"
+        var title: String
+        var lines = [intro]
+        if !named {
+            title = "Your mail relay changed, and this site has no record of why"
+            lines.append("A different relay is answering now, and this site has no record of an update that would explain it. This can mean that someone who controls this site is trying to read your mail.")
+        } else if status == "done" {
+            title = "Your mail relay was replaced"
+            lines.append("ⓘ This site says \(by) started an update of the relay\(on)" + (done.isEmpty ? "" : ", and it finished \(done)") + ". An update gives the relay a new identity.")
+        } else if status == "failed" {
+            title = "Your mail relay was being updated"
+            lines.append("ⓘ This site says \(by) started an update of the relay\(on), and it did not finish. Ask your site admin to look at the relay page; the update may need to be run again.")
+        } else {
+            title = "Your mail relay is being updated"
+            lines.append("ⓘ This site says \(by) started an update of the relay\(on), and it is still finishing. An update gives the relay a new identity.")
+        }
+        let code = VaultCrypto.fingerprint(identity)
+        lines.append("What this phone checked:\n✓ The new relay answered this phone just now, with its own signature.\n✓ The new relay says it seals your mail to your own key, which this site does not have.")
+        if let lastSeen { lines.append("This phone last confirmed your old relay on \(dateText(ISO8601DateFormatter().string(from: lastSeen))).") }
+        lines.append("This phone cannot check what the site says. The code below is the only check that does not depend on this site. If you want to be sure, ask your site admin to read you the relay's code from the provider's console, not from this site. It should end in \(String(code.suffix(4))).\nThe full code: \(code)")
+        lines.append("Mailboxes: " + addresses.joined(separator: ", "))
+        if !named { lines.append("What to do: do not trust it yet. Show this message to your site admin. Your existing mail is safe; this is about new mail.") }
+        lines.append(toTrust)
+        return (title, lines.joined(separator: "\n\n"))
+    }
+
+    nonisolated static func dateText(_ iso: String?) -> String {
+        guard let iso, let d = ISO8601DateFormatter().date(from: iso) else { return "" }
+        let f = DateFormatter()
+        f.dateFormat = "d MMM, HH:mm"
+        return f.string(from: d)
+    }
 
     /// A one-time challenge for one relay check: 18 random bytes, base64url
     /// (24 characters), which the relay signs into its answer.
@@ -343,6 +417,10 @@ public final class FortressWork: ObservableObject {
         guard let probe = try? await fortress.vault.probe(), probe.pendingPublicKey == nil else { return }
         guard let derived = try? VaultCrypto.publicKey(fromSecret: secret) else { return }
         pinsChecked = true
+        // A new relay that passed this phone's check: one alarm for every
+        // mailbox it covers (specs/relay_update_trust_step.md R2).
+        var changes: [(identity: String, boxes: [Mailbox], update: JSONValue?)] = []
+        var hardAlarm = false
         for box in boxes {
             let challenge = Self.newChallenge()
             guard var answer = try? await api.action("mailbox/relay_seal_target",
@@ -359,14 +437,29 @@ public final class FortressWork: ObservableObject {
                               challenge: challenge) {
             case .ok(_, let identity):
                 UserDefaults.standard.set(identity, forKey: localKey)
+                UserDefaults.standard.set(Date(), forKey: "joinery.relaypintime.\(box.aliasID)")
                 // A first use is only remembered here: pinning, and trusting a
                 // new relay, are a computer's (R11).
+            case .newRelay(let identity):
+                if let i = changes.firstIndex(where: { $0.identity == identity }) {
+                    changes[i].boxes.append(box)
+                } else {
+                    changes.append((identity: identity, boxes: [box], update: answer["update"]))
+                }
             case .bad(let reason, let expected, let reported):
-                relayAlarm = RelayAlarm(address: box.address,
-                                        reason: (Self.alarmReasons[reason] ?? Self.alarmReasons["unreadable"]!)
-                                            + " Until this is settled, mail to this address may be readable by whoever runs this server. Approve a new relay from a computer.",
+                hardAlarm = true
+                let t = Self.alarmText(reason: reason, address: box.address)
+                relayAlarm = RelayAlarm(title: t.title, body: t.body,
                                         expected: VaultCrypto.fingerprint(expected), reported: VaultCrypto.fingerprint(reported))
             }
+        }
+        // One alarm shows at a time: a mailbox that failed the check outranks a
+        // new relay that passed it (reviewer2 B4).
+        for change in changes where !hardAlarm {
+            let seen = change.boxes.compactMap { UserDefaults.standard.object(forKey: "joinery.relaypintime.\($0.aliasID)") as? Date }.max()
+            let t = Self.relayChangeText(identity: change.identity, update: change.update,
+                                         addresses: change.boxes.map(\.address), lastSeen: seen, dateText: Self.dateText)
+            relayAlarm = RelayAlarm(title: t.title, body: t.body, expected: "", reported: "")
         }
     }
 

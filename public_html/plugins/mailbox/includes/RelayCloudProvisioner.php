@@ -23,6 +23,8 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.9 - a run saves the identity its birth produced (registerBornRelay) and its done time
+ *                (specs/relay_update_trust_step.md R6)
  * @version 2.8 - node notes name the mailbox Server tab for Update and Delete
  * @version 2.7 - uptimeCheckFor() clears the port with 0, not null: the column is NOT NULL, so null
  *                failed the node save and left an updated relay on the port 25 check
@@ -650,6 +652,7 @@ class RelayCloudProvisioner {
 		$run->spendRunToken();
 		$run->set('rcl_mrl_mailbox_relay_id', intval($relay->key));
 		$run->set('rcl_status', 'done');
+		$run->set('rcl_done_time', gmdate('Y-m-d H:i:s'));
 		$run->set('rcl_error', null);
 		$run->eraseCredentials();
 		$run->save();
@@ -762,6 +765,7 @@ class RelayCloudProvisioner {
 
 		$run->spendRunToken();
 		$run->set('rcl_status', 'done');
+		$run->set('rcl_done_time', gmdate('Y-m-d H:i:s'));
 		$run->set('rcl_error', null);
 		$run->eraseCredentials();
 		$run->save();
@@ -844,6 +848,11 @@ class RelayCloudProvisioner {
 		$relay->set('mrl_cloud_provider', (string)$run->get('rcl_provider'));
 		$relay->set('mrl_cloud_instance_id', (string)$run->get('rcl_instance_id'));
 		$relay->save();
+		// The run names the identity it produced at the same moment, saved now:
+		// a birth whose map push then fails stops before the run's own save in
+		// completeBirth(), and the owner's mail page still has to find this run.
+		$run->set('rcl_identity_public_key', substr($identity_public_key, 0, 64));
+		$run->save();
 		$relay->ensureTransportKeypair();
 		return $relay;
 	}

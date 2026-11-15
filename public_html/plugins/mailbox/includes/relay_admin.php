@@ -13,6 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.14 - a run records who opened it (rcl_usr_user_id_started)
  * @version 2.13 - the relay card's setup link always points at the Server tab
  * @version 2.12 - a run being created (creating) is never dismissed
  * @version 2.11 - starting a cloud relay create or update with a token leaves no "started" notice:
@@ -227,6 +228,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		}
 
 		$run = new RelayCloudProvision(NULL);
+		$run->set('rcl_usr_user_id_started', intval($session->get_user_id()) ?: null);
 		$run->set('rcl_kind', 'upgrade');
 		$run->set('rcl_mrl_mailbox_relay_id', intval($relay->key));
 		$run->set('rcl_provider', (string)$relay->get('mrl_cloud_provider'));
@@ -274,6 +276,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		}
 
 		$run = new RelayCloudProvision(NULL);
+		$run->set('rcl_usr_user_id_started', intval($session->get_user_id()) ?: null);
 		$run->set('rcl_kind', 'provision');
 		$run->set('rcl_provider', 'linode');
 		$run->set('rcl_mail_hostname', substr($mail_hostname, 0, 255));

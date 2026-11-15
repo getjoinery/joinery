@@ -11,6 +11,8 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
+ * @version 1.34.0 - rcl_002_run_names_its_identity: each relay's newest finished run names the identity the relay
+ *                   holds, so an owner's relay-change popup finds the site's account of it
  * @version 1.33.0 - ifd_001_confirm_existing_destinations: every destination that forwards today is
  *                   recorded confirmed, so forwarding confirmation asks only new ones
  * @version 1.32.0 - ied_003_private_with_addons: mail's top level becomes Private plus the
@@ -1745,6 +1747,36 @@ return [
 			echo 'jdi_002: ' . count($domains) . ' domain(s) with a Direct key, ' . count($moved)
 				. ' moved to the custody their level calls for (or replaced, when sealed to a vault that is gone)' . ($moved ? ' (' . implode(', ', $moved) . ')' : '') . ".\n";
 			return $failed === 0;
+		},
+	],
+	[
+		// The run that gave each relay its current identity, for runs from before
+		// runs recorded it (specs/relay_update_trust_step.md R6): a relay row's
+		// newest finished run is the one whose birth wrote that row's identity.
+		// Its done time is its last save.
+		'id' => 'rcl_002_run_names_its_identity',
+		'version' => '1.146.19',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$has = $db->query("SELECT COUNT(*) FROM information_schema.columns
+				WHERE table_name = 'rcl_relay_cloud_provisions'
+				AND column_name IN ('rcl_identity_public_key', 'rcl_done_time')")->fetchColumn();
+			if (intval($has) !== 2) {
+				// Plugin columns sync before migrations, so this is a fault: try again.
+				echo "rcl_002: the run columns are not there; not applied.\n";
+				return false;
+			}
+			$n = $db->exec("UPDATE rcl_relay_cloud_provisions r
+				SET rcl_identity_public_key = m.mrl_identity_public_key,
+					rcl_done_time = COALESCE(r.rcl_done_time, r.rcl_update_time)
+				FROM mrl_mailbox_relays m
+				WHERE r.rcl_relay_cloud_provision_id = (
+						SELECT MAX(x.rcl_relay_cloud_provision_id) FROM rcl_relay_cloud_provisions x
+						WHERE x.rcl_mrl_mailbox_relay_id = m.mrl_mailbox_relay_id AND x.rcl_status = 'done')
+					AND r.rcl_identity_public_key IS NULL
+					AND COALESCE(m.mrl_identity_public_key, '') <> ''");
+			echo 'rcl_002: ' . intval($n) . " relay run(s) now name the identity their relay holds.\n";
+			return true;
 		},
 	],
 ];

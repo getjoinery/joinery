@@ -47,7 +47,7 @@ class FortressWork private constructor(
     /** A relay mismatch to show, or null. */
     var alarm by mutableStateOf<RelayAlarm?>(null)
 
-    data class RelayAlarm(val address: String, val reason: String, val expected: String?, val reported: String?)
+    data class RelayAlarm(val title: String, val body: String, val expected: String?, val reported: String?, val reason: String)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var running: Job? = null
@@ -269,6 +269,10 @@ class FortressWork private constructor(
         if (probe?.pendingPublicKey != null) return
         val myKey = fortress.keys.scopePublicKey(FortressOpener.SCOPE) ?: return
         val boxes = store.home?.mailboxes?.filter { it.isFortress } ?: return
+        // A new relay that passed this phone's check: one alarm for every
+        // mailbox it covers (specs/relay_update_trust_step.md R2).
+        val changes = linkedMapOf<String, MutableList<Pair<com.getjoinery.mail.Mailbox, JsonValue>>>()
+        var hard = false
         for (box in boxes) {
             val challenge = RelayPinCheck.newChallenge()
             val answer = try {
@@ -284,17 +288,36 @@ class FortressWork private constructor(
             val verdict = RelayPinCheck.judge(answer, box.aliasId, box.address, mac, listOf(myKey), challenge, local)
             if (verdict.ok) {
                 rememberPin(box.aliasId, verdict.identity ?: continue)
+            } else if (verdict.reason == "identity" && verdict.approvable && verdict.identity != null) {
+                changes.getOrPut(verdict.identity) { mutableListOf() } += box to answer
             } else {
-                alarm = RelayAlarm(box.address, verdict.reason ?: "unreadable", verdict.expected, verdict.reported)
+                hard = true
+                val t = RelayPinCheck.alarmText(verdict.reason ?: "unreadable", box.address)
+                alarm = RelayAlarm(t.title, t.body, verdict.expected, verdict.reported, verdict.reason ?: "unreadable")
             }
         }
+        // One alarm shows at a time: a mailbox that failed the check outranks a
+        // new relay that passed it (reviewer2 B4).
+        for ((identity, items) in changes) {
+            if (hard) break
+            val seen = items.mapNotNull { pinTime(it.first.aliasId) }.maxOrNull()
+            val t = RelayPinCheck.relayChangeText(identity, items.first().second["update"], items.map { it.first.address }, seen, ::dateText)
+            alarm = RelayAlarm(t.title, t.body, null, null, "identity")
+        }
     }
+
+    private fun dateText(iso: String?): String = try {
+        if (iso.isNullOrEmpty()) "" else java.time.format.DateTimeFormatter.ofPattern("d MMM, HH:mm")
+            .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(iso))
+    } catch (e: Exception) { "" }
 
     private val pinPrefs by lazy { context.getSharedPreferences("joinery.relaypins", Context.MODE_PRIVATE) }
     private fun localPin(aliasId: Int): String? = pinPrefs.getString("joinery-relay-pin:$aliasId", null)
     private fun rememberPin(aliasId: Int, identity: String) {
-        pinPrefs.edit().putString("joinery-relay-pin:$aliasId", identity).apply()
+        pinPrefs.edit().putString("joinery-relay-pin:$aliasId", identity)
+            .putLong("joinery-relay-pin-time:$aliasId", System.currentTimeMillis()).apply()
     }
+    private fun pinTime(aliasId: Int): Long? = pinPrefs.getLong("joinery-relay-pin-time:$aliasId", 0L).takeIf { it > 0L }
 
     // MARK: 3. AI on the person's own model
 

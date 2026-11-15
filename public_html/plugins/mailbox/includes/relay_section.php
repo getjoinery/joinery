@@ -11,6 +11,9 @@
  * and actions post back to the Server tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.15 - the identity shows as the code people compare (MailboxRelayPin::fingerprint); an update's
+ *                modal is tagged so the browser can note it started the update, and a started update
+ *                says so to the page; the trust box after an update (specs/relay_update_trust_step.md R1, R3, R4)
  * @version 2.14 - the grant buttons' script is assets/relay_grant.js (no inline script)
  * @version 2.13 - a site container (no mail server of its own) is never told to receive directly
  * @version 2.12 - the relay region defaults to us-east
@@ -89,7 +92,7 @@ function mailbox_relay_token_steps(): string {
  * region).
  */
 function mailbox_relay_grant_modal($page, string $id, string $intro_html, array $hidden, bool $oauth,
-		string $start_label, array $copy = array()): string {
+		string $start_label, array $copy = array(), int $update_relay_id = 0): string {
 	$form = $page->getFormWriter($id . '_form');
 	ob_start();
 	echo $form->begin_form();
@@ -118,7 +121,10 @@ function mailbox_relay_grant_modal($page, string $id, string $intro_html, array 
 	}
 	echo $form->end_form();
 	$form_html = ob_get_clean();
-	return '<div hidden id="' . htmlspecialchars($id, ENT_QUOTES) . '"><div style="max-width:640px;">'
+	// An update's modal names its relay, so the browser can note on the page
+	// the submit lands on that it started this update (relay_grant.js).
+	$tag = $update_relay_id > 0 ? ' data-relay-update="' . $update_relay_id . '"' : '';
+	return '<div hidden id="' . htmlspecialchars($id, ENT_QUOTES) . '"><div style="max-width:640px;"' . $tag . '>'
 		. $intro_html . $form_html . '</div></div>' . mailbox_relay_grant_script();
 }
 
@@ -204,7 +210,7 @@ function mailbox_relay_upgrade_control($page, int $relay_id, array $up, bool $oa
 	return '<div style="margin-top:.5rem;">'
 		. '<button type="button" class="btn btn-sm btn-warning" data-relay-grant="' . $modal_id . '">Update relay</button> '
 		. mailbox_relay_grant_modal($page, $modal_id, '<h5>Update this relay</h5><p>' . htmlspecialchars($confirm) . '</p>'
-			. ($warn !== '' ? '<p>' . $warn . '</p>' : ''), $hidden, $oauth, 'Start the update')
+			. ($warn !== '' ? '<p>' . $warn . '</p>' : ''), $hidden, $oauth, 'Start the update', array(), $relay_id)
 		. '<span class="text-muted small">Drains the relay, then re-images the same server from this site\'s '
 		. 'current release. It stops accepting mail for several minutes; senders retry and its address does not '
 		. 'change.' . $warn . '</span></div>';
@@ -350,11 +356,58 @@ function mailbox_relay_last_test_html($relay): string {
 }
 
 /** Echo the Relay section (one box, anchored #relay-section). */
+/**
+ * After the run that gave the relay its identity is done, while any of the
+ * viewer's mailboxes under it is not pinned to it: the relay's code, and the
+ * way to trust it (specs/relay_update_trust_step.md R1). The trust itself runs
+ * on the viewer's mail page, where the vault and the relay check live: its
+ * popup trusts every mailbox in one press. The box's words come from the
+ * browser (relay_trust_box.js): "you started this update" only with the note
+ * this browser wrote when it started one, which the server cannot write.
+ */
+function mailbox_relay_trust_box_html(): string {
+	$box = MailboxRelayPin::trustBox((int)SessionControl::get_instance()->get_user_id());
+	if ($box === null) {
+		return '';
+	}
+	$addresses = array();
+	foreach ($box['mine'] as $m) {
+		$addresses[] = htmlspecialchars($m['address']);
+	}
+	$others = '';
+	if ($box['others'] > 0) {
+		$others = '<p class="small">' . $box['others'] . ' other ' . ($box['others'] === 1 ? 'person\'s mailbox' : 'people\'s mailboxes')
+			. ' will ask ' . ($box['others'] === 1 ? 'its owner' : 'their owners') . ' the next time they open their mail. '
+			. 'They can check it with you: read them the code from your provider\'s console, not from this site. '
+			. 'It ends in <strong>' . htmlspecialchars(substr($box['code'], -4)) . '</strong>.</p>';
+	}
+	$code = '<p>Its code: <code>' . htmlspecialchars($box['code']) . '</code>. Your provider\'s console shows the same code '
+		. 'on the relay\'s login screen; that is the one check that does not depend on this site.</p>';
+	if (!$box['mine']) {
+		// An admin with no mailbox of their own under the relay: only what the
+		// others will be asked, and the code to read them.
+		return '<div class="alert alert-info" data-relay-trust-box-others>'
+			. '<p><strong>Your relay has a new identity.</strong></p>' . $code . $others . '</div>';
+	}
+	return '<div class="alert alert-warning" data-relay-trust-box data-relay-id="' . $box['relay_id']
+		. '" data-relay-run="' . $box['run_id'] . '">'
+		. '<p><strong>Your relay has a new identity.</strong> '
+		. '<span data-relay-trust-words>This site says the relay was rebuilt, and your mailboxes will not trust it until you do. '
+		. 'This browser did not start that update, and nothing it holds can confirm what the site says.</span></p>'
+		. $code
+		. '<p>Your mailboxes: ' . implode(', ', $addresses) . '</p>'
+		. $others
+		. '<a class="btn btn-primary" href="/profile/mailbox/mailbox">Open my mail to trust it</a>'
+		. '</div>'
+		. PageScript::src('plugins/mailbox/assets/relay_trust_box.js');
+}
+
 function mailbox_relay_section_render($page, array $v): void {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
 	echo '<div id="relay-section">';
 	$page->begin_box(array('title' => 'Relay'));
 	echo mailbox_relay_notice_html();
+	echo mailbox_relay_trust_box_html();
 
 	// --- relay rows -----------------------------------------------------------
 	// One relay per deployment: its name, address and state; one sentence on
@@ -428,7 +481,8 @@ function mailbox_relay_section_render($page, array $v): void {
 			echo '<div style="margin-top:.5rem;">';
 			echo '<table class="table" style="max-width:560px;"><tbody>';
 			if ($relay->usesRelayApi()) {
-				echo '<tr><th style="width:45%;">Identity pin</th><td><code>' . htmlspecialchars((string)$relay->get('mrl_identity_fingerprint')) . '</code></td></tr>';
+				echo '<tr><th style="width:45%;">Identity (as your devices show it)</th><td><code>'
+					. htmlspecialchars(MailboxRelayPin::fingerprint((string)$relay->get('mrl_identity_public_key'))) . '</code></td></tr>';
 				$failure = trim((string)$relay->get('mrl_last_health_failure'));
 				echo '<tr><th>Last ping</th><td>' . ($failure === ''
 					? '<span class="text-success">answered</span>'
@@ -599,8 +653,18 @@ function mailbox_relay_section_render($page, array $v): void {
 						: '<h5>Create a relay</h5><p>This creates one small server (1 GB Nanode) in your Linode account, billed '
 							. 'to you, and builds the relay on it automatically.</p>',
 					array('action' => 'relay_cloud_token'), !empty($v['cloud_oauth_configured']),
-					$is_upgrade ? 'Start the update' : 'Start');
+					$is_upgrade ? 'Start the update' : 'Start', array(),
+					$is_upgrade ? intval($run->get('rcl_mrl_mailbox_relay_id')) : 0);
 			} else {
+				// A started update says so, for the browser that pressed Start
+				// the update to note it (relay_grant.js).
+				// Only for the person who started it: a refused Start lands here
+				// beside someone else's run and must not note it (reviewer2 B3).
+				if ((string)$run->get('rcl_kind') === 'upgrade'
+						&& intval($run->get('rcl_usr_user_id_started')) === intval(SessionControl::get_instance()->get_user_id())) {
+					echo '<span hidden data-relay-update-started="' . intval($run->get('rcl_mrl_mailbox_relay_id'))
+						. '" data-relay-run="' . intval($run->key) . '"></span>' . mailbox_relay_grant_script();
+				}
 				echo '<p>⏳ ' . htmlspecialchars($status_lines[$run_status] ?? $run_status)
 					. ' <a href="">Refresh</a></p>';
 				if ((string)$run->get('rcl_error') !== '') {

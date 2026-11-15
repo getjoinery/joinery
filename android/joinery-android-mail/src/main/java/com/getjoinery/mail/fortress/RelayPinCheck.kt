@@ -28,6 +28,8 @@ object RelayPinCheck {
         val reason: String? = null,
         val expected: String? = null,
         val reported: String? = null,
+        /** For reason "identity": the new relay signed this check's challenge and names this phone's key. */
+        val approvable: Boolean = false,
     )
 
     fun pinMessage(aliasId: Int, identity: String): ByteArray = "$PIN_PREFIX$aliasId\n$identity".toByteArray(Charsets.UTF_8)
@@ -77,28 +79,103 @@ object RelayPinCheck {
             st["key_scope"]?.stringValue == FortressOpener.SCOPE &&
             st["key_kind"]?.stringValue == "client" &&
             st["public_key"]?.stringValue in keys
+        val signedChallenge = st["challenge"]?.stringValue ?: ""
+        val current = signedChallenge.isNotEmpty() && challenge.isNotEmpty() && sameText(signedChallenge, challenge)
         if (!sameText(stIdentity, pinned)) {
-            return Verdict(false, reason = "identity", expected = pinned, reported = stIdentity, identity = stIdentity)
+            // A new relay: whether its own statement is signed by it, carries
+            // this check's challenge and names this phone's key decides which
+            // words the alarm uses. A phone never trusts it (a computer does).
+            val selfSigned = stIdentity != null && try {
+                VaultCrypto.verifyEd25519(stIdentity, signed, signature.value)
+            } catch (e: Exception) { false }
+            return Verdict(false, reason = "identity", expected = pinned, reported = stIdentity, identity = stIdentity,
+                approvable = selfSigned && names && current)
         }
         if (!VaultCrypto.verifyEd25519(pinned, signed, signature.value)) {
             return Verdict(false, reason = "signature", expected = pinned, reported = pinned)
         }
-        val signedChallenge = st["challenge"]?.stringValue ?: ""
-        if (signedChallenge.isEmpty() || challenge.isEmpty() || !sameText(signedChallenge, challenge)) {
+        if (!current) {
             return Verdict(false, reason = "replayed", expected = pinned, reported = pinned)
         }
         if (!names) return Verdict(false, reason = "key", expected = keys.firstOrNull(), reported = st["public_key"]?.stringValue)
         return Verdict(true, firstUse = firstUse, identity = pinned)
     }
 
-    val REASONS = mapOf(
-        "pin" to "The relay this mailbox trusts was changed without your devices.",
-        "identity" to "A different relay is answering for this mailbox than the one your devices trust.",
-        "signature" to "The relay's answer is not signed by the relay your devices trust.",
-        "key" to "The relay is sealing this mailbox's mail to a key that is not your vault's.",
-        "replayed" to "The relay's answer was not made for this check: an old answer may have been shown again.",
-        "unreadable" to "The relay's answer could not be read.",
+    private const val INTRO = "Your mail passes through a relay on its way to this site, and the relay seals it so only you can read it."
+    private const val TO_TRUST = "To trust a new relay, open your mail on a computer: it asks you to confirm it is you."
+
+    /** Every alarm but a new relay that passed this phone's check: what happened, what it can mean, what to do. */
+    val ALARMS = mapOf(
+        "pin" to ("Your mail protection was changed without your devices" to
+            "Your devices keep a record, made with your own key, of which relay protects this mail. The record this site holds now was not made by any of your devices."),
+        "identity" to ("A different relay is answering, and it did not pass this phone's check" to
+            "A different relay is answering for this mailbox, and it did not sign this phone's one-time question, or it does not say it seals your mail to your own key."),
+        "signature" to ("The relay's answer could not be confirmed" to
+            "The answer that should come from your relay is not signed by it. Someone may be answering in its place."),
+        "replayed" to ("The relay's answer was not made for this check" to
+            "This phone asked your relay a one-time question, and the answer it got back was made for another one: an old answer shown again. That can hide a change to your relay."),
+        "key" to ("Your mail is not being sealed to your key" to
+            "Your relay says it seals mail to this address with a key that is not yours, so whoever holds that key could read new mail."),
+        "unreadable" to ("This phone could not read the relay's answer" to
+            "This can be a passing fault. If it keeps happening, tell your site admin."),
     )
+
+    /** An alarm's title and text, as the computer's popup words them (specs/relay_update_trust_step.md R2). */
+    data class AlarmText(val title: String, val body: String)
+
+    fun alarmText(reason: String, address: String): AlarmText {
+        val (title, what) = ALARMS[reason] ?: ALARMS.getValue("unreadable")
+        val lines = mutableListOf("$INTRO $what")
+        if (reason != "unreadable") lines += "This can mean that someone who controls this site is trying to read your mail."
+        lines += "Mailbox: $address"
+        lines += "What to do: do not trust anything new yet. Show this message to your site admin. Your existing mail is safe; this is about new mail."
+        return AlarmText(title, lines.joinToString("\n\n"))
+    }
+
+    /**
+     * A new relay that signed this phone's check and names its key. [update] is
+     * the site's account (relay_seal_target's update), shown as what the site
+     * says and never as a check; [lastSeen] when this phone last saw the old
+     * relay answer as it should, shown for information only.
+     */
+    fun relayChangeText(identity: String, update: JsonValue?, addresses: List<String>, lastSeen: Long?, dateText: (String?) -> String): AlarmText {
+        val u = update?.takeUnless { it.isNull }
+        val named = u != null && sameText(u["identity_public_key"]?.stringValue, identity)
+        val status = u?.get("status")?.stringValue ?: ""
+        val by = u?.get("started_by")?.stringValue?.takeIf { it.isNotEmpty() }?.let { "$it (site admin)" } ?: "the site admin"
+        val started = if (named) dateText(u?.get("started_time")?.stringValue) else ""
+        val done = if (named) dateText(u?.get("done_time")?.stringValue) else ""
+        val on = if (started.isNotEmpty()) " on $started" else ""
+        val title: String
+        val head = mutableListOf(INTRO)
+        when {
+            !named -> {
+                title = "Your mail relay changed, and this site has no record of why"
+                head += "A different relay is answering now, and this site has no record of an update that would explain it. This can mean that someone who controls this site is trying to read your mail."
+            }
+            status == "done" -> {
+                title = "Your mail relay was replaced"
+                head += "ⓘ This site says $by started an update of the relay$on" + (if (done.isNotEmpty()) ", and it finished $done" else "") + ". An update gives the relay a new identity."
+            }
+            status == "failed" -> {
+                title = "Your mail relay was being updated"
+                head += "ⓘ This site says $by started an update of the relay$on, and it did not finish. Ask your site admin to look at the relay page; the update may need to be run again."
+            }
+            else -> {
+                title = "Your mail relay is being updated"
+                head += "ⓘ This site says $by started an update of the relay$on, and it is still finishing. An update gives the relay a new identity."
+            }
+        }
+        val code = fingerprint(identity)
+        head += "What this phone checked:\n✓ The new relay answered this phone just now, with its own signature.\n✓ The new relay says it seals your mail to your own key, which this site does not have."
+        if (lastSeen != null) head += "This phone last confirmed your old relay on ${dateText(java.time.Instant.ofEpochMilli(lastSeen).toString())}."
+        head += "This phone cannot check what the site says. The code below is the only check that does not depend on this site. If you want to be sure, ask " +
+            "your site admin to read you the relay's code from the provider's console, not from this site. It should end in ${code.takeLast(4)}.\nThe full code: $code"
+        head += "Mailboxes: " + addresses.joinToString(", ")
+        if (!named) head += "What to do: do not trust it yet. Show this message to your site admin. Your existing mail is safe; this is about new mail."
+        head += TO_TRUST
+        return AlarmText(title, head.joinToString("\n\n"))
+    }
 
     /** A one-time challenge for one relay check: 18 random bytes, base64url (24 characters). */
     fun newChallenge(): String =

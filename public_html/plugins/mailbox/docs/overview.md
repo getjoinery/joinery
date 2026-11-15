@@ -2103,10 +2103,41 @@ first and its relay's Update follows.
   asked for it and a kept answer cannot be shown again. An answer carrying no
   challenge, or another one, is refused as an old answer, however recent its
   `signed_at`; a relay older than 3.18 therefore alarms on every check until it is
-  updated. A bad signature, another key, an old
-  answer, or a different relay stops with a dialog showing both fingerprints;
-  "Trust the new relay" re-pins, after a step-up on an account with a second
-  factor.
+  updated. A bad signature, another key, an old answer, a moved pin, or a new
+  relay that fails the check stops with a dialog that says in plain words what
+  happened and what to do, with both codes, and offers nothing to press but Close.
+- **A new relay.** Every relay update re-images the relay, and the rebuilt relay
+  has a new identity key; nothing the browser can see tells an honest rebuild from
+  one the server built with its own code, so the owner decides. A new relay that
+  signed this check's challenge and names this vault's key gives one popup for all
+  of the owner's mailboxes it covers, with one **Trust the new relay** (one
+  step-up, then a pin per mailbox). The popup marks what this device checked with
+  ✓ and what the site reports with ⓘ "This site says…": the answer carries
+  `update`, the run whose `rcl_identity_public_key` is the relay's identity
+  (`MailboxRelayPin::updateFor()`: who started it, when, its status). A done run
+  gives "Your mail relay was replaced", a run still going or failed gives "is
+  being updated" / "was being updated", and no such run gives "changed, and this
+  site has no record of why", whose Trust is behind "I have checked with my
+  admin". The site's account only picks the words, and every state says the
+  device cannot check it. The code people compare (`MailboxRelayPin::fingerprint()`:
+  SHA-256 over the raw public key, 16 bytes as hex in groups of four) is the
+  relay's own and the one check outside the site: the relay writes it into
+  `/etc/issue` (`provision_relay.sh`), so the provider's console shows it on the
+  login screen. A browser that started the update (the note `relay_grant.js`
+  writes once the page shows the run started, `joinery-relay-update:<relay id>`,
+  good for a day and used up by the trust) gets its own ✓ line. When this
+  browser last saw the old relay answer as it should
+  (`joinery-relay-pin-time:<alias id>`) is shown for information only.
+- **After an update, the Relay section** shows the new code and, for each viewer
+  with mailboxes pinned to another relay (`MailboxRelayPin::trustBox()`), a box that
+  links to their mail, where the popup trusts them all in one press, and says how
+  many other people's mailboxes will ask their owners. A mailbox with no pin yet is
+  not counted: its first check pins without asking. An admin with none of their own
+  gets only the code and that count. The box's calm words ("You started this update
+  from this browser") need that browser's note, which is written only for the person
+  who started the run. Every popup tells the owner to ask "your site admin" for the
+  code, never a name from the site's record. The dismissed run of a failed update
+  is still the site's account.
 
 **Phone apps.** The iOS and Android apps read, search, draft and reply to
 Fortress mail. The phone is handed the mail key once from a computer — enrollment

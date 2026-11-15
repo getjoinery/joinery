@@ -139,8 +139,9 @@ struct MailboxScreenBody: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
             .alert(item: Binding(get: { work.relayAlarm }, set: { _ in })) { alarm in
-                Alert(title: Text("Mail arriving at your relay is not being sealed to this phone's key"),
-                      message: Text("\(alarm.address): \(alarm.reason)\n\nTrusted relay: \(alarm.expected)\nAnswering now: \(alarm.reported)"),
+                Alert(title: Text(alarm.title),
+                      message: Text(alarm.expected.isEmpty && alarm.reported.isEmpty ? alarm.body
+                                    : "\(alarm.body)\n\nThe relay your devices trust: \(alarm.expected)\nThe relay answering now: \(alarm.reported)"),
                       dismissButton: .default(Text("Close")))
             }
     }

@@ -14,6 +14,9 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.19 - the identity's code as people compare it (SHA-256 of the public key, 16 bytes as hex) in the
+#                banner and in /etc/issue, so the provider's console login screen shows it
+#                (specs/relay_update_trust_step.md R4)
 # Version: 3.18 - the seal-target statement signs the asking browser's challenge, so an answer cannot be shown again later
 # Version: 3.17 - the sealer seals to X-Wing keys only: a 32-byte key in a map is refused as malformed
 # Version: 3.16 - the sealer seals in the format each key names: a 1216-byte X-Wing key gets the v2 seal
@@ -125,7 +128,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.18"
+RELAY_VERSION="3.19"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -740,7 +743,21 @@ IDENTITY_FINGERPRINT="$(printf '%s\n' "${IDENTITY_OUT}" | sed -n 's/^IDENTITY_FI
 chown -R "${RELAY_USER}:${RELAY_USER}" "${IDENTITY_DIR}"
 chmod 700 "${IDENTITY_DIR}"
 chmod 600 "${IDENTITY_DIR}/identity.key"
+IDENTITY_PUBLIC_KEY="$(printf '%s\n' "${IDENTITY_OUT}" | sed -n 's/^IDENTITY_PUBLIC_KEY=//p')"
 echo "identity: ${IDENTITY_FINGERPRINT}"
+
+# The identity as people compare it: SHA-256 over the raw public key, its
+# first 16 bytes as hex in groups of four. The owner's devices show this code
+# when the relay changes and ask the owner to check it; the provider's console
+# shows /etc/issue above every login prompt, which this site cannot change.
+# Inside the if, a key that does not decode is a "no" (pipefail), not an exit.
+if [[ -n "${IDENTITY_PUBLIC_KEY}" ]] \
+        && IDENTITY_CODE="$(printf '%s' "${IDENTITY_PUBLIC_KEY}" | base64 -d 2>/dev/null | sha256sum | cut -c1-32 | sed 's/..../& /g; s/ $//')"; then
+    ISSUE_BASE="$(grep -v '^Joinery relay identity' /etc/issue 2>/dev/null || true)"
+    printf '%s\nJoinery relay identity (as your devices show it): %s\n\n' "${ISSUE_BASE}" "${IDENTITY_CODE}" > /etc/issue
+else
+    IDENTITY_CODE="unknown"
+fi
 
 # --- 7b. tenant main -------------------------------------------------------------
 # A self-hosted relay is a fleet of one: tenant `main`, allowlist '*', keyed by
@@ -962,6 +979,7 @@ echo "  Mail hostname     : ${MAIL_HOSTNAME}"
 echo "  Authserv-id       : ${AUTHSERV_ID}"
 echo "  Relay public IP   : ${PUBLIC_IP}"
 echo "  Identity pin      : ${IDENTITY_FINGERPRINT}"
+echo "  Identity (as your devices show it): ${IDENTITY_CODE}"
 echo "  Relay API         : https://${PUBLIC_IP}/relay/ (signed; pinned identity)"
 echo "  Joinery Direct    : https://${MAIL_HOSTNAME}:443 (SRV target for relay-fronted tenants)"
 echo "  Tenants           : $(find "${TENANTS_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)"

@@ -40,6 +40,9 @@
  * the provider access token and the per-run root SSH private key, both
  * SecretBox-sealed and erased at terminal state.
  *
+ * @version 1.8 - who started a run (rcl_usr_user_id_started), when it finished (rcl_done_time) and the relay identity
+ *                it produced (rcl_identity_public_key), for the owner's relay-change popup
+ *                (specs/relay_update_trust_step.md R6)
  * @version 1.7 - claimForCreate(): ready -> creating in one conditional update, so only one worker creates the
  *                instance (two did: one server orphaned, the run failed by the other's stale copy)
  * @version 1.6 - rcl_instance_ipv6: the provider-reported IPv6 a birth report may arrive from
@@ -64,6 +67,7 @@ class RelayCloudProvision extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'rcl_mrl_mailbox_relay_id' => array('action' => 'null'),
 		'rcl_mfs_mailbox_fleet_shard_id' => array('action' => 'null'),
+		'rcl_usr_user_id_started' => array('action' => 'null'),
 	);
 
 	public static $field_specifications = array(
@@ -98,6 +102,13 @@ class RelayCloudProvision extends SystemBase {
 		// MailboxFleetShard row this names instead of a MailboxRelay row.
 		'rcl_mfs_mailbox_fleet_shard_id'     => array('type'=>'int8'),
 		'rcl_error'           => array('type'=>'text'),
+		// Who opened the run, when it reached done, and the relay identity its
+		// birth produced (saved at the moment the relay row takes it, so a run
+		// that stops after the birth still names it). The owner's mail page
+		// shows them as the site's account of a relay change.
+		'rcl_usr_user_id_started' => array('type'=>'int4'),
+		'rcl_done_time'       => array('type'=>'timestamp(6)'),
+		'rcl_identity_public_key' => array('type'=>'varchar(64)'),
 		'rcl_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'rcl_update_time'     => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'rcl_delete_time'     => array('type'=>'timestamp(6)'),

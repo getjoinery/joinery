@@ -140,6 +140,33 @@ class FortressOpenerTest {
     }
 
     @Test
+    fun relayChangeWords() {
+        val id = "beLRmH6k7NuV/nZUn/k7bG0xw022H71XCBnqdgjArS4="
+        fun run(status: String, idk: String = id) = JsonValue.obj(
+            "relay_id" to JsonValue.Num(4.0), "run_id" to JsonValue.Num(9.0), "status" to JsonValue.Str(status),
+            "started_by" to JsonValue.Str("Pat Admin"), "started_time" to JsonValue.Str("2026-11-15T11:52:00Z"),
+            "done_time" to JsonValue.Str("2026-11-15T12:07:00Z"), "identity_public_key" to JsonValue.Str(idk))
+        val date: (String?) -> String = { it ?: "" }
+        val done = RelayPinCheck.relayChangeText(id, run("done"), listOf("a@x.test", "b@x.test"), null, date)
+        assertEquals("Your mail relay was replaced", done.title)
+        assertTrue(done.body.contains("ⓘ This site says Pat Admin (site admin) started an update"))
+        assertFalse("the site's account is never a tick", done.body.lines().any { it.startsWith("✓") && it.contains("Pat Admin") })
+        assertTrue(done.body.contains("cannot check what the site says") && done.body.contains("provider's console, not from this site"))
+        assertTrue(done.body.contains("a@x.test, b@x.test") && done.body.contains("open your mail on a computer"))
+        assertEquals("Your mail relay is being updated", RelayPinCheck.relayChangeText(id, run("booting"), listOf("a"), null, date).title)
+        assertEquals("Your mail relay was being updated", RelayPinCheck.relayChangeText(id, run("failed"), listOf("a"), null, date).title)
+        val none = RelayPinCheck.relayChangeText(id, null, listOf("a"), null, date)
+        val other = RelayPinCheck.relayChangeText(id, run("done", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="), listOf("a"), null, date)
+        assertEquals("Your mail relay changed, and this site has no record of why", none.title)
+        assertEquals(none.title, other.title)
+        assertEquals("the last good check never changes the words' state", done.title,
+            RelayPinCheck.relayChangeText(id, run("done"), listOf("a"), 1_700_000_000_000L, date).title)
+        val pin = RelayPinCheck.alarmText("pin", "a@x.test")
+        assertEquals("Your mail protection was changed without your devices", pin.title)
+        assertTrue(pin.body.contains("Show this message to your site admin"))
+    }
+
+    @Test
     fun relayPinVector() {
         val v = Vectors.json("relay_pin_vector.json")
         // The pin MAC is under the secret's bytes as the browser's session and
@@ -183,6 +210,18 @@ class FortressOpenerTest {
         val sig = VaultCrypto.b64decode(cv.str("signature")).also { it[0] = (it[0].toInt() xor 1).toByte() }
         val bad = answerOf(cv.str("statement"), VaultCrypto.b64encode(sig), cv.str("relay_identity_public_key"))
         assertEquals("signature", RelayPinCheck.judge(bad, alias, address, macFn, listOf(myKey), challenge).reason)
+        // A pin this vault made for another relay: the answering relay is new.
+        val elsewhere = VaultCrypto.b64encode(ByteArray(32))
+        val moved = JsonValue.Obj(answer.pairs.map { if (it.first == "pin") "pin" to JsonValue.obj(
+            "relay_identity_public_key" to JsonValue.Str(elsewhere),
+            "mac" to JsonValue.Str(VaultCrypto.b64encode(macFn(RelayPinCheck.pinMessage(alias, elsewhere))))) else it })
+        val movedOk = RelayPinCheck.judge(moved, alias, address, macFn, listOf(myKey), challenge)
+        assertEquals("identity", movedOk.reason)
+        assertTrue("a new relay that signed this check and names this key passes the phone's check", movedOk.approvable)
+        assertFalse("one signed for another check does not",
+            RelayPinCheck.judge(moved, alias, address, macFn, listOf(myKey), "zzzzzzzzzzzzzzzzzzzzzz").approvable)
+        assertFalse("nor one naming another key", RelayPinCheck.judge(moved, alias, address, macFn, listOf("other"), challenge).approvable)
+
         // A challenge is 24 base64url characters, fresh each time.
         val a = RelayPinCheck.newChallenge()
         assertTrue(a, Regex("^[A-Za-z0-9_-]{24}$").matches(a))

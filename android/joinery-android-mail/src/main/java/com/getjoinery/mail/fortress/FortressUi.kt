@@ -66,19 +66,16 @@ fun FortressProgress(work: FortressWork, search: MailSearchIndex) {
     work.alarm?.let { a ->
         AlertDialog(
             onDismissRequest = { work.alarm = null },
-            title = { Text("Mail arriving at your relay is not being sealed to your key") },
+            title = { Text(a.title) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("${a.address}: ${RelayPinCheck.REASONS[a.reason] ?: RelayPinCheck.REASONS["unreadable"]} " +
-                        "Until this is settled, mail to this address may be readable by whoever runs this server.")
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(a.body)
                     if (a.expected != null || a.reported != null) {
                         Text(if (a.reason == "key") "Your vault's key" else "The relay your devices trust", style = MaterialTheme.typography.labelMedium)
                         Text(RelayPinCheck.fingerprint(a.expected), fontFamily = FontFamily.Monospace)
                         Text(if (a.reason == "key") "The key the relay seals to" else "The relay answering now", style = MaterialTheme.typography.labelMedium)
                         Text(RelayPinCheck.fingerprint(a.reported), fontFamily = FontFamily.Monospace)
                     }
-                    Text("To trust a new relay, open your mail on a computer: it asks you to confirm with your passkey.",
-                        style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = { TextButton(onClick = { work.alarm = null }) { Text("Close") } },
