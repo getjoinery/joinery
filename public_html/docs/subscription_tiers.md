@@ -80,11 +80,13 @@ and are not prefixed. The member Drive defines four:
 | `drive_storage_bytes` | integer | Storage per member, counting every file they own. `0` means no limit. |
 | `drive_max_file_bytes` | integer | Largest single file a member may upload. `0` means no limit. |
 | `drive_share_links` | boolean | Whether the member may mint public share links. |
-| `drive_versioning_depth` | integer | Prior versions kept per file. `0` keeps only the current version. |
+| `drive_versioning_depth` | integer | Prior versions kept per file, default `50`. `0` keeps only the current version. |
+| `drive_large_file_versioning_depth` | integer | Prior versions kept of a file larger than the site's `drive_large_file_bytes` setting (100 MiB), default `5`. The smaller of this and `drive_versioning_depth` applies. |
 
 Read at runtime with `SubscriptionTier::getUserFeature($user_id, $key, $default)`,
-which returns the default for a tierless member — so all four fail closed (no
-storage, no links, no history) until a tier is configured.
+which returns the default for a tierless member. A tierless member — the owner
+of a self-hosted site — therefore stores without limit, mints no share links,
+and keeps the declared default number of versions (50, or 5 for a large file).
 
 ### 3. Linking Tiers to Products
 

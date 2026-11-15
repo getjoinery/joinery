@@ -131,6 +131,7 @@ class SubscriptionTier extends SystemBase {
         $group_member->set('grm_grp_group_id', $this->get('sbt_grp_group_id'));
         $group_member->set('grm_foreign_key_id', $user_id);
         $group_member->save();
+        self::clearUserCache($user_id);
 
         // Log the change
         ChangeTracking::logChange(
@@ -251,8 +252,9 @@ class SubscriptionTier extends SystemBase {
      * @return mixed Feature value or default
      */
     public static function getUserFeature($user_id, $feature_key, $default = null) {
-        // Check cache first
-        if (!isset(self::$user_tier_cache[$user_id])) {
+        // Check cache first. A tierless member is cached too (null), so their
+        // every feature read does not reload their group memberships.
+        if (!array_key_exists($user_id, self::$user_tier_cache)) {
             self::$user_tier_cache[$user_id] = self::GetUserTier($user_id);
         }
         $tier = self::$user_tier_cache[$user_id];

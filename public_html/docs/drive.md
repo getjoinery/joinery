@@ -637,8 +637,9 @@ retain/release. The demotion holds the file's row (`SELECT ... FOR UPDATE`) and
 reads the head from inside that hold rather than from the caller's copy, which
 is what stops two uploads finishing at once from demoting the same blob twice
 and leaving the head one of them installed referenced by nothing. The same hold
-serialises `fvr_version_number`, which is `MAX + 1` against a unique index. Restoring swaps the roles back. Both prune to the owner's
-`drive_versioning_depth` (oldest versions released and deleted). Because a version
+serialises `fvr_version_number`, which is `MAX + 1` against a unique index. Restoring swaps the roles back. Both prune to the
+depth `FileVersion::retained_depth` gives for the file's current size (oldest
+versions released and deleted). Because a version
 IS a reference to its blob, `FileVersion::permanent_delete` releases it, and the
 file's `fvr_fil_file_id` rule is `permanent_delete` so deleting a file releases
 every version's bytes. `drive_versions` lists a file's history; `drive_version_restore`
@@ -1013,12 +1014,15 @@ stalled device visible instead of silent.
 ## Settings and tier features
 
 Settings (`settings.json`): `drive_active` (`'0'`), `drive_max_folder_depth`
-(`'32'`), `drive_upload_chunk_bytes` (`'8388608'`), `api_upload_rate_limit_requests`
+(`'32'`), `drive_large_file_bytes` (`'104857600'`), `drive_upload_chunk_bytes` (`'8388608'`), `api_upload_rate_limit_requests`
 (`'10000'`), `api_upload_rate_limit_window` (`'3600'`).
 
 Tier features (`includes/core_tier_features.json`), read via
 `SubscriptionTier::getUserFeature($uid, $key, $default)`: `drive_storage_bytes`
 (quota over everything the member owns; 0 is no quota), `drive_max_file_bytes`
 (per-file cap; 0 is no cap), `drive_share_links` (boolean),
-`drive_versioning_depth` (versions kept). A tierless member — the owner of a
-self-hosted site — uploads without limit, bounded by the disk-space reserve.
+`drive_versioning_depth` (versions kept, default 50),
+`drive_large_file_versioning_depth` (versions kept of a file larger than the
+`drive_large_file_bytes` setting, 100 MiB; default 5; the smaller of the two
+applies). A tierless member — the owner of a self-hosted site — uploads without
+limit, bounded by the disk-space reserve, and keeps the declared defaults.

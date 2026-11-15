@@ -2012,3 +2012,15 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'enforce', stg_update_time = now() WHERE stg_name = 'csp_strict_scripts' AND stg_value = 'report';";
 	$migrations[] = $migration;
+
+	// Drive Versions Kept (drive_versioning_depth) defaults to 50. The tier
+	// form fills each feature with its declared default, which was 0, so a
+	// stored 0 is the old default saved unchanged, not a choice: it moves to 50.
+	// No test, so it runs once on every site and is recorded: a 0 an admin
+	// types later is a choice, and this never runs again to overwrite it.
+	$migration = array();
+	$migration['database_version'] = '237';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE sbt_subscription_tiers SET sbt_features = jsonb_set(sbt_features, '{drive_versioning_depth}', '50') WHERE sbt_features->>'drive_versioning_depth' = '0';";
+	$migrations[] = $migration;

@@ -5,6 +5,8 @@
                               "description": "Largest single file a member may upload to Drive. 0 means no limit." },
   "drive_share_links":      { "label": "Drive Share Links", "type": "boolean", "default": false,
                               "description": "Allow members to mint public share links for Drive files and folders." },
-  "drive_versioning_depth": { "label": "Drive Versions Kept", "type": "integer", "default": 0,
-                              "description": "How many prior versions of each Drive file to retain. 0 keeps only the current version." }
+  "drive_versioning_depth": { "label": "Drive Versions Kept", "type": "integer", "default": 50,
+                              "description": "How many prior versions of each Drive file to retain. 0 keeps only the current version." },
+  "drive_large_file_versioning_depth": { "label": "Drive Versions Kept (Large Files)", "type": "integer", "default": 5,
+                              "description": "How many prior versions to retain of a Drive file larger than the site's large-file size (drive_large_file_bytes). The smaller of this and Drive Versions Kept applies." }
 }

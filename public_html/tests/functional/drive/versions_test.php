@@ -578,4 +578,74 @@ check(!$end_dangling(), 'a restore that meets an Error leaves no transaction ope
 check(head_blob($kfile_id) === (int)$k_sealed->key && version_count($kfile_id) === $versions_before, 'and writes nothing');
 $set_sealed->execute(array(null, $kfile_id));
 
+// ---------------------------------------------------------------------------
+section('how many versions a file keeps');
+
+// The owner of a self-hosted site belongs to no tier. A depth that fell back
+// to 0 for them threw away every version the moment it was made: a document
+// edited all day showed an empty Version history. A tierless owner, and a tier
+// that leaves a depth unset, keep the declared default; a file past the site's
+// large-file size keeps the smaller large-file depth.
+$declared = SubscriptionTier::getAllAvailableFeatures();
+$def_depth = (int)$declared['drive_versioning_depth']['default'];
+$def_large = (int)$declared['drive_large_file_versioning_depth']['default'];
+$large_bytes = (int)Globalvars::get_instance()->get_setting('drive_large_file_bytes');
+check($def_depth === 50 && $def_large === 5, 'declared defaults: 50 versions, 5 for a large file', $def_depth . ' / ' . $def_large);
+check($large_bytes > 0, 'the site has a large-file size', (string)$large_bytes);
+
+$tierless = make_user('drivetierless');
+check(SubscriptionTier::GetUserTier($tierless->key) === null, 'construction: the member has no tier');
+check(FileVersion::retained_depth($tierless->key, 1000) === 50, 'a tierless owner keeps 50 versions of a small file');
+check(FileVersion::retained_depth($tierless->key, $large_bytes + 1) === 5, 'and 5 of a file past the large-file size');
+check(FileVersion::retained_depth($tierless->key, $large_bytes) === 50, 'a file exactly at the size is not large');
+
+$tier_depth = (int)SubscriptionTier::getUserFeature($user->key, 'drive_versioning_depth', 0);
+check(FileVersion::retained_depth($user->key, 1000) === $tier_depth, 'a tier\'s own depth applies to a small file (' . $tier_depth . ')');
+check(FileVersion::retained_depth($user->key, $large_bytes + 1) === min($tier_depth, $def_large),
+	'a large file keeps the smaller of the tier\'s depth and the large-file depth');
+
+// A member on a tier whose features never set a depth, and one on a tier that
+// chose 0.
+$tier_with = function ($features) use ($dblink) {
+	$suffix = bin2hex(random_bytes(4));
+	$gq = $dblink->prepare("INSERT INTO grp_groups (grp_name, grp_category) VALUES (?, 'subscription_tier') RETURNING grp_group_id");
+	$gq->execute(array('drive-depth-test-' . $suffix));
+	$gid = (int)$gq->fetchColumn();
+	harness_register_row('grp_groups', 'grp_group_id', $gid);
+	$tq = $dblink->prepare(
+		"INSERT INTO sbt_subscription_tiers
+		   (sbt_grp_group_id, sbt_tier_level, sbt_name, sbt_display_name, sbt_features, sbt_is_active)
+		 VALUES (?, ?, ?, ?, ?::jsonb, TRUE) RETURNING sbt_subscription_tier_id");
+	$tq->execute(array($gid, 901, 'drive-depth-test-' . $suffix, 'Drive Depth Test', json_encode((object)$features)));
+	harness_register_row('sbt_subscription_tiers', 'sbt_subscription_tier_id', (int)$tq->fetchColumn());
+	$member = make_user('drivedepth' . $suffix);
+	$mq = $dblink->prepare("INSERT INTO grm_group_members (grm_grp_group_id, grm_foreign_key_id) VALUES (?, ?) RETURNING grm_group_member_id");
+	$mq->execute(array($gid, (int)$member->key));
+	harness_register_row('grm_group_members', 'grm_group_member_id', $mq->fetchColumn());
+	SubscriptionTier::clearUserCache((int)$member->key);
+	return $member;
+};
+$unset_member = $tier_with(array('drive_storage_bytes' => 0));
+check(SubscriptionTier::GetUserTier($unset_member->key) !== null, 'construction: the member is on a tier that sets no depth');
+check(FileVersion::retained_depth($unset_member->key, 1000) === 50, 'a tier that sets no depth keeps 50 versions of a small file');
+check(FileVersion::retained_depth($unset_member->key, $large_bytes + 1) === 5, 'and 5 of a large file');
+$zero_member = $tier_with(array('drive_versioning_depth' => 0));
+check(FileVersion::retained_depth($zero_member->key, 1000) === 0, 'a tier that chose 0 keeps no prior version');
+check(FileVersion::retained_depth($zero_member->key, $large_bytes + 1) === 0, 'of a large file either');
+
+$tfile = File::createFromBytes('t1-' . bin2hex(random_bytes(6)), 'doc.txt', 'text/plain', $tierless->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $tfile->key;
+for ($i = 2; $i <= 5; $i++) {
+	FileVersion::save_new_content($tfile, make_blob('t' . $i . '-' . bin2hex(random_bytes(10))), $tierless->key);
+}
+check(version_count($tfile->key) === 4, 'a tierless owner\'s four saves keep four versions', 'got ' . version_count($tfile->key));
+
+$oldest = null;
+foreach (new MultiFileVersion(array('file_id' => $tfile->key)) as $v) {
+	if ($oldest === null || (int)$v->get('fvr_version_number') < (int)$oldest->get('fvr_version_number')) { $oldest = $v; }
+}
+FileVersion::restore_version(new File($tfile->key, true), $oldest, $tierless->key);
+check(version_count($tfile->key) === 4, 'a restore drops none: the head it replaced takes the restored one\'s place', 'got ' . version_count($tfile->key));
+
 harness_finish();

@@ -2553,6 +2553,17 @@
       }
     },
     {
+      "name": "drive_large_file_bytes",
+      "default": "104857600",
+      "helptext": "A Drive file larger than this many bytes keeps the large-file number of prior versions (the tier's Drive Versions Kept (Large Files), 5 by default). Default 100 MiB.",
+      "group": "drive",
+      "label": "Large file size for version history (bytes)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
       "name": "drive_upload_chunk_bytes",
       "default": "8388608",
       "helptext": "Chunk size (bytes) the Drive resumable upload protocol requests. Default 8 MiB.",

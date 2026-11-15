@@ -50,7 +50,11 @@ class FileHeadMovedException extends Exception {
  * demotion transfers the head's reference to the new version (no count change),
  * and pruning / permanent delete release it.
  *
- * @version 1.3.0 - replace_head_content: a later save of one editing session
+ * @version 1.4.0 - retained_depth: a tierless owner and a tier with no depth
+ *                  set keep the declared default (50); a file over
+ *                  drive_large_file_bytes keeps at most
+ *                  drive_large_file_versioning_depth (5)
+ * @changelog 1.3.0 - replace_head_content: a later save of one editing session
  *                  replaces the head it wrote, adding no version
  *                  (specs/cloud_drive_office_suite.md §4.3)
  * @changelog 1.2.1 - a write that meets a PHP Error part way through rolls its
@@ -363,16 +367,11 @@ class FileVersion extends SystemBase {
 	}
 
 	/**
-	 * Prune to the owner's retained depth (drive_versioning_depth, default 0):
-	 * keep the newest N versions, release+delete the rest (MAX-cap style).
+	 * Prune to the depth retained_depth() gives: keep the newest N versions,
+	 * release+delete the rest (MAX-cap style).
 	 */
 	public static function prune($file, $owner_id) {
-		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
-		require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
-		$depth = (int)SubscriptionTier::getUserFeature($owner_id, 'drive_versioning_depth', 0);
-		if ($depth < 0) {
-			$depth = 0;
-		}
+		$depth = self::retained_depth($owner_id, self::_blob_size(self::_head_blob_id((int)$file->key)));
 
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$q = $dblink->prepare(
@@ -389,6 +388,29 @@ class FileVersion extends SystemBase {
 			FileBlob::release((int)$row['fvr_fbb_file_blob_id']);
 			self::_delete_row((int)$row['fvr_file_version_id']);
 		}
+	}
+
+	/**
+	 * How many prior versions a file of $head_size bytes keeps for $owner_id:
+	 * the owner's tier's drive_versioning_depth, or, for a file larger than the
+	 * site's drive_large_file_bytes, the smaller of that and
+	 * drive_large_file_versioning_depth. A tierless owner, and a tier that
+	 * leaves a feature unset, get the feature's declared default
+	 * (includes/core_tier_features.json).
+	 */
+	public static function retained_depth($owner_id, $head_size) {
+		static $declared = null;
+		if ($declared === null) {
+			$declared = SubscriptionTier::getAllAvailableFeatures();
+		}
+		$depth = max(0, (int)SubscriptionTier::getUserFeature($owner_id, 'drive_versioning_depth',
+			$declared['drive_versioning_depth']['default']));
+		$large = (int)Globalvars::get_instance()->get_setting('drive_large_file_bytes');
+		if ($large > 0 && (int)$head_size > $large) {
+			$depth = min($depth, max(0, (int)SubscriptionTier::getUserFeature($owner_id, 'drive_large_file_versioning_depth',
+				$declared['drive_large_file_versioning_depth']['default'])));
+		}
+		return $depth;
 	}
 
 	private static function _blob_size($blob_id) {
