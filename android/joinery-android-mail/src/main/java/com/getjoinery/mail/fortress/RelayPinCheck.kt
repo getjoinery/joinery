@@ -12,8 +12,10 @@ import com.getjoinery.android.vault.VaultCrypto
  * browser's pin on the server, or this phone's own record — the server can
  * withhold the answer but not forge it. With neither, the first check trusts
  * the relay the server names (trust on first use, as the browser does and the
- * Fortress card says) and this phone records it. The phone verifies and
- * alarms; trusting a new relay needs a passkey step-up on a computer.
+ * Fortress card says) and this phone records it. Each check sends a one-time
+ * challenge the relay signs into the statement; an answer without it is an
+ * old one shown again and is refused. The phone verifies and alarms; trusting
+ * a new relay needs a passkey step-up on a computer.
  */
 object RelayPinCheck {
     private const val SEAL_TARGET_PREFIX = "joinery-relay:seal-target:v1\n"
@@ -37,6 +39,7 @@ object RelayPinCheck {
      * [answer]: mailbox/relay_seal_target's data. [mac]: this vault's pin MAC.
      * [keys]: the public keys this phone worked out from secrets it holds.
      * [localPin]: the relay this phone pinned before, if the server lost it.
+     * [challenge]: the one this check sent ([newChallenge]).
      */
     fun judge(
         answer: JsonValue,
@@ -44,6 +47,7 @@ object RelayPinCheck {
         address: String,
         mac: (ByteArray) -> ByteArray,
         keys: List<String>,
+        challenge: String,
         localPin: String? = null,
     ): Verdict {
         val relay = try { JsonValue.parse(answer["relay_answer"]?.stringValue ?: "") } catch (e: Exception) { null }
@@ -79,6 +83,10 @@ object RelayPinCheck {
         if (!VaultCrypto.verifyEd25519(pinned, signed, signature.value)) {
             return Verdict(false, reason = "signature", expected = pinned, reported = pinned)
         }
+        val signedChallenge = st["challenge"]?.stringValue ?: ""
+        if (signedChallenge.isEmpty() || challenge.isEmpty() || !sameText(signedChallenge, challenge)) {
+            return Verdict(false, reason = "replayed", expected = pinned, reported = pinned)
+        }
         if (!names) return Verdict(false, reason = "key", expected = keys.firstOrNull(), reported = st["public_key"]?.stringValue)
         return Verdict(true, firstUse = firstUse, identity = pinned)
     }
@@ -88,8 +96,13 @@ object RelayPinCheck {
         "identity" to "A different relay is answering for this mailbox than the one your devices trust.",
         "signature" to "The relay's answer is not signed by the relay your devices trust.",
         "key" to "The relay is sealing this mailbox's mail to a key that is not your vault's.",
+        "replayed" to "The relay's answer was not made for this check: an old answer may have been shown again.",
         "unreadable" to "The relay's answer could not be read.",
     )
+
+    /** A one-time challenge for one relay check: 18 random bytes, base64url (24 characters). */
+    fun newChallenge(): String =
+        VaultCrypto.b64encode(VaultCrypto.randomBytes(18)).replace('+', '-').replace('/', '_').trimEnd('=')
 
     /** A key's fingerprint for people: SHA-256, first 16 bytes, groups of four hex digits. */
     fun fingerprint(b64: String?): String = try {

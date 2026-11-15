@@ -181,36 +181,58 @@ final class FortressFlowTests: XCTestCase {
         let v = try PortVectorTests.vector("relay_pin_vector.json")
         // The vector's secret is a pre-X-Wing PKCS#8; the MAC takes the bytes held.
         let secret = Data(hex: "302e020100300506032b656e04220420" + (v["vault_secret_hex"]?.stringValue ?? ""))
-        let id = v["relay_identity_public_key"]?.stringValue ?? ""
-        let relay = JSONValue.object([(key: "statement", value: v["statement"]!), (key: "signature", value: v["signature"]!)])
-        func answer(pin: JSONValue, statement: String? = nil) -> JSONValue {
-            var r = relay
-            if let statement { r = .object([(key: "statement", value: .string(statement)), (key: "signature", value: v["signature"]!)]) }
-            return .object([(key: "relay_answer", value: .string(r.encoded())),
-                            (key: "relay_identity_public_key", value: .string(id)), (key: "pin", value: pin)])
-        }
-        let pin = JSONValue.object([(key: "relay_identity_public_key", value: .string(id)), (key: "mac", value: v["pin_mac"]!)])
-        let keys = ["YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY="]
         let alias = v["alias_id"]?.intValue ?? 0
-        XCTAssertEqual(FortressWork.judge(answer: answer(pin: pin), aliasID: alias, address: "box@fortress.test", secret: secret, keys: keys),
+        let keys = ["YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY="]
+        let address = "box@fortress.test"
+        func pinFor(_ id: String) -> JSONValue {
+            .object([(key: "relay_identity_public_key", value: .string(id)),
+                     (key: "mac", value: .string(VaultCrypto.b64(VaultCrypto.mac(secret: secret, info: "sealed-vault:pin",
+                                                                                 message: FortressWork.pinMessage(alias, id)))))])
+        }
+        func answer(statement: String, signature: String, id: String, pin: JSONValue? = nil) -> JSONValue {
+            let r = JSONValue.object([(key: "statement", value: .string(statement)), (key: "signature", value: .string(signature))])
+            return .object([(key: "relay_answer", value: .string(r.encoded())),
+                            (key: "relay_identity_public_key", value: .string(id)), (key: "pin", value: pin ?? pinFor(id))])
+        }
+        func reason(_ verdict: FortressWork.PinVerdict) -> String {
+            if case .bad(let r, _, _) = verdict { return r }
+            return "ok"
+        }
+        XCTAssertEqual(pinFor(v["relay_identity_public_key"]?.stringValue ?? "")["mac"]?.stringValue, v["pin_mac"]?.stringValue,
+                       "the pin MAC matches the server's vector")
+
+        // The relay signs this check's challenge back (challenge_vector).
+        let cv = try XCTUnwrap(v["challenge_vector"])
+        let id = cv["relay_identity_public_key"]?.stringValue ?? ""
+        let challenge = cv["challenge"]?.stringValue ?? ""
+        let statement = cv["statement"]?.stringValue ?? ""
+        let signature = cv["signature"]?.stringValue ?? ""
+        let good = answer(statement: statement, signature: signature, id: id)
+        XCTAssertEqual(FortressWork.judge(answer: good, aliasID: alias, address: address, secret: secret, keys: keys, challenge: challenge),
                        .ok(firstUse: false, identity: id))
-        XCTAssertEqual(FortressWork.judge(answer: answer(pin: .null), aliasID: alias, address: "box@fortress.test", secret: secret, keys: keys),
+        XCTAssertEqual(FortressWork.judge(answer: answer(statement: statement, signature: signature, id: id, pin: .null), aliasID: alias,
+                                          address: address, secret: secret, keys: keys, challenge: challenge),
                        .ok(firstUse: true, identity: id))
-        if case .bad(let r, _, _) = FortressWork.judge(answer: answer(pin: pin), aliasID: alias, address: "box@fortress.test",
-                                                       secret: secret, keys: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="]) {
-            XCTAssertEqual(r, "key")
-        } else { XCTFail("another key must fail") }
-        let changed = (v["statement"]?.stringValue ?? "").replacingOccurrences(of: "\"map_version\":7", with: "\"map_version\":8")
-        if case .bad(let r, _, _) = FortressWork.judge(answer: answer(pin: pin, statement: changed), aliasID: alias,
-                                                       address: "box@fortress.test", secret: secret, keys: keys) {
-            XCTAssertEqual(r, "signature")
-        } else { XCTFail("a changed statement must fail") }
+        // Another check's challenge, or none, is an old answer shown again (B4).
+        XCTAssertEqual(reason(FortressWork.judge(answer: good, aliasID: alias, address: address, secret: secret, keys: keys,
+                                                 challenge: "zzzzzzzzzzzzzzzzzzzzzz")), "replayed")
+        let oldID = v["relay_identity_public_key"]?.stringValue ?? ""
+        let old = answer(statement: v["statement"]?.stringValue ?? "", signature: v["signature"]?.stringValue ?? "", id: oldID)
+        XCTAssertEqual(reason(FortressWork.judge(answer: old, aliasID: alias, address: address, secret: secret, keys: keys,
+                                                 challenge: challenge)), "replayed")
+        XCTAssertEqual(reason(FortressWork.judge(answer: good, aliasID: alias, address: address, secret: secret,
+                                                 keys: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="], challenge: challenge)), "key")
+        let changed = statement.replacingOccurrences(of: "\"map_version\":8", with: "\"map_version\":9")
+        XCTAssertEqual(reason(FortressWork.judge(answer: answer(statement: changed, signature: signature, id: id), aliasID: alias,
+                                                 address: address, secret: secret, keys: keys, challenge: challenge)), "signature")
         let forged = JSONValue.object([(key: "relay_identity_public_key", value: .string(id)),
                                        (key: "mac", value: .string("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))])
-        if case .bad(let r, _, _) = FortressWork.judge(answer: answer(pin: forged), aliasID: alias, address: "box@fortress.test",
-                                                       secret: secret, keys: keys) {
-            XCTAssertEqual(r, "pin")
-        } else { XCTFail("a forged pin must fail") }
+        XCTAssertEqual(reason(FortressWork.judge(answer: answer(statement: statement, signature: signature, id: id, pin: forged),
+                                                 aliasID: alias, address: address, secret: secret, keys: keys, challenge: challenge)), "pin")
+        // A challenge is 24 base64url characters, fresh each time.
+        let a = FortressWork.newChallenge()
+        XCTAssertNotNil(a.range(of: "^[A-Za-z0-9_-]{24}$", options: .regularExpression), a)
+        XCTAssertNotEqual(a, FortressWork.newChallenge())
     }
 }
 

@@ -2098,14 +2098,12 @@ first and its relay's Update follows.
   secret it holds (a pending key counts only once opened through the root). The
   first check pins (trust on first use; each device also keeps its own record, so
   a pin deleted on the server is noticed). Each check sends a one-time challenge
-  (`challenge`, 18 random bytes, base64url) that relay 3.18 and later sign into the
-  statement as its last field, so an answer is good for the one check that asked
-  for it and a kept answer cannot be shown again. A relay older than 3.18 signs no
-  challenge; its answer passes only if `signed_at` is within 5 minutes of the
-  device's clock, and only from a relay that device has never seen sign one (each
-  device remembers the relays that have, so a relay rolled back below 3.18 with the
-  same identity alarms as an old answer on every device that saw it sign one, with
-  no approve). A bad signature, another key, an old
+  (`challenge`, 18 random bytes, base64url) that the relay (3.18 and later) signs
+  into the statement as its last field, so an answer is good for the one check that
+  asked for it and a kept answer cannot be shown again. An answer carrying no
+  challenge, or another one, is refused as an old answer, however recent its
+  `signed_at`; a relay older than 3.18 therefore alarms on every check until it is
+  updated. A bad signature, another key, an old
   answer, or a different relay stops with a dialog showing both fingerprints;
   "Trust the new relay" re-pins, after a step-up on an account with a second
   factor.

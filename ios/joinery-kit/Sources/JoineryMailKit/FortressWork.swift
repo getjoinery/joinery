@@ -273,8 +273,11 @@ public final class FortressWork: ObservableObject {
     }
 
     /// The browser's judgeSealTarget: the pin must be this vault's MAC, the
-    /// statement signed by the pinned relay, naming this mailbox and this key.
-    nonisolated static func judge(answer: JSONValue, aliasID: Int, address: String, secret: Data, keys: [String]) -> PinVerdict {
+    /// statement signed by the pinned relay, carrying the challenge this check
+    /// sent (so a kept answer cannot be shown again), naming this mailbox and
+    /// this key.
+    nonisolated static func judge(answer: JSONValue, aliasID: Int, address: String, secret: Data, keys: [String],
+                                  challenge: String) -> PinVerdict {
         guard let relayText = answer["relay_answer"]?.stringValue,
               let relay = try? JSONValue.parse(relayText), let statement = relay["statement"]?.stringValue,
               let st = try? JSONValue.parse(statement), let signature = relay["signature"]?.stringValue else {
@@ -303,6 +306,10 @@ public final class FortressWork: ObservableObject {
         if !VaultCrypto.verifyEd25519(publicKeyB64: pinned, message: signed, signatureB64: signature) {
             return .bad(reason: "signature", expected: pinned, reported: pinned)
         }
+        let signedChallenge = st["challenge"]?.stringValue ?? ""
+        if signedChallenge.isEmpty || challenge.isEmpty || !VaultCrypto.sameText(signedChallenge, challenge) {
+            return .bad(reason: "replayed", expected: pinned, reported: pinned)
+        }
         if !names { return .bad(reason: "key", expected: keys.first ?? "", reported: st["public_key"]?.stringValue ?? "") }
         return .ok(firstUse: firstUse, identity: pinned)
     }
@@ -312,8 +319,18 @@ public final class FortressWork: ObservableObject {
         "identity": "A different relay is answering for this mailbox than the one this device trusts.",
         "signature": "The relay's answer is not signed by the relay this device trusts.",
         "key": "The relay is sealing this mailbox's mail to a key that is not this device's.",
+        "replayed": "The relay's answer was not made for this check: an old answer may have been shown again.",
         "unreadable": "The relay's answer could not be read.",
     ]
+
+    /// A one-time challenge for one relay check: 18 random bytes, base64url
+    /// (24 characters), which the relay signs into its answer.
+    nonisolated static func newChallenge() -> String {
+        let bytes = (0..<18).map { _ in UInt8.random(in: 0...255) }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+    }
 
     /// Every own Fortress mailbox fronted by the relay, once per app run. A
     /// mismatch raises the alarm; trusting a new relay is a computer's step-up.
@@ -327,8 +344,10 @@ public final class FortressWork: ObservableObject {
         guard let derived = try? VaultCrypto.publicKey(fromSecret: secret) else { return }
         pinsChecked = true
         for box in boxes {
+            let challenge = Self.newChallenge()
             guard var answer = try? await api.action("mailbox/relay_seal_target",
-                                                     [(key: "alias_id", value: .number(Double(box.aliasID)))]) else { continue }
+                                                     [(key: "alias_id", value: .number(Double(box.aliasID))),
+                                                      (key: "challenge", value: .string(challenge))]) else { continue }
             let localKey = "joinery.relaypin.\(box.aliasID)"
             if (answer["pin"] ?? .null).isNull, let local = UserDefaults.standard.string(forKey: localKey),
                case .object(var pairs) = answer {
@@ -336,7 +355,8 @@ public final class FortressWork: ObservableObject {
                 pairs.append((key: "relay_identity_public_key", value: .string(local)))
                 answer = .object(pairs)
             }
-            switch Self.judge(answer: answer, aliasID: box.aliasID, address: box.address, secret: secret, keys: [derived]) {
+            switch Self.judge(answer: answer, aliasID: box.aliasID, address: box.address, secret: secret, keys: [derived],
+                              challenge: challenge) {
             case .ok(_, let identity):
                 UserDefaults.standard.set(identity, forKey: localKey)
                 // A first use is only remembered here: pinning, and trusting a

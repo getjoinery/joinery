@@ -5,5 +5,13 @@
     "relay_identity_public_key": "uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=",
     "pin_mac": "gPKbTONVl2T3ZmbEUFf+kh1c5OlSjTiWXw9SbDEaiaE=",
     "statement": "{\"recipient\":\"box@fortress.test\",\"public_key\":\"YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=\",\"key_kind\":\"client\",\"key_scope\":\"mail\",\"key_generation\":1,\"map_version\":7,\"relay_identity_public_key\":\"uzn2WYR3e1WyY2Kcl1yJATPGrSeOLN9pfAim/U/NObM=\",\"signed_at\":\"2026-09-28T12:00:00Z\"}",
-    "signature": "8pmxylHrOIw/ZDVwm3ab5K+J1TtwprMXYv6074UCUT5uU79N20dOWiglY7B125GuW5DZ2EZOZ1IN87GxcxvvBw=="
+    "signature": "8pmxylHrOIw/ZDVwm3ab5K+J1TtwprMXYv6074UCUT5uU79N20dOWiglY7B125GuW5DZ2EZOZ1IN87GxcxvvBw==",
+    "challenge_vector": {
+        "_about": "A statement from relay 3.18 or later, which signs the asking browser's challenge as its last field. Signed by the Ed25519 key from relay_seed_hex (test key only); the Go test rebuilds the same bytes from that seed, fortress_relay_pull_test.php verifies them and MailboxFortress.selfCheck() judges them.",
+        "relay_seed_hex": "bed433908519123eb188945b86fae3325bb03cb629e01e5eb3682d65b9b25190",
+        "relay_identity_public_key": "beLRmH6k7NuV/nZUn/k7bG0xw022H71XCBnqdgjArS4=",
+        "challenge": "q3Jx0mVb_k2n-Lp8ZtR4wA",
+        "statement": "{\"recipient\":\"box@fortress.test\",\"public_key\":\"YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY=\",\"key_kind\":\"client\",\"key_scope\":\"mail\",\"key_generation\":1,\"map_version\":8,\"relay_identity_public_key\":\"beLRmH6k7NuV/nZUn/k7bG0xw022H71XCBnqdgjArS4=\",\"signed_at\":\"2026-11-15T12:00:00Z\",\"challenge\":\"q3Jx0mVb_k2n-Lp8ZtR4wA\"}",
+        "signature": "VLhweEzu8PYtTjy43M6kPwd/5c1LS6OShMxkTgHlP402WCbDSwu4OdzopOyFc2IP+NNRPR/Ix48j71Q67MtfCg=="
+    }
 }

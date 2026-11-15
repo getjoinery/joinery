@@ -151,27 +151,41 @@ class FortressOpenerTest {
         val mac = VaultCrypto.macFromSecret(pkcs8, "sealed-vault:pin", RelayPinCheck.pinMessage(alias, identity))
         assertEquals(v.str("pin_mac"), VaultCrypto.b64encode(mac))
 
-        val statement = JsonValue.parse(v.str("statement"))
-        val relayAnswer = JsonValue.obj("statement" to JsonValue.Str(v.str("statement")), "signature" to JsonValue.Str(v.str("signature"))).encoded()
-        val answer = JsonValue.obj(
-            "relay_answer" to JsonValue.Str(relayAnswer),
-            "relay_identity_public_key" to JsonValue.Str(identity),
-            "pin" to JsonValue.obj("relay_identity_public_key" to JsonValue.Str(identity), "mac" to JsonValue.Str(v.str("pin_mac"))),
-        )
-        val myKey = statement.str("public_key")
         val macFn: (ByteArray) -> ByteArray = { VaultCrypto.macFromSecret(pkcs8, "sealed-vault:pin", it) }
-        val ok = RelayPinCheck.judge(answer, alias, statement.str("recipient"), macFn, listOf(myKey))
+        fun answerOf(statement: String, signature: String, id: String) = JsonValue.obj(
+            "relay_answer" to JsonValue.Str(JsonValue.obj("statement" to JsonValue.Str(statement), "signature" to JsonValue.Str(signature)).encoded()),
+            "relay_identity_public_key" to JsonValue.Str(id),
+            "pin" to JsonValue.obj("relay_identity_public_key" to JsonValue.Str(id),
+                "mac" to JsonValue.Str(VaultCrypto.b64encode(macFn(RelayPinCheck.pinMessage(alias, id))))),
+        )
+        val myKey = JsonValue.parse(v.str("statement")).str("public_key")
+        val address = JsonValue.parse(v.str("statement")).str("recipient")
+
+        // The relay signs this check's challenge back (challenge_vector).
+        val cv = v["challenge_vector"]!!
+        val challenge = cv.str("challenge")
+        val answer = answerOf(cv.str("statement"), cv.str("signature"), cv.str("relay_identity_public_key"))
+        val ok = RelayPinCheck.judge(answer, alias, address, macFn, listOf(myKey), challenge)
         assertTrue(ok.reason ?: "", ok.ok)
+        // With no pin anywhere, it passes as a first use.
+        val unpinned = JsonValue.Obj(answer.pairs.map { if (it.first == "pin") "pin" to JsonValue.Null else it })
+        assertTrue(RelayPinCheck.judge(unpinned, alias, address, macFn, listOf(myKey), challenge).firstUse)
+        // An answer carrying another check's challenge, or none, is an old one shown again (B4).
+        assertEquals("replayed", RelayPinCheck.judge(answer, alias, address, macFn, listOf(myKey), "zzzzzzzzzzzzzzzzzzzzzz").reason)
+        val old = answerOf(v.str("statement"), v.str("signature"), identity)
+        assertEquals("replayed", RelayPinCheck.judge(old, alias, address, macFn, listOf(myKey), challenge).reason)
         // Another key: the relay seals to something this phone does not hold.
-        assertEquals("key", RelayPinCheck.judge(answer, alias, statement.str("recipient"), macFn, listOf("other")).reason)
+        assertEquals("key", RelayPinCheck.judge(answer, alias, address, macFn, listOf("other"), challenge).reason)
         // A pin the server wrote: its MAC is not this vault's.
-        val forged = JsonValue.Obj(answer.pairs.map { if (it.first == "pin") "pin" to JsonValue.obj("relay_identity_public_key" to JsonValue.Str(identity), "mac" to JsonValue.Str(VaultCrypto.b64encode(ByteArray(32)))) else it })
-        assertEquals("pin", RelayPinCheck.judge(forged, alias, statement.str("recipient"), macFn, listOf(myKey)).reason)
+        val forged = JsonValue.Obj(answer.pairs.map { if (it.first == "pin") "pin" to JsonValue.obj("relay_identity_public_key" to JsonValue.Str(cv.str("relay_identity_public_key")), "mac" to JsonValue.Str(VaultCrypto.b64encode(ByteArray(32)))) else it })
+        assertEquals("pin", RelayPinCheck.judge(forged, alias, address, macFn, listOf(myKey), challenge).reason)
         // A changed signature byte.
-        val sig = VaultCrypto.b64decode(v.str("signature")).also { it[0] = (it[0].toInt() xor 1).toByte() }
-        val badAnswer = JsonValue.Obj(answer.pairs.map {
-            if (it.first == "relay_answer") "relay_answer" to JsonValue.Str(JsonValue.obj("statement" to JsonValue.Str(v.str("statement")), "signature" to JsonValue.Str(VaultCrypto.b64encode(sig))).encoded()) else it
-        })
-        assertEquals("signature", RelayPinCheck.judge(badAnswer, alias, statement.str("recipient"), macFn, listOf(myKey)).reason)
+        val sig = VaultCrypto.b64decode(cv.str("signature")).also { it[0] = (it[0].toInt() xor 1).toByte() }
+        val bad = answerOf(cv.str("statement"), VaultCrypto.b64encode(sig), cv.str("relay_identity_public_key"))
+        assertEquals("signature", RelayPinCheck.judge(bad, alias, address, macFn, listOf(myKey), challenge).reason)
+        // A challenge is 24 base64url characters, fresh each time.
+        val a = RelayPinCheck.newChallenge()
+        assertTrue(a, Regex("^[A-Za-z0-9_-]{24}$").matches(a))
+        assertTrue(a != RelayPinCheck.newChallenge())
     }
 }

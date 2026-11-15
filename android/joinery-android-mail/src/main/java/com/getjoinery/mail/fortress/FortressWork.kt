@@ -270,14 +270,18 @@ class FortressWork private constructor(
         val myKey = fortress.keys.scopePublicKey(FortressOpener.SCOPE) ?: return
         val boxes = store.home?.mailboxes?.filter { it.isFortress } ?: return
         for (box in boxes) {
+            val challenge = RelayPinCheck.newChallenge()
             val answer = try {
-                post("mailbox/relay_seal_target", JsonValue.obj("alias_id" to JsonValue.Num(box.aliasId.toDouble())))
+                post("mailbox/relay_seal_target", JsonValue.obj(
+                    "alias_id" to JsonValue.Num(box.aliasId.toDouble()),
+                    "challenge" to JsonValue.Str(challenge),
+                ))
             } catch (e: Exception) {
                 continue
             } ?: continue // not relay-fronted, or not answered: nothing to check now
             val local = localPin(box.aliasId)
             val mac: (ByteArray) -> ByteArray = { fortress.keys.macWith(FortressOpener.SCOPE, "sealed-vault:pin", it) }
-            val verdict = RelayPinCheck.judge(answer, box.aliasId, box.address, mac, listOf(myKey), local)
+            val verdict = RelayPinCheck.judge(answer, box.aliasId, box.address, mac, listOf(myKey), challenge, local)
             if (verdict.ok) {
                 rememberPin(box.aliasId, verdict.identity ?: continue)
             } else {
