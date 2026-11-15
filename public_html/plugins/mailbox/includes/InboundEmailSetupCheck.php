@@ -31,7 +31,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.71 - a refusing provider's sending domain must also be verified there: a row says so, with Ask it to re-check
+ * @version 1.72 - a read-only check lists the Sending domain verified row as not asked
+ * @version 1.71 -a refusing provider's sending domain must also be verified there: a row says so, with Ask it to re-check
  * @version 1.70 - the DKIM row offers Make a signing key where joinery-dkim-add is installed
  * @version 1.69 - a provider that refuses unregistered sender domains makes the domain's provider DKIM row a
  *   required failure (its mail does not leave), with the Register button when the provider can register
@@ -4649,8 +4650,17 @@ class InboundEmailSetupCheck {
 
 		$status = $this->providerDkimStatus($class, $domain);
 		if ($status['status'] === 'unreachable') {
-			return array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::UNKNOWN,
+			$rows = array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::UNKNOWN,
 				'Could not determine ' . $label . '\'s DKIM records for ' . $domain . ' — its API did not answer. Try again.'));
+			// A read-only check still lists the verification step it did not
+			// ask about, so a reader knows the step exists.
+			if ($this->read_only) {
+				$verified = $this->providerSendingDomainRow($class, $label, $domain, $id_base);
+				if ($verified !== null) {
+					$rows[] = $verified;
+				}
+			}
+			return $rows;
 		}
 		if ($status['status'] === 'not_registered') {
 			$implements = class_implements($class) ?: array();

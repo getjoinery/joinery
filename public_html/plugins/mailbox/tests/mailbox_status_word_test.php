@@ -207,9 +207,11 @@ check($v !== null && $v['status'] === InboundEmailSetupCheck::PASS, 'once the pr
 check($verified_row($rows_for('MbwSigningProvider')) === null, 'a provider that does not refuse gets no verification row');
 $ro = InboundEmailSetupCheck::readOnly();
 $ro_rows = Closure::bind(function () { return $this->providerDkimRows('MbwUnverifiedProvider', 'Stub', 'example.com', 'domain.dkim_provider'); }, $ro, InboundEmailSetupCheck::class)();
-check(count($ro_rows) === 1 && $ro_rows[0]['status'] === InboundEmailSetupCheck::UNKNOWN && $verified_row($ro_rows) === null
+$ro_v = $verified_row($ro_rows);
+check(count($ro_rows) === 2 && $ro_rows[0]['status'] === InboundEmailSetupCheck::UNKNOWN
+	&& $ro_v !== null && $ro_v['status'] === InboundEmailSetupCheck::UNKNOWN
 	&& in_array('provider_api', $ro->notAsked(), true),
-	'the read-only engine asks the provider nothing: one unknown row, named as not asked');
+	'the read-only engine asks the provider nothing: the DKIM and verification rows are unknown, named as not asked');
 
 check(in_array('RefusesUnregisteredSenderDomains', class_implements('Smtp2GoProvider') ?: array(), true)
 	&& !in_array('RefusesUnregisteredSenderDomains', class_implements('MailgunProvider') ?: array(), true),
