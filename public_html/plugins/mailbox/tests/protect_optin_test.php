@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.8 - the editor's link to the owner question is send_protection_setup_url()
  * @version 1.7 - the ceremony is one ordered table; its publish box is named for group 1
  * @version 1.6 - the strict records come from strictStageRecords(), shared with the one press
  * @version 1.5 - the strict DMARC value is built by foldDmarc(), read through its helper
@@ -657,8 +658,11 @@ class ProtectOptinTest {
 			'the domain editor hosts no key-ownership control: one place for the task');
 		check(strpos($domains, 'The signing key belongs to') !== false,
 			'the owner is stated there — it was written by the raise and shown on no screen');
-		check(strpos($domains, '#sending-identity') !== false,
-			'and an unanswered owner links straight to the question');
+		$model_src = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/data/inbound_email_domains_class.php'));
+		check(strpos($domains, 'send_protection_setup_url()') !== false
+				&& strpos($model_src, "'#sending-identity'") !== false,
+			'and an unanswered owner links straight to the question (send_protection_setup_url)');
 		$dlogic = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/logic/admin_mailbox_domains_logic.php'));
 		check(strpos($dlogic, "=== 'protect_generate'") === false,

@@ -13,6 +13,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.14 - its Setup links come from InboundEmailDomain::send_protection_setup_url()
  * @version 4.13 - the Protected sending identity box states who owns the key and links to Setup, where it is chosen
  * @version 4.12 - no inline script: the Fortress gate, receipt title, unseal loop and ceremony gating are assets/admin_domains.js
  * @version 4.11 - Set up a relay opens the Server tab
@@ -510,11 +511,11 @@ if ($show_form) {
 			echo '<p>You asked for <strong>Only send while I\'m signed in</strong>. This domain has no signing key '
 				. 'yet: Setup says what it is waiting for (who owns it, or the vault it is locked inside). Only the '
 				. 'key\'s owner will ever be able to send as this domain.</p>';
-			$setup_link .= '#sending-identity';
+			$setup_link = $edit_domain->send_protection_setup_url();
 		} else {
 			echo '<p>You asked for <strong>Only send while I\'m signed in</strong>. It is not on yet: finish it '
 				. 'on the Setup tab, or switch it off above and this domain is finished as it is.</p>';
-			$setup_link .= '&protect_setup=1';
+			$setup_link = $edit_domain->send_protection_setup_url();
 		}
 
 		if ($has_key) {

@@ -1,4 +1,5 @@
 <?php
+// @version 1.9 - switching the sending lock on lands in the send-protection ceremony when the key exists
 // @version 1.8 - switching the sending lock on makes the key before a raise's receipt landing
 // @version 1.7 - a catch-all forwarding address is asked to confirm, and the editor can resend
 //   the request (specs/relay_receive_only_forwarding.md)
@@ -612,19 +613,21 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// Switching the sending lock on records the request immediately but
 			// never writes ied_is_protected_identity here — the verify-gated
 			// protect ceremony flips that after DNS proves the protected shape.
-			// Land on Setup focused on this domain, not on the ceremony itself:
-			// Setup lists every remaining step (vault, protect, relay,
-			// automated-mail subdomain), and it is a place the operator can
-			// navigate back to. The ceremony is one button away from there.
+			// Land where finishing it starts: the ceremony itself, opened, once
+			// the key exists (made just above), or the Sending identity box when
+			// the owner must be chosen first (specs/send_protection_one_press.md WP5).
 			if ($domain->send_lock_outstanding()) {
+				$has_key = (string)$domain->get('ied_dkim_sealed_key') !== '';
 				$session->save_message(new DisplayMessage(
-					'Domain saved. Finish the sending lock: publish the protected DNS records and turn on send protection.',
+					$has_key
+						? 'Domain saved. Finish send protection below: publish the records, then turn it on.'
+						: 'Domain saved. Finish send protection: choose who owns the signing key.',
 					'Saved',
 					'~/plugins/mailbox/admin/~',
 					DisplayMessage::MESSAGE_ANNOUNCEMENT,
 					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
-				return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$domain->key);
+				return LogicResult::redirect($domain->send_protection_setup_url());
 			}
 
 			$session->save_message(new DisplayMessage(

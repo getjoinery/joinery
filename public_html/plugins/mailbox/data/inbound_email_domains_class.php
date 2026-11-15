@@ -43,6 +43,7 @@
  * Either one hardens its holders (userHasHardenedDomain): short unlock-window
  * caps.
  *
+ * @version 1.17 - send_protection_setup_url(): where finishing send protection starts
  * @version 1.16 - save() keeps the domain's Direct signing key in the custody its level calls for
  * @version 1.15 - permanent_delete(): the last row for a domain takes its Direct signing identities with it
  * @version 1.14 - forwarding_offered(): no forward off a Fortress domain or one sealed at the relay
@@ -486,6 +487,18 @@ class InboundEmailDomain extends SystemBase {
 	 */
 	function send_lock_outstanding() {
 		return $this->send_lock_requested() && !$this->is_protected_identity();
+	}
+
+	/**
+	 * Where finishing send protection starts: the ceremony on Setup, opened,
+	 * once the signing key exists; before that, the Sending identity box on
+	 * Setup, which asks who owns the key (specs/send_protection_one_press.md
+	 * WP5). The editor's save, the editor's box and Setup's own Finish link all
+	 * land here, so they never disagree.
+	 */
+	function send_protection_setup_url(): string {
+		return '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$this->key
+			. (((string)$this->get('ied_dkim_sealed_key') !== '') ? '&protect_setup=1' : '#sending-identity');
 	}
 
 	/**

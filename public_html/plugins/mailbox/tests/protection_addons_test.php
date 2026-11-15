@@ -27,11 +27,14 @@
  *  - A write to an unconverted row converts it first, so a lift sticks.
  *  - The stored owner is a key-owner candidate and is never replaced by a
  *    guess; the sending lock's key and switch need a Private domain.
+ *  - Saving with the sending lock on lands in the ceremony when the key
+ *    exists, and on the Sending identity box when the owner is still to choose.
  *  - A cancelled sending-lock request prescribes no signing records.
  *  - Neither add-on adds a second-factor enrollment gate.
  *
  * Run: php tests/run.php db --filter=protection_addons
  *
+ * @version 1.8 - the editor's save with the sending lock on lands where finishing it starts
  * @version 1.7 - the ordinary signer ignores the sealed key's selector
  * @version 1.6 - Step 1 Apply through a mailbox resolves the records Step 1 showed
  * @version 1.5 - follows the mail cards' wording
@@ -404,6 +407,56 @@ try {
 		check($case->is_hardened() === (count($case->addon_labels()) > 0),
 			'hardened exactly when a label shows (' . $case->get('ied_domain') . ')');
 	}
+} finally {
+	$db->rollBack();
+}
+
+// ---------------------------------------------------------------------------
+section('Saving with the sending lock on lands where finishing it starts (one press WP5)');
+
+/** Save $domain through the editor as $admin with the sending lock switched on; the redirect. */
+function pa_save_with_lock(InboundEmailDomain $domain, User $admin, string $send_field): string {
+	$session = SessionControl::get_instance();
+	$session->set_api_user(intval($admin->key));
+	$was_method = $_SERVER['REQUEST_METHOD'] ?? null;
+	$_SERVER['REQUEST_METHOD'] = 'POST';
+	try {
+		$result = admin_mailbox_domains_logic(array(
+			'domain_type' => 'custom',
+			'edit_primary_key_value' => intval($domain->key),
+			'ied_domain' => $domain->get('ied_domain'),
+			'ied_is_enabled' => '1',
+			'ied_catch_all_mode' => 'store',
+			'ied_security_level' => InboundEmailDomain::LEVEL_PRIVATE,
+			$send_field => '1',
+		));
+	} finally {
+		if ($was_method === null) { unset($_SERVER['REQUEST_METHOD']); } else { $_SERVER['REQUEST_METHOD'] = $was_method; }
+		$session->clear_api_user();
+	}
+	return (string)($result->redirect ?? '') . ' ' . (string)($result->data['error'] ?? '');
+}
+
+$db->beginTransaction();
+try {
+	$lock_admin = make_user('PaLockAdmin', 10);
+	$keyed = pa_domain('private', array('ied_send_lock_requested' => true,
+		'ied_dkim_sealed_key' => 'not-a-real-key', 'ied_dkim_selector' => 'mailk1'), intval($lock_admin->key));
+	$setup = '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . intval($keyed->key);
+	check($keyed->send_protection_setup_url() === $setup . '&protect_setup=1',
+		'with a key, finishing starts in the ceremony, opened');
+	$landed = pa_save_with_lock($keyed, $lock_admin, $send_field);
+	check(trim($landed) === $setup . '&protect_setup=1',
+		'so the editor\'s save lands in the ceremony, not on Setup\'s overview', $landed);
+
+	$someone = make_user('PaKeyOwnerElse');
+	$keyless = pa_domain('private', array('ied_send_lock_requested' => true), intval($someone->key));
+	$setup2 = '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . intval($keyless->key);
+	$landed2 = pa_save_with_lock($keyless, $lock_admin, $send_field);
+	$keyless_after = new InboundEmailDomain(intval($keyless->key), TRUE);
+	check((string)$keyless_after->get('ied_dkim_sealed_key') === ''
+			&& trim($landed2) === $setup2 . '#sending-identity',
+		'with the owner still to choose, no key is made and the save lands on the Sending identity box', $landed2);
 } finally {
 	$db->rollBack();
 }

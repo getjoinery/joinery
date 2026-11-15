@@ -31,6 +31,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.74 - the Finish send protection link is InboundEmailDomain::send_protection_setup_url()
  * @version 1.73 - two SPF records at a name fail its SPF row (apex, forwarding subdomain, machine identity):
  *   receivers treat them as an error
  * @version 1.72 - a read-only check lists the Sending domain verified row as not asked
@@ -3689,9 +3690,7 @@ class InboundEmailSetupCheck {
 		// The fix opens the task itself: the ceremony when the key exists, or
 		// the owner question that comes before it (the Sending identity box
 		// leads the Setup page while that is unanswered).
-		$finish = array('url' => '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$model->key
-				. (((string)$model->get('ied_dkim_sealed_key') !== '') ? '&protect_setup=1' : '#sending-identity'),
-			'label' => 'Finish send protection');
+		$finish = array('url' => $model->send_protection_setup_url(), 'label' => 'Finish send protection');
 
 		if (!$signing && $strict) {
 			return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
