@@ -16,6 +16,7 @@
  *
  * Run: php tests/run.php safe --filter=seo_content_summary
  *
+ * @version 1.1 - content is parsed as a browser reads it: a pasted span with broken quotes in its style keeps its text
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -34,6 +35,12 @@ check($d === 'Location: Valencia, Spain Phone: +55 61 Classes every week.', 'sty
 check(SeoPageMetadata::summarize_html('<h1>One</h1><p>Two</p><ul><li>a</li><li>b</li></ul>') === 'One Two a b', 'block boundaries keep words apart');
 check(SeoPageMetadata::summarize_html('<p>Bold <b>word</b>s stay joined</p>') === 'Bold words stay joined', 'an inline tag adds no space');
 check(SeoPageMetadata::summarize_html('<style>a{}</style><form><label>x</label></form>') === null, 'nothing visible is no description');
+// What an editor left on xandyliberato's community page: a style attribute
+// whose font list broke out of its quotes. strip_tags() took everything after
+// it for part of the tag, and the page had no description.
+$broken = '<p><span style="font-family: -apple-system, " segoe="" ui",="" roboto,="" "helvetica="" neue",="" arial;"="">If you would like to be part of the community</span>, fill in this form:</p>';
+$d = SeoPageMetadata::summarize_html($broken);
+check($d === 'If you would like to be part of the community, fill in this form:', 'a broken attribute does not swallow the text after it', json_encode($d));
 
 section('The share image is not one inside a form or script');
 check(SeoPageMetadata::infer_preview_image('/', array('entity_body_html' => $embed)) === null, 'the badge inside the pasted form is not the share image');

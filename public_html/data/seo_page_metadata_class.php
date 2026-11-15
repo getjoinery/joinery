@@ -300,26 +300,60 @@ class SeoPageMetadata extends SystemBase {
 		return null;
 	}
 
+	/** Elements a reader never sees as text, or that are not what the page is about. */
+	const HIDDEN_ELEMENTS = array('style', 'script', 'noscript', 'template', 'form', 'head', 'title');
+
+	/** Elements whose edges separate words ("Valencia, Spain" / "Phone" is not "SpainPhone"). */
+	const BLOCK_ELEMENTS = array('br', 'p', 'div', 'li', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'td', 'th',
+		'section', 'article', 'blockquote', 'header', 'footer', 'table', 'figure', 'figcaption', 'dd', 'dt', 'hr', 'pre', 'main', 'aside', 'nav');
+
 	/**
-	 * Content HTML with what a reader never sees as text removed: style and
-	 * script blocks (a pasted embed carries both), templates, comments, and
-	 * forms (a pasted sign-up form's labels and vendor badge are not what the
-	 * page is about).
+	 * Content HTML parsed the way a browser reads it, with what a reader never
+	 * sees as text removed: style and script blocks (a pasted embed carries
+	 * both), templates, comments, and forms (a pasted sign-up form's labels and
+	 * vendor badge are not what the page is about). A parser, not tag
+	 * stripping: an editor can leave a broken attribute (stray quotes in a
+	 * pasted style) that a browser shrugs off and strip_tags() reads as the
+	 * rest of the page being inside one tag. Null when there is nothing.
 	 */
-	public static function visible_html($html) {
-		$html = preg_replace('#<!--.*?-->#s', ' ', (string)$html);
-		return preg_replace('#<(style|script|noscript|template|form)\b[^>]*>.*?</\1\s*>#is', ' ', $html);
+	public static function visible_dom($html): ?DOMElement {
+		$html = (string)$html;
+		if (trim($html) === '') return null;
+		$doc = new DOMDocument();
+		$previous = libxml_use_internal_errors(true);
+		$doc->loadHTML('<?xml encoding="UTF-8"?><html><body>' . $html . '</body></html>', LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+		libxml_clear_errors();
+		libxml_use_internal_errors($previous);
+		$body = $doc->getElementsByTagName('body')->item(0);
+		if (!$body) return null;
+		$xpath = new DOMXPath($doc);
+		$drop = array();
+		foreach ($xpath->query('.//comment()', $body) as $node) $drop[] = $node;
+		foreach (self::HIDDEN_ELEMENTS as $tag) {
+			foreach ($body->getElementsByTagName($tag) as $node) $drop[] = $node;
+		}
+		foreach ($drop as $node) {
+			if ($node->parentNode) $node->parentNode->removeChild($node);
+		}
+		return $body;
+	}
+
+	/** The visible text under $node, with a space at each block edge. */
+	private static function visible_text(DOMNode $node): string {
+		if ($node instanceof DOMText) return $node->nodeValue;
+		$text = '';
+		foreach ($node->childNodes as $child) $text .= self::visible_text($child);
+		if ($node instanceof DOMElement && in_array(strtolower($node->tagName), self::BLOCK_ELEMENTS, true)) {
+			$text = ' ' . $text . ' ';
+		}
+		return $text;
 	}
 
 	public static function summarize_html($html, $max_length = 160) {
 		if (!$html) return null;
-		// A block or line break between two pieces of text is a space between
-		// them once the tags go ("Valencia, Spain" / "Phone" is not "SpainPhone").
-		$text = preg_replace('#<(br|/?(p|div|li|ul|ol|h[1-6]|tr|td|th|section|article|blockquote|header|footer|table))\b[^>]*>#i',
-			' $0', self::visible_html($html));
-		$text = strip_tags($text);
-		$text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-		$text = preg_replace('/\s+/u', ' ', $text);
+		$body = self::visible_dom($html);
+		if (!$body) return null;
+		$text = preg_replace('/\s+/u', ' ', self::visible_text($body));
 		$text = trim($text);
 		if ($text === '') return null;
 		if (mb_strlen($text, 'UTF-8') <= $max_length) {
@@ -338,9 +372,10 @@ class SeoPageMetadata extends SystemBase {
 			return null;
 		}
 		if (!empty($options['entity_body_html'])) {
-			$body = self::visible_html($options['entity_body_html']);
-			if (preg_match('/<img[^>]+src\s*=\s*["\']([^"\']+)["\']/i', $body, $m)) {
-				$src = $m[1];
+			$body = self::visible_dom($options['entity_body_html']);
+			$img = $body ? $body->getElementsByTagName('img')->item(0) : null;
+			$src = $img ? trim($img->getAttribute('src')) : '';
+			if ($src !== '') {
 				if (strpos($src, 'data:') === 0) return null;
 				$lower = strtolower($src);
 				if (strpos($lower, 'pixel') !== false || strpos($lower, 'tracking') !== false

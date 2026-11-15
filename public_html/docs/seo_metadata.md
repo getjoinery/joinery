@@ -33,7 +33,7 @@ All inference logic lives as static methods on `SeoPageMetadata` (`data/seo_page
 | Field | Inference rule |
 |---|---|
 | `title` | Static path: humanize the last path segment (`/about-us` → `About Us`). Known acronyms preserved (`API`, `FAQ`, `SEO`, `URL`, `RSS`, `JSON`, etc.). Namespaced plugin views prepend the plugin display name when distinct. Path `/` returns NULL (falls through to `site_name`). |
-| `meta_description` | If `$options['entity_body_html']` is present, take only what a reader sees (`SeoPageMetadata::visible_html()` drops style, script, noscript, template and form elements and comments), keep a space at each block or line break, strip HTML, collapse whitespace, multi-byte-safe truncate at a word boundary to ~160 chars. Static paths fall through to `site_description`. |
+| `meta_description` | If `$options['entity_body_html']` is present, parse it as a browser does and take only what a reader sees (`SeoPageMetadata::visible_dom()` drops style, script, noscript, template and form elements and comments), keep a space at each block or line break, collapse whitespace, multi-byte-safe truncate at a word boundary to ~160 chars. Static paths fall through to `site_description`. |
 | `preview_image` | If `$options['entity_body_html']` is present, extract the first `<img src="...">` a reader sees, outside any form or script (data URIs and tracking-pixel patterns skipped). Falls through to `site_preview_image`. |
 | `og_type` | Maps `$options['entity_type']`: `post` / `event` / `video` → `article`; `product` → `product`; everything else → `website`. |
 
