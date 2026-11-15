@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # install_office_editor.sh - host installer for the office_editor plugin.
+# Version: 0.1.5 - paste works again: the clipboard's GET ends its query with
+#                &MimeType=text/html,text/plain;charset=utf-8, whose two '/' the
+#                0.1.4 allow list refused (403). That exact ending is admitted;
+#                no other '/' in a query is.
 # Version: 0.1.4 - /cool is proxied with nocanon, so the document address in its path
 #                reaches the editor as the browser sent it (inserting a picture
 #                failed: Apache refused or re-encoded the %2F in it; the site's
@@ -292,8 +296,10 @@ cat > "${CANDIDATE}" <<APACHE
     # without a login), admin console, search rendering, a dot segment and a
     # 0x hex-encoded path are all outside it. The editor splits the query on
     # '/' too, so the query may carry none but the trailing /ws the page adds
-    # (every value in it is URL-encoded).
-    <If "%{THE_REQUEST} !~ m#^(GET|POST) /cool/(ws|clipboard|http%3A%2F%2F127\.0\.0\.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F[0-9]+/(insertfile|download/[A-Za-z0-9_-][A-Za-z0-9._~-]*))(\?[^ /]*(/ws)?)? HTTP/#">
+    # and the &MimeType=text/html,text/plain;charset=utf-8 the clipboard's
+    # GET ends with when a paste reads back what was copied (every other
+    # value in it is URL-encoded).
+    <If "%{THE_REQUEST} !~ m#^(GET|POST) /cool/(ws|clipboard|http%3A%2F%2F127\.0\.0\.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F[0-9]+/(insertfile|download/[A-Za-z0-9_-][A-Za-z0-9._~-]*))(\?[^ /]*(/ws|&MimeType=text/html,text/plain;charset=utf-8)?)? HTTP/#">
         Require all denied
     </If>
 </Location>

@@ -619,13 +619,45 @@ check(strpos($oe, "ProxyPass http://127.0.0.1:9980/cool upgrade=websocket retry=
 // sent: nocanon hands the editor that line, so a deny list matched against
 // Apache's tidied path was passed by /cool/getMetrics/../x and by a 0x
 // hex-encoded first segment (reviewer2 B1, B2).
-check(strpos($oe, '<If "%{THE_REQUEST} !~ m#^(GET|POST) /cool/(ws|clipboard|http%3A%2F%2F127\\.0\\.0\\.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F[0-9]+/(insertfile|download/[A-Za-z0-9_-][A-Za-z0-9._~-]*))(\\?[^ /]*(/ws)?)? HTTP/#">') !== false,
+check(strpos($oe, '<If "%{THE_REQUEST} !~ m#^(GET|POST) /cool/(ws|clipboard|http%3A%2F%2F127\\.0\\.0\\.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F[0-9]+/(insertfile|download/[A-Za-z0-9_-][A-Za-z0-9._~-]*))(\\?[^ /]*(/ws|&MimeType=text/html,text/plain;charset=utf-8)?)? HTTP/#">') !== false,
     '/cool admits only the websocket, clipboard, insertfile and download forms, on the request line as sent');
 check(strpos($oe, 'getMetrics|adminws') === false && strpos($oe, 'getmetrics|adminws') === false,
     'no deny list of editor endpoints is left beside the allow list');
 $cool = preg_match('#<Location /cool>(.*?)</Location>#s', $oe, $m) ? $m[1] : '';
 check(strpos($cool, "Require all denied") !== false && strpos($cool, '<If "%{THE_REQUEST}') !== false,
     'the allow list sits inside the /cool proxy block');
+// The rule itself, run against request lines the editor's page really sends
+// and ones it must refuse. Apache's ap_expr regex is PCRE, as preg is.
+$cool_rule = preg_match('/<If "%\{THE_REQUEST\} !~ m#(.*?)#">/', $cool, $rm) ? '#' . $rm[1] . '#' : '';
+check($cool_rule !== '', 'the /cool allow-list pattern can be read from the installer');
+if ($cool_rule !== '') {
+    $doc = 'http%3A%2F%2F127.0.0.1%3A9981%2Foffice_editor%2Fwopi%2Ffiles%2F42';
+    $clip = 'WOPISrc=' . $doc . '&ServerId=abc123&ViewId=1&Tag=deadbeef';
+    $admit = array(
+        'GET /cool/ws?WOPISrc=' . $doc . '&compat=/ws HTTP/1.1',
+        'POST /cool/clipboard?' . $clip . ' HTTP/1.1',
+        'GET /cool/clipboard?' . $clip . ' HTTP/1.1',
+        // a paste reading back what was copied (Clipboard.js getMetaURL() + MimeType)
+        'GET /cool/clipboard?' . $clip . '&MimeType=text/html,text/plain;charset=utf-8 HTTP/1.1',
+        'POST /cool/' . $doc . '/insertfile?WOPISrc=' . $doc . ' HTTP/1.1',
+        'GET /cool/' . $doc . '/download/abc_1.pdf?WOPISrc=' . $doc . ' HTTP/1.1',
+    );
+    $refuse = array(
+        'GET /cool/ws?/getMetrics HTTP/1.1',
+        'GET /cool/clipboard?/getMetrics HTTP/1.1',
+        'GET /cool/clipboard?' . $clip . '&MimeType=text/html/getMetrics HTTP/1.1',
+        'GET /cool/clipboard?a=1/getMetrics&MimeType=text/html,text/plain;charset=utf-8 HTTP/1.1',
+        'POST /cool/ws?/convert-to/pdf HTTP/1.1',
+        'GET /cool/getMetrics/../x HTTP/1.1',
+        'GET /cool/0x6765744d657472696373/ HTTP/1.1',
+    );
+    foreach ($admit as $line) {
+        check(preg_match($cool_rule, $line) === 1, '/cool admits: ' . substr($line, 0, 90));
+    }
+    foreach ($refuse as $line) {
+        check(preg_match($cool_rule, $line) === 0, '/cool refuses: ' . $line);
+    }
+}
 
 foreach (array('default_virtualhost.conf' => '2.11', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);

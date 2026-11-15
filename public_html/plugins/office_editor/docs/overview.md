@@ -191,7 +191,11 @@ root by the host converger once the plugin is active):
    `/cool/<address>/download/<id>`) and reaches the editor as sent. `/cool`
    admits only the four forms the editor's page sends (those two,
    `/cool/ws?...` and `/cool/clipboard?...`), checked on the request line as
-   sent (`THE_REQUEST`), since that is what the editor reads; everything else
+   sent (`THE_REQUEST`), since that is what the editor reads. The editor splits
+   a query on `/` as well, so a query carries no `/` except the websocket's
+   trailing `/ws` and the clipboard read's closing
+   `&MimeType=text/html,text/plain;charset=utf-8` (a paste fetching what was
+   copied); everything else
    under it, the conversion endpoints and metrics included, is refused. The site's vhost keeps `%2F` in a path (`AllowEncodedSlashes
    NoDecode`, `default_virtualhost.conf`); without it Apache answers 404 to
    those paths. The listener checks the
