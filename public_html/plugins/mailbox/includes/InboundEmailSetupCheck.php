@@ -31,6 +31,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.75 - a read-only check says it did not ask the provider for DKIM records, not that its API failed
  * @version 1.74 - the Finish send protection link is InboundEmailDomain::send_protection_setup_url()
  * @version 1.73 - two SPF records at a name fail its SPF row (apex, forwarding subdomain, machine identity):
  *   receivers treat them as an error
@@ -4691,7 +4692,9 @@ class InboundEmailSetupCheck {
 		$status = $this->providerDkimStatus($class, $domain);
 		if ($status['status'] === 'unreachable') {
 			$rows = array($this->r($id_base, $domain, 'domain', 'DKIM record (' . $label . ')', self::RECOMMENDED, self::UNKNOWN,
-				'Could not determine ' . $label . '\'s DKIM records for ' . $domain . ' — its API did not answer. Try again.'));
+				$this->read_only
+					? 'Not asked: a read-only check does not ask ' . $label . ' which DKIM records ' . $domain . ' needs.'
+					: 'Could not determine ' . $label . '\'s DKIM records for ' . $domain . ' — its API did not answer. Try again.'));
 			// A read-only check still lists the verification step it did not
 			// ask about, so a reader knows the step exists.
 			if ($this->read_only) {

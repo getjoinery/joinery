@@ -7,15 +7,19 @@
  * Putting that behind a tiny interface keeps the diff logic testable without a
  * database and keeps the persistence in one place (ManagedDnsRecord).
  *
- * @version 1.0
+ * A slot is (domain, type, name, kind): kind is DnsRecord::txtKind() for a TXT
+ * and '' for every other type, so the apex SPF and a verification record
+ * beside it are owned, remembered and forgotten separately.
+ *
+ * @version 1.1 - slots are kept per TXT kind
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsRecord.php'));
 
 interface DnsOwnershipStore {
 
-	/** Is the platform responsible for this (domain, type, name) slot? */
-	public function isOwned(string $domain, string $type, string $name): bool;
+	/** Is the platform responsible for this (domain, type, name, kind) slot? */
+	public function isOwned(string $domain, string $type, string $name, string $kind = ''): bool;
 
 	/**
 	 * What the platform last wrote into a slot, and when — the write receipt.
@@ -26,18 +30,18 @@ interface DnsOwnershipStore {
 	 *
 	 * @return array{value:string,owner:string,provider:string,written:string}|null
 	 */
-	public function ownedRecord(string $domain, string $type, string $name): ?array;
+	public function ownedRecord(string $domain, string $type, string $name, string $kind = ''): ?array;
 
-	/** Record responsibility. $adopted marks ownership acquired by agreement. */
+	/** Record responsibility for the slot of $record's kind. $adopted marks ownership acquired by agreement. */
 	public function remember(string $domain, DnsRecord $record, string $owner,
 		string $provider, string $zone, bool $adopted): void;
 
 	/** Drop responsibility for a slot. Never touches DNS itself. */
-	public function forget(string $domain, string $type, string $name): void;
+	public function forget(string $domain, string $type, string $name, string $kind = ''): void;
 
 	/**
 	 * Every slot the platform owns in a domain.
-	 * @return array<int,array{type:string,name:string,value:string,owner:string}>
+	 * @return array<int,array{type:string,name:string,kind:string,value:string,owner:string}>
 	 */
 	public function ownedFor(string $domain): array;
 }
@@ -58,17 +62,17 @@ class DbDnsOwnershipStore implements DnsOwnershipStore {
 		require_once(PathHelper::getIncludePath('data/managed_dns_records_class.php'));
 	}
 
-	public function isOwned(string $domain, string $type, string $name): bool {
+	public function isOwned(string $domain, string $type, string $name, string $kind = ''): bool {
 		try {
-			return ManagedDnsRecord::IsOwned($domain, $type, $name);
+			return ManagedDnsRecord::IsOwned($domain, $type, $name, $kind);
 		} catch (Throwable $e) {
 			return false;
 		}
 	}
 
-	public function ownedRecord(string $domain, string $type, string $name): ?array {
+	public function ownedRecord(string $domain, string $type, string $name, string $kind = ''): ?array {
 		try {
-			$row = ManagedDnsRecord::Find($domain, $type, $name);
+			$row = ManagedDnsRecord::Find($domain, $type, $name, $kind);
 		} catch (Throwable $e) {
 			return null;
 		}
@@ -89,8 +93,8 @@ class DbDnsOwnershipStore implements DnsOwnershipStore {
 			$owner, $provider, $zone, $adopted);
 	}
 
-	public function forget(string $domain, string $type, string $name): void {
-		ManagedDnsRecord::Forget($domain, $type, $name);
+	public function forget(string $domain, string $type, string $name, string $kind = ''): void {
+		ManagedDnsRecord::Forget($domain, $type, $name, $kind);
 	}
 
 	public function ownedFor(string $domain): array {
@@ -104,6 +108,7 @@ class DbDnsOwnershipStore implements DnsOwnershipStore {
 			$out[] = array(
 				'type'  => (string)$row->get('dnr_type'),
 				'name'  => (string)$row->get('dnr_name'),
+				'kind'  => $row->kind(),
 				'value' => (string)$row->get('dnr_value'),
 				'owner' => (string)$row->get('dnr_owner'),
 			);
@@ -118,23 +123,26 @@ class MemoryDnsOwnershipStore implements DnsOwnershipStore {
 	/** @var array<string,array> slot key => row */
 	private $rows = array();
 
-	private function slot(string $domain, string $type, string $name): string {
-		return strtolower($domain) . '|' . strtoupper($type) . '|' . DnsRecord::normalizeName($name);
+	private function slot(string $domain, string $type, string $name, string $kind = ''): string {
+		$type = strtoupper($type);
+		return strtolower($domain) . '|' . $type . '|' . DnsRecord::normalizeName($name)
+			. '|' . ($type === DnsRecord::TYPE_TXT ? $kind : '');
 	}
 
-	public function isOwned(string $domain, string $type, string $name): bool {
-		return isset($this->rows[$this->slot($domain, $type, $name)]);
+	public function isOwned(string $domain, string $type, string $name, string $kind = ''): bool {
+		return isset($this->rows[$this->slot($domain, $type, $name, $kind)]);
 	}
 
-	public function ownedRecord(string $domain, string $type, string $name): ?array {
-		return $this->rows[$this->slot($domain, $type, $name)] ?? null;
+	public function ownedRecord(string $domain, string $type, string $name, string $kind = ''): ?array {
+		return $this->rows[$this->slot($domain, $type, $name, $kind)] ?? null;
 	}
 
 	public function remember(string $domain, DnsRecord $record, string $owner,
 			string $provider, string $zone, bool $adopted): void {
-		$this->rows[$this->slot($domain, $record->type, $record->name)] = array(
+		$this->rows[$this->slot($domain, $record->type, $record->name, $record->txtKind())] = array(
 			'type'     => $record->type,
 			'name'     => $record->name,
+			'kind'     => $record->txtKind(),
 			'value'    => $record->value,
 			'owner'    => $owner,
 			'provider' => $provider,
@@ -143,8 +151,8 @@ class MemoryDnsOwnershipStore implements DnsOwnershipStore {
 		);
 	}
 
-	public function forget(string $domain, string $type, string $name): void {
-		unset($this->rows[$this->slot($domain, $type, $name)]);
+	public function forget(string $domain, string $type, string $name, string $kind = ''): void {
+		unset($this->rows[$this->slot($domain, $type, $name, $kind)]);
 	}
 
 	public function ownedFor(string $domain): array {
@@ -163,8 +171,8 @@ class MemoryDnsOwnershipStore implements DnsOwnershipStore {
 	 * store that cannot be produced by exercising the real interface, because
 	 * remember() always stamps the present.
 	 */
-	public function ageWriteForTest(string $domain, string $type, string $name, string $interval): void {
-		$slot = $this->slot($domain, $type, $name);
+	public function ageWriteForTest(string $domain, string $type, string $name, string $interval, string $kind = ''): void {
+		$slot = $this->slot($domain, $type, $name, $kind);
 		if (isset($this->rows[$slot])) {
 			$this->rows[$slot]['written'] = LibraryFunctions::time_shift(
 				gmdate('Y-m-d H:i:s'), $interval, 'Y-m-d H:i:s');

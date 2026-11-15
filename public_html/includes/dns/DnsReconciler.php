@@ -39,6 +39,7 @@
  * request detail. The agent's site_log_count counts these (marker
  * dns_reconciler_failed); the reason itself stays on the result row.
  *
+ * @version 1.7 - ownership is looked up, removed and withdrawn per TXT kind (the store keeps one receipt per kind at a name)
  * @version 1.6 - every failed record write logs one line naming its operation, type and name
  * @version 1.5 - a TXT slot is ours only when we last wrote the same kind there; a TXT is diffed and replaced only against records of its own kind, so SPF never overwrites a verification record
  * @version 1.4 - the public-DNS diff reads the zone's own nameservers first (DnsResolver::preferAuthoritative)
@@ -210,6 +211,13 @@ class DnsReconciler {
 				}
 			}
 			$live = $found;
+			// Ours if any record it removes is a kind we own at this name.
+			$owned = false;
+			foreach ($found as $existing) {
+				if ($this->store->isOwned($plan->getDomain(), $existing->type, $existing->name, $existing->txtKind())) {
+					$owned = true;
+				}
+			}
 			// Gone is done. No write receipt, and no ownership claim — the
 			// platform is not responsible for a record it wants to not exist.
 			$outcome = empty($found) ? self::MATCHES : self::REMAINS;
@@ -259,29 +267,13 @@ class DnsReconciler {
 	/**
 	 * Is the platform responsible for the record $record would replace?
 	 *
-	 * Ownership is kept per type and name, but a TXT name holds records of
-	 * different kinds side by side. Owning the apex SPF says nothing about a
-	 * verification record beside it, so a TXT slot counts as ours only when what
-	 * we last wrote there is the same kind; otherwise the live record is someone
-	 * else's and needs an adopt choice.
+	 * A TXT name holds records of different kinds side by side, and the store
+	 * keeps one slot per kind: owning the apex SPF says nothing about a
+	 * verification record beside it, which is someone else's and needs an
+	 * adopt choice.
 	 */
 	private function ownsKind(string $domain, DnsRecord $record): bool {
-		if (!$this->store->isOwned($domain, $record->type, $record->name)) {
-			return false;
-		}
-		if ($record->type !== DnsRecord::TYPE_TXT || $record->absent) {
-			return true;
-		}
-		$receipt = $this->store->ownedRecord($domain, $record->type, $record->name);
-		if ($receipt === null || (string)($receipt['value'] ?? '') === '') {
-			return true;
-		}
-		try {
-			$written = new DnsRecord(DnsRecord::TYPE_TXT, $record->name, (string)$receipt['value']);
-		} catch (Throwable $e) {
-			return false;
-		}
-		return $written->txtKind() === $record->txtKind();
+		return $this->store->isOwned($domain, $record->type, $record->name, $record->txtKind());
 	}
 
 	/**
@@ -291,7 +283,7 @@ class DnsReconciler {
 	 * a credible explanation.
 	 */
 	private function recentWriteOf(string $domain, DnsRecord $record): string {
-		$receipt = $this->store->ownedRecord($domain, $record->type, $record->name);
+		$receipt = $this->store->ownedRecord($domain, $record->type, $record->name, $record->txtKind());
 		if ($receipt === null || (string)($receipt['written'] ?? '') === '') {
 			return '';
 		}
@@ -561,7 +553,9 @@ class DnsReconciler {
 			// Only if the platform was claiming this slot. Forgetting a slot it
 			// never owned is harmless but dishonest bookkeeping.
 			if (!empty($row['owned'])) {
-				$this->store->forget($plan->getDomain(), $record->type, $record->name);
+				foreach ($row['live'] as $live) {
+					$this->store->forget($plan->getDomain(), $live->type, $live->name, $live->txtKind());
+				}
 			}
 			$count = count($row['live']);
 			return $this->result($key, $record, 'deleted', true,
@@ -624,7 +618,7 @@ class DnsReconciler {
 				foreach ($matches as $live) {
 					$driver->deleteRecord($zone, $live);
 				}
-				$this->store->forget($domain, $row['type'], $row['name']);
+				$this->store->forget($domain, $row['type'], $row['name'], (string)($row['kind'] ?? ''));
 				$results[] = $this->result($record->key(), $record,
 					empty($matches) ? 'skipped' : 'deleted', true,
 					empty($matches) ? 'Already gone from the zone; the platform simply stopped claiming it.' : '');
@@ -644,10 +638,11 @@ class DnsReconciler {
 	public function zoneHoldsOnlyOurRecords(DnsProvider $driver, string $zone, string $domain): bool {
 		$owned = array();
 		foreach ($this->store->ownedFor($domain) as $row) {
-			$owned[strtoupper($row['type']) . '|' . DnsRecord::normalizeName($row['name'])] = true;
+			$owned[strtoupper($row['type']) . '|' . DnsRecord::normalizeName($row['name'])
+				. '|' . (string)($row['kind'] ?? '')] = true;
 		}
 		foreach ($driver->listRecords($zone) as $live) {
-			if (!isset($owned[$live->slotKey()])) {
+			if (!isset($owned[$live->slotKey() . '|' . $live->txtKind()])) {
 				return false;
 			}
 		}

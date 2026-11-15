@@ -41,6 +41,7 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.18 - a relay answer is refused unless signed within 5 minutes of this device's clock (B4: an old signed answer cannot be shown again)
  * @version 1.17 - a mailbox whose move to Fortress has not reached the relay yet gets a quiet note and a
  *   recheck every 30 s for up to 5 min before the alarm; a key's fingerprint reads base64url keys
  * @version 1.16 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
@@ -920,6 +921,11 @@ window.MailboxFortress = (function () {
 
 	var SEAL_TARGET_PREFIX = 'joinery-relay:seal-target:v1\n';
 	var PIN_PREFIX = 'joinery-relay-pin:v1\n';
+	// The relay signs the time it answers (signed_at). An answer older than
+	// this, or this far ahead of this device's clock, is refused: a hacked
+	// server could otherwise keep a statement the relay signed while it sealed
+	// to this device's key and show it again after moving the relay to its own.
+	var SEAL_TARGET_FRESH_MS = 5 * 60 * 1000;
 	var pinsChecked = false;
 
 	function pinMessage(aliasId, identity) {
@@ -944,13 +950,18 @@ window.MailboxFortress = (function () {
 	 * {ok, firstUse, identity} or {ok: false, reason, expected, reported,
 	 * approvable}: reason 'pin' (a pin this vault did not make), 'identity'
 	 * (a relay other than the pinned one; approvable when its own statement is
-	 * signed and names this vault's key), 'signature', 'key' (the relay seals
-	 * to another key), 'unreadable'.
+	 * signed, fresh and names this vault's key), 'signature', 'stale' (signed,
+	 * but not within SEAL_TARGET_FRESH_MS of now), 'key' (the relay seals to
+	 * another key), 'unreadable'. now is this device's clock in ms (Date.now()
+	 * unless given).
 	 */
-	async function judgeSealTarget(answer, box, mac, keys) {
+	async function judgeSealTarget(answer, box, mac, keys, now) {
 		var relay, st;
 		try { relay = JSON.parse(answer.relay_answer); st = JSON.parse(relay.statement); } catch (e) { relay = null; }
 		if (!relay || !st || typeof relay.signature !== 'string') return { ok: false, reason: 'unreadable' };
+		var signedAt = (typeof st.signed_at === 'string') ? Date.parse(st.signed_at) : NaN;
+		var clock = (typeof now === 'number') ? now : Date.now();
+		var fresh = !isNaN(signedAt) && Math.abs(clock - signedAt) <= SEAL_TARGET_FRESH_MS;
 
 		var pinned, firstUse = false;
 		if (answer.pin) {
@@ -972,10 +983,13 @@ window.MailboxFortress = (function () {
 		if (!sameText(st.relay_identity_public_key, pinned)) {
 			var selfSigned = await VaultCrypto.verifyEd25519(st.relay_identity_public_key, signed, relay.signature);
 			return { ok: false, reason: 'identity', expected: pinned, reported: st.relay_identity_public_key,
-				approvable: selfSigned && names, identity: st.relay_identity_public_key };
+				approvable: selfSigned && names && fresh, identity: st.relay_identity_public_key };
 		}
 		if (!await VaultCrypto.verifyEd25519(pinned, signed, relay.signature)) {
 			return { ok: false, reason: 'signature', expected: pinned, reported: pinned };
+		}
+		if (!fresh) {
+			return { ok: false, reason: 'stale', expected: pinned, reported: pinned, signedAt: st.signed_at };
 		}
 		if (!names) {
 			// The relay this device trusts, in its own signed words, still seals
@@ -1187,6 +1201,7 @@ window.MailboxFortress = (function () {
 		pin: 'The relay this mailbox trusts was changed without this device.',
 		identity: 'A different relay is answering for this mailbox than the one this device trusts.',
 		signature: 'The relay\'s answer is not signed by the relay this device trusts.',
+		stale: 'The relay\'s signed answer is not a current one: it is an old answer shown again, or this device\'s clock is wrong.',
 		key: 'The relay is sealing this mailbox\'s mail to a key that is not this device\'s.',
 		unreadable: 'The relay\'s answer could not be read.'
 	};
@@ -1557,24 +1572,38 @@ window.MailboxFortress = (function () {
 				VaultCrypto.b64encode(await mac(pinMessage(v.aliasId, v.identity))) === v.mac);
 			var box = { alias_id: v.aliasId, address: 'box@fortress.test' };
 			var keys = ['YO6P+WWilqSUxSipdAY4nfvIGw9u4mFN3hBKas4ZBVY='];
+			// The vector was signed at this moment; the checks judge it as just answered.
+			var at = Date.parse('2026-09-28T12:00:00Z') + 30 * 1000;
 			var answer = { relay_answer: JSON.stringify({ statement: v.statement, signature: v.signature }),
 				relay_identity_public_key: v.identity, pin: { relay_identity_public_key: v.identity, mac: v.mac } };
-			var ok = await judgeSealTarget(answer, box, mac, keys);
+			var ok = await judgeSealTarget(answer, box, mac, keys, at);
 			note('a signed statement under the pinned relay passes', ok.ok && !ok.firstUse);
-			var first = await judgeSealTarget(Object.assign({}, answer, { pin: null }), box, mac, keys);
+			var first = await judgeSealTarget(Object.assign({}, answer, { pin: null }), box, mac, keys, at);
 			note('with no pin, it passes as a first use', first.ok && first.firstUse);
-			var other = await judgeSealTarget(answer, box, mac, ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=']);
+			var other = await judgeSealTarget(answer, box, mac, ['AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='], at);
 			note('a statement naming another key fails', !other.ok && other.reason === 'key');
 			var bad = await judgeSealTarget(Object.assign({}, answer, { relay_answer: JSON.stringify({
-				statement: v.statement.replace('"map_version":7', '"map_version":8'), signature: v.signature }) }), box, mac, keys);
+				statement: v.statement.replace('"map_version":7', '"map_version":8'), signature: v.signature }) }), box, mac, keys, at);
 			note('a changed statement fails the signature', !bad.ok && bad.reason === 'signature');
 			var forged = await judgeSealTarget(Object.assign({}, answer, { pin: { relay_identity_public_key: v.identity,
-				mac: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' } }), box, mac, keys);
+				mac: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' } }), box, mac, keys, at);
 			note('a pin this vault did not make is refused', !forged.ok && forged.reason === 'pin');
+			var replayed = await judgeSealTarget(answer, box, mac, keys, at + 6 * 60 * 1000);
+			note('the same signed statement shown again six minutes later is refused (B4)', !replayed.ok && replayed.reason === 'stale');
+			var ahead = await judgeSealTarget(answer, box, mac, keys, at - 6 * 60 * 1000);
+			note('and so is one dated six minutes ahead of this device', !ahead.ok && ahead.reason === 'stale');
+			// A pin this vault made for some other relay: the answering relay is a new one.
+			var elsewhere = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+			var movedAnswer = Object.assign({}, answer, { pin: { relay_identity_public_key: elsewhere,
+				mac: VaultCrypto.b64encode(await mac(pinMessage(v.aliasId, elsewhere))) } });
+			var moved = await judgeSealTarget(movedAnswer, box, mac, keys, at);
+			note('a current statement from a new relay may be approved', !moved.ok && moved.reason === 'identity' && moved.approvable);
+			var movedOld = await judgeSealTarget(movedAnswer, box, mac, keys, at + 6 * 60 * 1000);
+			note('an old one may not', !movedOld.ok && movedOld.reason === 'identity' && !movedOld.approvable);
 			var other = function () { return Promise.resolve(new Uint8Array(32)); };
-			var either = await judgeSealTarget(answer, box, [other, mac], keys);
+			var either = await judgeSealTarget(answer, box, [other, mac], keys, at);
 			note('a pin re-made under the rotation\'s new key still passes (B48)', either.ok);
-			var neither = await judgeSealTarget(answer, box, [other], keys);
+			var neither = await judgeSealTarget(answer, box, [other], keys, at);
 			note('and one neither key made does not', !neither.ok && neither.reason === 'pin');
 			var pair = await VaultCrypto.generateVaultKeypair();
 			note('a vault\'s public key is worked out from its own secret (B47)',

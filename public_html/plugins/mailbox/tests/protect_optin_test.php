@@ -33,6 +33,7 @@
  *
  * Run: php plugins/mailbox/tests/protect_optin_test.php
  *
+ * @version 1.9 - the Sending identity panel yields the top to open machine sender steps
  * @version 1.8 - the editor's link to the owner question is send_protection_setup_url()
  * @version 1.7 - the ceremony is one ordered table; its publish box is named for group 1
  * @version 1.6 - the strict records come from strictStageRecords(), shared with the one press
@@ -680,8 +681,9 @@ class ProtectOptinTest {
 		// exists to remove.
 		check(substr_count($view, '$render_sending_identity();') === 2,
 			'the panel is called from exactly two places');
-		check(strpos($view, "\$si_at_top   = \$setup_open || \$owner_needed || (!empty(\$protect['is_protected']) && !empty(\$protect_record_list));") !== false,
-			'the top is for the open ceremony, the unanswered owner, and group 2 still to publish after the flag');
+		// The machine sender steps, while open, take the top instead.
+		check(strpos($view, "\$si_at_top   = !\$machine_open\n\t&& (\$setup_open || \$owner_needed || (!empty(\$protect['is_protected']) && !empty(\$protect_record_list)));") !== false,
+			'the top is for the open ceremony, the unanswered owner, and group 2 still to publish after the flag, unless the machine sender steps are open');
 		check(strpos($view, "if (\$si_at_top) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,
 			'rendered at the top of the page while it is the task');
 		check(strpos($view, "if (!\$si_at_top) {\n\techo '<div id=\"sending-identity\">';\n\t\$render_sending_identity();") !== false,

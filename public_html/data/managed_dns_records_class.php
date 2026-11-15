@@ -30,9 +30,13 @@ class ManagedDnsRecordException extends SystemBaseException {}
  * No credential is ever recorded here. dnr_provider is a driver NAME, kept so a
  * later publish can say where a record was written.
  *
+ * A slot is (domain, type, name, kind). Kind matters only for TXT, where one
+ * name carries unrelated records side by side: the apex SPF and a site
+ * verification are two slots with two owners, never one (DnsRecord::txtKind).
+ *
  * See docs/dns_management.md.
  *
- * @version 1.0.0
+ * @version 1.1.0 - ownership is kept per TXT kind (dnr_kind), so two kinds at one name keep two receipts
  */
 class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	public static $tablename = 'dnr_managed_dns_records';
@@ -47,6 +51,10 @@ class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	    'dnr_type' => array('type'=>'varchar(10)', 'is_nullable'=>false),
 	    'dnr_name' => array('type'=>'varchar(253)', 'is_nullable'=>false),
 	    'dnr_value' => array('type'=>'text'),
+	    // DnsRecord::txtKind() of what was written: 'spf', 'dmarc', or '' (any
+	    // other TXT, and every other type). NULL on a row written before kinds
+	    // were kept; its kind is read from dnr_value.
+	    'dnr_kind' => array('type'=>'varchar(16)'),
 	    'dnr_owner' => array('type'=>'varchar(64)', 'is_nullable'=>false),
 	    'dnr_provider' => array('type'=>'varchar(64)'),
 	    'dnr_zone' => array('type'=>'varchar(253)'),
@@ -57,35 +65,63 @@ class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	);
 
 
+	/** The kind a record of $type with $value has: DnsRecord::txtKind() for a TXT, '' for anything else. */
+	public static function KindOf($type, $value) {
+		$type = strtoupper(trim((string)$type));
+		if ($type !== DnsRecord::TYPE_TXT || trim((string)$value) === '') {
+			return '';
+		}
+		try {
+			return (new DnsRecord($type, 'kind.invalid', (string)$value))->txtKind();
+		} catch (Throwable $e) {
+			return '';
+		}
+	}
+
+	/** This row's kind: what it recorded, or for an older row, what its value reads as. */
+	public function kind() {
+		$kind = $this->get('dnr_kind');
+		return ($kind !== null) ? (string)$kind
+			: self::KindOf($this->get('dnr_type'), $this->get('dnr_value'));
+	}
+
 	/**
 	 * The live ownership row for one record slot, or null.
 	 *
-	 * A slot is (domain, type, name) — not the value. Ownership survives a value
-	 * change, which is what lets the platform update a record it already manages
-	 * without asking again.
+	 * A slot is (domain, type, name, kind) — not the value. Ownership survives a
+	 * value change, which is what lets the platform update a record it already
+	 * manages without asking again.
 	 */
-	public static function Find($domain, $type, $name) {
+	public static function Find($domain, $type, $name, $kind = '') {
+		$type = strtoupper(trim((string)$type));
+		$kind = ($type === DnsRecord::TYPE_TXT) ? (string)$kind : '';
 		$rows = new MultiManagedDnsRecord(array(
 			'domain'  => strtolower(trim((string)$domain)),
-			'type'    => strtoupper(trim((string)$type)),
+			'type'    => $type,
 			'name'    => strtolower(rtrim(trim((string)$name), '.')),
 			'deleted' => false,
 		));
-		$rows->load();
-		return count($rows) ? $rows->get(0) : null;
+		foreach ($rows as $row) {
+			if ($row->kind() === $kind) {
+				return $row;
+			}
+		}
+		return null;
 	}
 
 	/**
 	 * Record the platform as responsible for a record slot, creating the row or
 	 * refreshing the value on an existing one. Idempotent: re-publishing an
-	 * already-owned record changes nothing but the recorded value.
+	 * already-owned record changes nothing but the recorded value. The slot's
+	 * kind is the written value's.
 	 *
 	 * @param bool $adopted True when ownership came from the live value already
 	 *                      matching the plan rather than from writing it.
 	 */
 	public static function Remember($domain, $type, $name, $value, $owner,
 			$provider = '', $zone = '', $adopted = false) {
-		$row = self::Find($domain, $type, $name);
+		$kind = self::KindOf($type, $value);
+		$row = self::Find($domain, $type, $name, $kind);
 		if ($row === null) {
 			$row = new ManagedDnsRecord(NULL);
 			$row->set('dnr_domain', strtolower(trim((string)$domain)));
@@ -94,6 +130,7 @@ class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 			$row->set('dnr_owner', (string)$owner);
 			$row->set('dnr_adopted', (bool)$adopted);
 		}
+		$row->set('dnr_kind', $kind);
 		$row->set('dnr_value', (string)$value);
 		if ((string)$provider !== '') { $row->set('dnr_provider', (string)$provider); }
 		if ((string)$zone !== '')     { $row->set('dnr_zone', (string)$zone); }
@@ -103,13 +140,13 @@ class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	}
 
 	/** Whether the platform is responsible for a record slot. */
-	public static function IsOwned($domain, $type, $name) {
-		return self::Find($domain, $type, $name) !== null;
+	public static function IsOwned($domain, $type, $name, $kind = '') {
+		return self::Find($domain, $type, $name, $kind) !== null;
 	}
 
 	/** Stop claiming responsibility for a slot. The DNS record itself is untouched. */
-	public static function Forget($domain, $type, $name) {
-		$row = self::Find($domain, $type, $name);
+	public static function Forget($domain, $type, $name, $kind = '') {
+		$row = self::Find($domain, $type, $name, $kind);
 		if ($row !== null) {
 			$row->soft_delete();
 		}

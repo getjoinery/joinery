@@ -16,6 +16,7 @@
  * does not take the others down, re-publishing a correct domain writes nothing,
  * and a domain that already matches is adopted with no DNS write at all.
  *
+ * @version 1.2 - two TXT kinds at one name keep two receipts; withdrawal and removal work per kind (B5)
  * @version 1.1 - a TXT is compared and replaced only within its own kind (SPF, DMARC, other)
  */
 
@@ -336,7 +337,7 @@ check(DnsReconciler::lastWritten($rows) === $rows[0]['written'],
 // A write old enough that propagation has stopped being a credible excuse.
 $aged_store = new MemoryDnsOwnershipStore();
 $aged_store->remember(ZONE, $planned, 'mailbox', 'fake', ZONE, false);
-$aged_store->ageWriteForTest(ZONE, 'TXT', ZONE, '-2 days');
+$aged_store->ageWriteForTest(ZONE, 'TXT', ZONE, '-2 days', $planned->txtKind());
 $rows = (new DnsReconciler($aged_store))->diffAgainstPublicDns($plan);
 check($rows[0]['outcome'] === DnsReconciler::MISSING,
 	'a two-day-old receipt no longer excuses a record that does not resolve', $rows[0]['outcome']);
@@ -456,5 +457,55 @@ $plan->addRecord('TXT', ZONE, 'v=spf1 -all', null, null, 'SPF');
 $row = $reconciler->diffAgainstProvider($driver, ZONE, $plan)[0];
 check($row['outcome'] === DnsReconciler::CONFLICTS && !$row['owned'],
 	'a foreign SPF beside a TXT we own still needs an adopt choice');
+
+// ---------------------------------------------------------------------------
+section('Two TXT kinds at one name keep two receipts (B5)');
+// ---------------------------------------------------------------------------
+
+// One plan writes the apex SPF and a verification at the same name. Each is
+// remembered in its own slot, so withdrawal takes both away and leaves the
+// zone's foreign website record alone.
+list($driver, $reconciler) = fixture(array(new DnsRecord('A', 'www.example.com', '5.5.5.5')));
+$both = new DnsRecordPlan(ZONE, 'mailbox');
+$both->addRecord('TXT', ZONE, 'v=spf1 -all', null, null, 'SPF');
+$both->addRecord('TXT', ZONE, 'joinery-verify=xyz', null, null, 'Proof');
+$reconciler->apply($driver, ZONE, $both);
+$store = $reconciler->getStore();
+check($store->isOwned(ZONE, 'TXT', ZONE, 'spf') && $store->isOwned(ZONE, 'TXT', ZONE, ''),
+	'the SPF and the verification are each owned');
+check(count($store->ownedFor(ZONE)) === 2, 'two receipts, one per kind');
+$again = by_record($reconciler->diffAgainstProvider($driver, ZONE, $both));
+check(count(array_filter($again, function ($r) { return $r['outcome'] === DnsReconciler::MATCHES && $r['owned']; })) === 2,
+	'a re-publish reads both as ours and already published');
+check($reconciler->zoneHoldsOnlyOurRecords($driver, ZONE, ZONE) === false, 'the website record is still foreign');
+$results = $reconciler->withdraw($driver, ZONE, ZONE);
+check(count($results) === 2, 'withdrawal touches both records');
+$left = array();
+foreach ($driver->listRecords(ZONE) as $r) { $left[] = $r->type . ' ' . $r->value; }
+check($left === array('A 5.5.5.5'), 'both TXT records are gone and the website record stays', implode(' | ', $left));
+check(count($store->ownedFor(ZONE)) === 0, 'and nothing is claimed any more');
+
+// A foreign verification beside our SPF keeps the zone from counting as all ours.
+list($driver, $reconciler) = fixture(array(new DnsRecord('TXT', ZONE, 'google-site-verification=abc123')));
+$spf = new DnsRecordPlan(ZONE, 'mailbox');
+$spf->addRecord('TXT', ZONE, 'v=spf1 -all', null, null, 'SPF');
+$reconciler->apply($driver, ZONE, $spf);
+check($reconciler->zoneHoldsOnlyOurRecords($driver, ZONE, ZONE) === false,
+	'owning the apex SPF does not make the verification beside it ours');
+
+// Removing the SPF forgets only the SPF's receipt.
+list($driver, $reconciler) = fixture();
+$reconciler->apply($driver, ZONE, $both);
+$gone = new DnsRecordPlan(ZONE, 'mailbox');
+$gone->addAbsent('TXT', ZONE, 'v=spf1 -all', 'Old SPF');
+$gone_row = $reconciler->diffAgainstProvider($driver, ZONE, $gone)[0];
+check($gone_row['outcome'] === DnsReconciler::REMAINS && $gone_row['owned'], 'the SPF to remove is ours');
+$reconciler->apply($driver, ZONE, $gone, array('remove' => array($gone_row['key'])));
+$store = $reconciler->getStore();
+$left = array();
+foreach ($driver->listRecords(ZONE) as $r) { $left[] = $r->value; }
+check($left === array('joinery-verify=xyz'), 'the SPF is deleted and the verification stays', implode(' | ', $left));
+check(!$store->isOwned(ZONE, 'TXT', ZONE, 'spf') && $store->isOwned(ZONE, 'TXT', ZONE, ''),
+	'removing the SPF forgets only its receipt; the verification is still ours');
 
 harness_finish();

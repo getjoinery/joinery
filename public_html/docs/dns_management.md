@@ -271,9 +271,11 @@ verification at the apex. A planned TXT is compared with, and replaces, only liv
 records of its own kind (`DnsRecord::txtKind()`: SPF, DMARC, or anything else),
 so publishing SPF never overwrites a verification record, and a new verification
 record is created beside an existing SPF rather than adopted over it. Ownership is
-kept per type and name, so a TXT slot counts as owned only when the record last
-written there is the same kind as the one planned; a foreign SPF beside a
-verification record the platform wrote still needs an adopt choice.
+kept per slot too (`dnr_kind` on `dnr_managed_dns_records`): the apex SPF and a
+verification beside it are two receipts, so a plan that writes both is withdrawn
+in full, removing one forgets only its own receipt, and a foreign SPF beside a
+verification record the platform wrote still needs an adopt choice. Two TXT
+records of the same kind at one name are one slot.
 
 **Applying is per-record and best-effort.** If one record fails — a rate limit, a
 transient error, a managed-record refusal — the others still land and the failed
