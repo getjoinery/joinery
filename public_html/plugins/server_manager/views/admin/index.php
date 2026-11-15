@@ -4,6 +4,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.67 - Approve's question names why the order was held (the limit, a suspension or a dispute)
  * @version 1.66 - a Starter site's join is tagged as its own and approved for its own node (adopt_container_join, hosting_launch S4)
  * @version 1.65 - no inline script: the row click and status refresh are assets/js/admin-dashboard.js
  * @version 1.64 - the Discard test site confirmation asks for the domain once (confirmTyped adds the request)
@@ -1210,7 +1211,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 								<?php echo SmAdminCsrf::field(); ?>
 								<button type="button" class="btn btn-sm btn-outline-secondary"
-									<?php echo $confirm_submit('approve_held_' . (int)$prov->key, 'Approve ' . $prov->get('cvp_domain') . '? It is past the per-buyer limit; approving builds it (and registers its domain) as any paid order.'); ?>>Approve</button>
+									<?php echo $confirm_submit('approve_held_' . (int)$prov->key, 'Approve ' . $prov->get('cvp_domain') . '? It was held for a person (' . (string)$prov->get('cvp_error') . '); approving builds it (and registers its domain) as any paid order.'); ?>>Approve</button>
 							</form>
 							<form method="post" action="/admin/server_manager" id="refuse_held_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
 								<input type="hidden" name="action" value="refuse_held_provision">

@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.108 - Suspension: Suspend (with the reason the customer is emailed) and Unsuspend for a hosted site,
+ *                 with the open suspension's record and what the host answered to a Starter stop; a suspended
+ *                 site's container offers no Start (HostedSuspensions, hosting_launch S6, reviewer2 B1 B2)
  * @version 1.107 - Plugins shows each one's host setup where it is not installed (refused with its reason, failed, not run), and a Themes row; the tab's words name mailbox_status
  * @version 1.106 - no Move to customer's Linode panel on a Starter site: it has no server of its own (B8, hosting_launch S3 run)
  * @version 1.105 - the sentinel alarm links to the node's replace-after-a-break-in list
@@ -1308,7 +1311,10 @@
 						$ctext = 'Running'; $ccls = 'success';
 					}
 					echo '<tr><td>' . $hr_str($c['name']) . $site_figures($c) . '</td><td><span class="badge bg-' . $ccls . '">' . $hr_str($ctext) . '</span>' . $held_words . '</td><td class="text-end">';
-					if ($can_hold_c && $c_held) {
+					$c_sus = $c_held ? HostedSuspensions::open_for_container($node, (string)$c['name']) : null;
+					if ($c_sus !== null) {
+						echo '<span class="small text-muted">Suspended; Unsuspend on its own page</span>';
+					} elseif ($can_hold_c && $c_held) {
 						$form_id = 'nodeActionStartContainer_' . $c['name'];
 						$confirm = 'Start ' . $c['name'] . ' again? It is a working site from then on: Docker restarts it, and it is watched, backed up and upgraded like any other.';
 						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
@@ -2977,6 +2983,62 @@
 		'summary' => htmlspecialchars(CloudAccounts::hosted_at_label($hosted_at))
 			. ($target ? ' · backups to ' . htmlspecialchars((string)$target->get('bkt_name')) : ''),
 		'body' => ob_get_clean());
+
+	// ── Suspension (a hosted site a customer bought) ──
+	// Suspend stops the site (its container held, or its instance powered
+	// off), closes its mail and emails the customer why; Unsuspend reverses it.
+	$sus_provision = CustomerCloudProvision::latest_for_node($node->key);
+	if ($sus_provision && $sus_provision->is_sold() && $sus_provision->is_operator_hosted() && !$sus_provision->is_pre_payment()) {
+		$sus_row = HostedSuspension::open_for($sus_provision->key);
+		$sus_h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+		$page->begin_box(['title' => 'Suspension']);
+		if ($sus_row !== null) {
+			$sus_by = new User((int)$sus_row->get('hsu_suspend_usr_user_id'), TRUE);
+			// A Starter stop is a request: the badge says what the host answered.
+			$sus_outcome = HostedSuspensions::hold_outcome($sus_row);
+			$sus_badge = array(
+				''        => array('danger', 'Suspended'),
+				'held'    => array('danger', 'Suspended'),
+				'asked'   => array('warning', 'Stop asked, not confirmed yet'),
+				'refused' => array('warning', 'The host has not stopped it; asked again once an hour'),
+			)[$sus_outcome];
+			echo '<p class="mb-1"><span class="badge bg-' . $sus_badge[0] . '">' . $sus_h($sus_badge[1]) . '</span> since '
+				. $sus_h($sus_row->get_local('hsu_suspend_time')) . ($sus_by->key ? ' by ' . $sus_h($sus_by->display_name()) : '') . '</p>';
+			echo '<p class="mb-1"><strong>Reason:</strong> ' . $sus_h($sus_row->get('hsu_reason')) . '</p>';
+			if ((int)$sus_row->get('hsu_hold_job_id')) {
+				$sus_job = new ManagementJob((int)$sus_row->get('hsu_hold_job_id'), TRUE);
+				echo '<p class="small mb-1">Container stop: <a href="/admin/server_manager/job_detail?job_id='
+					. (int)$sus_job->key . '">job #' . (int)$sus_job->key . '</a> ' . $sus_h($sus_job->get('mjb_status')) . '</p>';
+			}
+			echo '<ul class="small text-muted mb-2">';
+			foreach ($sus_row->steps() as $sus_step) {
+				echo '<li>' . $sus_h($sus_step) . '</li>';
+			}
+			echo '</ul>';
+			echo '<form id="nodeActionUnsuspend" method="post" action="' . $sus_h($base_url) . '" hidden>'
+				. '<input type="hidden" name="action" value="unsuspend_site">' . SmAdminCsrf::field() . '</form>';
+			echo '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-submit="nodeActionUnsuspend"'
+				. ' data-jy-confirm="' . $sus_h('Unsuspend ' . $sus_provision->get('cvp_domain') . '? The site starts again, its mail is reopened, '
+				. 'its backups and uptime checks are put back, and the customer is emailed.') . '">Unsuspend</button>';
+		} else {
+			echo '<p class="text-muted small mb-2">Suspend stops this site for abuse: '
+				. ($sus_provision->is_container() ? 'its container is stopped and held on its host' : 'its instance is powered off')
+				. ', its mail is closed, its backups and uptime checks are switched off, and the customer is emailed the reason. '
+				. 'Nothing is deleted. The buyer\'s next hosted order is held for a person while it lasts.</p>';
+			echo '<form id="nodeActionSuspend" method="post" action="' . $sus_h($base_url) . '" hidden>'
+				. '<input type="hidden" name="action" value="suspend_site"><input type="hidden" name="reason" value="">'
+				. SmAdminCsrf::field() . '</form>';
+			echo '<button type="button" class="btn btn-sm btn-outline-danger"'
+				. ' data-jy-prompt="' . $sus_h('Suspend ' . $sus_provision->get('cvp_domain') . '? Why? The customer is emailed this reason.') . '"'
+				. ' data-jy-prompt-form="nodeActionSuspend" data-jy-prompt-field="reason"'
+				. ' data-jy-confirm-label="Suspend" data-jy-confirm-style="danger">Suspend</button>';
+		}
+		if ($sus_provision->get('cvp_disputed_time')) {
+			echo '<p class="small text-danger mt-2 mb-0">A payment for this site was disputed on '
+				. $sus_h($sus_provision->get_local('cvp_disputed_time')) . '.</p>';
+		}
+		$page->end_box();
+	}
 
 	// ── Move to customer's Linode (a Managed site's node) ──
 	// The check reads the operator's Linode account several times, so it runs

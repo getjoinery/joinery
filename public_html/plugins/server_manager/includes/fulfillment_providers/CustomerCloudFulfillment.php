@@ -49,6 +49,8 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.11 - an open suspension or a disputed payment on the buyer's account or card holds the order too
+ *                (HostedSuspensions::buyer_flag, hosting_launch S6)
  * @version 1.10 - the Starter place is reserved under the place lock (ManagedHost::reserve_starter_place, R2-2), and few places left alerts
  * @version 1.9 - a Starter order's host place is reserved at payment (reviewer2 F2-2); the activation alert names
  *                hosting, not Managed alone (F2-9)
@@ -342,8 +344,9 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	}
 
 	/**
-	 * Why a paid hosted order is past the per-buyer limit, or null when it is
-	 * not: the account's other hosted sites, then the card's.
+	 * Why a paid hosted order is held for a person, or null when it is not:
+	 * the account's other hosted sites, then the card's, then a suspension or
+	 * a disputed payment on either (HostedSuspensions::buyer_flag).
 	 */
 	public static function over_limit_reason(int $user_id, string $fingerprint, int $except_id): ?string {
 		if (CustomerCloudProvision::hosted_limit_exempt($user_id)) {
@@ -357,7 +360,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		if ($fingerprint !== '' && $held['card'] >= $limit) {
 			return 'the paying card already paid for ' . $held['card'] . ' hosted site(s) on any account, the limit is ' . $limit;
 		}
-		return null;
+		return HostedSuspensions::buyer_flag($user_id, $fingerprint);
 	}
 
 	/**
@@ -390,7 +393,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		if ((string)$prov->get('cvp_status') !== 'held') {
 			throw new RuntimeException('Only a held provision can be refused.');
 		}
-		$prov->set('cvp_error', 'Refused by user #' . $by_user_id . ' (over the per-buyer limit).');
+		$prov->set('cvp_error', 'Refused by user #' . $by_user_id . ' (held for a person).');
 		$prov->save();
 		$prov->soft_delete();
 		error_log('CustomerCloudFulfillment: held provision #' . $prov->key . ' refused by user #' . $by_user_id);

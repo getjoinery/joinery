@@ -39,6 +39,8 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.10 - a suspended site gets no banner and no storage pause, and a Starter stop that did not take is asked
+ *                 again (HostedSuspensions::recheck_hold); its grace still runs
  * @version 1.9 - a container site is recorded shut down only when its host's answer says the container is stopped
  *                and held (done, not the job's status); a hold that failed or did not take is asked again once
  *                an hour; hosted.container_held tells a person it still takes a place (reviewer2 F2-4, R2-1, R2-3)
@@ -154,6 +156,13 @@ class HostedTrialWatch {
 		// this month's allowance is wrong for the whole of a quiet first week.
 		$changed += $this->roll_count($trial);
 		$changed += $this->convert_if_trial_ended($trial);
+		// A suspended site is stopped on purpose: nothing is sent to it, and its
+		// node's backup policy is the suspension's to put back (HostedSuspensions).
+		// A Starter stop that did not take is asked again; its grace still runs
+		// out as any other's.
+		if (HostedSuspension::open_for($provision->key) !== null) {
+			return $changed + HostedSuspensions::recheck_hold($provision) + $this->shut_down_if_due($provision, $trial);
+		}
 		$changed += $this->enforce_storage_allowance($provision, $trial);
 		$changed += $this->shut_down_if_due($provision, $trial);
 		$changed += $this->push_banner($provision, $trial);

@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.36 - cvp_disputed_time and cvp_disputes: a payment for this site was disputed (HostedSuspensions, hosting_launch S6)
  * @version 1.35 - cvp_fleet_apk_api_key_id, cvp_inbound_dns_state: a site's own relay slot and its records (hosting_launch S5)
  * @version 1.34 - hosted_sites_held() counts only sold sites: a starter host an admin made counted toward their limit (B11)
  * @version 1.33 - option has_site: leaves out bare installs (a machine with no site)
@@ -296,6 +297,11 @@ class CustomerCloudProvision extends SystemBase {
 		// reads the same), recorded at activation for the per-card limit of a
 		// hosted site. Empty when the payment carried no card (PayPal).
 		'cvp_card_fingerprint'       => array('type'=>'varchar(64)'),
+		// Set while any dispute on this site's payments is not won (cvp_disputes): the buyer's
+		// next hosted order, by account or card, is held for a person (HostedSuspensions).
+		'cvp_disputed_time'          => array('type'=>'timestamp(6)'),
+		// Each dispute on this site's payments by Stripe id: open, won, lost or warning_closed.
+		'cvp_disputes'               => array('type'=>'jsonb'),
 		// The agents' keys as this plane watched the install produce them (16 hex): what a join is matched
 		// against for automatic approval, and consumed when it is approved (JoinAutoApproval).
 		// One layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a).

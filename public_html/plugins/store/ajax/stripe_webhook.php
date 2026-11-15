@@ -318,6 +318,19 @@ try {
             }
             break;
 
+        case 'charge.dispute.created':
+            // The buyer's bank opened a dispute (a chargeback). Nothing about
+            // the order changes here; the fact goes out on order.disputed for
+            // the operator's alert and for whatever the order paid for.
+            _stripe_webhook_dispute($stripe_helper, $event->data->object, 'order.disputed');
+            break;
+
+        case 'charge.dispute.closed':
+            // Decided: won, lost, or warning_closed. order.dispute_closed carries
+            // the status; a won dispute lets go of what the opening one held.
+            _stripe_webhook_dispute($stripe_helper, $event->data->object, 'order.dispute_closed');
+            break;
+
         default:
             error_log("Stripe webhook: unhandled event type $event_type");
             break;
@@ -405,4 +418,59 @@ function _stripe_webhook_send_payment_failure_email($user_id, $order_item) {
         error_log("Stripe webhook: failed to send payment failure email: " . $e->getMessage());
     }
 }
-?>
+
+/**
+ * A dispute opened or closed: find the order and lines its charge paid for
+ * (an order's own charge, or a subscription's charge through its invoice) and
+ * dispatch $signal (order.disputed or order.dispute_closed). An unmatched
+ * charge is still dispatched, so the operator hears of every dispute.
+ */
+function _stripe_webhook_dispute($stripe_helper, $dispute, $signal) {
+    $charge_id = (string)($dispute->charge ?? '');
+    $order = $charge_id !== '' ? Order::GetByStripeCharge($charge_id) : null;
+    if (!$order && !empty($dispute->payment_intent)) {
+        $order = Order::GetByStripePaymentIntent((string)$dispute->payment_intent);
+    }
+    $item_ids = array();
+    if ($order) {
+        foreach (new MultiOrderItem(['odi_ord_order_id' => (int)$order->key]) as $item) {
+            $item_ids[] = (int)$item->key;
+        }
+    } elseif ($charge_id !== '') {
+        try {
+            // charge->invoice and invoice->subscription are fields of the API
+            // version StripeHelper pins (2022-11-15). Newer versions drop both
+            // (the subscription moves under the invoice's parent); a bump of the
+            // pin has to move this lookup with it, or renewals stop matching.
+            $charge = $stripe_helper->get_charge($charge_id);
+            $invoice_id = is_string($charge->invoice ?? null) ? $charge->invoice : ($charge->invoice->id ?? '');
+            if ($invoice_id !== '') {
+                $invoice = $stripe_helper->get_stripe_client()->invoices->retrieve($invoice_id);
+                $subscription_id = is_string($invoice->subscription ?? null) ? $invoice->subscription : ($invoice->subscription->id ?? '');
+                if ($subscription_id !== '') {
+                    foreach (new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id]) as $item) {
+                        $item_ids[] = (int)$item->key;
+                        $order = $order ?: new Order((int)$item->get('odi_ord_order_id'), TRUE);
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            error_log("Stripe webhook: dispute {$dispute->id}: could not trace charge $charge_id to a subscription: " . $e->getMessage());
+        }
+    }
+
+    require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+    SignalBus::dispatch($signal, array(
+        'order_id'       => $order ? (int)$order->key : 0,
+        'order_label'    => $order ? 'order #' . (int)$order->key : 'charge ' . $charge_id . ' (no order found)',
+        'order_item_ids' => implode(',', $item_ids),
+        'user_id'        => $order ? (int)$order->get('ord_usr_user_id') : 0,
+        'amount'         => number_format(((int)($dispute->amount ?? 0)) / 100, 2) . ' ' . strtoupper((string)($dispute->currency ?? '')),
+        'reason'         => (string)($dispute->reason ?? ''),
+        'dispute_id'     => (string)($dispute->id ?? ''),
+        'status'         => (string)($dispute->status ?? ''),
+    ));
+    error_log("Stripe webhook: dispute " . ($dispute->id ?? '') . " " . ($dispute->status ?? '') . " on charge $charge_id"
+        . ($order ? " (order {$order->key})" : ' (no order found)'));
+}
+

@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.8 - a suspended site shows its reason (HostedSuspensions)
  * @version 2.7 - the email records box covers the records that bring mail in as well as those that sign it
  * @version 2.6 - no inline script: the move card is assets/js/profile-move.js, the reload data-jy-reload-after
  * @version 2.5 - a site on the buyer's own domain lists the email records still to add (B3)
@@ -127,6 +128,10 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<?php if ($site['hosted'] && $site['mail_state'] !== ''): ?>
 			<dt>Email</dt>
 			<dd><?php echo htmlspecialchars($mail_labels[$site['mail_state']] ?? $site['mail_state']); ?></dd>
+			<?php endif; ?>
+			<?php if ($site['suspended'] !== null): ?>
+			<dt>Suspended</dt>
+			<dd><?php echo htmlspecialchars($site['suspended']); ?> Reply to the email we sent if this is a mistake or once it is fixed.</dd>
 			<?php endif; ?>
 			<?php if ($site['plan_state'] !== ''): ?>
 			<dt>Hosting</dt>

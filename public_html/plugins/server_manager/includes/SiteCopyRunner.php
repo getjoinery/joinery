@@ -98,6 +98,7 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.45 - a suspended site is refused as a copy's source: only Unsuspend lifts a suspension (reviewer2 B2)
  * @version 1.44 - a starter host is refused as a copy's host: its places are sold Starter sites (reviewer2 F2-8)
  * @version 1.43 - copy_encryption() says a copy not encrypted by us is born under the provider's own disk encryption,
  *                asked on where the region offers it
@@ -447,6 +448,11 @@ class SiteCopyRunner {
 		$why = array();
 		if ($source->get('mgn_delete_time')) {
 			return array('It has been removed from the dashboard.');
+		}
+		if (class_exists('HostedSuspensions') && ($sus = HostedSuspensions::open_for_node($source)) !== null) {
+			// A copy freezes, starts and holds containers; a suspension is lifted
+			// only by Unsuspend, which also reopens the mail and the backups.
+			return array('It is suspended (' . $sus->get('hsu_reason') . '). Unsuspend it first.');
 		}
 		if (!$source->hosts_site()) {
 			return array('It hosts no Joinery site.');

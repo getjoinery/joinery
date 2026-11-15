@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.181",
+  "version": "1.30.183",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -980,6 +980,15 @@
         "subscription.payment_failed",
         "subscription.payment_recovered",
         "subscription.cancelled"
+      ]
+    },
+    "hosted_disputes": {
+      "file": "includes/HostedSuspensions.php",
+      "class": "HostedSuspensions",
+      "method": "handle_signal",
+      "signals": [
+        "order.disputed",
+        "order.dispute_closed"
       ]
     }
   }

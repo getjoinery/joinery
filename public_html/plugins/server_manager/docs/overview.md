@@ -1005,6 +1005,13 @@ files a provision for a paid order on a remote store that carries an answer
 to the configured domain Question, and reports any such order whose product
 is not `customer_cloud` (nothing builds it).
 
+A hosted site a customer bought has a **Suspension** box on its node page:
+**Suspend** (level 10) stops it for abuse (its container held, or its instance
+powered off), closes its mail and emails the customer the reason, and
+**Unsuspend** reverses it. A disputed payment alerts the operator
+(`order.disputed`). Either one holds the buyer's next hosted order for a person.
+See [Hosted tier § Abuse](hosted_tier.md#abuse-terms-reports-suspend).
+
 - **`customer_cloud`**: a product opts in by picking **Customer cloud server** in the product-edit
   Purchase grants picker (`CustomerCloudFulfillment`, registered with the
   store's FulfillmentRegistry from the plugin bootstrap); that stamps the provider value

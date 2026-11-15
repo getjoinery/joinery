@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.9 - suspended: an open suspension's reason, for the customer (HostedSuspensions, hosting_launch S6)
  * @version 1.8 - mail_records lists a Starter site's inbound records (MX, ownership TXT) on the buyer's own domain (S5)
  * @version 1.7 - lists only rows that hold a site: a starter host or relay shard made by an admin is not one of their sites
  * @version 1.6 - a draft's price and payment button are its own plan's product; the page offers a new site while any plan is on sale
@@ -202,6 +203,8 @@ function profile_sites_logic(array $input): LogicResult {
 				? $provision->admin_password_state() : 'pending',
 			'transfer'        => $provision->is_pre_payment() ? null : profile_sites_transfer($provision, $session),
 			'mail_state'      => (string)$provision->get('cvp_mail_state'),
+			// An open suspension's reason, shown to the customer (HostedSuspensions).
+			'suspended'       => ($sus = HostedSuspension::open_for($provision->key)) ? (string)$sus->get('hsu_reason') : null,
 			'plan_state'      => $trial ? (string)$trial->get('htr_state') : '',
 			'plan_until'      => $trial ? (string)($trial->get('htr_state') === HostedTrial::STATE_GRACE
 				? $trial->get('htr_grace_ends_time') : $trial->get('htr_trial_ends_time')) : '',

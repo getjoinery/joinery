@@ -49,6 +49,7 @@ expires after `server_manager_draft_days`. Payment activates it (see
   - **Approve** goes on as an activation under the limit would.
   - **Refuse** takes the row off the board. It moves no money: refund the payment and cancel the subscription on the order page first.
 - A customer who needs more sites goes on `server_manager_hosted_sites_limit_exempt` (user ids).
+- **A suspended site or a disputed payment holds the next order too.** While any site of the account, or any site paid with the same card, is suspended or has a disputed payment, a paid hosted order is held the same way, with the reason on its row (`HostedSuspensions::buyer_flag`). A site removed after a dispute still counts.
 
 A few minutes after paying their site is live at that domain, with email that
 sends and backups that run. The welcome email carries the address — and, for a
@@ -291,6 +292,63 @@ Sending health is the provider's. It enforces the monthly limit on the
 customer's subaccount and applies its own bounce and complaint controls there;
 this platform keeps no threshold of its own and removes nothing on the strength
 of a webhook.
+
+## Abuse: terms, reports, Suspend
+
+**The terms.** getjoinery's Terms of Service § 8 (*Acceptable use*) say what a
+hosted site may not be used for, that an abusive site may be suspended at once
+without notice, the three-site limit, what a disputed payment does, and the
+abuse address, abuse@getjoinery.com. Reports sent there reach the operator.
+
+**Suspend** is on a hosted site's node page, in the **Suspension** box (level
+10). It asks why, and the customer is emailed that reason. Then:
+
+| Site | What Suspend does |
+|---|---|
+| Starter | Its host's agent stops the container and keeps it stopped (`hold_container`). The host and its other sites are not touched. |
+| Managed | The instance is powered off through its cloud account. |
+
+On either kind it also closes the site's SMTP2GO subaccount, and switches off the
+node's backups and uptime checks so a site stopped on purpose raises no alerts.
+Visitors reach nothing; there is no suspended page. Nothing is deleted: the
+data, the backups and the record stay. The stop comes first. A Managed
+power-off the provider refuses records nothing, and the page says why. A
+Starter stop is a request to the host: the record is kept from the moment it is
+asked, and the box says **Stop asked, not confirmed yet** until the host's
+answer says the container is stopped and held (its `done`, not the job's
+status). A stop that failed or did not take reads **The host has not stopped
+it**, and the billing watch asks again once an hour. The record is saved
+straight after the stop, so a later failure never leaves a stopped site with
+nothing on record. Each later step's outcome is listed on it. One suspend or
+unsuspend runs at a time per site.
+
+Only Unsuspend lifts a suspension. The host page offers no **Start** for a
+suspended site's container, and refuses Start and **Replace** for one, and a
+suspended site cannot be copied.
+
+The record (`hsu_hosted_suspensions`, one row per suspension) names who
+suspended the site, when and why. The customer's sites page shows the reason.
+While it is open, the billing watch sends the site no banner and does not pause
+its backups for storage, but its grace still runs out as any other site's.
+
+**Unsuspend** reverses each step: the container is started or the instance
+powered on, the subaccount reopened, and the node's own backup policy and uptime
+check put back as they were. The customer is emailed. A site whose hosting
+ended unpaid is already stopped: Suspend does not stop it again, and Unsuspend
+closes the record and reopens the mail but does not start it, and leaves its
+backups and uptime checks off. Bringing it back is the manual step above.
+
+**A disputed payment.** Stripe's `charge.dispute.created` raises `order.disputed`.
+It names the order, the amount and the reason, and alerts the operator. A first
+charge is matched to its order; a renewal is matched through its invoice to
+the subscription line. Each hosted site the order paid for gets
+`cvp_disputed_time`, which holds the buyer's next order (above). The site
+itself keeps running: answering the dispute, and suspending the site if it is
+abuse, are a person's decisions. `charge.dispute.closed` raises
+`order.dispute_closed` with Stripe's status. Each site keeps its disputes by id
+(`cvp_disputes`), and the mark stays while any of them is not won: a lost one
+keeps it, and winning one of two clears nothing. Both events have to be switched on for the webhook endpoint
+in each Stripe account (test and live); nothing registers them on its own.
 
 ## Moving a site to its customer's own Linode account
 

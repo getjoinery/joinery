@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.93 - suspend_site and unsuspend_site: Suspend and Unsuspend a hosted site (HostedSuspensions, hosting_launch S6);
+ *                hold_container start and recreate_site are refused for a suspended site (reviewer2 B2)
  * @version 1.92 - mail_test_send, from a mailbox domain answer's Send test message button
  * @version 1.91 - mailbox_status, with an optional domain, in place of spam_learning_status
  * @version 1.90 - Retry install on a Starter site's node puts its paid row back to ready (ProvisionStarterSites::retry)
@@ -233,6 +235,8 @@ class NodeDetailActions {
 		'move_to_plane'            => 'api_keys',
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
+		'suspend_site'             => 'overview',
+		'unsuspend_site'           => 'overview',
 		'recreate_site'            => 'overview',
 		'site_limits'              => 'overview',
 		'data_root_migrate'        => 'overview',
@@ -444,6 +448,10 @@ class NodeDetailActions {
 			case 'recreate_site': {
 				// One site's container replaced now on a fresh image of the
 				// host's current base, building first (multi_tenant_host_hardening D9).
+				if (($sus = HostedSuspensions::open_for_container($node, (string)($_POST['name'] ?? ''))) !== null) {
+					self::fail($session, $page_regex, 'This site is suspended (' . $sus->get('hsu_reason') . '); it is not replaced until it is unsuspended.');
+					return $base_url . '&tab=overview';
+				}
 				$built = JobCommandBuilder::build_recreate_site($node, (string)($_POST['name'] ?? ''));
 				$job = ManagementJob::createFromBuild($node->key, 'recreate_site', $built, null, $uid);
 				return self::jobUrl($job);
@@ -463,9 +471,33 @@ class NodeDetailActions {
 					}
 					$record = ['reason' => mb_substr($reason, 0, 200)];
 				}
+				if ($op === 'start' && ($sus = HostedSuspensions::open_for_container($node, (string)($_POST['name'] ?? ''))) !== null) {
+					self::fail($session, $page_regex, 'This site is suspended (' . $sus->get('hsu_reason') . '). Start it with Unsuspend on '
+						. 'its own node page, which also reopens its mail and puts back its backups.');
+					return $base_url . '&tab=overview';
+				}
 				$built = JobCommandBuilder::build_hold_container($node, (string)($_POST['name'] ?? ''), $op);
 				$job = ManagementJob::createFromBuild($node->key, 'hold_container', $built, $record, $uid);
 				return self::jobUrl($job);
+			}
+
+			case 'suspend_site':
+			case 'unsuspend_site': {
+				// A hosted site stopped for abuse, or started again; its
+				// customer is emailed either way (HostedSuspensions).
+				$provision = CustomerCloudProvision::latest_for_node($node->key);
+				if ($provision === null) {
+					self::fail($session, $page_regex, 'This node has no hosted site on record.');
+					return $base_url . '&tab=overview';
+				}
+				if ($action === 'suspend_site') {
+					$row = HostedSuspensions::suspend($provision, (string)($_POST['reason'] ?? ''), (int)$uid);
+					self::ok($session, $page_regex, $provision->get('cvp_domain') . ' is suspended. ' . implode(' ', $row->steps()));
+				} else {
+					$row = HostedSuspensions::unsuspend($provision, (int)$uid);
+					self::ok($session, $page_regex, $provision->get('cvp_domain') . ' is unsuspended.');
+				}
+				return $base_url . '&tab=overview';
 			}
 
 			case 'site_limits': {
