@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.8.1 - colours only on a terminal: captured output carries no escape codes
 # Version: 1.8.0 - the database-exists check runs as the --db-user (else postgres) against the postgres
 #   database, so a site's own role can run it (mail_access_hardening WP4)
 # Version: 1.7.0 - an upgrade's own trees in an archive (deploy/, upgrades/, upgrade_archives/,
@@ -104,6 +105,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 
 # Function to print colored output.
 #

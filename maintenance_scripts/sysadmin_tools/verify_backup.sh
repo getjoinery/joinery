@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # verify_backup.sh - Prove a downloaded backup chain can be recovered, without restoring it
+# Version: 1.1.1 - colours only on a terminal: captured output carries no escape codes
 # Version: 1.1.0 - a version-3 chain's run manifests are read in place of manifest.json
 # Version: 1.0.0
 #
@@ -56,6 +57,7 @@ SITE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 ENGINE="${SITE_ROOT}/public_html/utils/verify_backup.php"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'; NC='\033[0m'
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" >&2; }
 print_error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 3.49 - colours only on a terminal: captured output carries no escape codes
 #VERSION 3.48 - a multi-tenant host's data root takes the whole givable disk at install (create all), so the
 #               sites' disk allowances, promised out of its size, fit: a 4th Starter site was refused (B4)
 #VERSION 3.47 - --new-site-only marks its install unfinished (/etc/joinery/new-site/NAME) until it ends: a run
@@ -979,6 +980,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 
 print_header() {
     [ "$QUIET_MODE" -eq 1 ] && return

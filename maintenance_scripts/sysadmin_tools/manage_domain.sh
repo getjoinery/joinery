@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # manage_domain.sh - change the domain a Joinery site answers to, after the install
+# VERSION: 2.1 - colours only on a terminal: captured output carries no escape codes
 # VERSION: 2.0 - a domain is set the way install.sh sets one (B7): the vhost is the
 #                template's render (_vhost_install.sh), at the one path
 #                install.sh writes, <site>.conf, for a container's proxy and a
@@ -69,6 +70,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[OK]${NC} $1"; }

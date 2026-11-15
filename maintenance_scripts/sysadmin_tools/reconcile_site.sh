@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.4.1 - colours only on a terminal: captured output carries no escape codes
 # Version: 1.4.0 - the pages the static page cache saved before the restore are deleted (its index, which
 #                  holds whether the cache is on, is kept): a copy's next restore served the pages saved
 #                  while its owner looked at it before, with the content from before
@@ -98,6 +99,7 @@ SCRIPT_VERSION="$(sed -n 's/^# Version: \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[
 [ -n "$SCRIPT_VERSION" ] || SCRIPT_VERSION="unknown"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" >&2; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }

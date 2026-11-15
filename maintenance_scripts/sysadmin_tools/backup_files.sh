@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.8.1 - colours only on a terminal: an error PHP captures into a backup record carries
+#                  no escape codes
 # Version: 1.8.0 - the root-only config files are left out of every archive, a root run's too
 #                  (_backup_root_only_files.sh 1.1.0), anchored to config/ so a same-named file
 #                  elsewhere in the tree is still archived
@@ -139,6 +141,7 @@ set -euo pipefail
 SCRIPT_VERSION="1.5.0"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" >&2; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }

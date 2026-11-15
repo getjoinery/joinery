@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.13.1 - colours only on a terminal: captured output carries no escape codes
 # Version: 2.13.0 - the root-only config files are left out of every archive, a root run's too
 #   (_backup_root_only_files.sh 1.1.0)
 # Version: 2.12.0 - the postgres password is read from the root-only config/db_admin.php before a config still
@@ -136,6 +137,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 
 # Function to print colored output
 print_info() {

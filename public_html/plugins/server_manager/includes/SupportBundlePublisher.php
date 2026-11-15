@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.40 - staged in a private temporary folder: in the site tree the converger changed a copy's mode
+ *                mid-tar and the build failed with 'file changed as we read it'
  * @version 1.39 - a bundle whose files are unchanged is built again when another key signed it (a key
  *                rotation's step 4): bundledSignature() (release_key_rotation rehearsal B4)
  * @version 1.38 - carries never_do_check.sh, the machine word of agent 1.106.0 (the never-do list)
@@ -381,7 +383,13 @@ class SupportBundlePublisher {
 		$source_root = rtrim($source_root ?: $full_site_dir, '/');
 
 		$dist_dir = $full_site_dir . '/public_html/agent_dist';
-		$staging  = $dist_dir . '/.support_bundle_staging';
+		// Staged in a private temporary folder, never in the site tree. The host
+		// converger resets modes in the tree every minute (a copied script is
+		// 0644 there and the tree wants 0755), and a mode changed while tar
+		// reads the copy fails the build with 'file changed as we read it'.
+		$staging  = rtrim(sys_get_temp_dir(), '/') . '/joinery_support_bundle_' . bin2hex(random_bytes(6));
+		// The folder older versions staged in, inside agent_dist, is debris.
+		self::rrmdir($dist_dir . '/.support_bundle_staging');
 
 		try {
 			$missing = array();
@@ -415,8 +423,7 @@ class SupportBundlePublisher {
 				throw new Exception("cannot create {$dist_dir}");
 			}
 
-			self::rrmdir($staging);
-			if (!mkdir($staging, 0755, true)) {
+			if (!mkdir($staging, 0700, true)) {
 				throw new Exception("cannot create staging dir {$staging}");
 			}
 

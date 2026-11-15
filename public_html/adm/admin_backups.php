@@ -3,6 +3,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.30 - a run that failed before it chose full or incremental shows no kind, not 'Full'
  * @version 1.29 - no inline script: the build's reload is data-jy-reload-after, the download button assets/js/admin-backups-download.js
  * @version 1.28 - the data-root confirm is the submit button's 'confirm' option (no inline handler)
  * @version 1.27 - a site its management node backs up says where to verify a backup now
@@ -787,7 +788,10 @@ foreach ($history as $h) { $hrows[] = $h; }
 
 $backup_kind = function ($h) {
 	if ((string)$h->get('bkh_type') === 'database') { return 'Database only'; }
-	if ((string)$h->get('bkh_chain_id') === '') { return 'Full'; }
+	if ((string)$h->get('bkh_chain_id') === '') {
+		// A run that stopped before it chose full or incremental has no chain and no kind.
+		return ((string)$h->get('bkh_outcome') === 'success') ? 'Full' : '—';
+	}
 	return ((int)$h->get('bkh_chain_seq') === 0) ? 'Full' : 'Incremental';
 };
 

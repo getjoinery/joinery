@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 4.19 - colours only on a terminal: captured output carries no escape codes
 #VERSION 4.18 - config/backup-ledger is made when missing: every backup runs as the web user, which cannot
 #               create it in config/ (shell_command_audit D3, reviewer2 B12)
 #VERSION 4.17 - cache/plugin_installers, logs/plugin_installers and logs/root_requests are no longer pinned: root
@@ -149,6 +150,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+[ -t 1 ] && [ -t 2 ] || { RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; NC=''; }  # colours only on a terminal
 
 # Check for root
 if [ "$EUID" -ne 0 ]; then
