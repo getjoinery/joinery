@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.35 - cvp_fleet_apk_api_key_id, cvp_inbound_dns_state: a site's own relay slot and its records (hosting_launch S5)
  * @version 1.34 - hosted_sites_held() counts only sold sites: a starter host an admin made counted toward their limit (B11)
  * @version 1.33 - option has_site: leaves out bare installs (a machine with no site)
  * @version 1.32 - cvp_starter_host: a bare instance installed as a multi-tenant starter host
@@ -235,6 +236,15 @@ class CustomerCloudProvision extends SystemBase {
 		// channel, so it waits for the node's agent to pair: pending →
 		// dispatched → done | failed. NULL means no seeding applies.
 		'cvp_fleet_seed_state'       => array('type'=>'varchar(12)', 'allowed_values'=>array('pending', 'dispatched', 'done', 'failed')),
+		// The API key minted for this site's relay slot (mailbox plugin), when
+		// its plan grants one: the fleet finds the site's slot by the key it
+		// signs with, and a re-mint retires only this key.
+		'cvp_fleet_apk_api_key_id'   => array('type'=>'int8'),
+		// The inbound records (MX, ownership TXT) a site whose plan grants a
+		// relay slot needs on its own domain: published by us on a name we
+		// registered, or left for the buyer to add (listed on their sites
+		// page). NULL until the site has enrolled and they are known.
+		'cvp_inbound_dns_state'      => array('type'=>'varchar(12)', 'allowed_values'=>array('published', 'buyer')),
 		// Whose cloud account the instance is created on, decided by the
 		// PRODUCT and never by the buyer (specs/hosted_trial_provisioning.md
 		// §4.1). customer: the buyer granted us access to their own account

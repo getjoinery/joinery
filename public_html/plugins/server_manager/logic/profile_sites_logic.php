@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.8 - mail_records lists a Starter site's inbound records (MX, ownership TXT) on the buyer's own domain (S5)
  * @version 1.7 - lists only rows that hold a site: a starter host or relay shard made by an admin is not one of their sites
  * @version 1.6 - a draft's price and payment button are its own plan's product; the page offers a new site while any plan is on sale
  * @version 1.5 - mail_records: a Managed site on the buyer's own domain lists the email records SMTP2GO
@@ -267,10 +268,11 @@ function profile_sites_dns_record($provision): ?array {
 }
 
 /**
- * The email records a Managed site on its buyer's own domain still needs, as
+ * The email records a hosted site on its buyer's own domain still needs, as
  * a list of array('type', 'name', 'value', 'note'), or [] when there is
  * nothing to add: a name we registered (we publish them ourselves), no mail
  * set up yet, or every record already resolving to what SMTP2GO asked for.
+ * A Starter site's inbound records come first (profile_sites_inbound_records).
  * Until they are in place the site's mail goes out unsigned and is more
  * likely to be filtered. Only CNAMEs can be checked here; a record of another
  * type is listed until mail setup has verified the domain.
@@ -280,13 +282,13 @@ function profile_sites_mail_records($provision): array {
 			|| JobResultProcessor::plane_registered_domain($provision)) {
 		return array();
 	}
+	$missing = profile_sites_inbound_records($provision);
 	$records = ProvisionHostedMail::records_of($provision);
 	if (!$records) {
-		return array();
+		return $missing;
 	}
 	$verified = in_array((string)$provision->get('cvp_mail_state'), array('domain_verified', 'smtp_user_created', 'done'), true)
 		&& trim((string)$provision->get('cvp_mail_error')) === '';
-	$missing = array();
 	foreach ($records as $record) {
 		$type = strtoupper((string)($record['type'] ?? ''));
 		$name = rtrim((string)($record['name'] ?? ''), '.');
@@ -307,6 +309,44 @@ function profile_sites_mail_records($provision): array {
 			continue;
 		}
 		$missing[] = array('type' => $type, 'name' => $name, 'value' => $value,
+			'note' => (string)($record['note'] ?? ''));
+	}
+	return $missing;
+}
+
+/**
+ * The inbound records a Starter site on its buyer's own domain still needs
+ * for its relay slot (FleetService::site_inbound_records): the MX until it
+ * names the slot, and the ownership TXT until the claim is verified (it is
+ * not listed after that). A name we registered gets them from us, so lists
+ * none.
+ */
+function profile_sites_inbound_records($provision): array {
+	if ((string)$provision->get('cvp_inbound_dns_state') !== 'buyer' || !class_exists('FleetService')) {
+		return array();
+	}
+	$missing = array();
+	foreach (FleetService::site_inbound_records($provision) as $record) {
+		$type = strtoupper((string)$record['type']);
+		$name = rtrim((string)$record['name'], '.');
+		$value = rtrim((string)$record['value'], '.');
+		try {
+			if ($type === 'MX') {
+				$found = false;
+				foreach (DnsResolver::getMx($name) as $mx) {
+					$found = $found || strcasecmp(rtrim((string)$mx['host'], '.'), $value) === 0;
+				}
+				if ($found) {
+					continue;
+				}
+			} elseif ($type === 'TXT' && in_array($value, DnsResolver::getTxt($name), true)) {
+				continue;
+			}
+		} catch (DnsLookupException $e) {
+			// Unknown is shown: the record is harmless to repeat.
+		}
+		$missing[] = array('type' => $type, 'name' => $name,
+			'value' => ($type === 'MX' ? (int)($record['priority'] ?? 10) . ' ' : '') . $value,
 			'note' => (string)($record['note'] ?? ''));
 	}
 	return $missing;

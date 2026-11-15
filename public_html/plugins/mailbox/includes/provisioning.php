@@ -16,6 +16,7 @@
  * file only creates aliases, it never edits an existing alias's
  * destinations or delivery mode.
  *
+ * @version 1.4 - a domain under an internationalized top-level name (xn--) is accepted
  * @version 1.3 - a plus-tagged address (name+tag@…) is refused as a connected
  *                mailbox with the fix named: connect the base address, which
  *                receives the tagged form too (specs/imap_source_domain_boundaries.md §9.3)
@@ -50,7 +51,7 @@ function mailbox_provision_domain(string $domain_name, bool $imap_source = false
 	$result = array('error' => null, 'domain' => null, 'created' => false);
 
 	$domain_name = strtolower(trim($domain_name));
-	if ($domain_name === '' || !preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $domain_name)) {
+	if ($domain_name === '' || !preg_match('/^[a-z0-9.-]+\.([a-z]{2,}|xn--[a-z0-9-]+)$/', $domain_name)) {
 		$result['error'] = 'Enter a valid domain name (like example.com).';
 		return $result;
 	}

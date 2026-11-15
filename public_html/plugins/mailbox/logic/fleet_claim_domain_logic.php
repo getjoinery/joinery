@@ -7,6 +7,7 @@
  * before its owner proves control, and a domain can be claimed by exactly one
  * tenant fleet-wide. Returns the TXT record the tenant must publish; verify
  * with fleet_verify_domain.
+ * @version 1.1 - the caller's slot is the one its key speaks for: a hosted site's own, or the buyer's tier slot
  */
 function fleet_claim_domain_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -17,7 +18,7 @@ function fleet_claim_domain_logic(array $input): LogicResult {
 	if (!$user_id) {
 		return LogicResult::error('You must be signed in.');
 	}
-	$slot = MailboxFleetSlot::activeForUser($user_id);
+	$slot = FleetService::callerSlot($session);
 	if ($slot === null) {
 		return LogicResult::error('No fleet slot — enroll first (fleet_enroll).');
 	}

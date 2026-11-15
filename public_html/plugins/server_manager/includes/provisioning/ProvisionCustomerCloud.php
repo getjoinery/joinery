@@ -58,6 +58,8 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.26 - seeding_applies() is public, takes the provision to FleetProvisionSeeding (a Starter site's plan
+ *                grants its own relay slot, hosting_launch S5), and the Starter worker queues it too
  * @version 2.25 - a bare machine's node has no uptime check (no URL to fetch); its agent watches it (hosting_launch S3 run)
  * @version 2.24 - a starter host (bare, cvp_starter_host) installs with --site-engine --multi-tenant, and its finish
  *                makes its host record a starter host with 8 places, provisioning off (make_starter_host)
@@ -732,7 +734,7 @@ class ProvisionCustomerCloud {
 		}
 		$provision->set('cvp_status', 'done');
 		$provision->set('cvp_error',  null);
-		$provision->set('cvp_fleet_seed_state', $this->seeding_applies($provision) ? 'pending' : null);
+		$provision->set('cvp_fleet_seed_state', self::seeding_applies($provision) ? 'pending' : null);
 		$provision->save();
 	}
 
@@ -779,7 +781,7 @@ class ProvisionCustomerCloud {
 	// a seeding failure alerts ops but never fails the provision. Bare
 	// instances have no site to seed.
 
-	private function seeding_applies($provision): bool {
+	public static function seeding_applies($provision): bool {
 		// A bare box has nothing to seed; a copy takes everything from its source.
 		if (in_array($provision->get('cvp_install_mode') ?: 'fresh', array('bare', 'copy'), true)) {
 			return false;
@@ -790,7 +792,7 @@ class ProvisionCustomerCloud {
 		}
 		try {
 			require_once($seeder);
-			return FleetProvisionSeeding::applies((int)$provision->get('cvp_usr_user_id'));
+			return FleetProvisionSeeding::applies($provision);
 		} catch (\Throwable $e) {
 			error_log('ProvisionCustomerCloud: fleet seeding gate failed: ' . $e->getMessage());
 			return false;
@@ -815,7 +817,7 @@ class ProvisionCustomerCloud {
 			if (!FleetProvisionSeeding::nodeReady($node)) {
 				return 0; // the agent has not paired yet, or is older than fleet_enroll
 			}
-			$result = FleetProvisionSeeding::seedNode($node, (int)$provision->get('cvp_usr_user_id'));
+			$result = FleetProvisionSeeding::seedNode($node, $provision);
 			if (!$result['ok']) {
 				$this->fail_seeding($provision, $result['message']);
 				return 1;

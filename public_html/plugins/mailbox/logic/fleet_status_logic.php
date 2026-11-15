@@ -7,6 +7,7 @@
  * lifecycle act moves it on the shard's verdict there and then
  * (FleetService::applyTenant), so there is nothing to fold in here.
  *
+ * @version 1.2 - the caller's slot is the one its key speaks for: a hosted site's own, or the buyer's tier slot
  * @version 1.1 - reads the slot as it is; the lazy reconcile went with the ssh era
  */
 function fleet_status_logic(array $input): LogicResult {
@@ -18,7 +19,7 @@ function fleet_status_logic(array $input): LogicResult {
 	if (!$user_id) {
 		return LogicResult::error('You must be signed in.');
 	}
-	$slot = MailboxFleetSlot::activeForUser($user_id);
+	$slot = FleetService::callerSlot($session);
 	if ($slot === null) {
 		return LogicResult::render(array('enrolled' => false));
 	}

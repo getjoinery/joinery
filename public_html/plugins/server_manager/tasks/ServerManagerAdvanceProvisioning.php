@@ -41,6 +41,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.7 - Inbound mail: a Starter site's MX and ownership TXT for its relay slot (ProvisionSiteInboundMail, S5)
  * @version 1.6 - Starter sites: a paid Starter site is installed in a container on a starter host
  * @version 1.5 - server transfers to the customer's own Linode account run before the hosted phases
  *                (specs/managed_to_self_hosted_transfer.md)
@@ -67,6 +68,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Domain watch'   => array($base . 'ManagedDomainWatch.php', 'ManagedDomainWatch'),
 			'Transfers'      => array($base . 'PollInstanceTransfers.php', 'PollInstanceTransfers'),
 			'Hosted mail'    => array($base . 'ProvisionHostedMail.php', 'ProvisionHostedMail'),
+			'Inbound mail'   => array($base . 'ProvisionSiteInboundMail.php', 'ProvisionSiteInboundMail'),
 			'Hosted watch'   => array($base . 'HostedTrialWatch.php', 'HostedTrialWatch'),
 			'Services'       => array($base . 'ServiceTenantWatch.php', 'ServiceTenantWatch'),
 		);

@@ -1,6 +1,6 @@
 {
   "name": "Reconcile mail relay",
-  "description": "Keeps a hardened ingest relay in step with this deployment: pushes the alias routing map, pulls the sealed mail spool, advances relay cloud provisioning, and reconciles the hosted relay fleet — in that order, every cron pass. No-op on colocated deployments.",
+  "description": "Keeps a hardened ingest relay in step with this deployment: enrolls a seeded site that can receive only through a relay, pushes the alias routing map, pulls the sealed mail spool, advances relay cloud provisioning, and reconciles the hosted relay fleet — in that order, every cron pass. No-op on colocated deployments.",
   "activate_on_install": true,
   "default_frequency": "every_run",
   "config_fields": {

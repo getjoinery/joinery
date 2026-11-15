@@ -28,6 +28,9 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.10 - phase 5 releases a site's slot once its site is removed (FleetService::siteGone)
+ * @version 1.9 - phase 0 (Hosted slot): a seeded site that can receive only through a relay enrolls itself
+ * @version 1.8 - phase 5 asks FleetService::slotEntitled(): a hosted site's slot is entitled by the site's hosting
  * @version 1.7 - the pickup-stopped fix text opens the Server tab, matching its link
  * @version 1.6 - phase 5 settles each shard's version from its ping before the walk
  * @version 1.5 - phase 5 re-adds an active slot whose shard keeps mail names (3.13) but not yet its own
@@ -47,6 +50,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 
 	public function run(array $config) {
 		$phases = array(
+			'Hosted slot' => function () { return $this->autoEnroll(); },
 			'Relay map'   => function () use ($config) { return $this->syncAliasMap($config); },
 			'Relay spool' => function () use ($config) { return $this->pullSpool($config); },
 			'Relay scanner' => function () { return $this->pollScannerHealth(); },
@@ -88,6 +92,23 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 			'status' => $failed ? 'error' : 'success',
 			'message' => implode('; ', $parts),
 		);
+	}
+
+	/**
+	 * Phase 0 — a site that can receive only through a relay (a site
+	 * container) and was seeded with its operator's fleet settings enrolls
+	 * itself, with no person (FleetClient::autoEnroll). Skipped everywhere
+	 * else, and once enrolled.
+	 */
+	private function autoEnroll() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+		try {
+			$outcome = (new FleetClient())->autoEnroll();
+		} catch (ServiceClientException $e) {
+			return array('status' => 'error', 'message' => 'Enrolling in the hosted relay failed: ' . $e->getMessage());
+		}
+		return $outcome === '' ? array('status' => 'skipped', 'message' => '')
+			: array('status' => 'success', 'message' => $outcome);
 	}
 
 	/** Phase 1 — rebuild the relay's DB-free routing map and push it if changed. */
@@ -335,6 +356,15 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 
 			$reconciled++;
 
+			// 0. A site's slot whose site was removed is released, so its
+			//    domain is free for the buyer's next site and its shard place
+			//    comes back; the next pass removes it from the shard.
+			if ($status !== MailboxFleetSlot::STATUS_RELEASED && FleetService::siteGone($slot)) {
+				FleetService::releaseSiteSlot($slot);
+				$notes[] = 'slot ' . $slot->key . ' released: its site was removed';
+				continue;
+			}
+
 			// 1. Pending work, applied on the shard here and now through its
 			//    operator-signed tenant routes (the slot's status moves on the verdict).
 			if ($status === MailboxFleetSlot::STATUS_PROVISIONING) {
@@ -369,8 +399,9 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 			//    same: re-sync the shard's allowlist, which a suspension empties
 			//    and a reactivation restores.
 			if ($status === MailboxFleetSlot::STATUS_ACTIVE || $status === MailboxFleetSlot::STATUS_SUSPENDED) {
-				$user_id = intval($slot->get('mft_usr_user_id'));
-				$entitled = $user_id > 0 && FleetService::entitled($user_id);
+				// A hosted site's slot is entitled by the site's hosting; any
+				// other by its buyer's tier.
+				$entitled = FleetService::slotEntitled($slot);
 				// Blank means the declared default; 0 is a real answer (suspend on the
 				// pass after the lapse), which the ladder honours.
 				$grace_raw = trim((string)Globalvars::get_instance()->get_setting('mailbox_fleet_grace_days'));

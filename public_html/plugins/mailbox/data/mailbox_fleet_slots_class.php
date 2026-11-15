@@ -11,6 +11,8 @@
  * fleet_status can reconcile lazily (server_manager never learns what a
  * tenant is).
  *
+ * @version 1.3 - mft_cvp_customer_cloud_provision_id: a slot a hosted site's plan grants belongs to that site;
+ *                activeForUser() answers only for the buyer's tier slot, activeForProvision() for a site's
  * @version 1.2 - mft_mx_hostname_applied: the mail name last delivered to the slot's shard
  * @version 1.1 - the four shared status values come from the core ServiceTenantLadder
  * @version 1.0
@@ -39,6 +41,11 @@ class MailboxFleetSlot extends SystemBase {
 		'mft_mfs_mailbox_fleet_shard_id'  => ['action' => 'prevent',
 			'message' => 'Shard still has slots on it — release or evict them first.'],
 		'mft_usr_user_id'   => ['action' => 'null'],
+		// A purged site leaves its slot a site's slot with no site behind it
+		// (-1), never NULL: NULL would turn it into its buyer's tier slot. The
+		// reconcile then finds it unentitled and suspends it after grace.
+		'mft_cvp_customer_cloud_provision_id' => ['action' => 'set_value', 'value' => -1,
+			'source_table' => 'cvp_customer_cloud_provisions'],
 	];
 
 	public static $field_specifications = array(
@@ -47,6 +54,11 @@ class MailboxFleetSlot extends SystemBase {
 		// The customer account that enrolled — entitlement is checked against
 		// this user's subscription tier, at enrollment and on the periodic re-check.
 		'mft_usr_user_id'           => array('type'=>'int8'),
+		// The hosted site whose plan grants this slot (server_manager's
+		// cvp_customer_cloud_provisions), or NULL for a slot the buyer's tier
+		// grants. A site's slot is that site's alone: its entitlement is the
+		// site's hosting, and another site of the same buyer never shares it.
+		'mft_cvp_customer_cloud_provision_id' => array('type'=>'int8'),
 		// The tenant's identity on the shard: account jt-<slug>, spool
 		// /var/spool/joinery-relay/<slug>, fragment drop under home/<slug>/.
 		'mft_slug'                  => array('type'=>'varchar(28)'),
@@ -90,10 +102,24 @@ class MailboxFleetSlot extends SystemBase {
 	// operator's staff touch all of them.
 
 
-	/** The tenant's live (non-terminal) slot for a user, or null. */
+	/**
+	 * The live (non-terminal) slot the user's tier grants, or null. A slot a
+	 * hosted site's plan grants is that site's, and never answers here.
+	 */
 	public static function activeForUser(int $user_id): ?MailboxFleetSlot {
-		$multi = new MultiMailboxFleetSlot(array('user_id' => $user_id, 'live' => true, 'deleted' => false));
-		$multi->load();
+		$multi = new MultiMailboxFleetSlot(array('user_id' => $user_id, 'tier_granted' => true, 'live' => true, 'deleted' => false));
+		foreach ($multi as $slot) {
+			return $slot;
+		}
+		return null;
+	}
+
+	/** The live slot a hosted site's plan grants it, or null. */
+	public static function activeForProvision(int $provision_id): ?MailboxFleetSlot {
+		if ($provision_id <= 0) {
+			return null;
+		}
+		$multi = new MultiMailboxFleetSlot(array('provision_id' => $provision_id, 'live' => true, 'deleted' => false));
 		foreach ($multi as $slot) {
 			return $slot;
 		}
@@ -124,6 +150,14 @@ class MultiMailboxFleetSlot extends SystemMultiBase {
 
 		if (isset($this->options['user_id'])) {
 			$filters['mft_usr_user_id'] = [intval($this->options['user_id']), PDO::PARAM_INT];
+		}
+
+		if (isset($this->options['provision_id'])) {
+			$filters['mft_cvp_customer_cloud_provision_id'] = [intval($this->options['provision_id']), PDO::PARAM_INT];
+		}
+
+		if (!empty($this->options['tier_granted'])) {
+			$filters['mft_cvp_customer_cloud_provision_id'] = 'IS NULL';
 		}
 
 		if (isset($this->options['shard_id'])) {

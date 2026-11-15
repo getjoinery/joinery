@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.10 - registrar_dns_driver() is public, shared with the site inbound records leg
  * @version 1.9 - the push allowance counts only attempts since the site last took one (B12)
  * @version 1.8 - the mail push carries the DKIM key name from the provider's records (dkim_key_name, B7)
  * @version 1.7 - a test site's mail goes to its plane's trap (server_manager_test_site_mail_trap), sent with
@@ -589,7 +590,13 @@ class ProvisionHostedMail {
 
 	/** The registrar's DNS driver, or null. Overridable for tests. */
 	protected function dns_driver() {
+		return self::registrar_dns_driver();
+	}
+
+	/** The DNS driver of the registrar names are registered through, or null when none is configured. */
+	public static function registrar_dns_driver() {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/domain_registrar/DomainRegistrarRegistry.php'));
+		require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
 		$registrar = DomainRegistrarRegistry::firstConfigured();
 		if ($registrar === null) { return null; }
 		$class = DnsDriverRegistry::get($registrar->dnsDriverKey());

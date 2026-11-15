@@ -1040,6 +1040,17 @@ is not `customer_cloud` (nothing builds it).
     worker, so two payments never share the last place; when a place is taken
     and `server_manager_starter_free_places_alert` free places or fewer are
     left (default 2), the operator is emailed to make another starter host.
+    A starter host has no port 25, so a finished site gets its own slot on the
+    mailbox plugin's relay fleet: its fleet seeding is queued
+    (`cvp_fleet_seed_state`, see the mailbox overview, *Two ways a slot is
+    granted*), the site enrolls itself, and **Inbound mail**
+    (`ProvisionSiteInboundMail`, a phase of the umbrella) places the MX and
+    ownership TXT its domain needs (`FleetService::site_inbound_records()`):
+    published additively on a name registered through us, or listed for the
+    buyer on their sites page otherwise (`cvp_inbound_dns_state` `published`
+    or `buyer`). A record we did not set is never overwritten: one in the way,
+    a zone that cannot be read, or a record skipped is reported and asked
+    again next pass; a drifted record of ours is updated.
 
 Every mode ends the same way: `install_node` completes, the welcome email goes
 out, and `ProvisionPendingSsl` turns HTTPS on once DNS resolves.

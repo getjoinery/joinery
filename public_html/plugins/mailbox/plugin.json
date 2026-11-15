@@ -609,6 +609,16 @@
             "helptext": "Recorded by the Setup tab's Relay section, which stops or starts Postfix on this server to match. Every deploy re-asserts this state, so change it here only to correct a record that has drifted \u2014 setting it by hand does not itself start or stop anything."
         },
         {
+            "name": "mailbox_fleet_auto_enroll_failed_time",
+            "default": "",
+            "managed": true
+        },
+        {
+            "name": "mailbox_fleet_auto_enroll_done_time",
+            "default": "",
+            "managed": true
+        },
+        {
             "name": "mailbox_fleet_service_url",
             "default": "",
             "group": "fleet",

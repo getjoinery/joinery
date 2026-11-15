@@ -25,6 +25,7 @@
  * The site's limits are the starter settings (server_manager_starter_memory,
  * _cpus, _disk), sized so 8 sites share a Linode 4 GB.
  *
+ * @version 1.3 - a finished site queues its relay slot seeding (cvp_fleet_seed_state), as a Managed install does (S5)
  * @version 1.2 - a place is reserved under the place lock (ManagedHost::reserve_starter_place, R2-2); note_free_places()
  *                alerts the operator at or under server_manager_starter_free_places_alert free places (S10)
  * @version 1.1 - reviewer2 F3-1/F3-3/F3-4/F3-7/F3-8: the container name is the plane's (st<provision id>), never the
@@ -288,6 +289,10 @@ class ProvisionStarterSites {
 		if ($status === 'completed' && $node->key && $node->get('mgn_install_state') === null) {
 			$provision->set('cvp_status', 'done');
 			$provision->set('cvp_error', null);
+			// Its relay slot (inbound mail: a starter box has no port 25) is
+			// seeded once the site's agent pairs, by the customer-cloud
+			// pipeline's seeding loop.
+			$provision->set('cvp_fleet_seed_state', ProvisionCustomerCloud::seeding_applies($provision) ? 'pending' : null);
 			$provision->save();
 		} else {
 			// Failed, cancelled, lost: anything that is not an install.

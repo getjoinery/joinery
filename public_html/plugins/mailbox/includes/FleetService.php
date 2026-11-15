@@ -17,6 +17,12 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
+ * @version 1.10 - a site's key answers only for its site's slot, never its buyer's tier slot (isSiteKey); a removed
+ *                site's slot is released and its key retired (siteGone, releaseSiteSlot)
+ * @version 1.9 - site_inbound_records(): the MX and ownership TXT a hosted site's domain needs for its slot
+ * @version 1.8 - a hosted site's plan grants it a slot of its own (hosting_launch S5): the caller's slot is
+ *                found from the API key it signs with (callerSlot), a site's slot is entitled by the site's
+ *                hosting (slotEntitled), and one buyer's sites never share or take each other's slot
  * @version 1.7 - review fixes: the delivered name is recorded with its shard (mailNameKey), and
  *                settleShardVersions() reads each shard's version from its ping
  * @version 1.6 - add_tenant carries the slot's mail name (mx_hostname) and records it once a shard that keeps it
@@ -61,6 +67,236 @@ class FleetService {
 		return max(1, intval(SubscriptionTier::getUserFeature($user_id, self::FEATURE_MAX_DOMAINS, 5)));
 	}
 
+	/** Domains one hosted site's slot may claim: its own name and a few more. */
+	const SITE_MAX_DOMAINS = 5;
+
+	/** How many domains this slot may claim: a site's fixed allowance, or the buyer's tier's. */
+	public static function slotMaxDomains(MailboxFleetSlot $slot): int {
+		if (intval($slot->get('mft_cvp_customer_cloud_provision_id')) !== 0) {
+			return self::SITE_MAX_DOMAINS;
+		}
+		return self::maxDomains(intval($slot->get('mft_usr_user_id')));
+	}
+
+	// ------------------------------------------------- a hosted site's own slot
+
+	/**
+	 * Whether a hosted site's plan grants it a relay slot of its own: a sold
+	 * site in a container on a shared host (Starter), which has no port 25 of
+	 * its own. A site on an instance of its own (Managed) is outside this
+	 * until the owner decides it (hosting_launch Q12); its buyer's tier still
+	 * grants a slot as for anyone.
+	 */
+	public static function site_plan_grants_slot($provision): bool {
+		if ($provision === null || !$provision->key || !class_exists('CustomerCloudProvision')) {
+			return false;
+		}
+		return $provision->is_container() && $provision->is_sold();
+	}
+
+	/**
+	 * Whether a site's plan still entitles it to its slot: the plan grants
+	 * one, the site is built and not removed, and its hosting has not been
+	 * shut down (a trial, a paid subscription and a payment's grace all
+	 * count). The fleet's own grace then runs on top, as for a tier slot.
+	 */
+	public static function site_entitled($provision): bool {
+		if (!self::site_plan_grants_slot($provision) || $provision->get('cvp_delete_time')) {
+			return false;
+		}
+		if ((string)$provision->get('cvp_status') !== 'done') {
+			return false;
+		}
+		$node_id = intval($provision->get('cvp_mgn_managed_node_id'));
+		if ($node_id <= 0) {
+			return false;
+		}
+		$node = new ManagedNode($node_id, TRUE);
+		if (!$node->key || $node->get('mgn_delete_time')) {
+			return false;
+		}
+		if (class_exists('HostedTrial')) {
+			$trial = HostedTrial::for_provision(intval($provision->key));
+			if ($trial && !in_array((string)$trial->get('htr_state'), HostedTrial::LIVE_STATES, true)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** A hosted site's own fleet key is named this plus its provision id (apk_name holds 32). */
+	const SITE_KEY_NAME_PREFIX = 'Fleet enrollment #';
+
+	/**
+	 * Whether an API key was minted for a hosted site: named for one, or
+	 * recorded on a provision (a removed one too). Such a key answers only
+	 * for its site's slot, for good: when the site no longer counts it is
+	 * refused, never let fall through to its buyer's tier slot, which may be
+	 * another site's.
+	 */
+	public static function isSiteKey($api_key_id): bool {
+		$api_key_id = intval($api_key_id);
+		if ($api_key_id <= 0) {
+			return false;
+		}
+		$key = new ApiKey($api_key_id, TRUE);
+		if ($key->key && strpos((string)$key->get('apk_name'), self::SITE_KEY_NAME_PREFIX) === 0) {
+			return true;
+		}
+		return class_exists('CustomerCloudProvision')
+			&& count(new MultiCustomerCloudProvision(array('cvp_fleet_apk_api_key_id' => $api_key_id))) > 0;
+	}
+
+	/**
+	 * The hosted site whose slot this API key was minted for (the key the
+	 * site's seeding recorded on its provision), when the site is the user's,
+	 * not removed, and its plan grants a slot; otherwise null.
+	 */
+	public static function provisionForKey(int $user_id, $api_key_id) {
+		$api_key_id = intval($api_key_id);
+		if ($user_id <= 0 || $api_key_id <= 0 || !class_exists('CustomerCloudProvision')) {
+			return null;
+		}
+		$rows = new MultiCustomerCloudProvision(array('cvp_fleet_apk_api_key_id' => $api_key_id, 'deleted' => false));
+		foreach ($rows as $provision) {
+			if (intval($provision->get('cvp_usr_user_id')) === $user_id && self::site_plan_grants_slot($provision)) {
+				return $provision;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The slot the signed-in caller speaks for: a site key's site's slot
+	 * (none when the site no longer counts), or any other caller's tier slot.
+	 */
+	public static function callerSlot($session): ?MailboxFleetSlot {
+		$user_id = intval($session->get_user_id());
+		if ($user_id <= 0) {
+			return null;
+		}
+		$api_key_id = $session->get_api_key_id();
+		if (self::isSiteKey($api_key_id)) {
+			$provision = self::provisionForKey($user_id, $api_key_id);
+			return $provision !== null ? MailboxFleetSlot::activeForProvision(intval($provision->key)) : null;
+		}
+		return MailboxFleetSlot::activeForUser($user_id);
+	}
+
+	/**
+	 * Whether a site's slot has lost its site for good: the site was purged
+	 * (-1), or its provision or its node was removed. A site whose hosting
+	 * only lapsed keeps its slot under the entitlement ladder instead.
+	 */
+	public static function siteGone(MailboxFleetSlot $slot): bool {
+		$provision_id = intval($slot->get('mft_cvp_customer_cloud_provision_id'));
+		if ($provision_id === 0) {
+			return false;
+		}
+		if ($provision_id < 0) {
+			return true;
+		}
+		// Not knowing is not gone: with server_manager inactive the site
+		// cannot be looked up, and its slot waits under the ladder instead.
+		if (!class_exists('CustomerCloudProvision') || !class_exists('ManagedNode')) {
+			return false;
+		}
+		$provision = new CustomerCloudProvision($provision_id, TRUE);
+		if (!$provision->key || $provision->get('cvp_delete_time')) {
+			return true;
+		}
+		$node_id = intval($provision->get('cvp_mgn_managed_node_id'));
+		if ($node_id <= 0) {
+			return true;
+		}
+		$node = new ManagedNode($node_id, TRUE);
+		return !$node->key || (bool)$node->get('mgn_delete_time');
+	}
+
+	/**
+	 * Release a removed site's slot (its claims are revoked, so the domain
+	 * can be claimed again by the buyer's next site) and retire every site
+	 * key of its buyer's whose site is gone.
+	 */
+	public static function releaseSiteSlot(MailboxFleetSlot $slot): void {
+		self::releaseSlot($slot);
+		$user_id = intval($slot->get('mft_usr_user_id'));
+		if ($user_id <= 0 || !class_exists('CustomerCloudProvision') || !class_exists('ManagedNode')) {
+			return; // a key is retired only when its site is known to be gone
+		}
+		foreach (new MultiApiKey(array('user_id' => $user_id)) as $key) {
+			$name = (string)$key->get('apk_name');
+			if (!$key->get('apk_is_active') || strpos($name, self::SITE_KEY_NAME_PREFIX) !== 0) {
+				continue;
+			}
+			$site_id = intval(substr($name, strlen(self::SITE_KEY_NAME_PREFIX)));
+			$site = $site_id > 0 ? new CustomerCloudProvision($site_id, TRUE) : null;
+			$live = $site !== null && $site->key && !$site->get('cvp_delete_time');
+			if ($live) {
+				$node_id = intval($site->get('cvp_mgn_managed_node_id'));
+				$node = $node_id > 0 ? new ManagedNode($node_id, TRUE) : null;
+				$live = $node !== null && $node->key && !$node->get('mgn_delete_time');
+			}
+			if (!$live) {
+				$key->set('apk_is_active', FALSE);
+				$key->save();
+			}
+		}
+	}
+
+	/**
+	 * The records a hosted site's own domain needs for its slot, once the
+	 * site has enrolled and filed its ownership claim: the MX naming the
+	 * slot's mail name, and the ownership TXT while the claim is pending.
+	 * Each is array(type, name, value, priority, note), the shape
+	 * ProvisionHostedMail keeps its mail records in. [] while there is
+	 * nothing to publish yet.
+	 */
+	public static function site_inbound_records($provision): array {
+		if (!self::site_plan_grants_slot($provision)) {
+			return array();
+		}
+		$slot = MailboxFleetSlot::activeForProvision(intval($provision->key));
+		$mx = $slot !== null ? strtolower(trim((string)$slot->get('mft_mx_hostname'))) : '';
+		$domain = strtolower(trim((string)$provision->get('cvp_domain')));
+		if ($mx === '' || $domain === '') {
+			return array();
+		}
+		$claim = null;
+		foreach (new MultiMailboxFleetDomainClaim(array('slot_id' => intval($slot->key), 'domain' => $domain,
+				'live' => true, 'deleted' => false)) as $row) {
+			$claim = $row;
+			break;
+		}
+		if ($claim === null) {
+			return array();
+		}
+		$records = array(array('type' => 'MX', 'name' => $domain, 'value' => $mx, 'priority' => 10,
+			'note' => 'Brings this site\'s mail in through our relay'));
+		if ((string)$claim->get('mfd_status') === MailboxFleetDomainClaim::STATUS_PENDING) {
+			$records[] = array('type' => 'TXT', 'name' => $claim->challengeHost(),
+				'value' => (string)$claim->get('mfd_txt_token'), 'priority' => null,
+				'note' => 'Proves the domain is this site\'s, so the relay accepts its mail');
+		}
+		return $records;
+	}
+
+	/** Whether a slot is still entitled: a site's by the site's hosting, any other by its buyer's tier. */
+	public static function slotEntitled(MailboxFleetSlot $slot): bool {
+		$user_id = intval($slot->get('mft_usr_user_id'));
+		$provision_id = intval($slot->get('mft_cvp_customer_cloud_provision_id'));
+		if ($provision_id !== 0) {
+			// A site's slot (-1: its site was purged) answers only to its site.
+			if ($provision_id < 0 || !class_exists('CustomerCloudProvision')) {
+				return false;
+			}
+			$provision = new CustomerCloudProvision($provision_id, TRUE);
+			return $provision->key && intval($provision->get('cvp_usr_user_id')) === $user_id
+				&& self::site_entitled($provision);
+		}
+		return $user_id > 0 && self::entitled($user_id);
+	}
+
 	// ------------------------------------------------------------- enrollment
 
 	/**
@@ -74,11 +310,15 @@ class FleetService {
 	 * verifies every request against. Idempotent: an existing live slot is
 	 * returned, re-registered on the next reconcile pass if the key changed.
 	 */
-	public static function enroll(int $user_id, array $keys): MailboxFleetSlot {
+	public static function enroll(int $user_id, array $keys, $provision = null): MailboxFleetSlot {
 		if (!self::enabled()) {
 			throw new FleetServiceException('The hosted relay fleet is not accepting enrollments.');
 		}
-		if (!self::entitled($user_id)) {
+		if ($provision !== null) {
+			if (!self::site_entitled($provision) || intval($provision->get('cvp_usr_user_id')) !== $user_id) {
+				throw new FleetServiceException('This site\'s hosting does not include a hosted relay slot right now.');
+			}
+		} elseif (!self::entitled($user_id)) {
 			throw new FleetServiceException('Your subscription does not include a hosted relay slot.');
 		}
 		$public_key = trim((string)($keys['public_key'] ?? ''));
@@ -87,7 +327,9 @@ class FleetService {
 			throw new FleetServiceException('public_key is not a valid Ed25519 public key.');
 		}
 
-		$existing = MailboxFleetSlot::activeForUser($user_id);
+		$existing = $provision !== null
+			? MailboxFleetSlot::activeForProvision(intval($provision->key))
+			: MailboxFleetSlot::activeForUser($user_id);
 		if ($existing !== null) {
 			if ($public_key !== trim((string)$existing->get('mft_public_key'))) {
 				$existing->set('mft_public_key', $public_key);
@@ -105,6 +347,7 @@ class FleetService {
 		$slot = new MailboxFleetSlot(NULL);
 		$slot->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));
 		$slot->set('mft_usr_user_id', $user_id);
+		$slot->set('mft_cvp_customer_cloud_provision_id', $provision !== null ? intval($provision->key) : null);
 		$slot->set('mft_status', MailboxFleetSlot::STATUS_PROVISIONING);
 		$slot->set('mft_public_key', $public_key);
 		$slot->save();
@@ -215,8 +458,8 @@ class FleetService {
 			'slot_id' => intval($slot->key), 'live' => true, 'deleted' => false,
 		));
 		$live->load();
-		if ($live->count() >= self::maxDomains(intval($slot->get('mft_usr_user_id')))) {
-			throw new FleetServiceException('Your subscription\'s hosted-relay domain limit is reached.');
+		if ($live->count() >= self::slotMaxDomains($slot)) {
+			throw new FleetServiceException('This slot\'s hosted-relay domain limit is reached.');
 		}
 
 		$claim = new MailboxFleetDomainClaim(NULL);

@@ -8,6 +8,7 @@
  * undrained sealed mail — so release, keep pulling until the spool drains,
  * and the slot evicts cleanly. Mail queues at senders during the tenant's
  * MX change; nothing is lost.
+ * @version 1.1 - the caller's slot is the one its key speaks for: a hosted site's own, or the buyer's tier slot
  */
 function fleet_release_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -18,7 +19,7 @@ function fleet_release_logic(array $input): LogicResult {
 	if (!$user_id) {
 		return LogicResult::error('You must be signed in.');
 	}
-	$slot = MailboxFleetSlot::activeForUser($user_id);
+	$slot = FleetService::callerSlot($session);
 	if ($slot === null) {
 		return LogicResult::error('No fleet slot to release.');
 	}

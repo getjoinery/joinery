@@ -1798,8 +1798,18 @@ as not done. It stops at the first step that does not finish, and every stopping
 point is safe: before the flag nothing changed, after it the domain signs with
 ambient DNS. It removes nothing: destroying the old on-disk key is a button on the
 page it lands on, and the old provider's DKIM record is left up for mail already
-on its way. A DNS host signed into with OAuth, or one with no driver, keeps the
-two presses: the Step 1 publish box, then **Check DNS and turn on send protection**.
+on its way. A DNS host signed into with OAuth, or one with no driver, gets the
+records as one ordered table (`mailbox_protect_record_list()`, rendered by
+`includes/protect_record_table.php`): group 1, *Publish now*, the signing-stage
+records with what is live, then group 2, *Publish after signing is on*, the strict
+SPF and `_dmarc`, greyed out and not looked up until the flag is set. Below it sit
+the publish box for group 1 where a host can take it, and **Check DNS and turn on
+send protection**, drawn disabled until the activate gate would pass. While
+anything is outstanding, `assets/protect_records.js` asks the API action
+`mailbox/protect_record_list` every 30 seconds (and on **Check now**), repaints each
+status from the zone's own nameservers, and enables the button when
+`signing_ready`. Once signing is on, the same table shows in the box with group 2
+active until both records are live.
 A locked vault does not take either button away: each waits behind an **Unlock your
 vault** button that opens the vault in place (`VaultGate`), and shows the moment it
 opens, with no reload; the press and the activate handler check the vault again.
@@ -2785,7 +2795,11 @@ is the task — the ceremony is open, or the owner is still to be chosen — and
 at the foot of the focused domain's setup otherwise; either way it carries the
 `#sending-identity` anchor. Making the key carries `protect_setup`, so the next
 step opens at once. The domain editor only states who owns the key and links
-here, and the `domain.send_protection` row's fix links to the same place.
+here; saving the editor with the sending lock switched on lands here too, and the
+`domain.send_protection` row's fix links to the same place. All three take the
+address from `InboundEmailDomain::send_protection_setup_url()`: the ceremony,
+opened, once the key exists, and the `#sending-identity` box while the owner is
+still to be chosen.
 
 The ceremony opens on an explicit gesture (`?protect_setup=1`). Only inside it
 does `dnsPlan($domain, true)` prescribe the protected shape; the DNS records and
@@ -3599,7 +3613,7 @@ automation calls — they are not user-facing steps.
 **Operator side** (the deployment with `mailbox_fleet_service_enabled` +
 `mailbox_fleet_mx_zone` set): the fleet service is the brain — `FleetService`
 assigns shards (least-loaded born shard with capacity), issues and verifies
-domain claims, and checks entitlement (the `mailbox_fleet_slot` tier feature).
+domain claims, and checks entitlement (a hosted site's plan, or the `mailbox_fleet_slot` tier feature; see *Two ways a slot is granted* below).
 The relay reconcile walks each slot down the core `ServiceTenantLadder` — the
 grace-then-suspend ladder every rented service shares: a lapse starts a
 `mailbox_fleet_grace_days` window, suspension past it empties the tenant's
@@ -3634,22 +3648,72 @@ inactive `customer_cloud`-fulfilled product on it — pricing and activating it
 are the operator's explicit acts on the product edit page. When a paid order
 then provisions the buyer's server, `ProvisionCustomerCloud` hands the
 finished site to `FleetProvisionSeeding` (mailbox side) once its agent has
-paired: if the fleet service is on, the store is this deployment, and the
-buyer's tier carries the slot feature, it mints a machine API key for the
-buyer's account (`Fleet enrollment`, read+write; re-minting deactivates the
-previous one) and dispatches ONE `fleet_enroll` job on the site's own agent
-carrying the three values — the setting names are compiled into
-`utils/fleet_enroll.php` on the site, the secret rides the job row redacted
-and is blanked once the node answers, and nothing opens a shell. The
-owner's Server tab then lands on one-click Enroll; the DNS TXT ownership
-proofs and the MX edit stay manual by nature (the customer proving domain
-control at their own DNS provider). Seeding is best-effort: a failure alerts
-the ops address and leaves the provision done — the owner can always enter
-the credentials manually on the Settings tab. A subscription carries one slot,
-so one seeded site per buyer: seeding a second site is refused, naming the
-site that holds the slot (re-seeding that same site is a key rotation). A site
-that has been decommissioned holds nothing — its node row is soft-deleted —
-so the slot is free for the account's next site.
+paired: if the fleet service is on, the store is this deployment, and a slot
+is granted, it mints a machine API key for the buyer's account (read+write)
+and dispatches ONE `fleet_enroll` job on the site's own agent carrying the
+three values — the setting names are compiled into `utils/fleet_enroll.php`
+on the site, the secret rides the job row redacted and is blanked once the
+node answers, and nothing opens a shell. The owner's Server tab then lands on
+one-click Enroll; the DNS TXT ownership proofs and the MX edit stay manual by
+nature (the customer proving domain control at their own DNS provider).
+
+**A site that can receive only through a relay enrolls itself.** A site with
+no mail server of its own (a site container, `mailbox_needs_relay()`) that
+holds the three fleet settings enrolls on the relay reconcile's first phase
+(*Hosted slot*, `FleetClient::autoEnroll()`), with no person. Each pass looks
+at the end state and does whatever is missing: enrolled, `mailbox_receive_mode`
+relay, its own domain (from `webDir`, `FleetClient::siteDomain()`) registered
+for receiving, and that domain's ownership claim filed and proven (it asks the
+fleet to check the TXT record). Its hosted relay row is born enabled, since it
+has no other way in; the *Relay cutover* row reports the DNS still to move. A
+pass that leaves something undone (a refusal, a claim not yet proven) records
+`mailbox_fleet_auto_enroll_failed_time` and the next waits
+`FleetClient::AUTO_ENROLL_RETRY_SECONDS` (5 minutes); once everything is in
+place it records `mailbox_fleet_auto_enroll_done_time` and does nothing more.
+Seeding is best-effort: a failure alerts the ops address and leaves the
+provision done — the owner can always enter the credentials manually on the
+Settings tab.
+
+**Two ways a slot is granted.**
+
+- **A hosted site's plan.** A sold site in a container on a shared host (a
+  Starter site, which has no port 25 of its own) gets a slot of its own
+  (`FleetService::site_plan_grants_slot()`). Its key is named for its
+  provision (`Fleet enrollment #<id>`) and recorded there
+  (`cvp_fleet_apk_api_key_id`); re-seeding the site retires only that key.
+  The Starter worker queues the seeding when the site is built
+  (`cvp_fleet_seed_state`). The slot records its site
+  (`mft_cvp_customer_cloud_provision_id`) and is entitled while the site is
+  built, not removed, and its hosting not shut down
+  (`FleetService::site_entitled()`); one buyer's sites never share a slot, and
+  one site's hosting ending leaves the others' slots, keys and mail as they
+  are. When the site is removed (its provision or node deleted, or its row
+  purged, which leaves `-1` on the slot) the reconcile releases its slot
+  (`FleetService::siteGone()`, `releaseSiteSlot()`; a site that cannot be
+  looked up, server_manager inactive, is not gone): its domain claims are
+  revoked, so the buyer's next site can claim the same domain, and the
+  buyer's keys for removed sites are retired.
+- **The buyer's tier** (the `mailbox_fleet_slot` feature), for any other
+  site. Its key is named `Fleet enrollment`; re-minting deactivates the
+  buyer's previous one. A subscription carries one slot, so one seeded site
+  per buyer: seeding a second such site is refused, naming the site that
+  holds the slot (re-seeding that same site is a key rotation). A site that
+  has been decommissioned holds nothing — its node row is soft-deleted — so
+  the slot is free for the account's next site.
+
+A site's own domain then needs an MX naming its slot's mail name and the
+ownership TXT while its claim is pending (`FleetService::site_inbound_records()`);
+the operator's provisioning publishes them on a name it registered and lists
+them for the buyer otherwise (server_manager's `ProvisionSiteInboundMail`). It
+never overwrites a record it did not set: one in the way is reported to the
+operator on every pass until it is cleared.
+
+Every `fleet_*` action finds the caller's slot from the API key the call is
+signed with (`FleetService::callerSlot()`): a site's key (named for a site,
+or recorded on one, `FleetService::isSiteKey()`) answers only for that site's
+slot, and for nothing once the site no longer counts; any other key answers
+for the buyer's tier slot. The reconcile's entitlement ladder asks the same question
+of each slot (`FleetService::slotEntitled()`).
 
 **Rebuild carries the spool across the wipe.** The scheduled shard rebuild
 closes port 25, flushes the Postfix queue for a bounded window, copies the

@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.7 - the email records box covers the records that bring mail in as well as those that sign it
  * @version 2.6 - no inline script: the move card is assets/js/profile-move.js, the reload data-jy-reload-after
  * @version 2.5 - a site on the buyer's own domain lists the email records still to add (B3)
  * @version 2.4 - not found where this site does not sell hosting (SmHosting)
@@ -155,9 +156,9 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 		<?php if ($site['mail_records']): ?>
 		<section class="sms-dns">
 			<h3>Add your email records</h3>
-			<p>Your site sends email now, but it is not signed as coming from your domain until you add
-				<?php echo count($site['mail_records']) === 1 ? 'this record' : 'these records'; ?> where your domain
-				is registered. Unsigned email is more likely to land in spam.</p>
+			<p>Add <?php echo count($site['mail_records']) === 1 ? 'this record' : 'these records'; ?> where your domain
+				is registered. Until they are in place, email your site sends is more likely to land in spam, and
+				email sent to your domain may not reach your site.</p>
 			<?php foreach ($site['mail_records'] as $record): ?>
 			<dl class="sms-facts">
 				<dt>Type</dt><dd><?php echo htmlspecialchars($record['type']); ?></dd>

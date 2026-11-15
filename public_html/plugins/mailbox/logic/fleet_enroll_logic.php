@@ -13,6 +13,8 @@
  * Idempotent: re-enrolling returns the existing live slot (re-registering it
  * only if the submitted keys changed).
  *
+ * @version 1.3 - a site's key whose site no longer counts is refused, never given the buyer's tier slot
+ * @version 1.2 - a key minted for a hosted site enrolls that site's own slot (hosting_launch S5)
  * @version 1.1 - the tenant sends its relay client public key (specs/relay_without_a_shell.md)
  */
 function fleet_enroll_logic(array $input): LogicResult {
@@ -26,11 +28,18 @@ function fleet_enroll_logic(array $input): LogicResult {
 	}
 
 	try {
+		// A key minted for a hosted site enrolls that site's own slot, and
+		// nothing else once the site no longer counts; any other key enrolls
+		// the buyer's tier slot.
+		$provision = FleetService::provisionForKey($user_id, $session->get_api_key_id());
+		if ($provision === null && FleetService::isSiteKey($session->get_api_key_id())) {
+			return LogicResult::error('This site\'s hosting no longer includes a hosted relay slot.');
+		}
 		$slot = FleetService::enroll($user_id, array(
 			'public_key'      => trim((string)($input['public_key'] ?? '')),
 			'wg_public_key'   => trim((string)($input['wg_public_key'] ?? '')),
 			'pull_public_key' => trim((string)($input['pull_public_key'] ?? '')),
-		));
+		), $provision);
 	} catch (FleetServiceException $e) {
 		return LogicResult::error($e->getMessage());
 	}
