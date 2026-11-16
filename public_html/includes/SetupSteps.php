@@ -36,6 +36,9 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.27
+ * @changelog 1.27 - interruptExempt() loads plugin bootstraps before reading quiet pages: on a real request
+ *                  nothing had loaded them yet, so a purchase page was still interrupted
  * @version 1.26
  * @changelog 1.26 - the Secure connection step renders when done (render_when_done), for its IPv6 offer;
  *                  quietOn(): a plugin names pages the login interrupt leaves alone (a purchase under way);
@@ -331,6 +334,11 @@ class SetupSteps {
 	}
 
 	public static function interruptExempt(string $path): bool {
+		if ($path === '/setup' || $path === '/logout') {
+			return true;
+		}
+		// Quiet pages register from plugin bootstraps, which load lazily.
+		self::ensurePluginSteps();
 		if (isset(self::$quiet_paths[$path])) {
 			return true;
 		}

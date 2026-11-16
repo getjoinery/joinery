@@ -7,6 +7,7 @@
  * set-domains job dispatched by the relay reconcile task), which the shard's map merge
  * then enforces on EVERY subsequent sync — the claim is checked continuously,
  * not once at enrollment.
+ * @version 1.2 - the verification is written on the slot rule (rule_checked_write): a member's site key was refused
  * @version 1.1 - the caller's slot is the one its key speaks for: a hosted site's own, or the buyer's tier slot
  */
 function fleet_verify_domain_logic(array $input): LogicResult {
@@ -33,8 +34,13 @@ function fleet_verify_domain_logic(array $input): LogicResult {
 		return LogicResult::error('That claim does not exist.');
 	}
 
+	// The caller's own slot (the key's site, or the buyer's tier slot) was
+	// found above; the fleet rows are written on that rule, whatever the
+	// account's level (a hosting buyer is an ordinary member).
 	try {
-		$result = FleetService::verifyClaim($slot, $claim);
+		$result = SystemBase::rule_checked_write(function () use ($slot, $claim) {
+			return FleetService::verifyClaim($slot, $claim);
+		});
 	} catch (FleetServiceException $e) {
 		return LogicResult::error($e->getMessage());
 	}

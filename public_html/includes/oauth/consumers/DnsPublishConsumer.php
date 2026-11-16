@@ -16,6 +16,7 @@
  * returns it is gone. Providers that do issue refresh tokens (Google, Azure,
  * DigitalOcean, DNSimple) are treated exactly like Linode, which issues none.
  *
+ * @version 1.2 - a page-set floor saves the write receipts on that page's rule (rule_checked_write)
  * @version 1.1 - the permission floor comes from the flow (min_level) when the page that started it set one
  * @version 1.0
  */
@@ -59,13 +60,18 @@ class DnsPublishConsumer implements OAuth2Consumer {
 			'account_id'   => (string)($payload['account_id'] ?? ''),
 		);
 
-		$publish = DnsPublishBox::publish(
-			$driver_class,
-			$credential,
-			$plan,
-			(array)($payload['decisions'] ?? array()),
-			DnsReconciler::APPLY_CONFIRMED
-		);
+		$write = function () use ($driver_class, $credential, $plan, $payload) {
+			return DnsPublishBox::publish(
+				$driver_class,
+				$credential,
+				$plan,
+				(array)($payload['decisions'] ?? array()),
+				DnsReconciler::APPLY_CONFIRMED
+			);
+		};
+		// A page that set its own floor proved the domain is the visitor's: the
+		// write receipts are saved on that rule (a hosting buyer is a member).
+		$publish = isset($payload['min_level']) ? SystemBase::rule_checked_write($write) : $write();
 
 		// The only copies of anything write-capable, dropped before the redirect.
 		unset($credential);

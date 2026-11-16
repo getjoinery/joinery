@@ -433,6 +433,12 @@ $rule_permitted = array(
 	'logic/drive_device_link_approve_logic.php' => 'a member approving a device code actionable_by() proved is theirs: the save binds the link to them',
 	'plugins/mailbox/logic/device_ai_host_logic.php' => 'a member clearing their own device AI address removes their own row',
 	'data/content_versions_class.php' => 'a version of a row being saved, after that save\'s own write rule decided',
+	'plugins/mailbox/logic/fleet_claim_domain_logic.php' => 'a domain claim on the caller\'s own fleet slot (callerSlot: the key\'s site or the buyer\'s tier slot)',
+	'plugins/mailbox/logic/fleet_verify_domain_logic.php' => 'verifying a claim verifyClaim checked belongs to the caller\'s own slot',
+	'plugins/mailbox/logic/fleet_release_logic.php' => 'releasing the caller\'s own fleet slot (callerSlot)',
+	'plugins/mailbox/logic/fleet_enroll_logic.php' => 'enrolling the caller\'s own site or tier slot, once enroll checked the site is theirs and entitled',
+	'plugins/server_manager/logic/profile_sites_logic.php' => 'the DNS write receipts for a buyer\'s own-domain site, found in their own list, written with their own DNS credential',
+	'includes/oauth/consumers/DnsPublishConsumer.php' => 'the DNS write receipts when the page that started the flow set its own floor (the visitor\'s own domain)',
 );
 $rule_found = array();
 foreach ($scan as $file) {

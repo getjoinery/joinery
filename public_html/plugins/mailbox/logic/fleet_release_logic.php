@@ -8,6 +8,7 @@
  * undrained sealed mail — so release, keep pulling until the spool drains,
  * and the slot evicts cleanly. Mail queues at senders during the tenant's
  * MX change; nothing is lost.
+ * @version 1.2 - the release is written on the slot rule (rule_checked_write): a member's key was refused
  * @version 1.1 - the caller's slot is the one its key speaks for: a hosted site's own, or the buyer's tier slot
  */
 function fleet_release_logic(array $input): LogicResult {
@@ -24,9 +25,14 @@ function fleet_release_logic(array $input): LogicResult {
 		return LogicResult::error('No fleet slot to release.');
 	}
 
+	// The caller's own slot (the key's site, or the buyer's tier slot) was
+	// found above; the fleet rows are written on that rule, whatever the
+	// account's level (a hosting buyer is an ordinary member).
 	// Release + immediate claim revocation (the domains' next home must be
 	// able to claim them before this slot finishes evicting).
-	FleetService::releaseSlot($slot);
+	SystemBase::rule_checked_write(function () use ($slot) {
+		FleetService::releaseSlot($slot);
+	});
 
 	return LogicResult::render(array(
 		'released' => true,

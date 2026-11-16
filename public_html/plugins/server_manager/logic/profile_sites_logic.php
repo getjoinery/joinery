@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.12 - the box's write receipts are saved on the buyer's-own-site rule (rule_checked_write): a member was refused
  * @version 1.11 - the publish box (dns_box) adds a buyer's own-domain records through their DNS host; aaaa_record
  *                 lists the optional IPv6 record while the server has one the name does not answer with
  * @version 1.10 - dmarc_record: the optional DMARC record while the buyer's domain has none (hosting_paid_launch B4)
@@ -114,9 +115,13 @@ function profile_sites_logic(array $input): LogicResult {
 	foreach ($provisions as $provision) {
 		if ((int)$provision->key === $dns_site_id) { $dns_provision = $provision; break; }
 	}
-	$dns_result = DnsPublishBox::handle($input, function () use ($dns_provision) {
-		return $dns_provision !== null ? profile_sites_dns_plan($dns_provision) : null;
-	}, $self_url . '?dns_site=' . $dns_site_id, 0);
+	// The write receipts it keeps (which records were written here, and when)
+	// are saved on that rule: the domain is the buyer's own.
+	$dns_result = SystemBase::rule_checked_write(function () use ($input, $dns_provision, $self_url, $dns_site_id) {
+		return DnsPublishBox::handle($input, function () use ($dns_provision) {
+			return $dns_provision !== null ? profile_sites_dns_plan($dns_provision) : null;
+		}, $self_url . '?dns_site=' . $dns_site_id, 0);
+	});
 	if ($dns_result !== null) {
 		return $dns_result;
 	}

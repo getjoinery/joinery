@@ -36,6 +36,7 @@ $node->set('mgn_port', 8080);
 $node->set('mgn_uptime_enabled', false);
 $node->save();
 $node->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', (int)$node->key);
 $v4 = (string)$node->get('mgn_host');
 $v6 = '2001:db8::' . random_int(16, 4000);
 
@@ -58,6 +59,8 @@ $provision->set('cvp_mail_records', json_encode(array(
 )));
 $provision->save();
 $provision->load();
+// Registered after the node, so teardown (newest first) removes it before the node it points at.
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', (int)$provision->key);
 
 section('The plan is every record the site asks for');
 DnsResolver::setBackend(new FakeDnsBackend(array()));
@@ -117,9 +120,5 @@ check(strpos($consumer_src, "\$payload['min_level']") !== false,
 	'the sign-in callback holds the grant to the floor the flow carried');
 
 DnsResolver::setBackend(null);
-$provision->set('cvp_delete_time', gmdate('Y-m-d H:i:s'));
-$provision->save();
-$node->set('mgn_delete_time', gmdate('Y-m-d H:i:s'));
-$node->save();
 
 harness_finish();

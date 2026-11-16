@@ -474,6 +474,22 @@ if ($slot_a && $slot_b) {
 	check(in_array('MX', $listed_types, true) && in_array('TXT', $listed_types, true),
 		'and their sites page lists the MX and the TXT', json_encode($listed));
 
+	// A site's key belongs to its buyer, an ordinary member: the site's own
+	// claim through the API is written on its slot rule, never refused for the
+	// account's level (found on dev 2026-11-16: every hosted site's claim was).
+	section('A member\'s site key claims its own domain');
+	require_once(PathHelper::getIncludePath('plugins/mailbox/logic/fleet_claim_domain_logic.php'));
+	$member_session = SessionControl::get_instance();
+	$member_session->set_api_user((int)$starter_buyer->key, (int)$site_a->get('cvp_fleet_apk_api_key_id'), 0);
+	$claimed = fleet_claim_domain_logic(array('domain' => (string)$site_a->get('cvp_domain')));
+	$claim_data = $claimed->data ?? array();
+	check($claimed->error === null && !empty($claim_data['claim_id']),
+		'the action claims the site\'s domain for its slot', (string)$claimed->error);
+	if (!empty($claim_data['claim_id'])) {
+		harness_register_row('mfd_mailbox_fleet_domain_claims', 'mfd_mailbox_fleet_domain_claim_id', $claim_data['claim_id']);
+	}
+	$member_session->clear_api_user();
+
 	// The same site as Managed (its own instance on our account): the leg
 	// takes it too, and leaves the records for the buyer (B11).
 	$site_b->set('cvp_inbound_dns_state', null);

@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.34 - the setup-wizard gate asks shouldInterrupt() before interruptExempt(), so plugins' quiet pages are loaded when read
  * @version 1.33 - the setup-wizard interrupt remembers the page it took someone from (SetupSteps::rememberDestination)
  * @version 1.32 - set_return() and the sign-in session regenerate are safe on the command line (no REQUEST_URI, output already sent); a vault that fails to close on a network change is recorded
  * @version 1.31 - save_visitor_event() takes a visitor id, for a conversion that completes in another browser
@@ -1988,7 +1989,10 @@ class SessionControl{
 		// there; dismissing without enrolling lands on the stricter gates
 		// below. SetupSteps::interruptExempt() lists the paths left alone.
 		require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
-		if (!SetupSteps::interruptExempt($path) && SetupSteps::shouldInterrupt()) {
+		// shouldInterrupt() first: it is free once the session is clear, and
+		// when it says yes it has loaded the plugin bootstraps whose quiet pages
+		// (a purchase under way) interruptExempt() then reads.
+		if (SetupSteps::shouldInterrupt() && !SetupSteps::interruptExempt($path)) {
 			SetupSteps::rememberDestination();
 			return '/setup';
 		}
