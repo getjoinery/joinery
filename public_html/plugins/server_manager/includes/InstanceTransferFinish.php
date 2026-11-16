@@ -24,6 +24,8 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.4 - link_node_services(): the node-linked mail and backup rows, shared with an own-Linode site built with the
+ *                email and backups bundle (specs/own_linode_we_install.md W5); a newly built site's mail row may be unverified ($mail_verified), and its backups link without its mail ($link_mail)
  * @version 1.3 - asks the account of ours the server was in (cloud_accounts_list)
  * @version 1.2 - a finished transfer marks the node hosted on the customer's account
  * @version 1.1 - the last step marks its email, note and alert as each happens, so a crash never repeats them
@@ -215,19 +217,42 @@ class InstanceTransferFinish {
 			$row->set('itx_error', 'The site has no node, so its mail and backups could not be carried on. Grant them by hand.');
 			return true;
 		}
+		self::link_node_services($provision, $node, (string)$row->get('itx_paid_until'),
+			'Moved from Managed on ' . gmdate('Y-m-d') . '.');
+		return true;
+	}
+
+	/**
+	 * A site's mail and backups as node-linked Services rows (§5a): what a
+	 * Managed site keeps when it moves to its buyer's own account, and what an
+	 * own-Linode site with the email and backups bundle is built into
+	 * (specs/own_linode_we_install.md W5). Idempotent: a row the node already
+	 * has is left as it is.
+	 *
+	 * Mail is a row copy: the provider pieces the hosted mail leg built become
+	 * the tenant's, and the provision lets go of them — the provider's webhook
+	 * matches provisions first and would otherwise keep counting sends against
+	 * the old row. Backups stay on the fleet path; the row's ladder acts on
+	 * the node. $order_item_id names the services line the rows follow, when
+	 * one paid for them.
+	 */
+	public static function link_node_services(CustomerCloudProvision $provision, ManagedNode $node, string $paid_until,
+			string $note, int $order_item_id = 0, bool $mail_verified = true, bool $link_mail = true): void {
 		$user_id = (int)$provision->get('cvp_usr_user_id');
-		$paid_until = (string)$row->get('itx_paid_until');
 		$domain = strtolower(trim((string)$provision->get('cvp_domain')));
 
 		$subaccount = trim((string)$provision->get('cvp_smtp2go_subaccount_id'));
-		if ($subaccount !== '' || ServiceTenant::forNode((int)$node->key, ServiceTenant::SERVICE_MAIL) !== null) {
+		if ($link_mail && ($subaccount !== '' || ServiceTenant::forNode((int)$node->key, ServiceTenant::SERVICE_MAIL) !== null)) {
 			$mail = ServiceTenant::forNode((int)$node->key, ServiceTenant::SERVICE_MAIL);
 			if ($mail === null) {
-				$mail = self::new_tenant($node, $user_id, ServiceTenant::SERVICE_MAIL, $domain, $paid_until);
+				$mail = self::new_tenant($node, $user_id, ServiceTenant::SERVICE_MAIL, $domain, $paid_until, $note, $order_item_id);
 				$mail->set('svt_provider_subaccount_id', $subaccount);
 				$mail->set('svt_provider_user_id', trim((string)$provision->get('cvp_smtp2go_user_id')) ?: null);
 				$mail->set('svt_provider_domain', Smtp2GoLeg::sendingDomain($domain));
-				$mail->set('svt_mail_state', ServiceTenant::MAIL_DOMAIN_VERIFIED);
+				// A moved Managed site's domain was verified while hosted; a newly
+				// built one may still be waiting, and the services reconcile
+				// keeps asking the provider until it is.
+				$mail->set('svt_mail_state', $mail_verified ? ServiceTenant::MAIL_DOMAIN_VERIFIED : ServiceTenant::MAIL_DOMAIN_ADDED);
 				$records = $provision->get('cvp_mail_records');
 				$mail->set('svt_mail_records', is_string($records) ? $records : json_encode($records ?: array()));
 				// Left at 0 so the next reconcile re-sets the provider's limit
@@ -246,7 +271,7 @@ class InstanceTransferFinish {
 
 		$shelf = ServiceTenant::forNode((int)$node->key, ServiceTenant::SERVICE_SHELF);
 		if ($shelf === null) {
-			$shelf = self::new_tenant($node, $user_id, ServiceTenant::SERVICE_SHELF, $domain, $paid_until);
+			$shelf = self::new_tenant($node, $user_id, ServiceTenant::SERVICE_SHELF, $domain, $paid_until, $note, $order_item_id);
 			$shelf->set('svt_allowance', JoineryServices::allowance(ServiceTenant::SERVICE_SHELF));
 			$shelf->set('svt_figure', NodeBackupShelf::bytes($node));
 			$shelf->set('svt_figure_time', gmdate('Y-m-d H:i:s'));
@@ -258,10 +283,10 @@ class InstanceTransferFinish {
 		if (NodeBackupShelf::paused_for_shelf($node)) {
 			NodeBackupShelf::apply_allowance($node, JoineryServices::allowance(ServiceTenant::SERVICE_SHELF));
 		}
-		return true;
 	}
 
-	private static function new_tenant(ManagedNode $node, int $user_id, string $service, string $host, string $paid_until): ServiceTenant {
+	private static function new_tenant(ManagedNode $node, int $user_id, string $service, string $host, string $paid_until,
+			string $note, int $order_item_id = 0): ServiceTenant {
 		$tenant = new ServiceTenant(NULL);
 		$tenant->set('svt_usr_user_id', $user_id);
 		$tenant->set('svt_mgn_managed_node_id', (int)$node->key);
@@ -269,7 +294,10 @@ class InstanceTransferFinish {
 		$tenant->set('svt_host', $host);
 		$tenant->set('svt_state', ServiceTenant::STATE_ACTIVE);
 		$tenant->set('svt_paid_until', $paid_until !== '' ? $paid_until : null);
-		$tenant->set('svt_note', 'Moved from Managed on ' . gmdate('Y-m-d') . '.');
+		$tenant->set('svt_note', $note);
+		if ($order_item_id > 0) {
+			$tenant->set('svt_odi_order_item_id', $order_item_id);
+		}
 		return $tenant;
 	}
 

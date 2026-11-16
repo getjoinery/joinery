@@ -10,6 +10,8 @@
  * Status: 'active' (usable), 'refresh_failed' (token refresh failed; needs
  * re-connect), 'revoked' (provider rejected the grant; needs re-connect).
  *
+ * @version 1.4 - live_for_build(): a grant with an hour left; clear_grant() leaves the account released, and
+ *                is_build_only_grant() (specs/own_linode_we_install.md W3)
  * @version 1.3 - the list of accounts a server can be created on is HeldCloudAccounts::targets(), ours and customers'
  * @version 1.2 - cca_account_name (the provider's own name for the account, read at connect)
  * @version 1.2 - no provider check of its own: the column defaults to linode and may not be empty
@@ -63,6 +65,61 @@ class CustomerCloudAccount extends SystemBase {
 			return false;
 		}
 		return strtotime($expires . ' UTC') < time() && trim((string)$account->get('cca_refresh_token')) === '';
+	}
+
+	/** How long a grant must still live for a build to start on it: a build uses it through boot and join. */
+	const BUILD_GRANT_SECONDS = 3600;
+
+	/**
+	 * Whether this user's Linode grant can carry a build now: an active,
+	 * stored grant that is not expired and has at least BUILD_GRANT_SECONDS
+	 * left (or can be refreshed). cca_status stays 'active' after a Linode
+	 * grant dies, so the status alone is not the answer
+	 * (specs/own_linode_we_install.md W3).
+	 */
+	public static function live_for_build(int $user_id, string $provider = 'linode'): ?CustomerCloudAccount {
+		$account = self::get_for_user($user_id, $provider);
+		if ($account === null || (string)$account->get('cca_status') !== 'active'
+				|| trim((string)$account->get('cca_access_token')) === '') {
+			return null;
+		}
+		if (trim((string)$account->get('cca_refresh_token')) !== '') {
+			return $account;
+		}
+		$expires = trim((string)$account->get('cca_token_expires'));
+		if ($expires === '') {
+			return $account;
+		}
+		return strtotime($expires . ' UTC') - time() >= self::BUILD_GRANT_SECONDS ? $account : null;
+	}
+
+	/** The status of an account whose build-only grant was let go: the pages ask to connect again. */
+	const STATUS_RELEASED = 'released';
+
+	/** The scope an own-Linode build asks for, and nothing else. */
+	const BUILD_SCOPE = 'linodes:read_write';
+
+	/**
+	 * Whether the stored grant is the build-only one an own-Linode site asked
+	 * for. A wider grant (the Connect page's, for a site copy's address swap)
+	 * was given for something else and is never let go by a build.
+	 */
+	public function is_build_only_grant(): bool {
+		$scopes = preg_split('/[\s,]+/', trim((string)$this->get('cca_scopes')), -1, PREG_SPLIT_NO_EMPTY);
+		return $scopes === array(self::BUILD_SCOPE);
+	}
+
+	/**
+	 * Forget the stored grant: a build that no longer needs it keeps nothing
+	 * of the buyer's account. The account reads released, so the pages ask
+	 * the buyer to connect again rather than saying it is connected.
+	 */
+	public function clear_grant(): void {
+		$this->set('cca_access_token', null);
+		$this->set('cca_refresh_token', null);
+		$this->set('cca_token_expires', null);
+		$this->set('cca_status', self::STATUS_RELEASED);
+		$this->save();
 	}
 
 	function prepare() {

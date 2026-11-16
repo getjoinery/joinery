@@ -32,6 +32,9 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.14 - an own-Linode draft without a live Linode grant sends its buyer to Connect on the setup (needs_linode)
+ * @version 1.13 - a site built on its buyer's own Linode is described like a hosted one (profile_sites_we_built):
+ *                its records, and its email only with the bundle; own_linode and with_services for its card
  * @version 1.12 - the box's write receipts are saved on the buyer's-own-site rule (rule_checked_write): a member was refused
  * @version 1.11 - the publish box (dns_box) adds a buyer's own-domain records through their DNS host; aaaa_record
  *                 lists the optional IPv6 record while the server has one the name does not answer with
@@ -235,7 +238,13 @@ function profile_sites_logic(array $input): LogicResult {
 			'pre_payment'     => $provision->is_pre_payment(),
 			'summary'         => $provision->is_pre_payment()
 				? profile_sites_draft_summary($provision, ManagedSiteDraft::product_for_row($provision)) : '',
-			'payment_form'    => ($status === 'pending_payment' && !ManagedSiteDraft::in_cart($provision))
+			// An own-Linode draft pays only on a grant that can carry the build;
+			// without one, its card sends the buyer to Connect on the setup
+			// (reviewer2 B7).
+			'needs_linode'    => $status === 'pending_payment' && ManagedSiteDraft::plan_of($provision) === 'own_linode'
+				&& CustomerCloudAccount::live_for_build($user_id) === null,
+			'payment_form'    => ($status === 'pending_payment' && !ManagedSiteDraft::in_cart($provision)
+					&& !(ManagedSiteDraft::plan_of($provision) === 'own_linode' && CustomerCloudAccount::live_for_build($user_id) === null))
 				? ManagedSiteDraft::payment_form($provision, ManagedSiteDraft::product_for_row($provision), 'Finish payment') : '',
 			'in_cart'         => $status === 'pending_payment' && ManagedSiteDraft::in_cart($provision),
 			'taken'           => $taken,
@@ -246,6 +255,11 @@ function profile_sites_logic(array $input): LogicResult {
 				? $provision->admin_password_state() : 'pending',
 			'transfer'        => $provision->is_pre_payment() ? null : profile_sites_transfer($provision, $session),
 			'mail_state'      => (string)$provision->get('cvp_mail_state'),
+			// On its buyer's own Linode: the card says whose server it is, and
+			// whether our email and backups came with it.
+			'own_linode'      => !$provision->is_pre_payment() && ManagedSiteDraft::plan_of($provision) === 'own_linode',
+			'with_services'   => (int)$provision->get('cvp_services_order_item_id') > 0,
+			'show_mail'       => $hosted || (int)$provision->get('cvp_services_order_item_id') > 0,
 			// An open suspension's reason, shown to the customer (HostedSuspensions).
 			'suspended'       => ($sus = HostedSuspension::open_for($provision->key)) ? (string)$sus->get('hsu_reason') : null,
 			'plan_state'      => $trial ? (string)$trial->get('htr_state') : '',
@@ -280,7 +294,7 @@ function profile_sites_logic(array $input): LogicResult {
  * Until then the site has no address and no certificate.
  */
 function profile_sites_dns_record($provision): ?array {
-	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
 			|| JobResultProcessor::plane_registered_domain($provision)) {
 		return null;
@@ -314,6 +328,15 @@ function profile_sites_dns_record($provision): ?array {
 }
 
 /**
+ * A site we built and whose records we describe: one we host, or one built on
+ * its buyer's own Linode (specs/own_linode_we_install.md W6). A site on a
+ * buyer's own cloud account set up any other way is theirs to describe.
+ */
+function profile_sites_we_built($provision): bool {
+	return $provision->is_operator_hosted() || ManagedSiteDraft::plan_of($provision) === 'own_linode';
+}
+
+/**
  * The IPv6 record a hosted site on its buyer's own domain can add, as
  * array('type' => 'AAAA', 'value' => address), or null: the server has no
  * IPv6 address, the name already answers with it, or we registered the name
@@ -321,7 +344,7 @@ function profile_sites_dns_record($provision): ?array {
  * site works without it, and with it visitors on IPv6 reach it directly.
  */
 function profile_sites_aaaa_record($provision): ?array {
-	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
 			|| JobResultProcessor::plane_registered_domain($provision)) {
 		return null;
@@ -357,7 +380,7 @@ function profile_sites_aaaa_record($provision): ?array {
  * not built yet).
  */
 function profile_sites_dns_plan($provision): ?DnsRecordPlan {
-	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
 			|| JobResultProcessor::plane_registered_domain($provision)) {
 		return null;
@@ -403,7 +426,7 @@ function profile_sites_dns_plan($provision): ?DnsRecordPlan {
  * record is profile_sites_dmarc_record()'s, shown on its own.
  */
 function profile_sites_mail_records($provision): array {
-	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| JobResultProcessor::plane_registered_domain($provision)) {
 		return array();
 	}
@@ -446,7 +469,7 @@ function profile_sites_mail_records($provision): array {
  * arrives and sends without it.
  */
 function profile_sites_dmarc_record($provision): ?array {
-	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionHostedMail::records_of($provision)) {
 		return null;
 	}

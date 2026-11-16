@@ -665,8 +665,10 @@ check($l2->get('cvp_status') === 'ready', 'the second site, at the limit of 2, a
 list($l3, $l3_data) = $lim_buy($lim_buyer, 'msp-limit-three-' . $run . '.com');
 check($provider->checkAvailability($managed, 1, 1, $l3_data) === CustomerCloudFulfillment::limit_sentence(2),
 	'a third is refused at checkout, while declining is free, with the limit named');
-check($provider->checkAvailability($managed, 0, 1, $l3_data) === null,
-	'a server on the buyer\'s own cloud account is not ours, so it is not limited');
+// The hosted limit counts our servers only; a site on the buyer's own Linode
+// has its own limit (own_linode_purchase). A Managed draft is never paid as one.
+check($provider->checkAvailability($managed, 0, 1, $l3_data) === CustomerCloudFulfillment::WRONG_PLAN_SENTENCE,
+	'a Managed draft cannot be paid with the own-Linode product to get around the limit');
 harness_set_setting_mem('server_manager_hosted_sites_limit_exempt', '1, ' . (int)$lim_buyer->key);
 check($provider->checkAvailability($managed, 1, 1, $l3_data) === null, 'an account on the exempt list passes');
 harness_set_setting_mem('server_manager_hosted_sites_limit_exempt', '');

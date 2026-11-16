@@ -7,6 +7,8 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.12 - an own-Linode draft waiting on its Linode connection offers Connect, not payment
+ * @version 2.11 - a site on its buyer's own Linode says whose server it is and whether email and backups came with it
  * @version 2.10 - Add these records for me (the DNS publish box) above the record lists, and the optional
  *                 IPv6 record on its own
  * @version 2.9 - an optional DMARC record on its own, below the email records (hosting_paid_launch B4);
@@ -104,6 +106,9 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<?php if ($site['status'] === 'draft'): ?>
 				<a href="<?php echo htmlspecialchars($configure_url . '?cvp_customer_cloud_provision_id=' . (int)$site['id']); ?>"
 					class="sms-visit">Continue</a>
+			<?php elseif ($site['needs_linode']): ?>
+				<a href="<?php echo htmlspecialchars($configure_url . '?cvp_customer_cloud_provision_id=' . (int)$site['id']); ?>"
+					class="sms-visit">Connect your Linode account</a>
 			<?php elseif ($site['in_cart']): ?>
 				<a href="/cart" class="sms-visit">Finish payment</a>
 			<?php elseif ($site['payment_form'] !== ''): ?>
@@ -129,7 +134,14 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 		<dl class="sms-facts">
 			<dt>Setup</dt>
 			<dd><?php echo htmlspecialchars($status_labels[$site['status']] ?? $site['status']); ?></dd>
-			<?php if ($site['hosted'] && $site['mail_state'] !== ''): ?>
+			<?php if ($site['own_linode']): ?>
+			<dt>Server</dt>
+			<dd>In your own Linode account. Linode bills you for it.</dd>
+			<dt>Email and backups</dt>
+			<dd><?php echo $site['with_services'] ? 'Through us, with your subscription.'
+				: 'Not included. Your site\'s setup offers ours, or set up your own mail provider.'; ?></dd>
+			<?php endif; ?>
+			<?php if ($site['show_mail'] && $site['mail_state'] !== ''): ?>
 			<dt>Email</dt>
 			<dd><?php echo htmlspecialchars($mail_labels[$site['mail_state']] ?? $site['mail_state']); ?></dd>
 			<?php endif; ?>

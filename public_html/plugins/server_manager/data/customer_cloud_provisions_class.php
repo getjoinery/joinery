@@ -42,6 +42,8 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.37 - cvp_plan, cvp_services_order_item_id, cvp_services_wanted and cvp_grant_released_time; own_linode_sites_held() and own_linode_site_limit()
+ *                (specs/own_linode_we_install.md)
  * @version 1.36 - cvp_disputed_time and cvp_disputes: a payment for this site was disputed (HostedSuspensions, hosting_launch S6)
  * @version 1.35 - cvp_fleet_apk_api_key_id, cvp_inbound_dns_state: a site's own relay slot and its records (hosting_launch S5)
  * @version 1.34 - hosted_sites_held() counts only sold sites: a starter host an admin made counted toward their limit (B11)
@@ -180,6 +182,15 @@ class CustomerCloudProvision extends SystemBase {
 		// container site's row never holds an instance id: the only instance in
 		// sight is its host's, and acting on that would reach every site on it.
 		'cvp_landing'                => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'instance', 'allowed_values'=>array('instance', 'container')),
+		// The plan a buyer's draft was frozen for (ManagedSiteDraft::PLANS). Empty on rows from before it,
+		// whose plan is read from the landing (specs/own_linode_we_install.md W1).
+		'cvp_plan'                   => array('type'=>'varchar(12)', 'allowed_values'=>array('starter', 'managed', 'own_linode')),
+		// The getjoinery services line paid with an own-Linode site, in the same order (W4).
+		'cvp_services_order_item_id' => array('type'=>'int8'),
+		// The buyer ticked the email and backups bundle on an own-Linode setup (W4).
+		'cvp_services_wanted'        => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
+		// When the build-only Linode grant was let go after this own-Linode site was built: once per site (W3).
+		'cvp_grant_released_time'    => array('type'=>'timestamp(6)'),
 		'cvp_mgh_managed_host_id'    => array('type'=>'int8'),
 		// A container site's site_create job on its host (ProvisionStarterSites).
 		'cvp_install_job_id'         => array('type'=>'int8'),
@@ -535,6 +546,28 @@ class CustomerCloudProvision extends SystemBase {
 	public static function hosted_limit_exempt(int $user_id): bool {
 		$list = (string)Globalvars::get_instance()->get_setting('server_manager_hosted_sites_limit_exempt');
 		return $user_id > 0 && in_array((string)$user_id, preg_split('/[\s,]+/', trim($list), -1, PREG_SPLIT_NO_EMPTY), true);
+	}
+
+	/** The most own-Linode sites one account may have (server_manager_own_linode_sites_per_buyer). */
+	public static function own_linode_site_limit(): int {
+		$n = (int)Globalvars::get_instance()->get_setting('server_manager_own_linode_sites_per_buyer');
+		return $n > 0 ? $n : 3;
+	}
+
+	/**
+	 * How many own-Linode sites this buyer holds past payment, not deleted.
+	 * Each is a node this plane manages for good, so the free plan is capped
+	 * per account (specs/own_linode_we_install.md W2). $except_id leaves out
+	 * the row being decided.
+	 */
+	public static function own_linode_sites_held(int $user_id, int $except_id = 0): int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$pre = "'" . implode("','", self::PRE_PAYMENT_STATUSES) . "'";
+		$q = $db->prepare("SELECT COUNT(*) FROM cvp_customer_cloud_provisions
+		          WHERE cvp_delete_time IS NULL AND cvp_plan = 'own_linode' AND cvp_usr_user_id = ?
+		            AND cvp_status NOT IN ($pre) AND cvp_customer_cloud_provision_id <> ?");
+		$q->execute(array($user_id, $except_id));
+		return (int)$q->fetchColumn();
 	}
 
 	/**
@@ -1033,6 +1066,15 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 
 		// Rows that hold a site: a bare install is a machine with none (a
 		// starter host, a relay shard), never one of anybody's sites.
+		// Sites paid with the email and backups bundle (specs/own_linode_we_install.md W4).
+		if (!empty($this->options['has_services_order'])) {
+			$filters['cvp_services_order_item_id'] = "IS NOT NULL";
+		}
+
+		if (isset($this->options['plan'])) {
+			$filters['cvp_plan'] = [(string)$this->options['plan'], PDO::PARAM_STR];
+		}
+
 		if (!empty($this->options['has_site'])) {
 			$filters['cvp_install_mode'] = "<> 'bare'";
 		}

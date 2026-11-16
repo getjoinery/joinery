@@ -14,6 +14,7 @@
  *   - colour pickers: .colorpicker-wrapper;
  *   - AJAX search selects: select[data-jy-ajax-select="endpoint"].
  *
+ * @version 1.1 - a show or hide cancels the field's pending fade: switching an option back within 300 ms left it hidden
  * @version 1.0
  */
 
@@ -120,20 +121,28 @@
         return document.getElementById(id + "_container") || document.getElementById(id);
     }
 
+    // Each field's pending fade, so a later show or hide cancels an earlier
+    // one: choosing an option and back within the fade must not leave the
+    // field hidden by the first choice's timer.
+    function later(el, fn, ms) {
+        clearTimeout(el._jyVisTimer);
+        el._jyVisTimer = setTimeout(fn, ms);
+    }
+
     function apply(rules) {
         (rules.show || []).forEach(function(id) {
             var el = target(id);
             if (!el) return;
             el.style.display = "";
             el.classList.remove("fw-field-hidden");
-            setTimeout(function() { el.classList.add("fw-field-visible"); }, 10);
+            later(el, function() { el.classList.add("fw-field-visible"); }, 10);
         });
         (rules.hide || []).forEach(function(id) {
             var el = target(id);
             if (!el) return;
             el.classList.remove("fw-field-visible");
             el.classList.add("fw-field-hidden");
-            setTimeout(function() { el.style.display = "none"; }, 300);
+            later(el, function() { el.style.display = "none"; }, 300);
         });
     }
 

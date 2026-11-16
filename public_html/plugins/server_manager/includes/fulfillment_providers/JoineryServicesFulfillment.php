@@ -32,6 +32,8 @@
  *
  * A Managed site never buys this: its hosting is the entitlement.
  *
+ * @version 1.2 - a line bought with an own-Linode site names its draft: checked against the site's install line in
+ *                the same cart, recorded on the provision at payment; bundle_offer() (own_linode_we_install W4)
  * @version 1.1 - reviewer2: a released service takes a paid date without coming back (B1); past_due is not
  *                paying (B2); what is on sale is read once per request (B6)
  * @version 1.0 - specs/services_phase3_selling_nudge.md §1, §4 items 1 and 2
@@ -76,6 +78,9 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 	const STALE_SITE_SENTENCE = 'The site in your cart is no longer connected to this account. '
 		. 'Remove it from the cart and buy again from your connected sites.';
 
+	const DRAFT_NOT_IN_CART_SENTENCE = 'Email and backups are bought here with their site. The site setup they belong to '
+		. 'is no longer in your cart: remove this line, and continue to payment from your site setup again.';
+
 	const ALREADY_RENEWING_SENTENCE = 'This site already has a getjoinery services subscription, and it renews on its own. '
 		. 'Remove it from the cart; there is nothing more to buy.';
 
@@ -114,6 +119,17 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 			return 'This product is not set up to grant a service yet.';
 		}
 		$user_id = (int)SessionControl::get_instance()->get_user_id();
+		// Bought with an own-Linode site: only with that site's install line in
+		// the same cart, at the same freeze (B5).
+		$draft_id = JoineryServiceRequirement::draft_id_from($data);
+		if ($draft_id > 0) {
+			$draft = ManagedSiteDraft::load_for_user($draft_id, $user_id);
+			if ($draft === null || (string)$draft->get('cvp_status') !== 'pending_payment'
+					|| ManagedSiteDraft::plan_of($draft) !== 'own_linode' || !ManagedSiteDraft::in_cart($draft)) {
+				return self::DRAFT_NOT_IN_CART_SENTENCE;
+			}
+			return null;
+		}
 		$row = JoineryServiceRequirement::row_for_line($data, $user_id);
 		if ($row === null) {
 			return self::STALE_SITE_SENTENCE;
@@ -126,6 +142,10 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 
 	public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array {
 		$outcome = $order_item->get('odi_is_subscription') ? 'subscription' : 'plain';
+		$draft_id = JoineryServiceRequirement::draft_id_from((array)$order_item->get_raw_data());
+		if ($draft_id > 0) {
+			return self::fulfill_for_site($user, $order_item, $draft_id, $outcome);
+		}
 		// The order is paid: a failure here is written down and alerted with
 		// the order item id, never thrown into the purchase.
 		try {
@@ -285,6 +305,54 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 	 * [{product, version, plan, label, price}], cheapest first. The price is
 	 * the product's, read here and nowhere else.
 	 */
+	/**
+	 * Bought with an own-Linode site: recorded on the site's provision, in any
+	 * state the install line has moved it to (B6). Its mail is set up by the
+	 * hosted mail leg and its Services rows are made once the site is built
+	 * (ProvisionOwnLinode), following this line from then on. Idempotent.
+	 */
+	private static function fulfill_for_site(User $user, OrderItem $order_item, int $draft_id, string $outcome): array {
+		try {
+			$provision = new CustomerCloudProvision($draft_id, TRUE);
+			if (!$provision->key || $provision->get('cvp_delete_time')
+					|| (int)$provision->get('cvp_usr_user_id') !== (int)$user->key) {
+				throw new RuntimeException('The paid line names site #' . $draft_id . ', which is not the buyer\'s.');
+			}
+			if ((int)$provision->get('cvp_services_order_item_id') !== (int)$order_item->key) {
+				$provision->set('cvp_services_order_item_id', (int)$order_item->key);
+				if (trim((string)$provision->get('cvp_mail_state')) === '') {
+					$provision->set('cvp_mail_state', 'pending');
+				}
+				$provision->save();
+			}
+		} catch (\Throwable $e) {
+			self::alert_problem($user, $order_item, $e->getMessage());
+			return array('ref_id' => null, 'label' => 'getjoinery services need attention', 'labels' => null,
+				'outcome' => $outcome);
+		}
+		return array('ref_id' => null, 'label' => 'Email and backups for ' . $provision->get('cvp_domain'),
+			'labels' => null, 'outcome' => $outcome);
+	}
+
+	/**
+	 * The product that grants both email and backups by subscription, as
+	 * offers() describes it, or null when none is on sale. A subscription
+	 * only: the rows an own-Linode site is built with follow the line's period
+	 * (ProvisionOwnLinode::paid_until), which a product bought once has not.
+	 */
+	public static function bundle_offer(): ?array {
+		foreach (self::offers() as $offer) {
+			$services = self::PLANS[$offer['plan']]['services'] ?? array();
+			if (!$offer['version']->is_subscription()) {
+				continue;
+			}
+			if (in_array('mail', $services, true) && in_array('shelf', $services, true)) {
+				return $offer;
+			}
+		}
+		return null;
+	}
+
 	public static function offers(): array {
 		if (!class_exists('Product')) {
 			return array();

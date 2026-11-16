@@ -13,6 +13,7 @@
  * Discovered by interface from this plugin's includes/oauth_consumers/;
  * no registration call is needed.
  *
+ * @version 1.3 - a grant started from an own-Linode site setup returns to it (payload draft_id, load_for_user)
  * @version 1.2 - the account's name is read by any provider driver that can name one (ComputeDriverRegistry)
  * @version 1.1 - records the provider's own name for the account it connects
  * @version 1.0
@@ -68,6 +69,14 @@ class CustomerCloudConsumer implements OAuth2Consumer {
 			$provision->save();
 		}
 
+		// Started from an own-Linode site setup: back to it, if it is still
+		// this buyer's and still before payment; anywhere else, the Connect page.
+		$draft_id = (int)($payload['draft_id'] ?? 0);
+		if ($draft_id > 0) {
+			if (ManagedSiteDraft::load_for_user($draft_id, $user_id) !== null) {
+				return ManagedSiteDraft::CONFIGURE_URL . '?cvp_customer_cloud_provision_id=' . $draft_id . '&connected=1';
+			}
+		}
 		return self::CONNECT_URL . '?connected=1';
 	}
 

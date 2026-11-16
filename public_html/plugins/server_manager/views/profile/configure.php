@@ -10,6 +10,9 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.8 - On your own Linode (specs/own_linode_we_install.md): the plan shows its server note and the email and
+ *                backups tickbox (unticked) and hides the region; the summary names the server and the bundle, and
+ *                offers Connect your Linode account until the grant can carry the build
  * @version 1.7 - a bring-your-own domain is told it adds the address record and the email records, not one record
  * @version 1.6 - the domain check is a data block and assets/js/domain-availability.js
  * @version 1.5 - a plan choice (Starter or Managed) heads the form; the summary names the plan
@@ -65,8 +68,25 @@ echo $steps_html;
 		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
 		<dt>Plan</dt>
 		<dd><?php echo htmlspecialchars($plan_label); ?></dd>
+		<?php if ($own_linode): ?>
+		<dt>Server</dt>
+		<dd>A 1 GB Linode in your own Linode account, in Newark (us-east). Linode bills you for it, from $5 a month.</dd>
+		<dt>Email and backups</dt>
+		<dd><?php if ($row->get('cvp_services_wanted')) {
+				echo 'Yes: email from your site and offsite backups, through us'
+					. ($bundle_price !== '' ? ', ' . htmlspecialchars($bundle_price) : '') . '.';
+			} else {
+				echo 'No. Your site has no email until you set up a mail provider, so a forgotten password cannot be '
+					. 'reset by email. You can add ours later from your site\'s setup.';
+			} ?></dd>
+		<?php endif; ?>
 		<dt>Price</dt>
-		<dd><?php if ($price_sentence !== '') {
+		<dd><?php if ($price_sentence === 'free') {
+				echo 'The setup is free; Linode bills you for the server';
+				if ($row->get('cvp_services_wanted') && $bundle_price !== '') { echo ', and email and backups are ' . htmlspecialchars($bundle_price); }
+				if ($domain_sentence !== '') { echo ', ' . htmlspecialchars($domain_sentence); }
+				echo '.';
+			} elseif ($price_sentence !== '') {
 				echo htmlspecialchars($price_sentence);
 				if ($domain_sentence !== '') { echo ', ' . htmlspecialchars($domain_sentence); }
 				echo '.';
@@ -75,7 +95,22 @@ echo $steps_html;
 			} ?></dd>
 	</dl>
 
-	<?php if ($payment_form !== ''): ?>
+	<?php if ($own_linode && !$linode_live && $product !== null): ?>
+		<section class="smc-connect">
+			<h3>Connect your Linode account</h3>
+			<p>We create one server in your Linode account and build your site on it. Linode asks you to let us
+				manage servers in your account; we use that access for the build only and forget it when your site is
+				ready.</p>
+			<?php if ($linode_connected): ?>
+			<p class="sms-error">Your Linode connection did not come back usable. Connect again.</p>
+			<?php endif; ?>
+			<?php echo PublicPage::action_button('Connect your Linode account', '/profile/server_manager/connect_cloud', array(
+				'hidden' => array('action' => 'connect', 'cvp_customer_cloud_provision_id' => (int)$row->key),
+				'class'  => 'sms-visit',
+			)); ?>
+			<p class="sms-note">No Linode account? You can make one on the way.</p>
+		</section>
+	<?php elseif ($payment_form !== ''): ?>
 		<?php if ($in_cart): ?>
 			<p><a href="/cart" class="sms-visit">Finish payment</a>
 				<span class="sms-note">This site is already in your cart.</span></p>
@@ -133,9 +168,17 @@ if (count($plans) > 1 || ($row !== null && !isset($plans[ManagedSiteDraft::plan_
 		$plan_options[$plan] = $def['label'] . ($plan_prices[$plan] !== '' ? ', ' . preg_replace('/ from today$/', '', $plan_prices[$plan]) : '')
 			. ' — ' . $def['blurb'];
 	}
+	$own_fields = array('with_services', 'with_services_note', 'own_linode_note');
+	$plan_rules = array();
+	foreach ($plans as $plan => $def) {
+		$plan_rules[$plan] = $plan === 'own_linode'
+			? array('show' => $own_fields, 'hide' => array('cvp_region'))
+			: array('hide' => $own_fields, 'show' => array('cvp_region'));
+	}
 	$formwriter->radioinput('plan', 'Plan', array(
-		'options' => $plan_options,
-		'value'   => $values['plan'],
+		'options'          => $plan_options,
+		'value'            => $values['plan'],
+		'visibility_rules' => $plan_rules,
 	));
 }
 
@@ -210,6 +253,22 @@ if (count($regions) > 1) {
 	}
 	$formwriter->dropinput('cvp_region', 'Where the site lives', array(
 		'options' => $region_options, 'value' => $values['cvp_region']));
+}
+
+// On your own Linode: where the server goes, and the email and backups bundle,
+// offered unticked (Q7). Shown when the plan is chosen, or when it is the only one.
+if (isset($plans['own_linode'])) {
+	echo '<div id="own_linode_note" class="form-text">We build your site on a 1 GB Linode in your own Linode account, '
+		. 'in Newark (us-east). Linode bills you for the server, from $5 a month; the setup is free. You connect your '
+		. 'Linode account on the next step.</div>';
+	if ($bundle_price !== '') {
+		$formwriter->checkboxinput('with_services', 'Add email and backups through us, ' . $bundle_price, array(
+			'checked'  => $values['with_services'] !== '',
+		));
+		echo '<p id="with_services_note" class="form-text">Your site sends email from your domain, and its backups are '
+			. 'kept offsite and encrypted. Without it, your site has no email until you set up a mail provider, so a '
+			. 'forgotten password cannot be reset by email.</p>';
+	}
 }
 
 $formwriter->textinput('cvp_buyer_email', 'Site admin email', array(

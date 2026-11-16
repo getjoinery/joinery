@@ -244,7 +244,7 @@ $f2 = $provider->fulfill($buyer, $starter, $item2, $order2, 2);
 check(($f2['ref_id'] ?? null) === null, 'a Managed draft paid through the Starter product is not activated');
 $mdraft->load();
 check((string)$mdraft->get('cvp_status') === 'pending_payment', 'the draft is left as it was');
-check(count(SpFulfillment::$alerts) === 1 && strpos(SpFulfillment::$alerts[0]['reason'], 'other one') !== false,
+check(count(SpFulfillment::$alerts) === 1 && strpos(SpFulfillment::$alerts[0]['reason'], 'another plan') !== false,
 	'and a person is alerted with the reason', json_encode(SpFulfillment::$alerts));
 
 harness_finish();

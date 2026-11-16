@@ -21,6 +21,8 @@
  * before the buyer confirms. Delete removes a draft; a paid site is never
  * deletable here.
  *
+ * @version 1.4 - On your own Linode (specs/own_linode_we_install.md): the summary shows Connect until the buyer's
+ *                Linode grant can carry the build, then Continue to checkout; the bundle's price for the form
  * @version 1.3 - the buyer picks a plan (Starter or Managed); the price and the payment button follow the row's plan
  * @version 1.2 - the availability check reveals the registrant's details (md_registrant) on a free name
  * @version 1.1 - a visitor without a session goes to the start page (step 1, the account), and the
@@ -117,6 +119,12 @@ function profile_configure_logic(array $input): LogicResult {
 
 	$regions = ManagedSiteDraft::regions();
 
+	// On your own Linode: the summary offers payment only while the buyer's
+	// Linode grant can carry the build, and Connect until then (W3).
+	$own_linode = $row !== null && ManagedSiteDraft::plan_of($row) === 'own_linode';
+	$linode_live = $own_linode && CustomerCloudAccount::live_for_build($user_id) !== null;
+	$bundle = JoineryServicesFulfillment::bundle_offer();
+
 	return LogicResult::render(array(
 		'session'          => $session,
 		'mode'             => $mode,
@@ -133,7 +141,12 @@ function profile_configure_logic(array $input): LogicResult {
 		'plans_sentence'   => ManagedSiteDraft::plans_sentence(),
 		'price_sentence'   => ManagedSiteDraft::price_sentence($product),
 		'domain_sentence'  => $row ? ManagedSiteDraft::domain_sentence($row) : '',
-		'payment_form'     => ($row && $mode === 'summary') ? ManagedSiteDraft::payment_form($row, $product) : '',
+		'payment_form'     => ($row && $mode === 'summary' && (!$own_linode || $linode_live))
+			? ManagedSiteDraft::payment_form($row, $product, $own_linode ? 'Continue to checkout' : 'Continue to payment') : '',
+		'own_linode'       => $own_linode,
+		'linode_live'      => $linode_live,
+		'linode_connected' => !empty($input['connected']),
+		'bundle_price'     => $bundle !== null ? (string)$bundle['price'] : '',
 		'in_cart'          => ($row && $mode === 'summary') ? ManagedSiteDraft::in_cart($row) : false,
 		'availability_html'  => ManagedDomainIntake::availabilityScript('cvp_domain', 'managed_domain_status',
 			'cvp_domain_source', 'register', 'md_registrant'),

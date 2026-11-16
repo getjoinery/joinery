@@ -21,6 +21,10 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.6 - a third plan, On your own Linode (reference 0, specs/own_linode_we_install.md W1): the plan is
+ *                recorded on the draft (cvp_plan) and read back by plan_of(); its server is in us-east; a free
+ *                product's price reads 'free'; the email and backups bundle rides with an own-Linode draft
+ *                (cvp_services_wanted) and leaves the cart with it
  * @version 1.5 - a chosen plan not on sale is refused with a sentence, never swapped for the other (reviewer2 F2-6);
  *                a re-freeze keeps the draft's own plan
  * @version 1.4 - two plans (starter_tier.md, Launch scope step 2): Starter lands in a container on a shared host
@@ -90,6 +94,13 @@ class ManagedSiteDraft {
 	/** The fulfilment reference of Starter hosting (a container on one of our shared hosts). */
 	const STARTER_REF = 2;
 
+	/** The fulfilment reference of On your own Linode (a server we build in the buyer's own account). */
+	const OWN_LINODE_REF = 0;
+
+	/** Where an own-Linode server is built, and its size: what the configurator tells the buyer (Q6, reviewer2 B6). */
+	const OWN_LINODE_REGION = 'us-east';
+	const OWN_LINODE_TYPE = 'g6-nanode-1';
+
 	/**
 	 * The plans a buyer chooses between, cheapest first. Each is one product
 	 * (found by its fulfilment reference) and one landing for the site.
@@ -99,6 +110,8 @@ class ManagedSiteDraft {
 			'blurb' => 'Your site on a server shared with other sites. Mail, backups and Drive included.'),
 		'managed' => array('ref' => self::MANAGED_REF, 'landing' => 'instance', 'label' => 'Managed',
 			'blurb' => 'Your site on a server of its own. Mail, backups and Drive included.'),
+		'own_linode' => array('ref' => self::OWN_LINODE_REF, 'landing' => 'instance', 'label' => 'On your own Linode',
+			'blurb' => 'We build your site on a server in your own Linode account. Linode bills you for the server.'),
 	);
 
 	/** What a site's internal name may look like: the install directory and database name. */
@@ -159,7 +172,8 @@ class ManagedSiteDraft {
 	/**
 	 * Take this draft out of the session's cart: the hosting line naming it,
 	 * and the domain-year line its freeze contributed (the line naming the
-	 * draft's domain on the domain product). Called before the draft changes,
+	 * draft's domain on the domain product), and the email and backups line
+	 * naming the draft. Called before the draft changes,
 	 * so the domain on the row is still the one the companion line was priced
 	 * for.
 	 */
@@ -177,7 +191,9 @@ class ManagedSiteDraft {
 				$product_id = isset($item[1]) && is_object($item[1]) ? (int)$item[1]->key : 0;
 				$companion = $domain_product_id > 0 && $product_id === $domain_product_id && $domain !== ''
 					&& strtolower(trim((string)($data['managed_domain']['answer'] ?? ''))) === $domain;
-				if (self::line_names_draft($data, $draft_id) || $companion) {
+				// The email and backups line that rode with this draft goes with it (B5).
+				$services = JoineryServiceRequirement::draft_id_from($data) === $draft_id;
+				if (self::line_names_draft($data, $draft_id) || $companion || $services) {
 					$cart->remove_item($key);
 				}
 			}
@@ -318,7 +334,10 @@ class ManagedSiteDraft {
 
 		$regions = self::regions();
 		$region = trim((string)($post['cvp_region'] ?? ''));
-		if (count($regions) <= 1) {
+		if ($plan === 'own_linode') {
+			// One place and one size for a server in the buyer's account (Q6).
+			$region = self::OWN_LINODE_REGION;
+		} elseif (count($regions) <= 1) {
 			$region = $regions[0];
 		} elseif (!in_array($region, $regions, true)) {
 			$errors[] = 'Choose where the site should live.';
@@ -375,6 +394,12 @@ class ManagedSiteDraft {
 		}
 		// Frozen: the cart line is built from this row and must not move under it.
 		$row->set('cvp_landing', self::PLANS[$plan]['landing']);
+		$row->set('cvp_plan', $plan);
+		// The size the buyer was told, pinned: not the shared customer-cloud default an operator may change.
+		$row->set('cvp_instance_type', $plan === 'own_linode' ? self::OWN_LINODE_TYPE : null);
+		// The email and backups bundle rides with an own-Linode site, when ticked and on sale.
+		$row->set('cvp_services_wanted', $plan === 'own_linode' && !empty($post['with_services'])
+			&& JoineryServicesFulfillment::bundle_offer() !== null);
 		$row->set('cvp_status', 'pending_payment');
 		$row->set('cvp_error', null);
 		$row->save();
@@ -391,6 +416,7 @@ class ManagedSiteDraft {
 			'cvp_sitename'      => '',
 			'cvp_region'        => self::regions()[0],
 			'cvp_buyer_email'   => (string)$user->get('usr_email'),
+			'with_services'     => '',
 			'md_first_name'     => (string)$user->get('usr_first_name'),
 			'md_last_name'      => (string)$user->get('usr_last_name'),
 			'md_email'          => (string)$user->get('usr_email'),
@@ -406,6 +432,7 @@ class ManagedSiteDraft {
 			return $values;
 		}
 		$values['plan'] = self::plan_of($row);
+		$values['with_services'] = $row->get('cvp_services_wanted') ? '1' : '';
 		foreach (array('cvp_domain_source', 'cvp_domain', 'cvp_sitename', 'cvp_region', 'cvp_buyer_email') as $col) {
 			$stored = (string)$row->get($col);
 			if ($stored !== '') {
@@ -433,8 +460,15 @@ class ManagedSiteDraft {
 		return self::product_for_plan('managed');
 	}
 
-	/** Which plan a row is: its landing names it. */
+	/**
+	 * Which plan a row is: the plan it was frozen for, or, on a row from
+	 * before plans were recorded, its landing (a container is Starter).
+	 */
 	public static function plan_of(CustomerCloudProvision $row): string {
+		$plan = (string)$row->get('cvp_plan');
+		if (isset(self::PLANS[$plan])) {
+			return $plan;
+		}
 		return $row->is_container() ? 'starter' : 'managed';
 	}
 
@@ -477,16 +511,20 @@ class ManagedSiteDraft {
 	 */
 	public static function plans_sentence(): string {
 		$parts = array();
-		foreach (self::offered_plans() as $def) {
+		$free = '';
+		foreach (self::offered_plans() as $plan => $def) {
 			$price = self::price_sentence($def['product']);
-			if ($price !== '') {
+			if ($price === 'free') {
+				$free = $def['label'] . ' is free (Linode bills you for the server)';
+			} elseif ($price !== '') {
 				$parts[] = $def['label'] . ' ' . preg_replace('/ from today$/', '', $price);
 			}
 		}
-		if (empty($parts)) {
-			return '';
+		$out = empty($parts) ? '' : implode(', ', $parts) . ', from today';
+		if ($free !== '') {
+			$out = $out === '' ? $free : $out . '; ' . $free;
 		}
-		return implode(', ', $parts) . ', from today';
+		return $out;
 	}
 
 	/** One plan's product: active, fulfilled by customer_cloud with the plan's reference, with a version. */
@@ -518,11 +556,14 @@ class ManagedSiteDraft {
 		return ($versions && count($versions) > 0) ? $versions->get(0) : null;
 	}
 
-	/** "$12.99 a month from today", read from the product; '' when none is on sale. */
+	/** "$12.99 a month from today", read from the product; 'free' for a free one; '' when none is on sale. */
 	public static function price_sentence($product): string {
 		$version = self::managed_version($product);
 		if ($version === null) {
 			return '';
+		}
+		if ((float)$version->get('prv_version_price') <= 0) {
+			return 'free';
 		}
 		$amount = self::money((string)$version->get('prv_version_price'));
 		$type = (string)$version->get('prv_price_type');

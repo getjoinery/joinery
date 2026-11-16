@@ -22,6 +22,7 @@
  * (checkAvailability) and after it (fulfill). Contributed by that provider,
  * never attached as a pri_ row.
  *
+ * @version 1.1 - a line may name an own-Linode site draft (cvp:<id>): the bundle bought with the site
  * @version 1.0 - specs/services_phase3_selling_nudge.md §1
  */
 
@@ -76,13 +77,41 @@ class JoineryServiceRequirement extends AbstractProductRequirement {
 		}
 	}
 
-	/** The row id a cart line or an order item's stored answers carry. */
+	/** The prefix of an answer naming an own-Linode site draft rather than a service row. */
+	const DRAFT_PREFIX = 'cvp:';
+
+	/** The row id a cart line or an order item's stored answers carry; 0 for a draft answer. */
 	public static function row_id_from(array $data): int {
-		$answer = $data[self::FIELD] ?? 0;
+		$answer = self::answer_of($data);
+		return strpos($answer, self::DRAFT_PREFIX) === 0 ? 0 : (int)$answer;
+	}
+
+	/**
+	 * The own-Linode site draft a line names (cvp:<id>), or 0. Such a line
+	 * rides with the site's install line in the same order, before the site
+	 * exists (specs/own_linode_we_install.md W4); ManagedSiteRequirement adds
+	 * it, never a product page.
+	 */
+	public static function draft_id_from(array $data): int {
+		$answer = self::answer_of($data);
+		return strpos($answer, self::DRAFT_PREFIX) === 0 ? (int)substr($answer, strlen(self::DRAFT_PREFIX)) : 0;
+	}
+
+	private static function answer_of(array $data): string {
+		$answer = $data[self::FIELD] ?? '';
 		if (is_array($answer)) {
-			$answer = $answer['answer'] ?? 0;
+			$answer = $answer['answer'] ?? '';
 		}
-		return (int)$answer;
+		return trim((string)$answer);
+	}
+
+	/** The form data of the line that rides with an own-Linode draft. */
+	public static function draft_line_data(int $draft_id, string $domain): array {
+		return array(
+			self::SUMMARY_FIELD => array('question' => 'Site', 'answer' => $domain),
+			self::FIELD         => array('question' => 'Site record', 'answer' => self::DRAFT_PREFIX . $draft_id,
+				'internal' => true),
+		);
 	}
 
 	/** The row a cart line names, still the buyer's, or null. */

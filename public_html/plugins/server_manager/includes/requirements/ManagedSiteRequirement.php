@@ -30,6 +30,9 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.5 - an own-Linode draft with the email and backups bundle brings the bundle line with it
+ *                (SERVICES_FIELD, extra_cart_lines; own_linode_we_install W4); a product page offers and accepts a
+ *                draft of its own plan, compared by plan as well as landing (draft_fits)
  * @version 1.4 - a product page offers and accepts only a draft of its own plan (its landing), so a Managed draft is
  *                never added on the Starter product or the other way round (reviewer2 F2-5)
  * @version 1.3 - purchase_path_heading(): the step strip, at Payment, on the cart and checkout
@@ -53,6 +56,9 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 
 	/** The form field and order-item key carrying the draft id. */
 	const FIELD = 'managed_site';
+
+	/** The line's form-data key saying the email and backups bundle rides with it (own-Linode). */
+	const SERVICES_FIELD = 'managed_site_services';
 
 	/**
 	 * The line's form-data key naming WHICH freeze the line was built from:
@@ -148,6 +154,16 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		return CustomerCloudFulfillment::landing_for_ref((int)($product ? $product->get('pro_fulfillment_ref') : 0));
 	}
 
+	/**
+	 * Is the draft one of this product's plan? Managed and own-Linode both
+	 * land on an instance, so the plan is compared as well as the landing.
+	 */
+	private static function draft_fits($draft, $product): bool {
+		$ref = (int)($product ? $product->get('pro_fulfillment_ref') : 0);
+		return (string)($draft->get('cvp_landing') ?: 'instance') === CustomerCloudFulfillment::landing_for_ref($ref)
+			&& ManagedSiteDraft::plan_of($draft) === CustomerCloudFulfillment::plan_for_ref($ref);
+	}
+
 	/** The site as one line, for the product page, the cart and the order. */
 	public static function summary($draft): string {
 		$line = (string)$draft->get('cvp_domain');
@@ -181,11 +197,14 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 				? (int)($existing_data[self::FIELD]['answer'] ?? 0) : (int)$existing_data[self::FIELD];
 			$draft = self::draft_for_user($wanted, $user_id);
 		}
-		if ($draft !== null && (string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_of($product)) {
+		if ($draft !== null && !self::draft_fits($draft, $product)) {
 			$draft = null;
 		}
 		if ($draft === null) {
 			$draft = self::newest_draft_for_user($user_id, self::landing_of($product));
+			if ($draft !== null && !self::draft_fits($draft, $product)) {
+				$draft = null;
+			}
 		}
 
 		if ($draft !== null) {
@@ -218,7 +237,7 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		if ($draft === null) {
 			return array('Set up your site first, then continue to payment from there.');
 		}
-		if ((string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_of($product)) {
+		if (!self::draft_fits($draft, $product)) {
 			return array('That site was set up for a different plan. Continue to payment from your site setup.');
 		}
 		$this->draft = $draft;
@@ -248,6 +267,11 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 			$data['managed_domain'] = array('question' => 'Registered domain',
 				'answer' => (string)$draft->get('cvp_domain'));
 		}
+		if ($draft->get('cvp_services_wanted') && ManagedSiteDraft::plan_of($draft) === 'own_linode') {
+			// The email and backups line rides with this one (extra_cart_lines).
+			$data[self::SERVICES_FIELD] = array('question' => 'Email and backups for',
+				'answer' => (string)$draft->get('cvp_domain'), 'internal' => true);
+		}
 		$display = array('Site' => self::summary($draft));
 		return array($data, $display);
 	}
@@ -267,6 +291,33 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 	 * edit-cart path find the line it previously contributed.
 	 */
 	public function extra_cart_lines($form_data, $product) {
+		return array_merge($this->domain_line($form_data), $this->services_line($form_data));
+	}
+
+	/**
+	 * The email and backups line an own-Linode site was set up with: the
+	 * bundle product, naming the draft (JoineryServiceRequirement::DRAFT_PREFIX).
+	 * Deterministic for the same form data, like the domain line.
+	 */
+	private function services_line($form_data): array {
+		$domain = trim((string)($form_data[self::SERVICES_FIELD]['answer'] ?? ''));
+		$answer = $form_data[self::FIELD] ?? 0;
+		$draft_id = (int)(is_array($answer) ? ($answer['answer'] ?? 0) : $answer);
+		if ($domain === '' || $draft_id <= 0) {
+			return array();
+		}
+		$offer = JoineryServicesFulfillment::bundle_offer();
+		if ($offer === null) {
+			return array();
+		}
+		return array(array(
+			'product_id' => (int)$offer['product']->key,
+			'form_data'  => JoineryServiceRequirement::draft_line_data($draft_id, $domain),
+		));
+	}
+
+	/** The domain-year line, when we register the name. */
+	private function domain_line($form_data): array {
 		$price = trim((string)($form_data['managed_domain_price_line'] ?? ''));
 		$domain = '';
 		if (isset($form_data['managed_domain']['answer'])) {

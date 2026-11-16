@@ -348,6 +348,14 @@
       "helptext": "The most hosted sites one account, or one card on any account, may have at once. Checkout refuses one more for the account; a paid order past either limit is held on the Server Manager board until you approve or refuse it."
     },
     {
+      "name": "server_manager_own_linode_sites_per_buyer",
+      "default": "3",
+      "group": "hosted",
+      "label": "Own-Linode sites per buyer",
+      "type": "number",
+      "helptext": "The most free On your own Linode sites one account may have at once. Each is a server this management node keeps managing, so checkout refuses one more. The accounts in Hosted sites limit exempt are let past it."
+    },
+    {
       "name": "server_manager_hosted_sites_limit_exempt",
       "default": "",
       "group": "hosted",

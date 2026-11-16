@@ -7,6 +7,7 @@
  * start_logic hands them to the platform's own sign-in and sign-up handlers
  * and every success lands on the configure page (step 2).
  *
+ * @version 1.5 - one small line to the advanced install at the bottom (specs/own_linode_we_install.md W7)
  * @version 1.4 - the passkey button's script is assets/js/passkey-pages.js (no inline script)
  * @version 1.3 - the lead names every plan on sale
  * @version 1.2 - not found where this site does not sell hosting (SmHosting)
@@ -109,6 +110,9 @@ $page->public_header(array(
 			</section>
 
 		</div>
+		<?php // The advanced install is here for whoever looks for it, and promoted nowhere (own_linode_we_install W7). ?>
+		<p class="sms-start-advanced">Prefer to install it yourself on a server of your own? See the
+			<a href="/page/install">advanced install</a>.</p>
 	</div>
 </div>
 </div>
@@ -121,6 +125,7 @@ $page->public_header(array(
 .sms-start-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
 .sms-start-col { padding: 1.25rem; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
 .sms-start-col h4 { margin: 0 0 1rem; }
+.sms-start-advanced { margin: 1.5rem 0 0; font-size: .85em; color: #6b7280; }
 @media (max-width: 760px) { .sms-start-cols { grid-template-columns: 1fr; } }
 </style>
 

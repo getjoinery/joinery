@@ -19,6 +19,39 @@ A hosted site lands in one of two places, and this is the buyer's choice of
   (fulfillment reference 2; `cvp_landing` `container`). Its row never holds
   an instance id, and it lands only on a host whose tier is `starter`.
 
+The configure page offers a third plan beside them that is not hosted:
+
+- **On your own Linode** — free (fulfillment reference 0, `cvp_plan`
+  `own_linode`). The buyer connects their Linode account on the summary step,
+  before paying; the server (1 GB, us-east, the customer-cloud defaults) is
+  created in their account with their grant and built the same way Managed is.
+  The grant is asked for `linodes:read_write` only, must have an hour left when
+  the buyer pays (`CustomerCloudAccount::live_for_build`), and is let go once
+  per site after the build, when none of the buyer's sites is still being
+  built or retried, and only when it is that build-only grant: the account
+  then reads `released` and the pages ask to connect again
+  (`ProvisionOwnLinode`, `cvp_grant_released_time`). The server's size is
+  pinned on the draft (`g6-nanode-1`), so it is what the buyer was told. An account may hold
+  `server_manager_own_linode_sites_per_buyer` of them (default 3).
+  The email and backups bundle (the `joinery_services` product) can ride in the
+  same checkout: the draft's install line brings a bundle line naming the draft
+  (`cvp:<id>`), refused without its install line in the cart, recorded on the
+  provision at payment (`cvp_services_order_item_id`). Such a site's mail is
+  built by the hosted mail leg, then the site is carried into the end state a
+  Managed site has after moving to its owner's account: node-linked mail and
+  backup Services rows following the bundle's subscription (paid to its period
+  end while it pays), and the node's space on this fleet's backup storage. The
+  mail row starts unverified and the services reconcile verifies it; a mail
+  leg that failed still gets its backups row, and is reported on every pass.
+  The install line is refused at checkout while the bundle it was set up with
+  is not in the cart. Without the bundle, nothing of ours is
+  set up: no mail and no backup space.
+
+Which plan a draft is for is recorded on it (`cvp_plan`, read by
+`ManagedSiteDraft::plan_of()`; a row from before it is read from its landing),
+and the plan, not only the landing, must match the paid product before the
+charge and at activation.
+
 Whose account a server is born on is the product's decision, not the buyer's:
 the `customer_cloud` fulfillment provider offers three references (the buyer's
 own account, 0, besides the two above), and the one a product stores becomes

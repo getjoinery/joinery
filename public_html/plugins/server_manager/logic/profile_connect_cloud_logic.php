@@ -16,6 +16,7 @@
  * requested. A grant made before the swap existed lacks the two; re-connecting
  * here grants them.
  *
+ * @version 1.4 - from an own-Linode site setup: asks linodes:read_write only and returns to that setup
  * @version 1.3 - asks for ips:read_write and firewall:read_only too, for a site copy's switch by IP swap
  * @version 1.2 - grant_expired/grant_expires: an expired Linode grant is reported as expired, not connected
  * @version 1.1
@@ -46,14 +47,25 @@ function profile_connect_cloud_logic(array $input): LogicResult {
 		if (!$provider_configured) {
 			return LogicResult::redirect($self_url . '?error=unconfigured');
 		}
+		// From an own-Linode site setup: the build needs to create one server,
+		// so only that is asked for, and the buyer comes back to the setup
+		// (specs/own_linode_we_install.md W3). A site copy's IP swap is what
+		// the wider scopes are for, asked here only from this page.
+		$draft = ManagedSiteDraft::load_for_user((int)($input['cvp_customer_cloud_provision_id'] ?? 0), (int)$user_id);
+		$for_draft = $draft !== null && ManagedSiteDraft::plan_of($draft) === 'own_linode';
+		$scopes = $for_draft ? array('linodes:read_write') : array('linodes:read_write', 'ips:read_write', 'firewall:read_only');
+		$payload = array('user_id' => intval($user_id), 'provider' => 'linode');
+		if ($for_draft) {
+			$payload['draft_id'] = (int)$draft->key;
+		}
 		try {
 			$client = new OAuth2Client();
 			$consent_url = $client->beginConsent(
 				'linode',
-				array('linodes:read_write', 'ips:read_write', 'firewall:read_only'),
+				$scopes,
 				'customer_cloud',
-				array('user_id' => intval($user_id), 'provider' => 'linode'),
-				$self_url
+				$payload,
+				$for_draft ? ManagedSiteDraft::CONFIGURE_URL . '?cvp_customer_cloud_provision_id=' . (int)$draft->key : $self_url
 			);
 			return LogicResult::redirect($consent_url);
 		} catch (Throwable $e) {

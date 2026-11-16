@@ -41,6 +41,8 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.8 - Own Linode: forget the buyer's grant after the build, and carry a bundle site into its Services rows
+ *                (ProvisionOwnLinode, specs/own_linode_we_install.md)
  * @version 1.7 - Inbound mail: a Starter site's MX and ownership TXT for its relay slot (ProvisionSiteInboundMail, S5)
  * @version 1.6 - Starter sites: a paid Starter site is installed in a container on a starter host
  * @version 1.5 - server transfers to the customer's own Linode account run before the hosted phases
@@ -69,6 +71,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Transfers'      => array($base . 'PollInstanceTransfers.php', 'PollInstanceTransfers'),
 			'Hosted mail'    => array($base . 'ProvisionHostedMail.php', 'ProvisionHostedMail'),
 			'Inbound mail'   => array($base . 'ProvisionSiteInboundMail.php', 'ProvisionSiteInboundMail'),
+			'Own Linode'     => array($base . 'ProvisionOwnLinode.php', 'ProvisionOwnLinode'),
 			'Hosted watch'   => array($base . 'HostedTrialWatch.php', 'HostedTrialWatch'),
 			'Services'       => array($base . 'ServiceTenantWatch.php', 'ServiceTenantWatch'),
 		);

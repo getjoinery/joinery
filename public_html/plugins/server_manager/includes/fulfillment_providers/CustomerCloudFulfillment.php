@@ -49,6 +49,10 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.12 - reference 0 is On your own Linode (specs/own_linode_we_install.md W2, W3): the draft's plan must
+ *                match the product before and after the charge; it needs a Linode grant with an hour left and
+ *                room under the own-Linode limit, and the email and backups it was set up with still in the cart;
+ *                activation finds the grant by the same live test
  * @version 1.11 - an open suspension or a disputed payment on the buyer's account or card holds the order too
  *                (HostedSuspensions::buyer_flag, hosting_launch S6)
  * @version 1.10 - the Starter place is reserved under the place lock (ManagedHost::reserve_starter_place, R2-2), and few places left alerts
@@ -120,6 +124,45 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	const WRONG_PLAN_SENTENCE = 'This site was set up for a different plan. '
 		. 'Remove it from the cart and continue to payment from your site setup again.';
 
+	/** What the buyer reads when their Linode connection cannot carry a build. */
+	const CONNECT_LINODE_SENTENCE = 'Connect your Linode account again before paying: we build the server in it, '
+		. 'and the connection lasts only a short while. Use Connect on your site setup.';
+
+	/** What the buyer reads when the email and backups they chose have left the cart. */
+	const BUNDLE_MISSING_SENTENCE = 'The email and backups you chose for this site are no longer in your cart. '
+		. 'Continue to payment from your site setup again, or edit it to go without them.';
+
+	/** Does the session's cart carry an email and backups line naming this draft? */
+	private static function bundle_in_cart(int $draft_id): bool {
+		if (!class_exists('ShoppingCart') || !isset($_SESSION)) {
+			return false;
+		}
+		try {
+			foreach (ShoppingCart::current()->items as $item) {
+				if (JoineryServiceRequirement::draft_id_from((array)($item[2] ?? array())) === $draft_id) {
+					return true;
+				}
+			}
+		} catch (\Throwable $e) {
+			return false;
+		}
+		return false;
+	}
+
+	/** The plan a draft must be for, by the paid product's reference. */
+	public static function plan_for_ref(int $ref): string {
+		if ($ref === self::REF_STARTER) {
+			return 'starter';
+		}
+		return $ref === self::REF_OPERATOR ? 'managed' : 'own_linode';
+	}
+
+	/** What the buyer reads at checkout when the account has its own-Linode sites. */
+	public static function own_linode_limit_sentence(int $limit): string {
+		return 'Your account already has ' . $limit . ' sites on your own Linode, the most one account may have. '
+			. 'Contact us if you need more.';
+	}
+
 	/** What the buyer reads when the starter hosts are full. */
 	const NO_ROOM_SENTENCE = 'Starter hosting is full right now. Choose Managed, or try again later.';
 
@@ -146,8 +189,28 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		if ($draft === null) {
 			return self::STALE_DRAFT_SENTENCE;
 		}
-		if ((string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_for_ref($ref)) {
+		// The plan, not only the landing: Managed and own-Linode both land on
+		// an instance, and a Managed draft must never be built for nothing.
+		if ((string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_for_ref($ref)
+				|| ManagedSiteDraft::plan_of($draft) !== self::plan_for_ref($ref)) {
 			return self::WRONG_PLAN_SENTENCE;
+		}
+		if ($ref === self::REF_CUSTOMER) {
+			if (CustomerCloudAccount::live_for_build($user_id) === null) {
+				return self::CONNECT_LINODE_SENTENCE;
+			}
+			// The email and backups the buyer ticked must still be in the cart:
+			// a removed or refused bundle line would build the site without
+			// them while the summary said yes (reviewer2 B8).
+			if ($draft->get('cvp_services_wanted') && !self::bundle_in_cart((int)$draft->key)) {
+				return self::BUNDLE_MISSING_SENTENCE;
+			}
+			if (!CustomerCloudProvision::hosted_limit_exempt($user_id)) {
+				$limit = CustomerCloudProvision::own_linode_site_limit();
+				if (CustomerCloudProvision::own_linode_sites_held($user_id, (int)$draft->key) >= $limit) {
+					return self::own_linode_limit_sentence($limit);
+				}
+			}
 		}
 		if ($ref === self::REF_STARTER) {
 			require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_hosts_class.php'));
@@ -182,9 +245,9 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		// the order item id, so a person can finish it.
 		try {
 			$provision = $this->activate_draft($user, $order_item, self::mode_for_ref($ref), $order,
-				self::landing_for_ref($ref));
+				self::landing_for_ref($ref), self::plan_for_ref($ref));
 		} catch (\Throwable $e) {
-			$this->alert_activation_problem($user, $order_item, $e->getMessage());
+			$this->alert_activation_problem($user, $order_item, $e->getMessage() . self::bundle_line_note($order, $order_item));
 			$provision = null;
 		}
 		if ($provision === null) {
@@ -206,7 +269,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	 * pending_payment draft owned by this buyer throws, and the caller alerts.
 	 */
 	private function activate_draft(User $user, OrderItem $order_item, string $hosting_mode, ?Order $order = null,
-			string $landing = 'instance'): ?CustomerCloudProvision {
+			string $landing = 'instance', string $plan = ''): ?CustomerCloudProvision {
 		if (!$order_item->key || !$user->key) {
 			throw new RuntimeException('The order item or the buyer could not be loaded.');
 		}
@@ -235,9 +298,11 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			throw new RuntimeException('Site draft #' . $draft_id . " is at '" . $draft->get('cvp_status')
 				. "', not pending_payment; the buyer edited it after adding it to the cart.");
 		}
-		if ((string)($draft->get('cvp_landing') ?: 'instance') !== $landing) {
+		if ((string)($draft->get('cvp_landing') ?: 'instance') !== $landing
+				|| ($plan !== '' && ManagedSiteDraft::plan_of($draft) !== $plan)) {
 			throw new RuntimeException('Site draft #' . $draft_id . ' was set up for the '
-				. ($draft->is_container() ? 'Starter' : 'Managed') . ' plan, but the paid product is the other one.');
+				. ManagedSiteDraft::PLANS[ManagedSiteDraft::plan_of($draft)]['label']
+				. ' plan, but the paid product is for another plan.');
 		}
 
 		// A slug or domain a live provision already holds fails the activation
@@ -313,8 +378,10 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			$draft->set('cvp_mail_state', 'pending');
 		} else {
 			// A buyer who already granted access skips the Connect wait entirely.
-			$account = CustomerCloudAccount::get_for_user((int)$user->key, 'linode');
-			if ($account !== null && $account->get('cca_status') === 'active') {
+			// A grant that can carry the build: cca_status stays active after
+			// a Linode grant expires.
+			$account = CustomerCloudAccount::live_for_build((int)$user->key, 'linode');
+			if ($account !== null) {
 				$draft->set('cvp_cca_customer_cloud_account_id', $account->key);
 				$draft->set('cvp_status', 'ready');
 			} else {
@@ -449,6 +516,25 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	}
 
 	/** A paid order that could not be activated is a person's task, never silent. Protected: the mail edge a test double intercepts. */
+	/**
+	 * When the site that failed to activate was bought with the email and
+	 * backups bundle, the bundle's line in the same order, so the person who
+	 * refunds the site cancels that subscription too (own_linode_we_install B5).
+	 */
+	private static function bundle_line_note(?Order $order, OrderItem $order_item): string {
+		$draft_id = self::draft_id_from((array)$order_item->get_raw_data());
+		if ($order === null || !$order->key || $draft_id <= 0 || !class_exists('MultiOrderItem')) {
+			return '';
+		}
+		foreach (new MultiOrderItem(array('order_id' => (int)$order->key)) as $item) {
+			if (JoineryServiceRequirement::draft_id_from((array)$item->get_raw_data()) === $draft_id) {
+				return ' The same order also bought email and backups for this site (order item #' . (int)$item->key
+					. ', a subscription): cancel it with the refund.';
+			}
+		}
+		return '';
+	}
+
 	protected function alert_activation_problem(User $user, OrderItem $order_item, string $reason): void {
 		$line = 'CustomerCloudFulfillment: order item #' . $order_item->key . ' (buyer '
 			. $user->get('usr_email') . '): ' . $reason;
@@ -460,7 +546,7 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			if ($to === '') {
 				return;
 			}
-			$body = "A paid hosting order (Managed or Starter) could not be activated.\n\n"
+			$body = "A paid hosting order (Managed, Starter or On your own Linode) could not be activated.\n\n"
 				. 'Order item: ' . $order_item->key . "\n"
 				. 'Buyer: ' . $user->get('usr_email') . "\n"
 				. 'Reason: ' . $reason . "\n\n"

@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.12 - a site on its buyer's own Linode paid with the email and backups bundle is set up too (own_linode_we_install W5)
  * @version 1.11 - dmarc_record(): a monitoring DMARC record for a hosted site's domain, published for a name we
  *                registered when it has none (hosting_paid_launch B4)
  * @version 1.10 - registrar_dns_driver() is public, shared with the site inbound records leg
@@ -104,12 +105,19 @@ class ProvisionHostedMail {
 		require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 
-		$rows = new MultiCustomerCloudProvision(array(
-			'hosting_mode' => 'operator',
-			'mail_states'  => self::WORKING_STATES,
-			'deleted'      => false,
-		));
-		$rows->load();
+		// Our hosted sites, and a site on its buyer's own Linode paid with the
+		// email and backups bundle (specs/own_linode_we_install.md W5): its mail
+		// is built the same way, then carried on as a Services row.
+		$rows = array();
+		foreach (array(
+			array('hosting_mode' => 'operator', 'mail_states' => self::WORKING_STATES, 'deleted' => false),
+			array('hosting_mode' => 'customer', 'has_services_order' => true, 'mail_states' => self::WORKING_STATES,
+				'deleted' => false),
+		) as $options) {
+			foreach (new MultiCustomerCloudProvision($options) as $provision) {
+				$rows[] = $provision;
+			}
+		}
 		if (count($rows) === 0) {
 			return array('status' => 'skipped', 'message' => 'No hosted mail to set up.');
 		}

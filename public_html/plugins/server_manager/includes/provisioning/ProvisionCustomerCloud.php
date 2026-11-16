@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.28 - a free own-Linode site with no email and backups bundle is given no space on our backup storage (own_linode_we_install B8)
  * @version 2.27 - a starter host is born with ManagedHost::STARTER_PLACES (7) places (hosting_paid_launch B3)
  * @version 2.26 - seeding_applies() is public, takes the provision to FleetProvisionSeeding (a Starter site's plan
  *                grants its own relay slot, hosting_launch S5), and the Starter worker queues it too
@@ -363,6 +364,11 @@ class ProvisionCustomerCloud {
 		return array($region, $type, $image);
 	}
 
+	/** A free own-Linode site with no email and backups bundle: nothing of our storage is its. */
+	public static function own_linode_without_bundle(CustomerCloudProvision $provision): bool {
+		return (string)$provision->get('cvp_plan') === 'own_linode' && !(int)$provision->get('cvp_services_order_item_id');
+	}
+
 	/**
 	 * Why an encrypted data root cannot be made from here, or '' when it can:
 	 * the volume's break-glass copy is sealed to this management node's own
@@ -528,8 +534,11 @@ class ProvisionCustomerCloud {
 		$provision->save();
 		// Its backups go where new backups go: a node without its space is
 		// given one, on this pass or a retried one. A copy's backups are its
-		// source's (ManagedNode::backup_node_of), so it is given none.
-		if (!$copy_source) {
+		// source's (ManagedNode::backup_node_of), so it is given none. A free
+		// site on its buyer's own Linode gets our backup storage only with the
+		// email and backups bundle, whose leg opens it then
+		// (specs/own_linode_we_install.md B8, W5).
+		if (!$copy_source && !self::own_linode_without_bundle($provision)) {
 			$node->open_default_backup_space();
 		}
 

@@ -51,6 +51,8 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.12 - a node-linked mail row at domain_added is asked of the provider hourly until it verifies
+ *                (an own-Linode site's mail, specs/own_linode_we_install.md B5)
  * @version 1.11 - a row paid by a subscription takes the line's period end every pass (JoineryServicesFulfillment::
  *                 follow_line), before the ladder compares the date; a self-hosted site's reminder emails
  *                 (ServicesNudge), once per event, a paid site never switched on included
@@ -89,6 +91,9 @@ class ServiceTenantWatch {
 
 	/** How often a tenant's ledger is reconciled against a real listing. */
 	const SHELF_RECONCILE_SECONDS = 86400;
+
+	/** How often an unverified node-linked mail row's domain is asked about. */
+	const MAIL_PROBE_SECONDS = 3600;
 
 	/** @var Smtp2GoClient|null|false Resolved once per tick; false = not configured. */
 	public $client = false;
@@ -183,8 +188,27 @@ class ServiceTenantWatch {
 		}
 		$acted += $this->refresh_allowance($row);
 
-		// The ladder. The two acts are the service's own (JoineryServices).
 		$client = $this->mail_client();
+
+		// A node-linked mail row whose sending domain has not verified yet (an
+		// own-Linode site built before its buyer added the email records) has
+		// no key, so the site's own status poll never asks for it: ask here,
+		// once an hour, until the provider says it verifies.
+		if ($service === ServiceTenant::SERVICE_MAIL && $row->is_node_linked() && $client !== null
+				&& (string)$row->get('svt_mail_state') === ServiceTenant::MAIL_DOMAIN_ADDED
+				&& (string)$row->get('svt_state') === ServiceTenant::STATE_ACTIVE) {
+			$probed = trim((string)$row->get('svt_mail_probed_time'));
+			if ($probed === '' || strtotime($probed . ' UTC') <= strtotime($now . ' UTC') - self::MAIL_PROBE_SECONDS) {
+				$row->set('svt_mail_probed_time', $now);
+				$row->save();
+				JoineryServices::probeMailDomain($row, $client);
+				if ((string)$row->get('svt_mail_state') === ServiceTenant::MAIL_DOMAIN_VERIFIED) {
+					$acted++;
+				}
+			}
+		}
+
+		// The ladder. The two acts are the service's own (JoineryServices).
 		$state = (string)$row->get('svt_state');
 		if ($state === ServiceTenant::STATE_ACTIVE || $state === ServiceTenant::STATE_SUSPENDED) {
 			$step = ServiceTenantLadder::advance($row, array(

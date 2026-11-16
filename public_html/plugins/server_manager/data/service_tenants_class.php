@@ -45,6 +45,7 @@
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
+ * @version 1.5 - svt_mail_probed_time: the hourly provider check of an unverified node-linked mail row
  * @version 1.4 - svt_odi_order_item_id: the store line that pays for the row (a subscription's period end is
  *               followed by the reconcile); svt_nudged: the reminder emails already sent, so each goes once
  * @version 1.3 - permanent_delete() refuses while the row holds anything at a provider (provider_holding()):
@@ -161,6 +162,8 @@ class ServiceTenant extends SystemBase {
 		'svt_provider_domain'    => array('type'=>'varchar(255)'),
 		'svt_provider_user_id'   => array('type'=>'varchar(128)'),
 		'svt_mail_state'         => array('type'=>'varchar(24)'),
+		// When the reconcile last asked the provider whether a node-linked row's domain verifies (hourly).
+		'svt_mail_probed_time'   => array('type'=>'timestamp(6)'),
 		'svt_mail_records'       => array('type'=>'text'),
 		// The sentence the site shows (a refusal's cause, a pause), or null.
 		'svt_notice'             => array('type'=>'text'),
