@@ -4,7 +4,7 @@
  * tier: test-db
  * env: dev-only
  * needs: []
- * covers: [plugins/mailbox/includes/MailboxRelayPin.php, plugins/mailbox/includes/MailboxFortressParse.php, plugins/mailbox/includes/MailboxDeviceRules.php, plugins/mailbox/includes/RelaySpoolConsumer.php, plugins/mailbox/includes/RelayMapExporter.php, plugins/mailbox/includes/RelayVersion.php]
+ * covers: [plugins/mailbox/includes/MailboxRelayPin.php, plugins/mailbox/includes/MailboxFortressParse.php, plugins/mailbox/includes/MailboxDeviceRules.php, plugins/mailbox/includes/RelaySpoolConsumer.php, plugins/mailbox/includes/RelayMapExporter.php, plugins/mailbox/includes/RelayVersion.php, plugins/mailbox/includes/MailboxService.php]
  */
 /**
  * Relay-sealed Fortress mail (specs/client_custody_mail.md § R9, WP7).
@@ -25,6 +25,9 @@
  *    answers a different DEK `stale` and writes nothing (B44), refuses another
  *    person, classifies spam from the posted headers, clears pending and stamps
  *    the search time; a second post on a parsed row is a no-op;
+ *  - a waiting row lists in no view and counts as no unread; the list carries
+ *    fortress_pending for the waiting line; parsed, it lists where its verdict
+ *    files it (an unopenable row lists all along, so it can be deleted);
  *  - B45, B46: a waiting row is not on the lowering walk, is still counted and
  *    named on the lowering receipt, and parses after the mailbox left Fortress;
  *  - the map names the mail key only under the add-on, to a relay that
@@ -260,6 +263,33 @@ try {
 	section('Only the owner\'s browser parses it');
 	check(!DeferredIngest::hasWork($owner_id), 'DeferredIngest has no work in it');
 	check(MailboxFortressParse::pendingCount($owner_id) === 1, 'one message waits for the owner\'s browser (the unopenable ones do not)');
+
+	section('A waiting row lists nowhere until it is opened');
+	$owner_service = new MailboxService(MailboxViewer::forUser($owner_id, 5));
+	$listed = function (array $filters) use ($owner_service, $alias) {
+		$ids = array();
+		foreach ($owner_service->listThreads(intval($alias->key), $filters)['threads'] as $t) {
+			$ids[] = intval($t['latest_id']);
+		}
+		return $ids;
+	};
+	$unread_of = function () use ($owner_service, $alias) {
+		foreach ($owner_service->listMailboxes()['mailboxes'] as $mb) {
+			if (intval($mb['alias_id']) === intval($alias->key)) return intval($mb['unread']);
+		}
+		return -1;
+	};
+	$unopenable_id = intval($db->query('SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+		WHERE iem_iea_inbound_email_alias_id = ' . intval($alias->key) . ' AND iem_pending_parse = true
+		AND iem_key_generation = 0 AND iem_delete_time IS NULL ORDER BY 1 DESC LIMIT 1')->fetchColumn());
+	$inbox_ids = $listed(array('inbox' => true));
+	check(!in_array($id, $inbox_ids, true) && !in_array($id, $listed(array()), true)
+		&& !in_array($id, $listed(array('spam' => true)), true), 'not in the Inbox, All Mail or Spam');
+	check($unopenable_id > 0 && in_array($unopenable_id, $inbox_ids, true),
+		'a row no device can open still lists, so it can be deleted');
+	check(($owner_service->listThreads(intval($alias->key), array('inbox' => true))['fortress_pending'] ?? 0) === 1,
+		'the list says one waits, for the waiting line');
+	$unread_waiting = $unread_of();
 	$next = MailboxFortressParse::next($owner_id);
 	check($next['remaining'] === 1 && $next['item']['id'] === $id && $next['item']['raw_ad'] === 'mail:relay:' . $entry[2],
 		'next() hands out the row with its AD');
@@ -365,6 +395,11 @@ try {
 	check(MailboxFortressParse::storeParts($owner_id, $params, array()) === array('id' => $id, 'stored' => false),
 		'a second post on a parsed row changes nothing');
 	check(MailboxFortressParse::pendingCount($owner_id) === 0, 'nothing waits any more');
+	check(in_array($id, $listed(array($spam_on ? 'spam' : 'inbox' => true)), true),
+		'opened, it lists where its verdict filed it', $spam_on ? 'Spam' : 'Inbox');
+	check(!isset($owner_service->listThreads(intval($alias->key), array('inbox' => true))['fortress_pending']),
+		'and the list says nothing waits');
+	check($spam_on || $unread_of() === $unread_waiting + 1, 'filed in the Inbox, it counts as unread only now');
 	check(intval($db->query('SELECT count(*) FROM fil_files')->fetchColumn()) === $files_before + 1,
 		'one File for the one part, none left over');
 	check(MailboxFortressLevel::loweringBacklogCount($owner_id, intval($domain->key)) === 1,

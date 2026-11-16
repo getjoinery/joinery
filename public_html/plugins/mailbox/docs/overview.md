@@ -2057,6 +2057,14 @@ first and its relay's Update follows.
   `iem_relay_sealed_raw`, the DEK in the key column). An entry sealed to a key no
   vault on the mailbox holds is stored unopenable at generation 0 and the reader
   says so; an entry not in the browser's format is held.
+- **A waiting row lists nowhere.** No spam check, rule or folder has run on it,
+  so it is in no view (Inbox, All Mail, Spam, labels, the IMAP folders) and no
+  unread count until it is parsed and filed (`MailboxService::awaitingDeviceSql()`).
+  The reader's waiting line says how many wait: every list read carries
+  `fortress_pending` (the owner's own count, `MailboxFortressParse::pendingCount()`),
+  and `MailboxFortress.showPending()` shows it and, with the vault open, starts
+  the drain, so mail arriving while the page is open is opened then. An
+  unopenable row (generation 0) still lists, so it can be deleted.
 - When the mail vault opens, the reader drains waiting rows newest first
   (`mailbox/fortress_pending`): it opens the body, parses it (`mailbox_mime.js`,
   pinned by `mime_parser_gate.sh`), seals the fields and parts under the same DEK,

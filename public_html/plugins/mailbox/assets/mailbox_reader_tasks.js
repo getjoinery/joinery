@@ -5,9 +5,11 @@
  *     sealed rows on domains that no longer seal, so mailbox/unseal_batch runs
  *     in a loop until done (specs/mailbox_lowering_unseal.md § 6). A locked
  *     vault stops it quietly; the next unlock and visit converge the rest.
- *   - .mbx-catchup-banner: its Catch up button drains the long lane, where the
+ *   - .mbx-catchup-banner[data-outstanding]: its Catch up button drains the long lane, where the
  *     AI work runs.
  *
+ * @version 1.1 - the AI catch-up box is found by its own data-outstanding: other banners share the class
+ *               (the Fortress level and waiting lines) and stand before it on the page
  * @version 1.0
  */
 (function () {
@@ -23,7 +25,7 @@
 })();
 
 (function () {
-	var box = document.querySelector('.mbx-catchup-banner');
+	var box = document.querySelector('.mbx-catchup-banner[data-outstanding]');
 	if (!box) { return; }
 	var btn = box.querySelector('.mbx-catchup-btn');
 	var out = box.querySelector('.mbx-catchup-progress');

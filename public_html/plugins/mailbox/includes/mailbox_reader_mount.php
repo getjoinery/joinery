@@ -37,6 +37,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.34.0 - the relay-pending banner is always present for a vault client (hidden at none), so the reader
+ *                   can show it when end-to-end mail arrives while the page is open
  * @version 1.33.0 - no inline script: the reader's settings are a JSON block, the unseal loop and the catch-up
  *   button are assets/mailbox_reader_tasks.js
  * @version 1.32.0 - the AI catch-up button drains the long lane, where AI work runs
@@ -163,8 +165,11 @@ function mailbox_reader_emit_fortress_banner(callable $asset_ver, bool $vault_cl
 /**
  * The banner over the reader while end-to-end mail a relay sealed to the
  * viewer's key waits to be parsed in their browser (specs/client_custody_mail.md
- * § R9). MailboxFortress.drainPending() keeps its count and hides it at none;
- * it runs when the mail vault opens, so a locked vault leaves it standing.
+ * § R9). Such mail lists nowhere until it is opened (MailboxService::
+ * awaitingDeviceSql), so this line is where it shows. MailboxFortress.showPending()
+ * keeps its count from every list read and hides it at none; the element is
+ * always written for a vault client, hidden at none, so mail arriving while the
+ * page is open has a place to show.
  */
 function mailbox_reader_emit_relay_pending_banner(bool $vault_client): void {
 	$user_id = (int)SessionControl::get_instance()->get_user_id();
@@ -176,10 +181,7 @@ function mailbox_reader_emit_relay_pending_banner(bool $vault_client): void {
 	} catch (\Throwable $e) {
 		return; // a probe failure must never break the reader
 	}
-	if ($n === 0) {
-		return;
-	}
-	echo '<div class="mbx-catchup-banner" data-fortress-pending>'
+	echo '<div class="mbx-catchup-banner" data-fortress-pending' . ($n === 0 ? ' hidden' : '') . '>'
 		. '<span class="mbx-catchup-text" data-fortress-pending-text>'
 		. htmlspecialchars($n . ' new end-to-end message' . ($n === 1 ? '' : 's'))
 		. ' waiting to be opened on this device. Unlock your vault to read ' . ($n === 1 ? 'it' : 'them') . '.</span></div>';

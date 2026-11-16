@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.68 - end-to-end mail still waiting for its owner's browser to open it lists nowhere and counts as no unread
+ *                (awaitingDeviceSql); the list carries `fortress_pending` so the reader opens it and shows the waiting line
  * @version 1.67 - listMailboxes() says why a level-10 viewer is not all-access (oversight, mail_access_hardening WP3)
  * @version 1.66 - getThread() and listThreads() write down an all-access viewer's foreign reads (MailboxReadAudit, mail_access_hardening WP1)
  * @version 1.65 - the reader reads cid: references through InlineParts, the same rule ingest uses (B5)
@@ -488,6 +490,20 @@ class MailboxService {
 	/** The views viewScopeSql() answers for. */
 	const VIEWS = array('inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all', 'label');
 
+	/**
+	 * Not end-to-end mail still waiting for its owner's browser to open it: a
+	 * relay sealed it whole to their key, and no spam check, rule or folder has
+	 * run on it yet. It belongs to no view until it is opened and filed — shown
+	 * in the Inbox, it read as an unopenable message with the vault open, then
+	 * left for Junk when the spam check ran. The reader's waiting line counts
+	 * it instead (MailboxFortressParse::pendingCount, the same rows). A row no
+	 * device can open (generation 0) still lists, so it can be deleted.
+	 */
+	private static function awaitingDeviceSql(): string {
+		return 'NOT (iem_pending_parse = true AND ' . InboundEmailMessage::mailKeySql()
+			. ' AND iem_key_generation > 0 AND iem_relay_sealed_raw IS NOT NULL)';
+	}
+
 	/** Judged spam (the Spam view), or everything else (every other view but Trash). */
 	private static function spamSql(bool $spam): string {
 		return $spam ? "iem_spam_verdict = 'spam'" : "iem_spam_verdict IS DISTINCT FROM 'spam'";
@@ -530,7 +546,7 @@ class MailboxService {
 			case 'spam':
 				return $this->readScopeSql($aliasId) . ' AND ' . self::spamSql(true);
 		}
-		$parts = array($this->readScopeSql($aliasId), self::spamSql(false));
+		$parts = array($this->readScopeSql($aliasId), self::spamSql(false), self::awaitingDeviceSql());
 		if ($view === 'inbox') {
 			$parts[] = self::INBOX_SQL;
 		} elseif ($view === 'sent') {
@@ -662,6 +678,7 @@ class MailboxService {
 					WHERE iem_delete_time IS NULL
 					AND iem_is_archived = false AND iem_is_read = false
 					AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "
+					AND " . self::awaitingDeviceSql() . "
 					AND (iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)
 					AND iem_iea_inbound_email_alias_id IN ($in)
 					GROUP BY iem_iea_inbound_email_alias_id";
@@ -786,7 +803,7 @@ class MailboxService {
 		if ($this->viewer->isAllAccess()) {
 			// "All mail" — every non-deleted, non-spam row, including NULL-alias.
 			$row = $db->query("SELECT COUNT(*) AS total,
-					COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
+					COUNT(*) FILTER (WHERE iem_is_read = false AND " . self::awaitingDeviceSql() . ") AS unread
 				FROM iem_inbound_email_messages
 				WHERE iem_delete_time IS NULL AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "")
 				->fetch(PDO::FETCH_ASSOC);
@@ -821,7 +838,7 @@ class MailboxService {
 			$stmt = $db->query("SELECT iem_ied_inbound_email_domain_id AS domain_id,
 					COUNT(*) AS total,
 					COUNT(*) FILTER (WHERE iem_is_read = false AND iem_is_archived = false
-					AND iem_spam_verdict IS DISTINCT FROM 'spam') AS unread
+					AND iem_spam_verdict IS DISTINCT FROM 'spam' AND " . self::awaitingDeviceSql() . ") AS unread
 				FROM iem_inbound_email_messages
 				WHERE iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "
 				GROUP BY iem_ied_inbound_email_domain_id");
@@ -1145,6 +1162,7 @@ class MailboxService {
 		// or mail a filter trashed on arrival would be invisible in both views.
 		if (!$trash) {
 			$where[] = self::spamSql(!empty($filters['spam']));
+			$where[] = self::awaitingDeviceSql();
 		}
 
 		// Inbox view (specs/implemented/inbound_email_filters.md): the default list
@@ -1514,6 +1532,13 @@ class MailboxService {
 			// read as missing mail.
 			$result['search_indexing'] = $this->search_indexing;
 		}
+		// End-to-end mail waiting for this viewer's browser to open it lists
+		// nowhere (awaitingDeviceSql); the count lets the reader open it now
+		// and say it is on its way.
+		$fortress_pending = $this->fortressPendingCount();
+		if ($fortress_pending > 0) {
+			$result['fortress_pending'] = $fortress_pending;
+		}
 		if ($this->parseKey() !== null) {
 			// Relay-sealed mail is waiting for the viewer's open window to parse
 			// it (DeferredIngest). The list never parses — one message can wait
@@ -1700,6 +1725,20 @@ class MailboxService {
 	 * session. Cheap when there is nothing waiting (one indexed LIMIT 1, no
 	 * vault read); never throws into the caller.
 	 */
+	/** How many relay-sealed end-to-end rows the viewer's own browser still has to open. */
+	private function fortressPendingCount(): int {
+		$viewer_id = intval($this->viewer->getUserId());
+		if ($viewer_id <= 0) {
+			return 0;
+		}
+		try {
+			return MailboxFortressParse::pendingCount($viewer_id);
+		} catch (\Throwable $e) {
+			error_log('MailboxService: end-to-end waiting count failed for user ' . $viewer_id . ': ' . $e->getMessage());
+			return 0;
+		}
+	}
+
 	private function parseKey(): ?VaultKey {
 		$viewer_id = intval($this->viewer->getUserId());
 		if ($viewer_id <= 0) {

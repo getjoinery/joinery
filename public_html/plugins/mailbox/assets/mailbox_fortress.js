@@ -24,7 +24,8 @@
  *   drainPending()    parses what a relay sealed to this key (§ R9): the
  *                     message is opened and parsed here (MailboxMime) and its
  *                     fields and parts go back sealed under the row's own DEK.
- *                     It runs whenever the mail vault opens;
+ *                     It runs whenever the mail vault opens, and when a list
+ *                     read says some wait (showPending);
  *   checkRelayPins()  asks the relay, through the server, which key it seals
  *                     each relay-fronted mailbox to, and checks the signed
  *                     answer against the relay pinned for it (§ R10).
@@ -41,6 +42,8 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.21 - showPending(n): every list read sets the waiting line (end-to-end mail waiting to be opened lists
+ *   nowhere until it is) and, with the vault open, opens what waits; the line hides rather than leaving the page
  * @version 1.20.2 - the relay-change popup is a few lines: what the site says was done and when, that the new relay
  *   passed this device's checks, trust it if you know of the update or ask your site admin first, and its key
  * @version 1.20.1 - the relay check takes what it reaches (records, API, step-up, challenge) as an argument, so
@@ -720,23 +723,46 @@ window.MailboxFortress = (function () {
 	}
 
 	/**
-	 * The banner's count, as the last fetch said; gone at none. `failed` of
-	 * them could not be opened on this device (the drain skipped them), which
-	 * the banner says instead of promising they are on their way.
+	 * The waiting line's count, as the last fetch or list read said; hidden at
+	 * none. Mail waiting here lists nowhere until it is opened, so this line is
+	 * where it shows. `failed` of them could not be opened on this device (the
+	 * drain skipped them), which the line says instead of promising they are
+	 * on their way; with the vault shut it asks for the unlock.
 	 */
+	var pendingFailed = 0;
 	function pendingBanner(n, failed) {
 		if (typeof document === 'undefined') return;
 		var el = document.querySelector('[data-fortress-pending]');
 		if (!el) return;
-		// The banner's own display rule outranks the hidden attribute.
-		if (!(n > 0)) { el.parentNode.removeChild(el); return; }
+		pendingFailed = failed || 0;
+		el.hidden = !(n > 0);
+		if (el.hidden) return;
 		var text = el.querySelector('[data-fortress-pending-text]');
 		if (!text) return;
 		var plural = function (k) { return k + ' new end-to-end message' + (k === 1 ? '' : 's'); };
-		text.textContent = failed >= n
-			? plural(n) + ' could not be opened on this device. Another of your devices may open '
-				+ (n === 1 ? 'it' : 'them') + '; if none can, please report this problem.'
-			: plural(n) + ' being opened on this device.';
+		var them = n === 1 ? 'it' : 'them';
+		text.textContent = !isOpen()
+			? plural(n) + ' waiting to be opened on this device. Unlock your vault to read ' + them + '.'
+			: (pendingFailed >= n
+				? plural(n) + ' could not be opened on this device. Another of your devices may open '
+					+ them + '; if none can, please report this problem.'
+				: plural(n) + ' being opened on this device.');
+	}
+
+	/**
+	 * A list read said how many are waiting (fortress_pending): show the line
+	 * and, with the vault open, open them now — mail that arrives while the
+	 * page is open would otherwise wait for the next unlock or reload. A drain
+	 * already running is joined, not doubled.
+	 */
+	function showPending(n) {
+		n = n > 0 ? n : 0;
+		// After ready(): a list read can land before the vault has said whether
+		// it is open, and the line would ask for an unlock it does not need.
+		return ready().then(function () {
+			if (!draining) pendingBanner(n, Math.min(pendingFailed, n));
+			if (n > 0 && isOpen()) return drainPending();
+		}).catch(function () {});
 	}
 
 	/**
@@ -2042,6 +2068,7 @@ window.MailboxFortress = (function () {
 		sourceFiles: sourceFiles,
 		onLock: onLock,
 		drainPending: drainPending,
+		showPending: showPending,
 		drainRuleBacklog: drainRuleBacklog,
 		checkRelayPins: checkRelayPins,
 		judgeEntry: judgeEntry,
