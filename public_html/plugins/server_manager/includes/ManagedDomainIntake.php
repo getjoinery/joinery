@@ -24,6 +24,7 @@
  *    domain: a half-configured deployment must never take money for hosting
  *    and silently not buy the name.
  *
+ * @version 1.5 - quote() and validateRegistration() carry the yearly renewal price (renew) the buyer will pay
  * @version 1.4 - availabilityScript() returns a data block and assets/js/domain-availability.js (no inline script)
  * @version 1.3 - availabilityScript() may reveal a block (the registrant's details) only once the name is free
  * @version 1.2 - the registrant's address and phone are the platform's own form blocks (Address and
@@ -340,7 +341,8 @@ class ManagedDomainIntake {
 			return array('price' => null,
 				'error' => $message !== '' ? $message : 'That domain is not available. Try another name.');
 		}
-		return array('price' => (string)$answer['price_year'], 'error' => '');
+		return array('price' => (string)$answer['price_year'],
+			'renew' => trim((string)($answer['renew_year'] ?? '')), 'error' => '');
 	}
 
 	// ------------------------------------------------------------------
@@ -385,6 +387,7 @@ class ManagedDomainIntake {
 			return $out;
 		}
 		$out['price'] = $quote['price'];
+		$out['renew'] = (string)($quote['renew'] ?? '');
 		$out['registrant'] = self::registrantFrom($post);
 		return $out;
 	}

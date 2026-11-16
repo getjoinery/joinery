@@ -66,6 +66,9 @@ function domain_check_logic(array $input): LogicResult {
 		'available'     => !empty($answer['available']),
 		'price_year'    => $price,
 		'price_display' => $price !== null ? $symbol . $price : '',
+		// What a year costs once the domain is the buyer's: shown beside the
+		// first year, which is often a promotion.
+		'renew_display' => trim((string)($answer['renew_year'] ?? '')) !== '' ? $symbol . $answer['renew_year'] : '',
 		'message'       => (string)($answer['message'] ?? ''),
 	));
 }

@@ -10,6 +10,9 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.10 - the summary names the domain's yearly renewal price
+ * @version 1.9 - less text and a calmer layout: the form is four cards (plan, domain, email and backups, sign-in),
+ *                the summary one card; no server size, region or after-payment notes
  * @version 1.8 - On your own Linode (specs/own_linode_we_install.md): the plan shows its server note and the email and
  *                backups tickbox (unticked) and hides the region; the summary names the server and the bundle, and
  *                offers Connect your Linode account until the grant can carry the build
@@ -46,81 +49,65 @@ echo $steps_html;
 
 <?php if ($mode === 'summary'): ?>
 
-<section class="smc-summary">
-	<h2><?php echo htmlspecialchars($row->get('cvp_domain')); ?></h2>
-	<p class="smc-lead">Here is the site we will build. Check it, then continue to payment.</p>
-	<dl class="sms-facts">
-		<dt>Domain</dt>
-		<dd><?php echo htmlspecialchars($row->get('cvp_domain'));
-			if ((string)$row->get('cvp_domain_source') === 'register') {
-				echo ' — we register it for you, ' . htmlspecialchars(ManagedSiteDraft::money((string)$row->get('cvp_domain_quote')))
-					. ' for the first year. You are its legal owner from day one.';
-			} else {
-				echo ' — your own domain. You add its DNS records where the domain is registered: one gives the site '
-					. 'its address and certificate, the others are for its email. Your sites page lists them once the site '
-					. 'is built, and we email you when it is.';
-			} ?></dd>
-		<?php if (count($regions) > 1): ?>
-		<dt>Region</dt>
-		<dd><?php echo htmlspecialchars($row->get('cvp_region')); ?></dd>
-		<?php endif; ?>
-		<dt>Site admin email</dt>
-		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
+<?php
+// The price as the buyer pays it: the plan, the bundle when chosen, the domain year.
+$price_parts = array();
+if ($price_sentence === 'free') {
+	$price_parts[] = 'Free';
+} elseif ($price_sentence !== '') {
+	$price_parts[] = preg_replace('/ from today$/', '', $price_sentence);
+}
+if ($own_linode && $row->get('cvp_services_wanted') && $bundle_price !== '') {
+	$price_parts[] = $bundle_price . ' for email and backups';
+}
+if ($domain_sentence !== '') {
+	$price_parts[] = preg_replace('/^and /', '', $domain_sentence);
+}
+?>
+<section class="smc-card smc-summary">
+	<h2 class="smc-title smc-title-lg"><?php echo htmlspecialchars($row->get('cvp_domain')); ?></h2>
+	<dl class="smc-facts">
 		<dt>Plan</dt>
 		<dd><?php echo htmlspecialchars($plan_label); ?></dd>
+		<dt>Domain</dt>
+		<dd><?php echo (string)$row->get('cvp_domain_source') === 'register' ? 'We register it for you' : 'Your own'; ?></dd>
 		<?php if ($own_linode): ?>
-		<dt>Server</dt>
-		<dd>A 1 GB Linode in your own Linode account, in Newark (us-east). Linode bills you for it, from $5 a month.</dd>
 		<dt>Email and backups</dt>
-		<dd><?php if ($row->get('cvp_services_wanted')) {
-				echo 'Yes: email from your site and offsite backups, through us'
-					. ($bundle_price !== '' ? ', ' . htmlspecialchars($bundle_price) : '') . '.';
-			} else {
-				echo 'No. Your site has no email until you set up a mail provider, so a forgotten password cannot be '
-					. 'reset by email. You can add ours later from your site\'s setup.';
-			} ?></dd>
+		<dd><?php echo $row->get('cvp_services_wanted') ? 'Included' : 'Not included'; ?></dd>
 		<?php endif; ?>
+		<dt>Admin sign-in</dt>
+		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
 		<dt>Price</dt>
-		<dd><?php if ($price_sentence === 'free') {
-				echo 'The setup is free; Linode bills you for the server';
-				if ($row->get('cvp_services_wanted') && $bundle_price !== '') { echo ', and email and backups are ' . htmlspecialchars($bundle_price); }
-				if ($domain_sentence !== '') { echo ', ' . htmlspecialchars($domain_sentence); }
-				echo '.';
-			} elseif ($price_sentence !== '') {
-				echo htmlspecialchars($price_sentence);
-				if ($domain_sentence !== '') { echo ', ' . htmlspecialchars($domain_sentence); }
-				echo '.';
-			} else {
-				echo htmlspecialchars($plan_label) . ' hosting is not on sale right now.';
-			} ?></dd>
+		<dd><?php echo $price_parts ? htmlspecialchars(implode(', plus ', $price_parts)) : htmlspecialchars($plan_label) . ' is not on sale right now'; ?></dd>
+		<?php if (($renewal = ManagedSiteDraft::domain_renewal_sentence($row)) !== ''): ?>
+		<dt>Domain renewal</dt>
+		<dd><?php echo htmlspecialchars($renewal); ?></dd>
+		<?php endif; ?>
 	</dl>
 
+	<div class="smc-next">
 	<?php if ($own_linode && !$linode_live && $product !== null): ?>
-		<section class="smc-connect">
-			<h3>Connect your Linode account</h3>
-			<p>We create one server in your Linode account and build your site on it. Linode asks you to let us
-				manage servers in your account; we use that access for the build only and forget it when your site is
-				ready.</p>
-			<?php if ($linode_connected): ?>
-			<p class="sms-error">Your Linode connection did not come back usable. Connect again.</p>
-			<?php endif; ?>
-			<?php echo PublicPage::action_button('Connect your Linode account', '/profile/server_manager/connect_cloud', array(
-				'hidden' => array('action' => 'connect', 'cvp_customer_cloud_provision_id' => (int)$row->key),
-				'class'  => 'sms-visit',
-			)); ?>
-			<p class="sms-note">No Linode account? You can make one on the way.</p>
-		</section>
+		<h3 class="smc-title">Connect your Linode account</h3>
+		<p>We'll create your server there. We only use this access to set up your site.</p>
+		<?php if ($linode_connected): ?>
+		<p class="sms-error">That connection didn't work. Please connect again.</p>
+		<?php endif; ?>
+		<?php echo PublicPage::action_button('Connect your Linode account', '/profile/server_manager/connect_cloud', array(
+			'hidden' => array('action' => 'connect', 'cvp_customer_cloud_provision_id' => (int)$row->key),
+			'class'  => 'sms-visit',
+		)); ?>
 	<?php elseif ($payment_form !== ''): ?>
 		<?php if ($in_cart): ?>
-			<p><a href="/cart" class="sms-visit">Finish payment</a>
-				<span class="sms-note">This site is already in your cart.</span></p>
+			<a href="/cart" class="sms-visit">Finish payment</a>
+			<span class="sms-note">Already in your cart.</span>
 		<?php else: ?>
 			<?php echo $payment_form; ?>
 		<?php endif; ?>
 	<?php else: ?>
-		<p class="sms-error"><?php echo htmlspecialchars($plan_label); ?> hosting is not on sale right now, so this site
-			cannot be paid for yet. Your setup is saved; Edit it to choose another plan.</p>
+		<p class="sms-error"><?php echo htmlspecialchars($plan_label); ?> isn't available right now. Your setup is saved;
+			edit it to choose another plan.</p>
 	<?php endif; ?>
+	</div>
 
 	<div class="smc-actions">
 		<?php echo PublicPage::action_button('Edit', ManagedSiteDraft::CONFIGURE_URL, array(
@@ -138,9 +125,7 @@ echo $steps_html;
 
 <?php else: ?>
 
-<p class="smc-lead">Tell us about the site you want. Nothing is bought or created until you pay.
-	<?php if ($plans_sentence !== ''): ?><strong><?php echo htmlspecialchars($plans_sentence); ?></strong><?php
-		if ($sellable) { echo ', plus the domain year at cost if we register the name for you'; } ?>.<?php endif; ?></p>
+<p class="smc-lead">Tell us about your site. Nothing is charged until checkout.</p>
 
 <?php if (!empty($errors)): ?>
 <div class="sms-error">
@@ -160,43 +145,54 @@ if ($row) {
 	$formwriter->hiddeninput('cvp_customer_cloud_provision_id', '', array('value' => (int)$row->key));
 }
 
+// ── Plan ──
 // The choice shows when there is one to make, and when the draft's own plan
 // is not on sale now: then its buyer picks the one that is, knowingly.
-if (count($plans) > 1 || ($row !== null && !isset($plans[ManagedSiteDraft::plan_of($row)]))) {
-	$plan_options = array();
-	foreach ($plans as $plan => $def) {
-		$plan_options[$plan] = $def['label'] . ($plan_prices[$plan] !== '' ? ', ' . preg_replace('/ from today$/', '', $plan_prices[$plan]) : '')
-			. ' — ' . $def['blurb'];
+$show_plans = count($plans) > 1 || ($row !== null && !isset($plans[ManagedSiteDraft::plan_of($row)]));
+if ($show_plans || count($regions) > 1) {
+	echo '<section class="smc-card"><h3 class="smc-title">Plan</h3>';
+	if ($show_plans) {
+		$plan_options = array();
+		foreach ($plans as $plan => $def) {
+			$price = $plan_prices[$plan] === 'free' ? 'Free' : preg_replace('/ from today$/', '', $plan_prices[$plan]);
+			$plan_options[$plan] = $def['label'] . ($price !== '' ? ' — ' . $price : '') . '. ' . $def['blurb'];
+		}
+		$plan_rules = array();
+		foreach ($plans as $plan => $def) {
+			$plan_rules[$plan] = $plan === 'own_linode'
+				? array('show' => array('smc_services'), 'hide' => array('cvp_region'))
+				: array('hide' => array('smc_services'), 'show' => array('cvp_region'));
+		}
+		$formwriter->radioinput('plan', '', array(
+			'options'          => $plan_options,
+			'value'            => $values['plan'],
+			'visibility_rules' => $plan_rules,
+		));
 	}
-	$own_fields = array('with_services', 'with_services_note', 'own_linode_note');
-	$plan_rules = array();
-	foreach ($plans as $plan => $def) {
-		$plan_rules[$plan] = $plan === 'own_linode'
-			? array('show' => $own_fields, 'hide' => array('cvp_region'))
-			: array('hide' => $own_fields, 'show' => array('cvp_region'));
+	if (count($regions) > 1) {
+		$region_options = array();
+		foreach ($regions as $region) {
+			$region_options[$region] = $region;
+		}
+		$formwriter->dropinput('cvp_region', 'Where the site lives', array(
+			'options' => $region_options, 'value' => $values['cvp_region']));
 	}
-	$formwriter->radioinput('plan', 'Plan', array(
-		'options'          => $plan_options,
-		'value'            => $values['plan'],
-		'visibility_rules' => $plan_rules,
-	));
+	echo '</section>';
 }
 
+// ── Domain ──
+echo '<section class="smc-card"><h3 class="smc-title">Domain</h3>';
 $registrant_fields = array_merge(array('managed_domain_status', 'md_intro'), array_keys(ManagedDomainIntake::CONTACT_FIELDS));
-$own_domain_note = '<p id="own_domain_note" class="form-text">Your site has no address and no security certificate '
-	. 'until your domain points at it. After payment, your sites page lists the DNS records to add where your '
-	. 'domain is registered: one for the site\'s address, the others for its email. We email you when the site is '
-	. 'built.</p>';
 if ($sellable) {
-	$formwriter->radioinput('cvp_domain_source', 'Your domain', array(
+	$formwriter->radioinput('cvp_domain_source', '', array(
 		'options' => array(
-			'register' => 'Register one for me',
-			'own'      => 'I own one already',
+			'register' => 'Register a new domain for me',
+			'own'      => 'I already own a domain',
 		),
 		'value' => $values['cvp_domain_source'],
 		'visibility_rules' => array(
-			'register' => array('show' => $registrant_fields, 'hide' => array('own_domain_note')),
-			'own'      => array('hide' => $registrant_fields, 'show' => array('own_domain_note')),
+			'register' => array('show' => $registrant_fields),
+			'own'      => array('hide' => $registrant_fields),
 		),
 	));
 } else {
@@ -207,25 +203,22 @@ $formwriter->textinput('cvp_domain', 'Domain name', array(
 	'value'       => $values['cvp_domain'],
 	'maxlength'   => 253,
 	'placeholder' => 'smithfamily.com',
-	'helptext'    => $sellable
-		? 'If we register it: ' . $offered_tlds . ' names, priced at cost for the first year. If you own it: exactly as you own it.'
-		: 'Exactly as you own it.',
+	'helptext'    => $sellable ? 'New domains (' . $offered_tlds . ') are registered at cost.' : '',
 	'validation'  => array('required' => true),
 ));
 echo '<div id="managed_domain_status" class="form-text" aria-live="polite"></div>';
-echo $own_domain_note;
 
 if ($sellable) {
 	// Asked once the name is known to be free. A saved draft, or a form shown
 	// again with errors, stays open: the name prefills from the account, so it
 	// says nothing about whether the buyer has answered.
 	$registrant_kept = $row !== null || !empty($errors);
-	echo '<div id="md_registrant"' . ($registrant_kept ? ' data-keep="1"' : '') . '>';
-	echo '<p id="md_intro" class="form-text">Who owns the domain. This becomes the public registration record, so it '
-		. 'has to be a real contact — private registration keeps it hidden from WHOIS lookups, and we turn that on '
-		. 'for you at no cost.</p>';
+	echo '<div id="md_registrant" class="smc-subsection"' . ($registrant_kept ? ' data-keep="1"' : '') . '>';
+	echo '<p id="md_intro" class="smc-subhead">Registration contact <span>Kept private from public lookups, at no cost.</span></p>';
+	echo '<div class="smc-row">';
 	$formwriter->textinput('md_first_name', 'First name', array('value' => $values['md_first_name'] ?? '', 'maxlength' => 255));
 	$formwriter->textinput('md_last_name', 'Last name', array('value' => $values['md_last_name'] ?? '', 'maxlength' => 255));
+	echo '</div>';
 
 	// The address and the phone are the platform's own form blocks, prefilled
 	// through unsaved models: a country and a phone country code are chosen
@@ -241,44 +234,35 @@ if ($sellable) {
 	$registrant_phone->set('phn_phone_number', $values['phn_phone_number'] ?? '');
 	PhoneNumber::renderFormFields($formwriter, array('required' => true, 'model' => $registrant_phone));
 
-	$formwriter->textinput('md_email', 'Email for the registration record', array(
+	$formwriter->textinput('md_email', 'Contact email', array(
 		'value' => $values['md_email'] ?? '', 'maxlength' => 255));
 	echo '</div>';
 }
+echo '</section>';
 
-if (count($regions) > 1) {
-	$region_options = array();
-	foreach ($regions as $region) {
-		$region_options[$region] = $region;
-	}
-	$formwriter->dropinput('cvp_region', 'Where the site lives', array(
-		'options' => $region_options, 'value' => $values['cvp_region']));
+// ── Email and backups (On your own Linode only; unticked, Q7) ──
+if (isset($plans['own_linode']) && $bundle_price !== '') {
+	echo '<section class="smc-card" id="smc_services"><h3 class="smc-title">Email and backups</h3>';
+	$formwriter->checkboxinput('with_services', 'Add email and backups — ' . $bundle_price, array(
+		'checked' => $values['with_services'] !== '',
+	));
+	echo '<p class="form-text smc-indent">Without it, your site can\'t send email until you set up your own mail provider.</p>';
+	echo '</section>';
 }
 
-// On your own Linode: where the server goes, and the email and backups bundle,
-// offered unticked (Q7). Shown when the plan is chosen, or when it is the only one.
-if (isset($plans['own_linode'])) {
-	echo '<div id="own_linode_note" class="form-text">We build your site on a 1 GB Linode in your own Linode account, '
-		. 'in Newark (us-east). Linode bills you for the server, from $5 a month; the setup is free. You connect your '
-		. 'Linode account on the next step.</div>';
-	if ($bundle_price !== '') {
-		$formwriter->checkboxinput('with_services', 'Add email and backups through us, ' . $bundle_price, array(
-			'checked'  => $values['with_services'] !== '',
-		));
-		echo '<p id="with_services_note" class="form-text">Your site sends email from your domain, and its backups are '
-			. 'kept offsite and encrypted. Without it, your site has no email until you set up a mail provider, so a '
-			. 'forgotten password cannot be reset by email.</p>';
-	}
-}
-
-$formwriter->textinput('cvp_buyer_email', 'Site admin email', array(
+// ── Sign-in ──
+echo '<section class="smc-card"><h3 class="smc-title">Your sign-in</h3>';
+$formwriter->textinput('cvp_buyer_email', 'Admin email', array(
 	'value'      => $values['cvp_buyer_email'],
 	'maxlength'  => 255,
-	'helptext'   => 'The sign-in for your new site\'s admin account. Its first password is shown to you once, on your sites page.',
+	'helptext'   => 'You\'ll sign in to your new site with this.',
 	'validation' => array('required' => true),
 ));
+echo '</section>';
 
-$formwriter->submitbutton('btn_save', 'Save and continue');
+echo '<div class="smc-submit">';
+$formwriter->submitbutton('btn_save', 'Continue');
+echo '</div>';
 echo $formwriter->end_form();
 ?>
 
@@ -287,19 +271,42 @@ echo $formwriter->end_form();
 <?php endif; ?>
 
 <style>
-.smc-lead { margin: 0 0 1.2em; }
-.smc-summary .sms-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: .5em 0 1.2em; }
-.smc-summary .sms-facts dt { font-weight: 600; }
-.smc-summary .sms-facts dd { margin: 0; }
-.smc-actions { margin-top: 1.5em; }
-.sms-error { padding: 12px 16px; background: #fef2f2; border-radius: 4px; }
+.smc-lead { margin: 0 0 1.5rem; color: #4b5563; }
+.smc-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem 1.5rem 1.4rem;
+	margin: 0 0 1.25rem; max-width: 760px; }
+.smc-card .smc-title { margin: 0 0 1rem; font-size: 1.05rem; font-weight: 600; color: #111827; letter-spacing: 0; }
+.smc-card .smc-title-lg { font-size: 1.4rem; margin-bottom: 1.25rem; }
+/* Each choice is a tile: the whole box is the label, the chosen one is marked. */
+.smc-card .form-check { position: relative; margin: 0 0 .6rem; padding: .8rem 1rem .8rem 2.6rem;
+	border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; transition: border-color .15s, background .15s; }
+.smc-card .form-check:last-child { margin-bottom: 0; }
+.smc-card .form-check:hover { border-color: #cbd5e1; }
+.smc-card .form-check:has(input:checked) { border-color: #02b159; background: #f0fdf4; }
+.smc-card .form-check-input { position: absolute; left: 1rem; top: 1.05rem; margin: 0; }
+.smc-card .form-check-label { display: block; line-height: 1.45; cursor: pointer; }
+.smc-card .mb-3:last-child, .smc-card .form-group:last-child { margin-bottom: 0; }
+.smc-subsection { margin-top: 1.25rem; padding-top: 1.1rem; border-top: 1px solid #f0f1f3; }
+.smc-subhead { font-weight: 600; margin: 0 0 .75rem; }
+.smc-subhead span { display: block; font-weight: 400; color: #6b7280; font-size: .9em; margin-top: .15rem; }
+.smc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+@media (max-width: 600px) { .smc-row { grid-template-columns: 1fr; } }
+.smc-indent { margin: .6rem 0 0; color: #6b7280; font-size: .92em; }
+.smc-submit { margin: 1.5rem 0 2rem; }
+.smc-facts { display: grid; grid-template-columns: max-content 1fr; gap: .6rem 2rem; margin: 0 0 1.5rem; }
+.smc-facts dt { color: #6b7280; font-weight: 500; }
+.smc-facts dd { margin: 0; color: #111827; }
+.smc-next { padding-top: 1.25rem; border-top: 1px solid #f0f1f3; }
+.smc-next h3 { margin-bottom: .35rem; }
+.smc-next p { margin: 0 0 1rem; color: #4b5563; }
+.smc-actions { margin-top: 1.5rem; }
+.sms-error { padding: 12px 16px; background: #fef2f2; border-radius: 6px; margin-bottom: 1.25rem; }
 .sms-error ul { margin: 0; padding-left: 1.2em; }
-.sms-note { color: #555; font-size: .9em; margin-left: .6em; }
+.sms-note { color: #6b7280; font-size: .9em; margin-left: .6em; }
 .sms-visit { display: inline-block; background: #02b159; color: #fff; padding: 10px 22px; border: 0;
-	border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 1em; cursor: pointer; }
-.sms-pay { display: inline-block; margin: .5em 0; }
+	border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 1em; cursor: pointer; }
+.sms-pay { display: inline-block; margin: 0; }
 .sms-secondary-btn { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; padding: 8px 18px;
-	border-radius: 4px; font-size: .95em; cursor: pointer; margin-right: .5em; }
+	border-radius: 6px; font-size: .95em; cursor: pointer; margin-right: .5em; }
 #managed_domain_status[data-state="available"] { color: #1a7f37; }
 #managed_domain_status[data-state="unavailable"] { color: #b42318; }
 </style>

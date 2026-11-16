@@ -38,7 +38,8 @@
 			window.joineryApi.post('server_manager/domain_check', { domain: value }).then(function (data) {
 				if ((input.value || '').trim().toLowerCase() !== value) { return; }
 				if (data && data.available) {
-					show(value + ' is available — ' + (data.price_display || '') + ' for the first year.', 'available');
+					show(value + ' is available: ' + (data.price_display || '') + ' for the first year'
+						+ (data.renew_display ? ', then ' + data.renew_display + ' a year to renew.' : '.'), 'available');
 				} else {
 					show((data && data.message) || 'That name is not available.', 'unavailable');
 				}

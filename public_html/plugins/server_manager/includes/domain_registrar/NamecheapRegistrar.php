@@ -29,6 +29,7 @@
  * buyer paid with what the registrar charges, and a coupon applied on one side
  * only breaks that comparison in one direction or the other.
  *
+ * @version 1.1.3 - checkAvailability() also answers renew_year: the buyer's yearly renewal in their own account
  * @version 1.1.2 - dnsCredential() carries the endpoint (sandbox or live), so the DNS driver talks to the
  *                  same Namecheap the registrar registered with
  * @version 1.1.1 - the pricing answer is walked by property, not xpath: the live response's default
@@ -153,6 +154,9 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 			$out[$name] = array(
 				'available'  => $available && $price !== null,
 				'price_year' => $price,
+				// What a year costs the buyer once the domain is in their own
+				// account: the registrar's ordinary renewal price, no coupon.
+				'renew_year' => $available ? $this->renewalForDomain($name, $icann_fee) : null,
 				'premium'    => false,
 				'message'    => $available
 					? ($price !== null ? '' : 'We could not price that name right now — try again in a moment.')
@@ -319,32 +323,52 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 		return false;
 	}
 
-	/** The one-year price for a domain, including the ICANN fee. */
-	private function priceForDomain(string $domain, float $icann_fee): ?string {
+	/**
+	 * A year's renewal once the buyer holds the name, or null. Best effort: it
+	 * is shown beside the quote, never charged, so a pricing call that fails
+	 * leaves it out rather than failing the availability answer.
+	 */
+	private function renewalForDomain(string $domain, float $icann_fee): ?string {
+		try {
+			return $this->priceForDomain($domain, $icann_fee, 'RENEW');
+		} catch (DomainRegistrarException $e) {
+			return null;
+		}
+	}
+
+	/** The one-year price for a domain, including the ICANN fee: to register it (ours), or to renew it (the buyer's). */
+	private function priceForDomain(string $domain, float $icann_fee, string $action = 'REGISTER'): ?string {
 		$tld = $this->tldOf($domain);
 		if ($tld === '') {
 			return null;
 		}
-		$base = $this->tldPrice($tld);
+		$base = $this->tldPrice($tld, $action);
 		if ($base === null) {
 			return null;
 		}
 		return number_format((float)$base + $icann_fee, 2, '.', '');
 	}
 
-	/** The registry price for one year of a TLD, cached for this request. */
-	private function tldPrice(string $tld): ?string {
-		if (array_key_exists($tld, $this->tld_price)) {
-			return $this->tld_price[$tld];
+	/**
+	 * The price of one year of a TLD, cached for this request. REGISTER is
+	 * what the operator pays (its account price, with the coupon where it
+	 * applies); RENEW is what the buyer will pay in their own account: the
+	 * registrar's list price, no coupon.
+	 */
+	private function tldPrice(string $tld, string $action = 'REGISTER'): ?string {
+		$key = $action . ':' . $tld;
+		if (array_key_exists($key, $this->tld_price)) {
+			return $this->tld_price[$key];
 		}
-		$this->tld_price[$tld] = null;
+		$this->tld_price[$key] = null;
+		$renew = $action === 'RENEW';
 
 		$xml = $this->call('namecheap.users.getPricing', array(
 			'ProductType'     => 'DOMAIN',
 			'ProductCategory' => 'DOMAINS',
-			'ActionName'      => 'REGISTER',
+			'ActionName'      => $renew ? 'RENEW' : 'REGISTER',
 			'ProductName'     => $tld,
-		) + self::promotionParams());
+		) + ($renew ? array() : self::promotionParams()));
 
 		// Walked by property, never by xpath: the live answer carries a default
 		// namespace (xmlns="http://api.namecheap.com/xml.response"), and
@@ -377,9 +401,10 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 		// applies to this TLD, and empty otherwise, so it is read only when it
 		// is a number. An excluded TLD quotes at YourPrice and registers at
 		// YourPrice, which is what keeps the two sides equal.
-		$value = (string)($price_node['YourPrice'] ?: $price_node['Price']);
+		$value = $renew ? (string)($price_node['RegularPrice'] ?: $price_node['Price'])
+			: (string)($price_node['YourPrice'] ?: $price_node['Price']);
 		$coupon = trim((string)($price_node['CouponPrice'] ?? ''));
-		if (self::promotionCode() !== '' && $coupon !== '' && is_numeric($coupon)) {
+		if (!$renew && self::promotionCode() !== '' && $coupon !== '' && is_numeric($coupon)) {
 			$value = $coupon;
 		}
 		if ($value === '' || !is_numeric($value)) {
@@ -392,8 +417,8 @@ class NamecheapRegistrar implements DomainRegistrarProvider {
 				$total += (float)$amount;
 			}
 		}
-		$this->tld_price[$tld] = number_format($total, 2, '.', '');
-		return $this->tld_price[$tld];
+		$this->tld_price[$key] = number_format($total, 2, '.', '');
+		return $this->tld_price[$key];
 	}
 
 	/** Everything after the first label — 'co.uk' for 'a.co.uk'. */

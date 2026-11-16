@@ -43,6 +43,21 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
+// The plans and the bundle on offer are read from the products this box has
+// live. A box with its own hosting or services products switched on (a
+// person walking the pages) would change what this test sees, so they are
+// set aside for the run and switched back on after it.
+$set_aside = DbConnector::get_instance()->get_db_link()->query("SELECT pro_product_id FROM pro_products
+	WHERE pro_is_active = true AND pro_delete_time IS NULL
+	  AND pro_fulfillment_provider IN ('customer_cloud', 'joinery_services')")->fetchAll(PDO::FETCH_COLUMN);
+if ($set_aside) {
+	$ids = implode(',', array_map('intval', $set_aside));
+	DbConnector::get_instance()->get_db_link()->exec("UPDATE pro_products SET pro_is_active = false WHERE pro_product_id IN ($ids)");
+	harness_defer(function () use ($ids) {
+		DbConnector::get_instance()->get_db_link()->exec("UPDATE pro_products SET pro_is_active = true WHERE pro_product_id IN ($ids)");
+	});
+}
+
 require_once(PathHelper::getIncludePath('plugins/store/includes/requirements/AbstractProductRequirement.php'));
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));

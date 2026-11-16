@@ -30,6 +30,7 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.6 - the domain-year line carries the name's yearly renewal price (managed_domain_renewal)
  * @version 1.5 - an own-Linode draft with the email and backups bundle brings the bundle line with it
  *                (SERVICES_FIELD, extra_cart_lines; own_linode_we_install W4); a product page offers and accepts a
  *                draft of its own plan, compared by plan as well as landing (draft_fits)
@@ -266,6 +267,12 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 			$data['managed_domain_price_line'] = number_format((float)$draft->get('cvp_domain_quote'), 2, '.', '');
 			$data['managed_domain'] = array('question' => 'Registered domain',
 				'answer' => (string)$draft->get('cvp_domain'));
+			if (trim((string)$draft->get('cvp_domain_renew_quote')) !== '') {
+				// Shown on the domain line: a first year is often a promotion.
+				$data['managed_domain_renewal'] = array('question' => 'Renews at',
+					'answer' => ManagedSiteDraft::money((string)$draft->get('cvp_domain_renew_quote'))
+						. ' a year, paid to the registrar once the domain is in your own account');
+			}
 		}
 		if ($draft->get('cvp_services_wanted') && ManagedSiteDraft::plan_of($draft) === 'own_linode') {
 			// The email and backups line rides with this one (extra_cart_lines).
@@ -330,12 +337,16 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		if ($product_id <= 0) {
 			return array();
 		}
+		$line = array(
+			'user_price_override' => $price,
+			'managed_domain'      => array('question' => 'Registered domain', 'answer' => $domain),
+		);
+		if (!empty($form_data['managed_domain_renewal'])) {
+			$line['managed_domain_renewal'] = $form_data['managed_domain_renewal'];
+		}
 		return array(array(
 			'product_id' => $product_id,
-			'form_data'  => array(
-				'user_price_override' => $price,
-				'managed_domain'      => array('question' => 'Registered domain', 'answer' => $domain),
-			),
+			'form_data'  => $line,
 		));
 	}
 

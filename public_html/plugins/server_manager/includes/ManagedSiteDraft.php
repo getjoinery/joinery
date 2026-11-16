@@ -21,6 +21,7 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.7 - the domain's yearly renewal is recorded with its quote (cvp_domain_renew_quote, domain_renewal_sentence)
  * @version 1.6 - a third plan, On your own Linode (reference 0, specs/own_linode_we_install.md W1): the plan is
  *                recorded on the draft (cvp_plan) and read back by plan_of(); its server is in us-east; a free
  *                product's price reads 'free'; the email and backups bundle rides with an own-Linode draft
@@ -107,11 +108,11 @@ class ManagedSiteDraft {
 	 */
 	const PLANS = array(
 		'starter' => array('ref' => self::STARTER_REF, 'landing' => 'container', 'label' => 'Starter',
-			'blurb' => 'Your site on a server shared with other sites. Mail, backups and Drive included.'),
+			'blurb' => 'We host it on a server shared with other sites. Email and backups included.'),
 		'managed' => array('ref' => self::MANAGED_REF, 'landing' => 'instance', 'label' => 'Managed',
-			'blurb' => 'Your site on a server of its own. Mail, backups and Drive included.'),
+			'blurb' => 'We host and run it for you. Email and backups included.'),
 		'own_linode' => array('ref' => self::OWN_LINODE_REF, 'landing' => 'instance', 'label' => 'On your own Linode',
-			'blurb' => 'We build your site on a server in your own Linode account. Linode bills you for the server.'),
+			'blurb' => 'We set it up in your own Linode account. Linode bills you for the server.'),
 	);
 
 	/** What a site's internal name may look like: the install directory and database name. */
@@ -306,11 +307,13 @@ class ManagedSiteDraft {
 
 		$domain = '';
 		$price = null;
+		$renew = '';
 		$registrant = array();
 		if ($source === 'register') {
 			$intake = ManagedDomainIntake::validateRegistration($post, 'cvp_domain');
 			$domain = $intake['domain'];
 			$price = $intake['price'];
+			$renew = (string)($intake['renew'] ?? '');
 			$registrant = $intake['registrant'];
 			foreach ($intake['errors'] as $error) {
 				$errors[] = $error;
@@ -385,10 +388,12 @@ class ManagedSiteDraft {
 		$row->set('cvp_domain_source', $source);
 		if ($source === 'register') {
 			$row->set('cvp_domain_quote', $price);
+			$row->set('cvp_domain_renew_quote', $renew !== '' ? $renew : null);
 			$row->set('cvp_domain_quote_time', gmdate('Y-m-d H:i:s'));
 			$row->seal_registrant($registrant);
 		} else {
 			$row->set('cvp_domain_quote', null);
+			$row->set('cvp_domain_renew_quote', null);
 			$row->set('cvp_domain_quote_time', null);
 			$row->set('cvp_registrant_sealed', null);
 		}
@@ -572,6 +577,14 @@ class ManagedSiteDraft {
 			return $amount . ' ' . $per[$type] . ' from today';
 		}
 		return $amount . ' once';
+	}
+
+	/** "Renews at $Y a year, paid to the registrar once the domain is yours", for a register draft with a renewal quote; '' otherwise. */
+	public static function domain_renewal_sentence(CustomerCloudProvision $row): string {
+		if ((string)$row->get('cvp_domain_source') !== 'register' || trim((string)$row->get('cvp_domain_renew_quote')) === '') {
+			return '';
+		}
+		return 'Renews at ' . self::money((string)$row->get('cvp_domain_renew_quote')) . ' a year, paid to the registrar once the domain is in your own account';
 	}
 
 	/** "and $X once for the domain year", for a register draft; '' otherwise. */

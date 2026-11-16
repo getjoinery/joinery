@@ -67,6 +67,7 @@ interface DomainRegistrarProvider {
 	 *
 	 * @param string[] $domains
 	 * @return array domain => ['available' => bool, 'price_year' => ?string,
+	 *                          'renew_year' => ?string (optional: a year's renewal, once the buyer holds it),
 	 *                          'premium' => bool, 'message' => string]
 	 */
 	public function checkAvailability(array $domains): array;

@@ -111,6 +111,7 @@ list($driver, $log) = ncp_driver(array(
 		. 'IsPremiumName="false" IcannFee="0.18"/>'
 		. '</CommandResponse>'),
 	ncp_xml(ncp_pricing_xml('com', '10.28')),
+	ncp_xml(ncp_pricing_xml('com', '10.28')),   // the renewal price (RENEW)
 ));
 $answers = $driver->checkAvailability(array('free-name.com', 'taken-name.com'));
 
@@ -122,7 +123,12 @@ check($answers['free-name.com']['price_year'] === '10.46',
 check($answers['taken-name.com']['price_year'] === null, 'a taken name is not priced');
 check(trim((string)$answers['taken-name.com']['message']) !== '',
 	'a taken name says so in words the buyer can read');
-check(count($log) === 2, 'one check call plus one pricing call', 'calls: ' . count($log));
+check($answers['free-name.com']['renew_year'] === '14.16',
+	'the renewal is the registrar\'s list price plus the ICANN fee: what the buyer pays in their own account',
+	'got: ' . var_export($answers['free-name.com']['renew_year'] ?? null, true));
+check($answers['taken-name.com']['renew_year'] === null, 'a taken name has no renewal price');
+check(count($log) === 3 && ncp_params($log[1])['ActionName'] === 'REGISTER' && ncp_params($log[2])['ActionName'] === 'RENEW',
+	'one check call, then the registration and the renewal price', 'calls: ' . count($log));
 check(ncp_params($log[0])['DomainList'] === 'free-name.com,taken-name.com',
 	'both names go in one check call');
 
@@ -135,6 +141,18 @@ $answers = $driver->checkAvailability(array('silent-name.com'));
 check(isset($answers['silent-name.com']), 'the name still gets an answer row');
 check(empty($answers['silent-name.com']['available']),
 	'silence is unavailable — never "sure, sell it"');
+
+section('A renewal price that cannot be read leaves the quote standing');
+
+list($driver) = ncp_driver(array(
+	ncp_xml('<CommandResponse Type="namecheap.domains.check">'
+		. '<DomainCheckResult Domain="quiet.com" Available="true" ErrorNo="0" IsPremiumName="false" IcannFee="0"/>'
+		. '</CommandResponse>'),
+	ncp_xml(ncp_pricing_xml('com', '9.00')),
+));
+$answers = $driver->checkAvailability(array('quiet.com'));
+check(!empty($answers['quiet.com']['available']) && $answers['quiet.com']['price_year'] === '9.00'
+	&& $answers['quiet.com']['renew_year'] === null, 'available and priced, with no renewal price shown');
 
 section('A premium name is declined, and says why');
 
@@ -158,11 +176,12 @@ list($driver, $log) = ncp_driver(array(
 		. '<DomainCheckResult Domain="two.com" Available="true" ErrorNo="0" IsPremiumName="false" IcannFee="0"/>'
 		. '</CommandResponse>'),
 	ncp_xml(ncp_pricing_xml('com', '9.00')),
+	ncp_xml(ncp_pricing_xml('com', '9.00')),
 ));
 $answers = $driver->checkAvailability(array('one.com', 'two.com'));
 check($answers['one.com']['price_year'] === '9.00' && $answers['two.com']['price_year'] === '9.00',
 	'both .com names get the same price');
-check(count($log) === 2, 'the pricing endpoint is called once for the TLD, not once per name',
+check(count($log) === 3, 'each price is looked up once for the TLD, not once per name',
 	'calls: ' . count($log));
 
 // ---------------------------------------------------------------------------

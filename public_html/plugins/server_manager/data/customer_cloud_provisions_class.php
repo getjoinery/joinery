@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.38 - cvp_domain_renew_quote: the name's yearly renewal, shown to the buyer
  * @version 1.37 - cvp_plan, cvp_services_order_item_id, cvp_services_wanted and cvp_grant_released_time; own_linode_sites_held() and own_linode_site_limit()
  *                (specs/own_linode_we_install.md)
  * @version 1.36 - cvp_disputed_time and cvp_disputes: a payment for this site was disputed (HostedSuspensions, hosting_launch S6)
@@ -301,6 +302,8 @@ class CustomerCloudProvision extends SystemBase {
 		// registrant block sealed here. NULL on rows from the other origins.
 		'cvp_domain_source'          => array('type'=>'varchar(10)', 'allowed_values'=>array('own', 'register')),
 		'cvp_domain_quote'           => array('type'=>'numeric(10,2)'),
+		// The registrar's yearly renewal price for the name, quoted with it: what the buyer pays once it is theirs.
+		'cvp_domain_renew_quote'     => array('type'=>'numeric(10,2)'),
 		'cvp_domain_quote_time'      => array('type'=>'timestamp(6)'),
 		'cvp_registrant_sealed'      => array('type'=>'text'),
 		'cvp_error'                  => array('type'=>'text'),
