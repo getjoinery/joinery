@@ -41,6 +41,8 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.20.2 - the relay-change popup is a few lines: what the site says was done and when, that the new relay
+ *   passed this device's checks, trust it if you know of the update or ask your site admin first, and its key
  * @version 1.20.1 - the relay check takes what it reaches (records, API, step-up, challenge) as an argument, so
  *   selfCheck swaps nothing on the page (reviewer2 N1)
  * @version 1.20 - a relay change is one plain popup per new relay, for every mailbox it covers: what happened,
@@ -1349,41 +1351,33 @@ window.MailboxFortress = (function () {
 		var named = !!(update && update.identity_public_key && sameText(update.identity_public_key, identity));
 		var state = !named ? 'unexplained'
 			: (update.status === 'done' ? 'explained' : (update.status === 'failed' ? 'unfinished' : 'finishing'));
-		var who = (update && update.started_by) ? update.started_by + ' (site admin)' : 'the site admin';
 		var started = named ? dateText(Date.parse(update.started_time)) : '';
 		var done = named ? dateText(Date.parse(update.done_time)) : '';
-		var v = { state: state, intro: RELAY_INTRO, site: '', checked: [], lastSeen: '', code: code, trustPlain: state !== 'unexplained' };
+		var v = { state: state, intro: '', site: '', checked: [], lastSeen: '', code: code, trustPlain: state !== 'unexplained' };
+		var when = started ? ' on ' + started : '';
+		var by = (update && update.started_by) ? ' by ' + update.started_by : '';
 		if (state === 'explained') {
-			v.title = 'Your mail relay was replaced';
-			v.site = 'This site says ' + who + ' started an update of the relay' + (started ? ' on ' + started : '')
-				+ (done ? ', and it finished ' + done : '') + '. An update gives the relay a new identity.';
+			v.title = 'Your mail relay was updated';
+			v.site = 'This site says your mail relay was rebuilt or upgraded' + (done ? ' on ' + done : when) + by + ', which gives it a new key.';
 		} else if (state === 'finishing') {
 			v.title = 'Your mail relay is being updated';
-			v.site = 'This site says ' + who + ' started an update of the relay' + (started ? ' on ' + started : '')
-				+ ', and it is still finishing. An update gives the relay a new identity.';
+			v.site = 'This site says your mail relay is being rebuilt or upgraded (started' + when + by + '), which gives it a new key.';
 		} else if (state === 'unfinished') {
-			v.title = 'Your mail relay was being updated';
-			v.site = 'This site says ' + who + ' started an update of the relay' + (started ? ' on ' + started : '')
-				+ ', and it did not finish. Ask your site admin to look at the relay page; the update may need to be run again.';
+			v.title = 'Your mail relay update did not finish';
+			v.site = 'This site says an update of your mail relay was started' + when + by + ' and did not finish.';
 		} else {
-			v.title = 'Your mail relay changed, and this site has no record of why';
-			v.site = '';
-			v.warning = 'A different relay is answering now, and this site has no record of an update that would explain it. '
+			v.title = 'Your mail relay changed without an update';
+			v.intro = RELAY_INTRO;
+			v.warning = 'A different relay is answering, and this site has no record of an update. '
 				+ 'This can mean that someone who controls this site is trying to read your mail.';
+			if (lastSeen) v.lastSeen = 'This device last confirmed your old relay on ' + dateText(lastSeen) + '.';
 		}
-		v.checked.push('The new relay answered this device just now, with its own signature.');
-		v.checked.push('The new relay says it seals your mail to your own key, which this site does not have.');
-		if (note && named) {
-			v.checked.push('You started this update from this browser at '
-				+ new Date(note.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + '.');
-		}
-		if (lastSeen) v.lastSeen = 'This device last confirmed your old relay on ' + dateText(lastSeen) + '.';
-		v.independent = 'This device cannot check what the site says. The code below is the only check that does not '
-			+ 'depend on this site.';
+		if (note && named) v.checked.push('You started this update from this browser.');
+		v.checked.push('The new relay passed this device\'s checks.');
 		// Who to ask is never taken from the site's record (reviewer2 Q4).
-		v.ask = 'If you want to be sure, ask your site admin'
-			+ ' to read you the relay\'s code from the provider\'s console, not from this site. It should end in '
-			+ code.slice(-4) + '.';
+		v.ask = state === 'unexplained'
+			? 'Contact your site admin before you trust it. Your existing mail is safe; this is about new mail.'
+			: 'If you know about this update, trust the new relay. If you do not, contact your site admin before you trust it.';
 		return v;
 	}
 
@@ -1437,27 +1431,20 @@ window.MailboxFortress = (function () {
 		var dlg = dialogShell('identity');
 		dlg.setAttribute('data-relay-change', v.state);
 		dlg.appendChild(el('h3', v.title));
-		dlg.appendChild(el('p', v.intro));
+		if (v.intro) dlg.appendChild(el('p', v.intro));
 		if (v.site) dlg.appendChild(el('p', 'ⓘ ' + v.site, 'mbx-relay-site-says'));
 		if (v.warning) dlg.appendChild(el('p', v.warning));
-		dlg.appendChild(el('p', 'What this device checked', 'fw-bold'));
 		var ul = el('ul');
 		ul.style.listStyle = 'none';
 		ul.style.paddingLeft = '0';
 		v.checked.forEach(function (line) { ul.appendChild(el('li', '✓ ' + line)); });
 		dlg.appendChild(ul);
 		if (v.lastSeen) dlg.appendChild(el('p', v.lastSeen, 'small'));
-		dlg.appendChild(el('p', v.independent));
-		var code = el('p', v.ask);
-		dlg.appendChild(code);
-		var full = el('p', 'The full code: ' + v.code, 'small');
+		dlg.appendChild(el('p', v.ask));
+		var full = el('p', 'New relay key: ' + v.code, 'small');
 		full.style.fontFamily = 'monospace';
 		dlg.appendChild(full);
 		dlg.appendChild(el('p', 'Mailboxes: ' + items.map(function (it) { return it.box.address; }).join(', ')));
-		if (v.state === 'unexplained') {
-			dlg.appendChild(el('p', 'What to do: do not trust it yet. Show this message to your site admin. '
-				+ 'Your existing mail is safe; this is about new mail.'));
-		}
 		var msg = el('p', '', 'mbx-relay-alarm-status');
 		var trust = el('button', v.trustPlain ? 'Trust the new relay' : 'Trust it anyway', 'btn btn-primary');
 		trust.type = 'button';
@@ -1479,8 +1466,6 @@ window.MailboxFortress = (function () {
 		if (v.trustPlain) {
 			buttons.appendChild(trust);
 			buttons.appendChild(closeButton(dlg, 'Not now'));
-			dlg.appendChild(el('p', 'Trusting it asks you to confirm it is you. Until you confirm it, this device cannot '
-				+ 'promise that new mail to these addresses is private, and it will ask again next time.', 'small'));
 		} else {
 			buttons.appendChild(closeButton(dlg));
 			var det = el('details');
@@ -1860,11 +1845,9 @@ window.MailboxFortress = (function () {
 			var noTick = function (view) { return view.checked.every(function (l) { return l.indexOf('This site says') === -1 && l.indexOf('Pat Admin') === -1; }); };
 			var vDone = relayChangeView(nid, run('done'), null, null, '6fd2 c2b8');
 			note('a done run that names the new identity gives the explained popup, with a plain Trust',
-				vDone.state === 'explained' && vDone.trustPlain && vDone.site.indexOf('This site says Pat Admin') === 0);
-			note('the site\'s account is never a tick, and the popup says the device cannot check it',
-				noTick(vDone) && vDone.independent.indexOf('cannot check what the site says') !== -1);
-			note('the code is asked for from the provider\'s console', vDone.ask.indexOf('provider\'s console, not from this site') !== -1
-				&& vDone.ask.indexOf('c2b8') !== -1);
+				vDone.state === 'explained' && vDone.trustPlain && vDone.site.indexOf('This site says') === 0 && vDone.site.indexOf('by Pat Admin') !== -1);
+			note('the site\'s account is never a tick, and the popup says to ask the admin when the update is news',
+				noTick(vDone) && vDone.ask.indexOf('If you do not, contact your site admin') !== -1 && vDone.code === '6fd2 c2b8');
 			note('a run still going, or failed, gives the finishing words without the accusation',
 				relayChangeView(nid, run('booting'), null, null, 'x').state === 'finishing'
 				&& relayChangeView(nid, run('failed'), null, null, 'x').state === 'unfinished'
@@ -1872,14 +1855,14 @@ window.MailboxFortress = (function () {
 			var vNone = relayChangeView(nid, null, null, null, 'x'), vOther = relayChangeView(nid, run('done', other2), null, null, 'x');
 			note('no run, or a run naming another identity, is unexplained, with no plain Trust',
 				vNone.state === 'unexplained' && !vNone.trustPlain && vOther.state === 'unexplained' && !vOther.trustPlain
-				&& vNone.warning.indexOf('no record') !== -1);
+				&& vNone.warning.indexOf('no record') !== -1 && vNone.ask.indexOf('before you trust it') !== -1);
 			note('the last good check is information only: it never changes the state',
 				relayChangeView(nid, run('done'), null, Date.parse('2026-11-15T12:30:00Z'), 'x').state === 'explained'
 				&& relayChangeView(nid, null, null, Date.parse('2026-11-14T09:00:00Z'), 'x').state === 'unexplained');
 			var started = { run_id: 9, at: Date.parse('2026-11-15T11:52:00Z') };
 			note('this browser\'s note adds its own tick, and only when the site\'s account names the identity',
-				relayChangeView(nid, run('done'), started, null, 'x').checked.length === 3
-				&& relayChangeView(nid, null, started, null, 'x').checked.length === 2);
+				relayChangeView(nid, run('done'), started, null, 'x').checked.length === 2
+				&& relayChangeView(nid, null, started, null, 'x').checked.length === 1);
 
 			// The mail page's path (checkOne -> collectChange -> trustAll), with
 			// this check's own store, API and step-up, so nothing real is touched.

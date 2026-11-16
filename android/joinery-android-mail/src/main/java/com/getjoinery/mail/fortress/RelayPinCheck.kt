@@ -142,37 +142,37 @@ object RelayPinCheck {
         val u = update?.takeUnless { it.isNull }
         val named = u != null && sameText(u["identity_public_key"]?.stringValue, identity)
         val status = u?.get("status")?.stringValue ?: ""
-        val by = u?.get("started_by")?.stringValue?.takeIf { it.isNotEmpty() }?.let { "$it (site admin)" } ?: "the site admin"
+        val by = u?.get("started_by")?.stringValue?.takeIf { it.isNotEmpty() }?.let { " by $it" } ?: ""
         val started = if (named) dateText(u?.get("started_time")?.stringValue) else ""
         val done = if (named) dateText(u?.get("done_time")?.stringValue) else ""
         val on = if (started.isNotEmpty()) " on $started" else ""
         val title: String
-        val head = mutableListOf(INTRO)
+        val head = mutableListOf<String>()
         when {
             !named -> {
-                title = "Your mail relay changed, and this site has no record of why"
-                head += "A different relay is answering now, and this site has no record of an update that would explain it. This can mean that someone who controls this site is trying to read your mail."
+                title = "Your mail relay changed without an update"
+                head += INTRO
+                head += "A different relay is answering, and this site has no record of an update. This can mean that someone who controls this site is trying to read your mail."
             }
             status == "done" -> {
-                title = "Your mail relay was replaced"
-                head += "ⓘ This site says $by started an update of the relay$on" + (if (done.isNotEmpty()) ", and it finished $done" else "") + ". An update gives the relay a new identity."
+                title = "Your mail relay was updated"
+                head += "ⓘ This site says your mail relay was rebuilt or upgraded" + (if (done.isNotEmpty()) " on $done" else on) + "$by, which gives it a new key."
             }
             status == "failed" -> {
-                title = "Your mail relay was being updated"
-                head += "ⓘ This site says $by started an update of the relay$on, and it did not finish. Ask your site admin to look at the relay page; the update may need to be run again."
+                title = "Your mail relay update did not finish"
+                head += "ⓘ This site says an update of your mail relay was started$on$by and did not finish."
             }
             else -> {
                 title = "Your mail relay is being updated"
-                head += "ⓘ This site says $by started an update of the relay$on, and it is still finishing. An update gives the relay a new identity."
+                head += "ⓘ This site says your mail relay is being rebuilt or upgraded (started$on$by), which gives it a new key."
             }
         }
-        val code = fingerprint(identity)
-        head += "What this phone checked:\n✓ The new relay answered this phone just now, with its own signature.\n✓ The new relay says it seals your mail to your own key, which this site does not have."
-        if (lastSeen != null) head += "This phone last confirmed your old relay on ${dateText(java.time.Instant.ofEpochMilli(lastSeen).toString())}."
-        head += "This phone cannot check what the site says. The code below is the only check that does not depend on this site. If you want to be sure, ask " +
-            "your site admin to read you the relay's code from the provider's console, not from this site. It should end in ${code.takeLast(4)}.\nThe full code: $code"
+        head += "✓ The new relay passed this phone's checks."
+        if (lastSeen != null && !named) head += "This phone last confirmed your old relay on ${dateText(java.time.Instant.ofEpochMilli(lastSeen).toString())}."
+        head += if (named) "If you know about this update, trust the new relay. If you do not, contact your site admin before you trust it."
+            else "Contact your site admin before you trust it. Your existing mail is safe; this is about new mail."
+        head += "New relay key: ${fingerprint(identity)}"
         head += "Mailboxes: " + addresses.joinToString(", ")
-        if (!named) head += "What to do: do not trust it yet. Show this message to your site admin. Your existing mail is safe; this is about new mail."
         head += TO_TRUST
         return AlarmText(title, head.joinToString("\n\n"))
     }

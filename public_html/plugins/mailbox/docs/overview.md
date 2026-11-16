@@ -2115,19 +2115,21 @@ first and its relay's Update follows.
   ✓ and what the site reports with ⓘ "This site says…": the answer carries
   `update`, the run whose `rcl_identity_public_key` is the relay's identity
   (`MailboxRelayPin::updateFor()`: who started it, when, its status). A done run
-  gives "Your mail relay was replaced", a run still going or failed gives "is
-  being updated" / "was being updated", and no such run gives "changed, and this
-  site has no record of why", whose Trust is behind "I have checked with my
-  admin". The site's account only picks the words, and every state says the
-  device cannot check it. The code people compare (`MailboxRelayPin::fingerprint()`:
+  gives "Your mail relay was updated" with the time it finished and who ran it, a
+  run still going or failed gives "is being updated" / "update did not finish",
+  and each says to trust it if you know of the update and to contact the site
+  admin first if you do not. No such run gives "changed without an update", which
+  says to contact the site admin and puts its Trust behind "I have checked with my
+  admin". The site's account only picks the words. The popup shows the new relay's
+  key; the code people compare (`MailboxRelayPin::fingerprint()`:
   SHA-256 over the raw public key, 16 bytes as hex in groups of four) is the
   relay's own and the one check outside the site: the relay writes it into
   `/etc/issue` (`provision_relay.sh`), so the provider's console shows it on the
   login screen. A browser that started the update (the note `relay_grant.js`
   writes once the page shows the run started, `joinery-relay-update:<relay id>`,
-  good for a day and used up by the trust) gets its own ✓ line. When this
-  browser last saw the old relay answer as it should
-  (`joinery-relay-pin-time:<alias id>`) is shown for information only.
+  good for a day and used up by the trust) gets its own ✓ line. When no update
+  explains the change, the popup also says when this browser last saw the old
+  relay answer as it should (`joinery-relay-pin-time:<alias id>`).
 - **After an update, the Relay section** shows the new code and, for each viewer
   with mailboxes pinned to another relay (`MailboxRelayPin::trustBox()`), a box that
   links to their mail, where the popup trusts them all in one press, and says how
@@ -3718,19 +3720,23 @@ Settings tab.
 
 **Two ways a slot is granted.**
 
-- **A hosted site's plan.** A sold site in a container on a shared host (a
-  Starter site, which has no port 25 of its own) gets a slot of its own
-  (`FleetService::site_plan_grants_slot()`). Its key is named for its
+- **A hosted site's plan.** A sold site we host, on our own account (hosting
+  mode operator), gets a slot of its own (`FleetService::site_plan_grants_slot()`):
+  a Starter site in a container on a shared host, or a Managed site in a
+  container on its own instance. Neither runs a mail server of its own. A site
+  on its buyer's own cloud account, or a Managed site moved to it, has none from
+  its plan. Its key is named for its
   provision (`Fleet enrollment #<id>`) and recorded there
   (`cvp_fleet_apk_api_key_id`); re-seeding the site retires only that key.
-  The Starter worker queues the seeding when the site is built
-  (`cvp_fleet_seed_state`). The slot records its site
+  The Starter worker and the instance processor queue the seeding when the
+  site is built (`cvp_fleet_seed_state`). The slot records its site
   (`mft_cvp_customer_cloud_provision_id`) and is entitled while the site is
   built, not removed, and its hosting not shut down
   (`FleetService::site_entitled()`); one buyer's sites never share a slot, and
   one site's hosting ending leaves the others' slots, keys and mail as they
   are. When the site is removed (its provision or node deleted, or its row
-  purged, which leaves `-1` on the slot) the reconcile releases its slot
+  purged, which leaves `-1` on the slot), or moved to its buyer's own cloud
+  account (hosting mode transferred), the reconcile releases its slot
   (`FleetService::siteGone()`, `releaseSiteSlot()`; a site that cannot be
   looked up, server_manager inactive, is not gone): its domain claims are
   revoked, so the buyer's next site can claim the same domain, and the

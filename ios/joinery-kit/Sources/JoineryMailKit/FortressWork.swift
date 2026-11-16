@@ -361,31 +361,32 @@ public final class FortressWork: ObservableObject {
         let named = u.map { VaultCrypto.sameText($0["identity_public_key"]?.stringValue ?? "", identity) } ?? false
         let status = u?["status"]?.stringValue ?? ""
         let byName = u?["started_by"]?.stringValue ?? ""
-        let by = byName.isEmpty ? "the site admin" : "\(byName) (site admin)"
+        let by = byName.isEmpty ? "" : " by \(byName)"
         let started = named ? dateText(u?["started_time"]?.stringValue) : ""
         let done = named ? dateText(u?["done_time"]?.stringValue) : ""
         let on = started.isEmpty ? "" : " on \(started)"
         var title: String
-        var lines = [intro]
+        var lines: [String] = []
         if !named {
-            title = "Your mail relay changed, and this site has no record of why"
-            lines.append("A different relay is answering now, and this site has no record of an update that would explain it. This can mean that someone who controls this site is trying to read your mail.")
+            title = "Your mail relay changed without an update"
+            lines.append(intro)
+            lines.append("A different relay is answering, and this site has no record of an update. This can mean that someone who controls this site is trying to read your mail.")
         } else if status == "done" {
-            title = "Your mail relay was replaced"
-            lines.append("ⓘ This site says \(by) started an update of the relay\(on)" + (done.isEmpty ? "" : ", and it finished \(done)") + ". An update gives the relay a new identity.")
+            title = "Your mail relay was updated"
+            lines.append("ⓘ This site says your mail relay was rebuilt or upgraded" + (done.isEmpty ? on : " on \(done)") + "\(by), which gives it a new key.")
         } else if status == "failed" {
-            title = "Your mail relay was being updated"
-            lines.append("ⓘ This site says \(by) started an update of the relay\(on), and it did not finish. Ask your site admin to look at the relay page; the update may need to be run again.")
+            title = "Your mail relay update did not finish"
+            lines.append("ⓘ This site says an update of your mail relay was started\(on)\(by) and did not finish.")
         } else {
             title = "Your mail relay is being updated"
-            lines.append("ⓘ This site says \(by) started an update of the relay\(on), and it is still finishing. An update gives the relay a new identity.")
+            lines.append("ⓘ This site says your mail relay is being rebuilt or upgraded (started\(on)\(by)), which gives it a new key.")
         }
-        let code = VaultCrypto.fingerprint(identity)
-        lines.append("What this phone checked:\n✓ The new relay answered this phone just now, with its own signature.\n✓ The new relay says it seals your mail to your own key, which this site does not have.")
-        if let lastSeen { lines.append("This phone last confirmed your old relay on \(dateText(ISO8601DateFormatter().string(from: lastSeen))).") }
-        lines.append("This phone cannot check what the site says. The code below is the only check that does not depend on this site. If you want to be sure, ask your site admin to read you the relay's code from the provider's console, not from this site. It should end in \(String(code.suffix(4))).\nThe full code: \(code)")
+        lines.append("✓ The new relay passed this phone's checks.")
+        if let lastSeen, !named { lines.append("This phone last confirmed your old relay on \(dateText(ISO8601DateFormatter().string(from: lastSeen))).") }
+        lines.append(named ? "If you know about this update, trust the new relay. If you do not, contact your site admin before you trust it."
+            : "Contact your site admin before you trust it. Your existing mail is safe; this is about new mail.")
+        lines.append("New relay key: \(VaultCrypto.fingerprint(identity))")
         lines.append("Mailboxes: " + addresses.joined(separator: ", "))
-        if !named { lines.append("What to do: do not trust it yet. Show this message to your site admin. Your existing mail is safe; this is about new mail.") }
         lines.append(toTrust)
         return (title, lines.joined(separator: "\n\n"))
     }

@@ -847,7 +847,7 @@ against the pin, sending a one-time `challenge` the relay must sign back (an
 answer without it is refused as an old one), and raises an alarm on a mismatch,
 in the same words as the computer's popup: a new relay that passed the check gets
 one alarm for every mailbox it covers, with what the site says (ⓘ) apart from what
-the phone checked (✓) and the relay's code to check off-site. Trusting a new relay
+the phone checked (✓) and the new relay's key. Trusting a new relay
 is a step-up on a computer; the phone follows the computer's pin. The rules' "apply to existing mail" walk
 (`rule_backlog` / `rule_outcomes`) runs from the same place.
 

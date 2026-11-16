@@ -186,19 +186,19 @@ final class FortressFlowTests: XCTestCase {
         }
         let date: (String?) -> String = { $0 ?? "" }
         let done = FortressWork.relayChangeText(identity: id, update: run("done"), addresses: ["a@x.test", "b@x.test"], lastSeen: nil, dateText: date)
-        XCTAssertEqual(done.title, "Your mail relay was replaced")
-        XCTAssertTrue(done.body.contains("ⓘ This site says Pat Admin (site admin) started an update"))
+        XCTAssertEqual(done.title, "Your mail relay was updated")
+        XCTAssertTrue(done.body.contains("ⓘ This site says your mail relay was rebuilt or upgraded"))
         XCTAssertFalse(done.body.split(separator: "\n").contains { $0.hasPrefix("✓") && $0.contains("Pat Admin") }, "the site's account is never a tick")
-        XCTAssertTrue(done.body.contains("cannot check what the site says") && done.body.contains("provider's console, not from this site"))
+        XCTAssertTrue(done.body.contains("If you do not, contact your site admin") && done.body.contains("by Pat Admin"))
         XCTAssertTrue(done.body.contains("a@x.test, b@x.test") && done.body.contains("open your mail on a computer"))
         XCTAssertEqual(FortressWork.relayChangeText(identity: id, update: run("booting"), addresses: ["a"], lastSeen: nil, dateText: date).title,
                        "Your mail relay is being updated")
         XCTAssertEqual(FortressWork.relayChangeText(identity: id, update: run("failed"), addresses: ["a"], lastSeen: nil, dateText: date).title,
-                       "Your mail relay was being updated")
+                       "Your mail relay update did not finish")
         let none = FortressWork.relayChangeText(identity: id, update: nil, addresses: ["a"], lastSeen: nil, dateText: date)
         let other = FortressWork.relayChangeText(identity: id, update: run("done", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
                                                  addresses: ["a"], lastSeen: nil, dateText: date)
-        XCTAssertEqual(none.title, "Your mail relay changed, and this site has no record of why")
+        XCTAssertEqual(none.title, "Your mail relay changed without an update")
         XCTAssertEqual(other.title, none.title)
         XCTAssertEqual(FortressWork.relayChangeText(identity: id, update: run("done"), addresses: ["a"], lastSeen: Date(), dateText: date).title,
                        done.title, "the last good check never changes the words' state")
