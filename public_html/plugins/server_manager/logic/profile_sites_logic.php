@@ -32,6 +32,8 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.11 - the publish box (dns_box) adds a buyer's own-domain records through their DNS host; aaaa_record
+ *                 lists the optional IPv6 record while the server has one the name does not answer with
  * @version 1.10 - dmarc_record: the optional DMARC record while the buyer's domain has none (hosting_paid_launch B4)
  * @version 1.9 - suspended: an open suspension's reason, for the customer (HostedSuspensions, hosting_launch S6)
  * @version 1.8 - mail_records lists a Starter site's inbound records (MX, ownership TXT) on the buyer's own domain (S5)
@@ -55,6 +57,8 @@ function profile_sites_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/server_manager/data/hosted_trials_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/data/registered_domains_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ManagedSiteDraft.php'));
+	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeDnsPlan.php'));
 
 	$self_url = ManagedSiteDraft::SITES_URL;
 	$self_regex = '/\/profile\/server_manager/';
@@ -100,6 +104,22 @@ function profile_sites_logic(array $input): LogicResult {
 	$provisions = new MultiCustomerCloudProvision(
 		array('user_id' => $user_id, 'has_site' => true, 'deleted' => false), array('cvp_customer_cloud_provision_id' => 'DESC'));
 	$provisions->load();
+
+	// "Add these records for me": the publish box writes a site's records
+	// through the buyer's own DNS host, with a credential that lives for the
+	// one request. The site is found in the buyer's own list, so an id from
+	// somebody else's site has no plan and the box does nothing.
+	$dns_site_id = (int)($input['dns_site'] ?? 0);
+	$dns_provision = null;
+	foreach ($provisions as $provision) {
+		if ((int)$provision->key === $dns_site_id) { $dns_provision = $provision; break; }
+	}
+	$dns_result = DnsPublishBox::handle($input, function () use ($dns_provision) {
+		return $dns_provision !== null ? profile_sites_dns_plan($dns_provision) : null;
+	}, $self_url . '?dns_site=' . $dns_site_id, 0);
+	if ($dns_result !== null) {
+		return $dns_result;
+	}
 
 	// The reveal. A POST, and the method is checked rather than assumed.
 	//
@@ -182,10 +202,26 @@ function profile_sites_logic(array $input): LogicResult {
 			}
 		}
 
+		$dns_record   = profile_sites_dns_record($provision);
+		$mail_records = profile_sites_mail_records($provision);
+		$dmarc_record = profile_sites_dmarc_record($provision);
+		$aaaa_record  = profile_sites_aaaa_record($provision);
+		$dns_box = null;
+		if ($dns_record !== null || $mail_records || $dmarc_record !== null || $aaaa_record !== null) {
+			$plan = profile_sites_dns_plan($provision);
+			if ($plan !== null) {
+				$dns_box = DnsPublishBox::build($plan,
+					(int)$provision->key === $dns_site_id ? $input : array(),
+					$self_url . '?dns_site=' . (int)$provision->key);
+			}
+		}
+
 		$sites[] = array(
-			'dns_record'      => profile_sites_dns_record($provision),
-			'mail_records'    => profile_sites_mail_records($provision),
-			'dmarc_record'    => profile_sites_dmarc_record($provision),
+			'dns_record'      => $dns_record,
+			'mail_records'    => $mail_records,
+			'dmarc_record'    => $dmarc_record,
+			'aaaa_record'     => $aaaa_record,
+			'dns_box'         => $dns_box,
 			'id'              => (int)$provision->key,
 			'domain'          => (string)$provision->get('cvp_domain'),
 			'url'             => 'https://' . (string)$provision->get('cvp_domain'),
@@ -270,6 +306,84 @@ function profile_sites_dns_record($provision): ?array {
 		// Unknown is shown: the record is harmless to repeat.
 	}
 	return array('type' => $type, 'value' => $ip);
+}
+
+/**
+ * The IPv6 record a hosted site on its buyer's own domain can add, as
+ * array('type' => 'AAAA', 'value' => address), or null: the server has no
+ * IPv6 address, the name already answers with it, or we registered the name
+ * (and published it ourselves). Optional, so it is listed on its own: the
+ * site works without it, and with it visitors on IPv6 reach it directly.
+ */
+function profile_sites_aaaa_record($provision): ?array {
+	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
+			|| JobResultProcessor::plane_registered_domain($provision)) {
+		return null;
+	}
+	$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+	if ($node_id <= 0) {
+		return null;
+	}
+	$v6 = NodeDnsPlan::publicAddresses(new ManagedNode($node_id, TRUE))['AAAA'];
+	$packed = $v6 !== '' ? @inet_pton($v6) : false;
+	if ($packed === false) {
+		return null;
+	}
+	try {
+		foreach (DnsResolver::getAaaa((string)$provision->get('cvp_domain')) as $address) {
+			if (@inet_pton($address) === $packed) {
+				return null;
+			}
+		}
+	} catch (DnsLookupException $e) {
+		// Unknown is shown: the record is harmless to repeat.
+	}
+	return array('type' => 'AAAA', 'value' => $v6);
+}
+
+/**
+ * Every record a hosted site on its buyer's own domain asks for, as one plan
+ * for the publish box: the address records (A, and AAAA where the server has
+ * IPv6), the email records SMTP2GO asked for, a Starter site's inbound
+ * records, and DMARC while the domain has none. Records already in place show
+ * as unchanged in the box; one that would replace a live value needs its own
+ * tick. Null when there is nothing to publish (a name we registered, a site
+ * not built yet).
+ */
+function profile_sites_dns_plan($provision): ?DnsRecordPlan {
+	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
+			|| JobResultProcessor::plane_registered_domain($provision)) {
+		return null;
+	}
+	$domain = strtolower(trim((string)$provision->get('cvp_domain')));
+	$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+	if ($domain === '' || $node_id <= 0) {
+		return null;
+	}
+	$plan = new DnsRecordPlan($domain, 'server_manager');
+	NodeDnsPlan::addAddressRecords($plan, $domain, NodeDnsPlan::publicAddresses(new ManagedNode($node_id, TRUE)),
+		'Points ' . $domain . ' at your site\'s server.');
+	$mail = ProvisionHostedMail::records_of($provision);
+	if (class_exists('FleetService') && (string)$provision->get('cvp_inbound_dns_state') === 'buyer') {
+		$mail = array_merge(FleetService::site_inbound_records($provision), $mail);
+	}
+	foreach ($mail as $record) {
+		$type = strtoupper((string)($record['type'] ?? ''));
+		$name = rtrim((string)($record['name'] ?? ''), '.');
+		$value = rtrim((string)($record['value'] ?? ''), '.');
+		if ($type === '' || $name === '' || $value === '') {
+			continue;
+		}
+		$plan->addRecord($type, $name, $value, null,
+			isset($record['priority']) ? (int)$record['priority'] : null, (string)($record['note'] ?? ''));
+	}
+	if ($mail && !ProvisionHostedMail::has_dmarc($domain)) {
+		$dmarc = ProvisionHostedMail::dmarc_record($domain);
+		$plan->addRecord($dmarc['type'], $dmarc['name'], $dmarc['value'], null, null, $dmarc['note']);
+	}
+	return $plan->isEmpty() ? null : $plan;
 }
 
 /**

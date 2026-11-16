@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.111 - Bring back asks Access::permits(10) instead of comparing the level inline
  * @version 1.110 - a shut-down Starter site shows Bring back (level 10) once a subscription pays for it again (O3)
  * @version 1.109 - a held Starter site marked ready to remove says so, and its Permanently Delete Site names the host's
  *                 hold as the gate (hosting_paid_launch B1)
@@ -706,7 +707,7 @@
 	}
 
 	// A held Starter site whose payment came late is brought back by a person.
-	if (!$is_removed && class_exists('HostedLateReturn') && SessionControl::get_instance()->get_permission() >= 10) {
+	if (!$is_removed && class_exists('HostedLateReturn') && Access::permits(10, $session)) {
 		$late_provision = CustomerCloudProvision::latest_for_node($node->key);
 		$late_trial = ($late_provision && $late_provision->is_container() && $late_provision->is_sold())
 			? HostedTrial::for_provision($late_provision->key) : null;

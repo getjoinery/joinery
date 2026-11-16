@@ -6,6 +6,9 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.19 - the Secure connection step is diagnosed when done too, for the IPv6 record (https_ipv6_box)
+ * @version 2.18 - both ways out (Finish later, Go to your site) return to the page the login interrupt took the
+ *                 person from (SetupSteps::takeDestination), else /admin, /profile or / as before
  * @version 2.17 - leaving (Finish later, Go to your site) records the steps shown (usr_setup_seen_steps); someone
  *                 who left and has a step never shown to them walks just those steps (SetupSteps::unseenSteps)
  * @version 2.16 - the final checklist releases the login interrupt for the rest of the session, so an owner who
@@ -151,7 +154,7 @@ function setup_logic(array $input): LogicResult {
 			SetupSteps::recordSeen($viewer, $permission);
 			$viewer->save();
 			SetupSteps::invalidateSessionCache();
-			return LogicResult::redirect(Access::permits(10, $session) ? '/admin' : '/profile');
+			return LogicResult::redirect(SetupSteps::takeDestination(Access::permits(10, $session) ? '/admin' : '/profile'));
 		}
 	}
 
@@ -165,7 +168,7 @@ function setup_logic(array $input): LogicResult {
 		SetupSteps::recordSeen($viewer, $permission);
 		$viewer->save();
 		SetupSteps::invalidateSessionCache();
-		return LogicResult::redirect('/');
+		return LogicResult::redirect(SetupSteps::takeDestination('/'));
 	}
 
 	// "Not now" on an optional step: records a decision, never completion.
@@ -731,8 +734,7 @@ function setup_logic(array $input): LogicResult {
 	// the network and take a few seconds. "Check again" is simply a reload of
 	// this page: every render re-runs the checks fresh.
 	$https_diagnosis = null;
-	if ($current_key === 'https' && Access::permits(10, $session)
-		&& (($statuses['https'] ?? '') !== SetupSteps::STATUS_GREEN || !empty($declined['https']))) {
+	if ($current_key === 'https' && Access::permits(10, $session)) {
 		require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
 		$https_diagnosis = setup_https_diagnose();
 	}
@@ -748,6 +750,14 @@ function setup_logic(array $input): LogicResult {
 			require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 			$https_dns_box = DnsPublishBox::build($https_plan, $input, '/setup?step=https');
 		}
+	}
+	// Once the name points here, the IPv6 record it may still lack: offered
+	// on the done step, optional (the site works without it).
+	$https_ipv6_box = null;
+	$https_ipv6_plan = is_array($https_diagnosis) ? setup_https_ipv6_plan($https_diagnosis) : null;
+	if ($https_ipv6_plan !== null) {
+		require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+		$https_ipv6_box = DnsPublishBox::build($https_ipv6_plan, $input, '/setup?step=https');
 	}
 
 	// The done screen surfaces the scheduled-task heartbeat only when it is
@@ -787,6 +797,7 @@ function setup_logic(array $input): LogicResult {
 		'calendar_level_saved'    => $calendar_level_saved,
 		'https_diagnosis' => $https_diagnosis,
 		'https_dns_box' => $https_dns_box,
+		'https_ipv6_box' => $https_ipv6_box,
 	), $totp_forward));
 }
 

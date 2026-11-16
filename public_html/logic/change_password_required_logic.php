@@ -1,4 +1,10 @@
 <?php
+/**
+ * /change-password-required: an account flagged to choose its own password does so here.
+ *
+ * @version 1.1 - the email setup line shows only while no mail provider is configured; the unused
+ *               XMLHttpRequest branch is gone (the page is a plain form post)
+ */
 // PathHelper, Globalvars, SessionControl are pre-loaded - no need to require them
 
 function change_password_required_logic(array $input): LogicResult{
@@ -11,15 +17,8 @@ function change_password_required_logic(array $input): LogicResult{
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
-	// Check if this is an AJAX request
-	$ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] == 'XMLHttpRequest';
-
 	// Must be logged in to access this page
 	if (!$session->is_logged_in()) {
-		if ($ajax) {
-			echo json_encode(array('success' => 0, 'error' => 'Not logged in'));
-			exit();
-		}
 		return LogicResult::redirect('/login');
 	}
 
@@ -30,36 +29,20 @@ function change_password_required_logic(array $input): LogicResult{
 	if (!$user->get('usr_force_password_change')) {
 		// Clear the session cache to prevent redirect loops
 		unset($_SESSION['force_password_change']);
-		if ($ajax) {
-			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
-			exit();
-		}
 		return LogicResult::redirect('/admin/admin_users');
 	}
 
 	if (!empty($_POST)) {
 		// Validate passwords
 		if (empty($input['new_password'])) {
-			if ($ajax) {
-				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
-				throw new ValidationException('Please enter a new password.', ['new_password' => 'Password is required']);
-			}
 			return LogicResult::error('Please enter a new password.');
 		}
 
 		if ($input['new_password'] !== $input['confirm_password']) {
-			if ($ajax) {
-				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
-				throw new ValidationException('Passwords do not match.', ['confirm_password' => 'Passwords do not match']);
-			}
 			return LogicResult::error('Passwords do not match.');
 		}
 
 		if (strlen($input['new_password']) < 8) {
-			if ($ajax) {
-				require_once(PathHelper::getIncludePath('includes/Exceptions/ValidationException.php'));
-				throw new ValidationException('Password must be at least 8 characters long.', ['new_password' => 'Minimum 8 characters']);
-			}
 			return LogicResult::error('Password must be at least 8 characters long.');
 		}
 
@@ -71,10 +54,6 @@ function change_password_required_logic(array $input): LogicResult{
 		// Clear the session cache so check_permission won't redirect anymore
 		unset($_SESSION['force_password_change']);
 
-		if ($ajax) {
-			echo json_encode(array('success' => 1, 'redirect' => '/admin/admin_users'));
-			exit();
-		}
 		return LogicResult::redirect('/admin/admin_users');
 	}
 
@@ -85,10 +64,11 @@ function change_password_required_logic(array $input): LogicResult{
 	// site does not have. So this screen is where they are told.
 	//
 	// A link, not a redirect: someone who just chose a password is mid-task, and
-	// being thrown into a settings form reads as a bug. Shown unconditionally
-	// rather than only when email looks unconfigured — an owner who already set
-	// it up sees one extra line, once, on a page they see once.
-	$page_vars['show_email_setup_hint'] = Access::permits(10, $session);
+	// being thrown into a settings form reads as a bug. Shown only while the
+	// site has no working mail provider: a hosted site's mail is set up before
+	// its owner first signs in, and telling them to set it up is untrue.
+	$page_vars['show_email_setup_hint'] = Access::permits(10, $session)
+		&& !change_password_required_mail_ready();
 
 	return LogicResult::render($page_vars);
 }
@@ -105,4 +85,13 @@ function change_password_required_logic_descriptor(): array {
 		],
 	];
 }
-?>
+
+/** Does the site have an outbound mail provider chosen and configured? */
+function change_password_required_mail_ready(): bool {
+	$provider = EmailSender::getActiveProvider();
+	if ($provider === null) {
+		return false;
+	}
+	$check = $provider::validateConfiguration();
+	return !empty($check['valid']);
+}

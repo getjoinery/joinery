@@ -13,6 +13,9 @@
  * API is. Plain words only; the one term of art allowed is "A record", named
  * because that is the label they must find at their registrar.
  *
+ * @version 1.4
+ * @changelog 1.4 - Once the connection is secure the step shows only the optional IPv6 record (AAAA), with
+ *   the publish box where the domain's DNS host has a driver.
  * @version 1.3
  * @changelog 1.3 - The DNS publish box mounts here for the site's own address
  *   record, so a domain whose DNS host has a driver gets the record written
@@ -28,6 +31,30 @@
  */
 
 $d = $page_vars['https_diagnosis'] ?? null;
+
+// Done: the connection is secure. What is left is optional — the IPv6
+// record, when this server has an IPv6 address the name does not answer with.
+if (LibraryFunctions::isSecure()) {
+	if (is_array($d) && function_exists('setup_https_ipv6_plan') && setup_https_ipv6_plan($d) !== null) {
+		$ipv6_box = $page_vars['https_ipv6_box'] ?? null;
+		echo '<div class="jy-fieldset"><h4>Optional: reach your site over IPv6</h4>'
+			. '<p>Your site works without this. This server also has an IPv6 address, '
+			. '<strong>' . htmlspecialchars((string)$d['server_ip6']) . '</strong>, and '
+			. htmlspecialchars((string)$d['domain']) . ' does not name it yet. Adding it lets visitors whose '
+			. 'internet uses the newer IPv6 addresses reach your site directly.</p>';
+		if (is_array($ipv6_box) && !empty($ipv6_box['provider_label'])) {
+			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+			dns_publish_box_render($page, $ipv6_box, 'Add the IPv6 record at ' . $ipv6_box['provider_label'] . ' for me');
+			echo '<p><strong>Or add it yourself:</strong> ';
+		} else {
+			echo '<p>';
+		}
+		echo 'where your web address is registered, add an <strong>AAAA record</strong> for <strong>'
+			. htmlspecialchars((string)$d['domain']) . '</strong> pointing at <strong>'
+			. htmlspecialchars((string)$d['server_ip6']) . '</strong>.</p></div>';
+	}
+	return;
+}
 ?>
 
 	<div class="jy-fieldset">

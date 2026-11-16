@@ -4,6 +4,7 @@
  * tier: test-db
  * env: dev-only
  * needs: []
+ * covers: [plugins/mailbox/includes/MailboxRelayPin.php, plugins/mailbox/includes/MailboxFortressParse.php, plugins/mailbox/includes/MailboxDeviceRules.php, plugins/mailbox/includes/RelaySpoolConsumer.php, plugins/mailbox/includes/RelayMapExporter.php, plugins/mailbox/includes/RelayVersion.php]
  */
 /**
  * Relay-sealed Fortress mail (specs/client_custody_mail.md § R9, WP7).

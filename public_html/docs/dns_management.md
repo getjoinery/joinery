@@ -182,9 +182,24 @@ connection** screen mounts the box for the site's own address record (`A`, and
 exists only while the name does not yet point here, and is withheld when the
 name already answers from another server: pointing it at this one would
 replace whatever is served there, which is a decision the operator makes by
-hand, and the screen says so. The wizard's Email screen carries its own
+hand, and the screen says so. Once the name points here and the site is
+secure, the same screen offers the one record it may still lack: the `AAAA`,
+when the server has a public IPv6 address and the name answers none
+(`setup_https_ipv6_plan()`). The wizard's Email screen carries its own
 publish form for the mail plan (`includes/setup_steps/mail_send.php`), which
 also honours the credential an installer kept (`DnsInstallCredential`).
+
+On a management node, a hosting buyer's **sites page** (`/profile/server_manager`)
+mounts the box for a site on the buyer's own domain: every record the site asks
+for in one plan (`profile_sites_dns_plan()` — `A` and `AAAA`, the email records,
+an inbound `MX` and ownership `TXT` for a Starter site, `DMARC` while the domain
+has none). The buyer is an ordinary member writing their own domain with their
+own credential, so the page passes the level it already requires as
+`handle()`'s fourth argument (`$min_level`); without one the box needs
+`config:write`. The plan factory proves the domain is theirs: it finds the site
+in the buyer's own list. A sign-in host carries the same floor through the
+consent flow (`min_level` in the flow payload, held in the session), and the
+callback holds the grant to it.
 
 ## The order: diff, then authorize, then write
 

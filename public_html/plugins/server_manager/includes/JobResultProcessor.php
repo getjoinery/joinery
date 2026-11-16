@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.135 - the hosted welcome email for a bring-your-own domain names both things left to add: the
+ *                  address record, and the email records the sites page lists
  * @version 1.134 - a verified held removal (held_removal) closes the site's mail account and suspension first
  *                (HostedHeldRemoval, hosting_paid_launch B1)
  * @version 1.133 - script_json reads the last JSON line when a script's logged lines come ahead of its answer
@@ -2012,8 +2014,8 @@ class JobResultProcessor {
 		$sites_url = trim((string)$settings->get_setting('server_manager_hosted_manage_url'));
 
 		// A hosted site whose name this plane did NOT register is the buyer's
-		// own domain: the one thing left for them to do is the A record, and
-		// the email has to say so. Decided by the registration row, which
+		// own domain: the address record and the email records are theirs to
+		// add, and the email has to say so. Decided by the registration row, which
 		// exists exactly when the plane bought the name for this order.
 		$needs_dns = false;
 		if ($hosted) {
@@ -2155,15 +2157,20 @@ HTML;
 			: "<h3>Your password</h3>\n<p>Use the <strong>Forgot password</strong> link at "
 				. "<a href=\"{$login_url}\">{$login_url}</a> with this email address to set one.</p>";
 
-		// The buyer's own domain: the one record they add, and everything
-		// else already done. A domain this plane registered needs nothing.
+		// The buyer's own domain: the address record now, and the email
+		// records the sites page lists once mail setup has them. A domain
+		// this plane registered needs nothing.
 		$intro = $dns_ip !== ''
-			? "<p>Your site for <strong>{$dom}</strong> is built. The server, its email and its offsite "
-				. "backups are all set up and running — one thing is left, and it is yours to do.</p>\n"
-				. "<h3>Next step: point your domain at it</h3>\n"
+			? "<p>Your site for <strong>{$dom}</strong> is built, and its server and offsite backups are "
+				. "running. Two things are left, and they are yours to do, where your domain is registered.</p>\n"
+				. "<h3>1. Point your domain at it</h3>\n"
 				. $dns_block
 				. "<p>DNS changes typically take a few minutes to a few hours. Once your domain resolves to that "
-				. "address, HTTPS is provisioned automatically — nothing more to do on your part.</p>"
+				. "address, HTTPS is provisioned automatically.</p>\n"
+				. "<h3>2. Add your email records</h3>\n"
+				. "<p>" . ($sites !== '' ? "<a href=\"{$sites}\">Your sites page</a>" : "Your sites page")
+				. " lists them within a few minutes of this email. Until they are in place, email your site sends "
+				. "is more likely to land in spam.</p>"
 			: "<p>Your site is live at <strong><a href=\"https://{$dom}\">https://{$dom}</a></strong>. The server, its\n"
 				. "email and its offsite backups are all set up and running — there is no DNS record to add and nothing\n"
 				. "to install.</p>";

@@ -16,6 +16,7 @@
  * returns it is gone. Providers that do issue refresh tokens (Google, Azure,
  * DigitalOcean, DNSimple) are treated exactly like Linode, which issues none.
  *
+ * @version 1.1 - the permission floor comes from the flow (min_level) when the page that started it set one
  * @version 1.0
  */
 
@@ -33,8 +34,12 @@ class DnsPublishConsumer implements OAuth2Consumer {
 		$return_url = (string)($payload['return_url'] ?? '/');
 
 		// The grant proves control of a DNS account, not of this site. Writing
-		// someone's DNS is an admin act whatever the provider just said.
-		if (!Access::decide(Access::staffLevel(), $session)) {
+		// the site's DNS is an admin act whatever the provider just said; a page
+		// whose plan is the visitor's own domain (a hosting buyer's sites page)
+		// set a lower floor when it started the flow, and the flow is held in
+		// this session, so the floor is the one that page asked for.
+		$floor = isset($payload['min_level']) ? (int)$payload['min_level'] : Access::staffLevel();
+		if (!Access::decide($floor, $session)) {
 			return $return_url;
 		}
 

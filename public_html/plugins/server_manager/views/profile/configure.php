@@ -10,6 +10,7 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.7 - a bring-your-own domain is told it adds the address record and the email records, not one record
  * @version 1.6 - the domain check is a data block and assets/js/domain-availability.js
  * @version 1.5 - a plan choice (Starter or Managed) heads the form; the summary names the plan
  * @version 1.4 - not found where this site does not sell hosting (SmHosting)
@@ -52,8 +53,9 @@ echo $steps_html;
 				echo ' — we register it for you, ' . htmlspecialchars(ManagedSiteDraft::money((string)$row->get('cvp_domain_quote')))
 					. ' for the first year. You are its legal owner from day one.';
 			} else {
-				echo ' — your own domain. The site has no address or certificate until you add one record where the domain '
-					. 'is registered; we email it to you when the site is built, and your sites page shows it.';
+				echo ' — your own domain. You add its DNS records where the domain is registered: one gives the site '
+					. 'its address and certificate, the others are for its email. Your sites page lists them once the site '
+					. 'is built, and we email you when it is.';
 			} ?></dd>
 		<?php if (count($regions) > 1): ?>
 		<dt>Region</dt>
@@ -139,8 +141,9 @@ if (count($plans) > 1 || ($row !== null && !isset($plans[ManagedSiteDraft::plan_
 
 $registrant_fields = array_merge(array('managed_domain_status', 'md_intro'), array_keys(ManagedDomainIntake::CONTACT_FIELDS));
 $own_domain_note = '<p id="own_domain_note" class="form-text">Your site has no address and no security certificate '
-	. 'until your domain points at it. After payment we email you the one record to add where your domain is '
-	. 'registered (an A record), and your sites page shows it too until it is in place.</p>';
+	. 'until your domain points at it. After payment, your sites page lists the DNS records to add where your '
+	. 'domain is registered: one for the site\'s address, the others for its email. We email you when the site is '
+	. 'built.</p>';
 if ($sellable) {
 	$formwriter->radioinput('cvp_domain_source', 'Your domain', array(
 		'options' => array(

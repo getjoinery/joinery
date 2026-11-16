@@ -23,6 +23,9 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * face correctly refuses cleartext with 426 — so the page cannot fetch its
  * own diagnosis. The API action remains for secure contexts.
  *
+ * @version 1.3
+ * @changelog 1.3 - setup_https_ipv6_plan(): the AAAA record a connected site lacks, which setup_https_dns_plan()
+ *   offers once the name points here
  * @version 1.2
  * @changelog 1.2 - points_elsewhere in the diagnosis, and setup_https_address_plan():
  *   the A/AAAA record the publish box can write for the site, withheld when the
@@ -140,11 +143,40 @@ function setup_https_address_plan(string $domain, array $dns_a, array $dns_aaaa,
 	return $plan;
 }
 
-/** The plan for the running site, from a fresh diagnosis. */
+/**
+ * The IPv6 record a connected site still lacks: the name answers with this
+ * server's IPv4 address, this server has a public IPv6 address, and the name
+ * has no AAAA record at all. Null otherwise — including a name whose AAAA
+ * answers with some other address, which is the operator's to change by hand.
+ * The site works without it; with it, visitors on IPv6 reach it directly.
+ */
+function setup_https_ipv6_plan(array $d): ?DnsRecordPlan {
+	if (empty($d['applicable']) || empty($d['dns_match']) || (string)($d['server_ip6'] ?? '') === ''
+			|| !empty($d['dns_aaaa']) || !in_array((string)$d['server_ip4'], (array)$d['dns_a'], true)) {
+		return null;
+	}
+	require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+	$domain = DnsRecord::normalizeName((string)$d['domain']);
+	if ($domain === '' || strpos($domain, '.') === false) {
+		return null;
+	}
+	$plan = new DnsRecordPlan($domain, 'setup_wizard');
+	$plan->addRecord(DnsRecord::TYPE_AAAA, $domain, (string)$d['server_ip6']);
+	return $plan;
+}
+
+/**
+ * The plan for the running site, from a fresh diagnosis: its address records
+ * while the name does not point here, and once it does, the IPv6 record it
+ * still lacks.
+ */
 function setup_https_dns_plan(): ?DnsRecordPlan {
 	$d = setup_https_diagnose();
-	if (empty($d['applicable']) || !empty($d['dns_match'])) {
+	if (empty($d['applicable'])) {
 		return null;
+	}
+	if (!empty($d['dns_match'])) {
+		return setup_https_ipv6_plan($d);
 	}
 	return setup_https_address_plan((string)$d['domain'], (array)$d['dns_a'], (array)$d['dns_aaaa'],
 		(string)$d['server_ip4'], (string)$d['server_ip6']);

@@ -26,7 +26,7 @@
 
         <div class="alert alert-warning jy-auth-note">
             <strong>Password Change Required</strong>
-            <p class="jy-auth-subhead">For security reasons, you must change your password before continuing. The default password should not be used in production.</p>
+            <p class="jy-auth-subhead">Choose your own password before you continue. The one you signed in with was only for getting in.</p>
         </div>
 
         <?php

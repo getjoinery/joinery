@@ -24,6 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
+ * @version 1.10
+ * @changelog 1.10 - handle() takes the floor a page sets for its own box (a buyer publishing their own domain), carried to the OAuth callback
  * @version 1.9
  * @changelog 1.9 - credentialFrom() and connect(), so a caller can write two plans with one credential in one request
  * @version 1.8
@@ -65,8 +67,14 @@ class DnsPublishBox {
 	 *
 	 * @param callable $plan_factory  fn(): ?DnsRecordPlan — called only when needed,
 	 *                                so a page pays nothing for the box it does not use.
+	 * @param int|null $min_level     Who may press it. Null is config:write: a site
+	 *                                publishing its own domain. A page whose plan is
+	 *                                the visitor's own domain, written with their own
+	 *                                DNS credential (a hosting buyer's sites page),
+	 *                                passes the level that page already requires; its
+	 *                                plan factory is what proves the domain is theirs.
 	 */
-	public static function handle(array $input, callable $plan_factory, string $return_url): ?LogicResult {
+	public static function handle(array $input, callable $plan_factory, string $return_url, ?int $min_level = null): ?LogicResult {
 		// The box's actions are its buttons (POST). A GET is a link any site can
 		// make the browser follow, and one could carry the 'typed' OAuth client
 		// that dns_oauth_config saves, so a page view acts on none of them. A
@@ -80,7 +88,10 @@ class DnsPublishBox {
 		// Publishing a domain's records changes the site's configuration. The
 		// host page gates first; this is the box's own floor.
 		$session = SessionControl::get_instance();
-		$session->check_permission(Access::level('config:write'));
+		if ($min_level === null) {
+			$min_level = Access::level('config:write');
+		}
+		$session->check_permission($min_level);
 
 		$plan = $plan_factory();
 		if (!($plan instanceof DnsRecordPlan) || $plan->isEmpty()) {
@@ -145,11 +156,11 @@ class DnsPublishBox {
 			if ($blocked !== null) {
 				return $blocked;
 			}
-			return self::startApply($input, $plan, $driver_class, $return_url, $session);
+			return self::startApply($input, $plan, $driver_class, $return_url, $session, $min_level);
 		}
 
 		if ($action === 'dns_apply') {
-			return self::startApply($input, $plan, $driver_class, $return_url, $session);
+			return self::startApply($input, $plan, $driver_class, $return_url, $session, $min_level);
 		}
 
 		// 'dns_show' just reveals the diff — a credential-free read. Carry the
@@ -166,7 +177,7 @@ class DnsPublishBox {
 	 * with the credential the operator just typed and discard it on return.
 	 */
 	private static function startApply(array $input, DnsRecordPlan $plan, string $driver_class,
-			string $return_url, $session): LogicResult {
+			string $return_url, $session, int $min_level): LogicResult {
 
 		$decisions = array(
 			'adopt'   => array_values((array)($input['dns_adopt'] ?? array())),
@@ -188,6 +199,8 @@ class DnsPublishBox {
 						'decisions'  => $decisions,
 						'account_id' => $account_id,
 						'return_url' => $return_url,
+						// The callback holds the grant to the same floor this press met.
+						'min_level'  => $min_level,
 					),
 					$return_url
 				);

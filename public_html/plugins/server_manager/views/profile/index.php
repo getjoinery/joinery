@@ -7,6 +7,8 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.10 - Add these records for me (the DNS publish box) above the record lists, and the optional
+ *                 IPv6 record on its own
  * @version 2.9 - an optional DMARC record on its own, below the email records (hosting_paid_launch B4);
  *   the move card says email sent to the domain stops reaching the site when the move finishes (B11)
  * @version 2.8 - a suspended site shows its reason (HostedSuspensions)
@@ -145,6 +147,21 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<?php endif; ?>
 		</dl>
 
+		<?php
+		// Where the domain's DNS host has a driver, the records below can be
+		// written for the buyer in one press; the lists stay for doing it by hand.
+		if ($site['dns_box'] !== null && !empty($site['dns_box']['provider_label'])) {
+			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+			echo '<section class="sms-dns"><h3>Let us add your records</h3><p>Your domain\'s DNS is at '
+				. htmlspecialchars($site['dns_box']['provider_label']) . '. We can add every record below there '
+				. 'for you: you see each one before anything is written, and the access you give us is used for that '
+				. 'one write and not kept.</p>';
+			dns_publish_box_render($page, $site['dns_box'],
+				'Add these records at ' . $site['dns_box']['provider_label'] . ' for me');
+			echo '</section><p class="sms-note">Or add them yourself, where your domain is registered:</p>';
+		}
+		?>
+
 		<?php if ($site['dns_record'] !== null): ?>
 		<section class="sms-dns">
 			<h3>Point your domain at your site</h3>
@@ -190,6 +207,19 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 				<dt>Type</dt><dd><?php echo htmlspecialchars($d['type']); ?></dd>
 				<dt>Name</dt><dd><code><?php echo htmlspecialchars($d['name']); ?></code></dd>
 				<dt>Value</dt><dd><code><?php echo htmlspecialchars($d['value']); ?></code></dd>
+			</dl>
+		</section>
+		<?php endif; ?>
+
+		<?php if ($site['aaaa_record'] !== null): $v6 = $site['aaaa_record']; ?>
+		<section class="sms-dns">
+			<h3>Optional: reach your site over IPv6</h3>
+			<p>Your site works without this. Adding it lets visitors whose internet uses the newer IPv6 addresses
+				reach your site directly.</p>
+			<dl class="sms-facts">
+				<dt>Type</dt><dd><?php echo htmlspecialchars($v6['type']); ?></dd>
+				<dt>Name</dt><dd><code><?php echo htmlspecialchars($site['domain']); ?></code> (often written as <code>@</code>)</dd>
+				<dt>Value</dt><dd><code><?php echo htmlspecialchars($v6['value']); ?></code></dd>
 			</dl>
 		</section>
 		<?php endif; ?>

@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.33 - the setup-wizard interrupt remembers the page it took someone from (SetupSteps::rememberDestination)
  * @version 1.32 - set_return() and the sign-in session regenerate are safe on the command line (no REQUEST_URI, output already sent); a vault that fails to close on a network change is recorded
  * @version 1.31 - save_visitor_event() takes a visitor id, for a conversion that completes in another browser
  * @version 1.30 - reviewer2 F1-2..F1-5: a password-started pending factor is never replaced by the cookie's; the
@@ -1988,6 +1989,7 @@ class SessionControl{
 		// below. SetupSteps::interruptExempt() lists the paths left alone.
 		require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
 		if (!SetupSteps::interruptExempt($path) && SetupSteps::shouldInterrupt()) {
+			SetupSteps::rememberDestination();
 			return '/setup';
 		}
 

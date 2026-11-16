@@ -184,4 +184,25 @@ check(!SetupSteps::unseenSteps($sw_user, 0), 'Finish later records what was show
 unset($_SESSION['usr_user_id'], $_SESSION['loggedin'], $_SESSION['permission']);
 SetupSteps::resetViewer();
 
+section('Leaving the wizard goes back to the page the interrupt took someone from');
+// A buyer signs up on the way to the hosting configure page and is sent to
+// the wizard; Finish later must land them on that page, not on /profile.
+$_SESSION[SetupSteps::SESSION_RESUME] = '/server_manager/configure?d=7';
+check(SetupSteps::takeDestination('/profile') === '/server_manager/configure?d=7', 'the remembered page is where leaving goes');
+check(SetupSteps::takeDestination('/profile') === '/profile', 'once: the next exit uses the fallback');
+$_SESSION[SetupSteps::SESSION_RESUME] = '//evil.example/x';
+check(SetupSteps::takeDestination('/') === '/', 'an off-site destination is never used');
+SetupSteps::rememberDestination();
+check(!isset($_SESSION[SetupSteps::SESSION_RESUME]), 'no request (the command line) remembers nothing');
+
+check(!SetupSteps::interruptExempt('/sw_quiet_test_page'), 'a page no one named is interrupted');
+SetupSteps::quietOn('/sw_quiet_test_page');
+check(SetupSteps::interruptExempt('/sw_quiet_test_page'), 'a page a plugin named quiet is left alone (a purchase under way)');
+check(!SetupSteps::interruptExempt('/sw_quiet_test_page/more'), 'quiet paths are exact, not prefixes');
+foreach (array('/cart', '/checkout', '/profile/server_manager/configure') as $buy_path) {
+	if (PluginHelper::isPluginActive('store') && PluginHelper::isPluginActive('server_manager')) {
+		check(SetupSteps::interruptExempt($buy_path), "the purchase page $buy_path is quiet");
+	}
+}
+
 harness_finish();

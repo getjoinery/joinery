@@ -971,8 +971,13 @@ nothing. The record holds step keys, so renaming a step's key makes it unseen
 again. A test fixture or probe viewer is marked past onboarding with every step
 seen (`SetupSteps::markPastOnboarding()`). `SetupSteps::interruptExempt()` names the
 paths it leaves alone: the wizard, logout, the API, the security page (where
-the encryption step sends a user to add a passkey that can derive a key) and
-the step-up ceremony. The wizard applies the forced-password-change and terms
+the encryption step sends a user to add a passkey that can derive a key),
+the step-up ceremony, and every page a plugin names with `SetupSteps::quietOn()`
+from its bootstrap: a purchase under way (the store's cart and checkout pages,
+the hosting configure page), so someone who signs up to buy pays before the
+wizard starts. When the redirect fires on a page view it remembers the page
+asked for (`SetupSteps::rememberDestination()`), and both ways out of the
+wizard go back there (`SetupSteps::takeDestination()`). The wizard applies the forced-password-change and terms
 gates itself, in `check_permission()`'s order, since it never calls that
 method. The "Finish setup — n of m" header pill
 renders from `PublicPageBase::render_setup_pill()`; counts are session-cached

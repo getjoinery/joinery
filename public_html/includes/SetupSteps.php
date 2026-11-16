@@ -36,6 +36,11 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.26
+ * @changelog 1.26 - the Secure connection step renders when done (render_when_done), for its IPv6 offer;
+ *                  quietOn(): a plugin names pages the login interrupt leaves alone (a purchase under way);
+ *                  the login interrupt remembers the page it took someone from (rememberDestination), and leaving
+ *                  the wizard goes back there (takeDestination)
  * @version 1.25
  * @changelog 1.25 - the step-up page lives at /profile/verify-stepup
  * @version 1.24
@@ -110,6 +115,10 @@ class SetupSteps {
 	/** Session keys: sticky all-clear for the login gate, and the pill cache. */
 	const SESSION_CLEAR = 'setup_wizard_clear';
 	const SESSION_PILL  = 'setup_wizard_pill';
+	const SESSION_RESUME = 'setup_wizard_resume';
+
+	/** @var array<string, true> paths the login interrupt leaves alone (quietOn) */
+	private static $quiet_paths = array();
 	const PILL_TTL = 300;
 
 	/** @var array<string,array> keyed by step key */
@@ -311,7 +320,20 @@ class SetupSteps {
 	 * for the same reason); and the step-up ceremony, which the security page
 	 * and the wizard both run mid-flow and return from.
 	 */
+	/**
+	 * A plugin names a page the login interrupt leaves alone: a purchase under
+	 * way (the cart, the checkout, the hosting configure page). Someone who
+	 * signed up to buy something pays first; the wizard waits for the next page
+	 * that is not one of these. Called from a plugin bootstrap; exact paths.
+	 */
+	public static function quietOn(string $path): void {
+		self::$quiet_paths[$path] = true;
+	}
+
 	public static function interruptExempt(string $path): bool {
+		if (isset(self::$quiet_paths[$path])) {
+			return true;
+		}
 		if ($path === '/setup' || $path === '/logout' || $path === '/profile/security' || $path === '/profile/verify-stepup') {
 			return true;
 		}
@@ -454,6 +476,30 @@ class SetupSteps {
 	}
 
 	/** Drop the session caches after a step-affecting write (wizard POSTs call this). */
+	/**
+	 * The login interrupt is about to send this request to /setup: remember the
+	 * page that was asked for, so leaving the wizard goes back to it. A buyer
+	 * who signed up on the way to the hosting configure page lands there, not
+	 * on the profile page with the purchase lost. Only a page view (a GET) is
+	 * remembered, and only a local path.
+	 */
+	public static function rememberDestination(): void {
+		if (PHP_SAPI === 'cli' || strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) !== 'GET') {
+			return;
+		}
+		$uri = (string)($_SERVER['REQUEST_URI'] ?? '');
+		if (SessionControl::is_safe_return($uri) && parse_url($uri, PHP_URL_PATH) !== '/setup') {
+			$_SESSION[self::SESSION_RESUME] = $uri;
+		}
+	}
+
+	/** Where leaving the wizard goes: the remembered page, once, else $fallback. */
+	public static function takeDestination(string $fallback): string {
+		$to = (string)($_SESSION[self::SESSION_RESUME] ?? '');
+		unset($_SESSION[self::SESSION_RESUME]);
+		return SessionControl::is_safe_return($to) ? $to : $fallback;
+	}
+
 	public static function invalidateSessionCache(): void {
 		unset($_SESSION[self::SESSION_CLEAR]);
 		unset($_SESSION[self::SESSION_PILL]);
@@ -609,6 +655,9 @@ class SetupSteps {
 				return "Your connection to this site isn't secure yet: anything typed here — passwords included — could be read along the way, and browsers keep some sign-in features switched off until this is fixed. It's usually automatic once your web address points at this server.";
 			},
 			'render_file' => 'includes/setup_steps/https.php',
+			// Done, the step still renders: it offers the IPv6 record a
+			// connected site may lack.
+			'render_when_done' => true,
 			'dismiss_line' => "The site's connection is not secure.",
 			'decision' => 'site',
 			// A host that can never hold a certificate has nothing to set up here.

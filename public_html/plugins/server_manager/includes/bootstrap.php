@@ -13,6 +13,8 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.28 - the hosting configure page is quiet for the setup wizard (SetupSteps::quietOn): a buyer who
+ *                 signed up configures and pays before the wizard starts
  * @version 1.27 - the joinery_services fulfilment provider registers beside customer_cloud (specs/services_phase3_selling_nudge.md §1)
  * @version 1.26 - plane:unseal_daemon: a node whose unseal daemon is down, on its previous build, held or unlocked
  * @version 1.25 - plane:never_do: the never-do list's unexplained items (node_unexplained_root first slice)
@@ -90,4 +92,6 @@ if (class_exists('FulfillmentRegistry')) {
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/JoineryServicesFulfillment.php'));
 	FulfillmentRegistry::register(new JoineryServicesFulfillment());
 }
-?>
+
+// ---- Setup wizard: a hosting purchase under way is not interrupted ----
+SetupSteps::quietOn('/profile/server_manager/configure');

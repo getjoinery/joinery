@@ -53,8 +53,13 @@ expires after `server_manager_draft_days`. Payment activates it (see
 
 A few minutes after paying their site is live at that domain, with email that
 sends and backups that run. The welcome email carries the address — and, for a
-domain they brought themselves, the one A record to add — and a link to
-**their sites page** (`/profile/server_manager`), where
+domain they brought themselves, the address record to add and word that the
+email records follow on the sites page — and a link to
+**their sites page** (`/profile/server_manager`). For a domain they brought
+themselves, that page lists every record still to add (the address record,
+the email records, DMARC while there is none, and the optional IPv6 record),
+and where the domain's DNS host has a driver it offers to add them all at once
+(the DNS publish box, docs/dns_management.md). There
 the admin password their account was born with is shown **once** — reading it
 erases it, and the site asks them to choose their own at first sign-in. The
 password is never in an email: email is a copy that persists in somebody else's
