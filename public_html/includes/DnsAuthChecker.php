@@ -8,6 +8,8 @@
  * Lookups go through DnsResolver — the single raw-DNS chokepoint — so this
  * class is fully unit-testable via DnsResolver::setBackend().
  *
+ * @version 1.4 - on hosted mail (a key name the management node told the site) a missing SPF record is
+ *   advice, not a failure: the provider's return address carries its own (hosting_paid_launch B4)
  * @version 1.3 - assess() tries smtp_dkim_key_name first, the key name hosted mail signs with (hosting_launch B7)
  * @version 1.2 - assess(): the sending service's own key names, the domain it signs as, whether that
  *   matches the From domain, and the plain-language explanation every page shows
@@ -321,7 +323,7 @@ class DnsAuthChecker {
 			'service_label'     => $label,
 			'service_key_names' => $key_names,
 			'signing_domain'    => $signing,
-			'explanation'       => self::explain($results, $domain, $label, $key_names, $signing),
+			'explanation'       => self::explain($results, $domain, $label, $key_names, $signing, $told !== ''),
 		);
 	}
 
@@ -379,7 +381,7 @@ class DnsAuthChecker {
 	 *         tone is 'success' | 'warning' | 'danger'.
 	 */
 	public static function explain(array $results, string $domain, string $service_label = '',
-			array $service_key_names = array(), ?string $signing_domain = null): array {
+			array $service_key_names = array(), ?string $signing_domain = null, bool $hosted_mail = false): array {
 		$spf = $results['spf'];
 		$dkim = $results['dkim'];
 		$dmarc = $results['dmarc'];
@@ -436,11 +438,18 @@ class DnsAuthChecker {
 			$text = 'Your domain has more than one approved-senders list, and other servers ignore both. Merge them into one.';
 		} elseif ($spf['status'] === 'warn') {
 			$text = "Your domain's approved-senders list lets any server send as you, so it protects nothing.";
+		} elseif ($hosted_mail) {
+			// Hosted mail goes out with the provider's own return address,
+			// whose domain carries the approved-senders list: mail passes
+			// without one on the site's own domain.
+			$text = 'Your domain publishes no approved-senders list. Your hosted mail does not need one: it is sent with a return address that has its own. You can still add one.';
 		} else {
 			$text = 'Your domain publishes no approved-senders list. Signed mail is still trusted, but publishing one is recommended.';
 		}
+		// 'fail' is no SPF record at all; two records are 'warn' and stay so.
+		$missing_on_hosted = $hosted_mail && $spf['status'] === 'fail';
 		$rows[] = array('title' => 'Approved senders', 'tech' => 'SPF',
-			'tone' => $spf['status'] === 'pass' ? 'success' : ($spf['status'] === 'warn' ? 'warning' : 'danger'),
+			'tone' => $spf['status'] === 'pass' ? 'success' : (($spf['status'] === 'warn' || $missing_on_hosted) ? 'warning' : 'danger'),
 			'text' => $text, 'raw' => $record !== '' ? $record : (string)$spf['detail']);
 
 		$policy_text = array(

@@ -277,7 +277,26 @@ $site_a = $mk_starter_site('site-a', $node_a);
 $site_b = $mk_starter_site('site-b', $node_b);
 
 check(FleetService::site_plan_grants_slot($site_a) && !FleetService::site_plan_grants_slot($tier_site),
-	'a sold container site\'s plan grants a slot; a site on its own server does not (Q12)');
+	'a sold container site\'s plan grants a slot; an admin\'s site does not');
+
+// A Managed site: its own instance on our account, the site in a container
+// on it (hosting_paid_launch B11, Q12).
+$managed = $mk_starter_site('managed', $mk_site_node('managed'));
+$managed->set('cvp_landing', 'instance');
+$managed->set('cvp_instance_id', 'lin-' . random_int(100000, 999999));
+$managed->save();
+check(FleetService::site_plan_grants_slot($managed), 'a sold Managed site on our account is granted a slot of its own');
+$managed->set('cvp_hosting_mode', 'customer');
+check(!FleetService::site_plan_grants_slot($managed), 'the same site on its buyer\'s own cloud account is not');
+$managed->set('cvp_hosting_mode', 'transferred');
+check(!FleetService::site_plan_grants_slot($managed), 'nor once it moved to its buyer\'s own account');
+$managed->set('cvp_hosting_mode', 'operator');
+$managed->set('cvp_docker_mode', 'bare-metal');
+check(!FleetService::site_plan_grants_slot($managed), 'nor a site installed on the machine itself, which runs its own mail server');
+$managed->set('cvp_docker_mode', 'docker');
+$managed->set('cvp_install_mode', 'bare');
+check(!FleetService::site_plan_grants_slot($managed), 'nor a bare instance with no site');
+$managed->set('cvp_install_mode', 'fresh');
 check(FleetProvisionSeeding::applies($site_a) === true,
 	'a Starter site is seeded with no slot tier on its buyer');
 
@@ -394,8 +413,30 @@ if ($slot_a && $slot_b) {
 	check(!FleetService::slotEntitled($slot_b), 'a removed site (node soft-deleted) is no longer entitled');
 	$node_b->set('mgn_delete_time', null);
 	$node_b->save();
+	// A site moved to its buyer's own account is gone from its slot too (B11).
+	$site_b->set('cvp_landing', 'instance');
+	$site_b->set('cvp_instance_id', 'lin-' . random_int(100000, 999999));
+	$site_b->set('cvp_hosting_mode', 'transferred');
+	$site_b->save();
+	check(FleetService::siteGone($slot_b), 'a site moved to its buyer\'s own account is gone from its slot, so the slot is released');
+	$site_b->set('cvp_hosting_mode', 'operator');
+	$site_b->set('cvp_instance_id', null);
+	$site_b->set('cvp_landing', 'container');
+	$site_b->save();
+	check(!FleetService::siteGone($slot_b), 'and back on our account it is not');
 	$slot_a->set('mft_cvp_customer_cloud_provision_id', -1);
 	check(!FleetService::slotEntitled($slot_a), 'a slot whose site was purged (-1) is not entitled');
+
+	// A Managed site seeded before its plan granted a slot holds the buyer's
+	// tier key: it still holds the tier slot, so another site of the buyer is
+	// refused rather than handed its key (reviewer2 B11 B3).
+	$managed->set('cvp_fleet_seed_state', 'done');
+	$managed->set('cvp_fleet_apk_api_key_id', null);
+	$managed->save();
+	check(FleetProvisionSeeding::seededElsewhere($node_a, (int)$starter_buyer->key) === (string)$managed->get('cvp_domain'),
+		'a site seeded with the tier key still holds the tier slot, whatever its plan grants now');
+	$managed->set('cvp_fleet_seed_state', null);
+	$managed->save();
 
 	// ── The records site B's domain needs, and where they go (S5-3) ──
 	section('A Starter site\'s inbound records');
@@ -432,6 +473,21 @@ if ($slot_a && $slot_b) {
 	$listed_types = array_map(function ($r) { return $r['type']; }, $listed);
 	check(in_array('MX', $listed_types, true) && in_array('TXT', $listed_types, true),
 		'and their sites page lists the MX and the TXT', json_encode($listed));
+
+	// The same site as Managed (its own instance on our account): the leg
+	// takes it too, and leaves the records for the buyer (B11).
+	$site_b->set('cvp_inbound_dns_state', null);
+	$site_b->set('cvp_landing', 'instance');
+	$site_b->set('cvp_instance_id', 'lin-' . random_int(100000, 999999));
+	$site_b->save();
+	$leg->run(array('provision_id' => (int)$site_b->key));
+	$site_b->load();
+	check((string)$site_b->get('cvp_inbound_dns_state') === 'buyer',
+		'a Managed site is placed by the inbound leg too: its records are left for its buyer',
+		var_export($site_b->get('cvp_inbound_dns_state'), true));
+	$site_b->set('cvp_instance_id', null);
+	$site_b->set('cvp_landing', 'container');
+	$site_b->save();
 
 	// The same site on a name we registered: published, additively.
 	$site_b->set('cvp_inbound_dns_state', null);

@@ -54,6 +54,10 @@ DnsResolver::setBackend(new FakeDnsBackend([
     'loose.example.com|' . DNS_TXT                    => [['txt' => 'v=spf1 -all']],
     's123._domainkey.loose.example.com|' . DNS_CNAME  => [['target' => 'k.dkimhost.example.net']],
     '_dmarc.loose.example.com|' . DNS_TXT             => [['txt' => 'v=DMARC1; p=none']],
+    // A hosted site: signed, no SPF of its own, monitoring DMARC (hosting_paid_launch B4).
+    'hosted.example.com|' . DNS_TXT                   => [],
+    's77._domainkey.hosted.example.com|' . DNS_CNAME  => [['target' => 'k.dkimhost.example.net']],
+    '_dmarc.hosted.example.com|' . DNS_TXT            => [['txt' => 'v=DMARC1; p=none']],
 ]));
 
 // ── checkSPF ─────────────────────────────────────────────────────────────
@@ -131,6 +135,20 @@ $nobody = DnsAuthChecker::explain(DnsAuthChecker::quickCheck('reject.example.com
 ok('no key found and no service asked reads Could not tell, not Not yet',
     $nobody['verdict']['tone'] === 'warning' && strpos($nobody['verdict']['text'], 'Could not tell.') === 0
     && $nobody['rows'][0]['tone'] === 'warning');
+
+$hosted_check = DnsAuthChecker::quickCheck('hosted.example.com', ['s77']);
+$hosted = DnsAuthChecker::explain($hosted_check, 'hosted.example.com', '', ['s77'], null, true);
+$spf_row = $hosted['rows'][array_search('Approved senders', array_column($hosted['rows'], 'title'), true)];
+ok('hosted mail: a missing SPF is advice (warning), not a failure (B4)', $spf_row['tone'] === 'warning'
+    && strpos($spf_row['text'], 'does not need one') !== false);
+ok('  and no row on a signed hosted site with monitoring DMARC is red',
+    !in_array('danger', array_column($hosted['rows'], 'tone'), true) && $hosted['verdict']['tone'] !== 'danger');
+$own = DnsAuthChecker::explain($hosted_check, 'hosted.example.com', '', ['s77'], null, false);
+ok('  the same domain on mail of its own keeps the missing SPF red',
+    $own['rows'][array_search('Approved senders', array_column($own['rows'], 'title'), true)]['tone'] === 'danger');
+$multi_hosted = DnsAuthChecker::explain(DnsAuthChecker::quickCheck('multi.example.com', ['mail']), 'multi.example.com', '', [], null, true);
+ok('  two SPF records stay a problem on hosted mail too',
+    strpos($multi_hosted['rows'][array_search('Approved senders', array_column($multi_hosted['rows'], 'title'), true)]['text'], 'more than one') !== false);
 
 $html = DnsAuthChecker::explanationHtml($b169);
 ok('the HTML escapes and wraps in one block', strpos($html, '<div><p class="text-danger">') === 0

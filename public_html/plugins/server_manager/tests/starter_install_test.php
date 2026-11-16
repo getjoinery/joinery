@@ -50,7 +50,7 @@ $db = DbConnector::get_instance()->get_db_link();
 $db->beginTransaction();
 $suffix = substr(bin2hex(random_bytes(4)), 0, 8);
 
-harness_set_setting_mem('server_manager_starter_memory', '384m');
+harness_set_setting_mem('server_manager_starter_memory', '448m');
 harness_set_setting_mem('server_manager_starter_cpus', '1');
 harness_set_setting_mem('server_manager_starter_disk', '5G');
 $db->exec("UPDATE mgh_managed_hosts SET mgh_provisioning_enabled = false");
@@ -245,8 +245,8 @@ $cmd = json_decode((string)$job->get('mjb_commands'), true);
 check(strpos((string)$job->get('mjb_commands'), $sealed_pw) === false && strpos((string)$job->get('mjb_parameters'), $sealed_pw) === false
 		&& ($cmd['params']['admin_password'] ?? '') === '__SM_ADMIN_PASSWORD_' . (int)$p->key . '__',
 	'the job row never holds the password, only the slot');
-check(($cmd['params']['memory'] ?? '') === '384m' && ($cmd['params']['cpus'] ?? '') === '1' && ($cmd['params']['disk'] ?? '') === '5G',
-	'with the starter limits: 8 sites to a Linode 4 GB', json_encode(array_diff_key($cmd['params'] ?? array(), array('admin_password' => 1))));
+check(($cmd['params']['memory'] ?? '') === '448m' && ($cmd['params']['cpus'] ?? '') === '1' && ($cmd['params']['disk'] ?? '') === '5G',
+	'with the starter limits: 7 sites to a Linode 4 GB', json_encode(array_diff_key($cmd['params'] ?? array(), array('admin_password' => 1))));
 
 // The hand-out opens the slot for this job alone.
 $resolve = (new ReflectionClass('AgentChannelEndpoint'))->getMethod('resolve_credential_slots');
@@ -376,9 +376,9 @@ $sh_prov->set('cvp_starter_host', true);
 $sh_prov->save();
 $sh = ProvisionCustomerCloud::make_starter_host($sh_prov, $sh_node);
 $sh_node->load();
-check($sh && (string)$sh->get('mgh_tier') === 'starter' && (int)$sh->get('mgh_max_sites') === 8
+check($sh && (string)$sh->get('mgh_tier') === 'starter' && (int)$sh->get('mgh_max_sites') === 7
 		&& (string)$sh->get('mgh_host') === (string)$sh_node->get('mgn_host'),
-	'its host record is a starter host at the machine\'s IPv4, with eight places');
+	'its host record is a starter host at the machine\'s IPv4, with seven places');
 check($sh && (int)$sh->get('mgh_mgn_managed_node_id') === (int)$sh_node->key && !$sh->get('mgh_provisioning_enabled'),
 	'its own node is the host\'s agent, and it takes no sites until an operator turns provisioning on');
 $threw = null;
@@ -389,6 +389,54 @@ try {
 	$bad->set('cvp_starter_host', true); $bad->save();
 } catch (Exception $e) { $threw = $e->getMessage(); }
 check($threw !== null, 'a starter host with a site of its own is refused', (string)$threw);
+
+section('Seven places at 448m: the declared default, a new host and the migration (hosting_paid_launch B3)');
+$declared = null;
+foreach ((json_decode((string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/plugin.json')), true)['settings'] ?? array()) as $d) {
+	if (($d['name'] ?? '') === 'server_manager_starter_memory') { $declared = $d['default'] ?? null; }
+}
+check($declared === '448m', 'the declared starter memory is 448m', var_export($declared, true));
+check(ManagedHost::STARTER_PLACES === 7, 'a starter host is born with seven places');
+require_once(PathHelper::getIncludePath('migrations/starter_seven_places.php'));
+$db->exec("UPDATE stg_settings SET stg_value = ' 384M ' WHERE stg_name = 'server_manager_starter_memory'");
+$old8 = new ManagedHost(NULL);
+$old8->set('mgh_slug', 'si-old8-' . $suffix);
+$old8->set('mgh_name', 'si-old8-' . $suffix);
+$old8->set('mgh_host', '192.0.2.' . random_int(10, 250));
+$old8->set('mgh_tier', 'starter');
+$old8->set('mgh_max_sites', 8);
+$old8->save();
+$gen8 = new ManagedHost(NULL);
+$gen8->set('mgh_slug', 'si-gen8-' . $suffix);
+$gen8->set('mgh_name', 'si-gen8-' . $suffix);
+$gen8->set('mgh_host', '198.51.100.' . random_int(10, 250));
+$gen8->set('mgh_tier', 'general');
+$gen8->set('mgh_max_sites', 8);
+$gen8->save();
+$set5 = new ManagedHost(NULL);
+$set5->set('mgh_slug', 'si-set5-' . $suffix);
+$set5->set('mgh_name', 'si-set5-' . $suffix);
+$set5->set('mgh_host', '203.0.113.' . random_int(10, 250));
+$set5->set('mgh_tier', 'starter');
+$set5->set('mgh_max_sites', 5);
+$set5->save();
+ob_start();
+starter_seven_places();
+starter_seven_places();
+ob_end_clean();
+$mem = $db->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'server_manager_starter_memory'")->fetchColumn();
+check($mem === '448m', 'the migration moves the old default (here typed \' 384M \') to 448m', var_export($mem, true));
+$db->exec("UPDATE stg_settings SET stg_value = '512m' WHERE stg_name = 'server_manager_starter_memory'");
+ob_start(); starter_seven_places(); ob_end_clean();
+$mem = $db->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'server_manager_starter_memory'")->fetchColumn();
+check($mem === '512m', 'an operator\'s own figure is left alone', var_export($mem, true));
+$places = function ($h) use ($db) {
+	$q = $db->prepare('SELECT mgh_max_sites FROM mgh_managed_hosts WHERE mgh_managed_host_id = ?');
+	$q->execute(array((int)$h->key));
+	return (int)$q->fetchColumn();
+};
+check($places($old8) === 7, 'a starter host at eight places moves to seven');
+check($places($gen8) === 8 && $places($set5) === 5, 'a general host and a starter host set to another figure are left alone');
 
 $db->rollBack();
 harness_finish();

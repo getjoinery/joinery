@@ -17,6 +17,8 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
+ * @version 1.11 - a Managed site on our account gets its own relay slot too (site_plan_grants_slot, hosting_paid_launch B11);
+ *                a site moved to its buyer's own account is gone from its slot (siteGone): released, its key retired
  * @version 1.10 - a site's key answers only for its site's slot, never its buyer's tier slot (isSiteKey); a removed
  *                site's slot is released and its key retired (siteGone, releaseSiteSlot)
  * @version 1.9 - site_inbound_records(): the MX and ownership TXT a hosted site's domain needs for its slot
@@ -82,16 +84,24 @@ class FleetService {
 
 	/**
 	 * Whether a hosted site's plan grants it a relay slot of its own: a sold
-	 * site in a container on a shared host (Starter), which has no port 25 of
-	 * its own. A site on an instance of its own (Managed) is outside this
-	 * until the owner decides it (hosting_launch Q12); its buyer's tier still
+	 * site we host, Starter or Managed. Each is a Docker deployment (Starter in
+	 * a container on a shared host, Managed in a container on its own
+	 * instance), and a Docker deployment runs no mail server of its own
+	 * (mailbox_site_has_mail_server() keys on deployment_environment docker),
+	 * so the relay is how it receives. Not a landing test: Managed lands on
+	 * an instance. Only on our own account
+	 * (hosting mode operator): a buyer's site on their own cloud account, or a
+	 * Managed site moved to it, is not ours to host, and its buyer's tier
 	 * grants a slot as for anyone.
 	 */
 	public static function site_plan_grants_slot($provision): bool {
 		if ($provision === null || !$provision->key || !class_exists('CustomerCloudProvision')) {
 			return false;
 		}
-		return $provision->is_container() && $provision->is_sold();
+		if (!$provision->is_sold() || !$provision->is_operator_hosted()) {
+			return false;
+		}
+		return $provision->is_container() || (string)($provision->get('cvp_docker_mode') ?: 'docker') === 'docker';
 	}
 
 	/**
@@ -185,8 +195,11 @@ class FleetService {
 
 	/**
 	 * Whether a site's slot has lost its site for good: the site was purged
-	 * (-1), or its provision or its node was removed. A site whose hosting
-	 * only lapsed keeps its slot under the entitlement ladder instead.
+	 * (-1), its provision or its node was removed, or the site moved to its
+	 * buyer's own cloud account (hosting mode transferred), which ends our
+	 * hosting of it: its slot is released at once, so its domain can be
+	 * claimed again. A site whose hosting only lapsed keeps its slot under
+	 * the entitlement ladder instead.
 	 */
 	public static function siteGone(MailboxFleetSlot $slot): bool {
 		$provision_id = intval($slot->get('mft_cvp_customer_cloud_provision_id'));
@@ -202,7 +215,7 @@ class FleetService {
 			return false;
 		}
 		$provision = new CustomerCloudProvision($provision_id, TRUE);
-		if (!$provision->key || $provision->get('cvp_delete_time')) {
+		if (!$provision->key || $provision->get('cvp_delete_time') || $provision->is_transferred()) {
 			return true;
 		}
 		$node_id = intval($provision->get('cvp_mgn_managed_node_id'));
@@ -231,7 +244,7 @@ class FleetService {
 			}
 			$site_id = intval(substr($name, strlen(self::SITE_KEY_NAME_PREFIX)));
 			$site = $site_id > 0 ? new CustomerCloudProvision($site_id, TRUE) : null;
-			$live = $site !== null && $site->key && !$site->get('cvp_delete_time');
+			$live = $site !== null && $site->key && !$site->get('cvp_delete_time') && !$site->is_transferred();
 			if ($live) {
 				$node_id = intval($site->get('cvp_mgn_managed_node_id'));
 				$node = $node_id > 0 ? new ManagedNode($node_id, TRUE) : null;

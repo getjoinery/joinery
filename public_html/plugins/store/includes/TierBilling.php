@@ -14,6 +14,8 @@
  * Stripe/PayPal/App Store/Play webhooks, and the mobile claim actions) are all
  * store-side.
  *
+ * @version 1.2.0 - every reading of 'the user's subscription' here is a tier subscription (grants_tier);
+ *                a hosting or service subscription ending never revokes the tier (hosting_paid_launch B10)
  * @version 1.1.0
  */
 require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
@@ -51,12 +53,12 @@ class TierBilling {
     }
 
     /**
-     * Whether the user has at least one active subscription order item.
+     * Whether the user has at least one active tier subscription.
      */
     public static function userHasActiveSubscription($user_id) {
         require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
         $subscriptions = new MultiOrderItem(
-            array('user_id' => $user_id, 'is_active_subscription' => true)
+            array('user_id' => $user_id, 'is_active_subscription' => true, 'grants_tier' => true)
         );
         $subscriptions->load();
 
@@ -71,15 +73,16 @@ class TierBilling {
     }
 
     /**
-     * The billing system the user's active subscription runs through:
+     * The billing system the user's active tier subscription runs through:
      * 'stripe', 'paypal', 'app_store', or 'play_store' — null when the user
-     * has no active subscription. Reads stored state only (no provider API
-     * calls), so it is safe on request paths.
+     * has none. A hosting or service subscription is not a tier, so it never
+     * stands in the way of buying one in an app. Reads stored state only (no
+     * provider API calls), so it is safe on request paths.
      */
     public static function getActiveSubscriptionSource($user_id) {
         require_once(PathHelper::getIncludePath('plugins/store/data/order_items_class.php'));
         $subscriptions = new MultiOrderItem(
-            array('user_id' => $user_id, 'is_active_subscription' => true),
+            array('user_id' => $user_id, 'is_active_subscription' => true, 'grants_tier' => true),
             array('order_item_id' => 'DESC')
         );
         $subscriptions->load();
@@ -107,6 +110,19 @@ class TierBilling {
         return null;
     }
 
+    /** Whether an order line's product grants a subscription tier. */
+    public static function lineGrantsTier($order_item): bool {
+        if (!$order_item || !$order_item->get('odi_pro_product_id')) {
+            return false;
+        }
+        // Asked in SQL: a product removed for good leaves its lines, and
+        // loading the model for a missing row throws.
+        $q = DbConnector::get_instance()->get_db_link()->prepare(
+            'SELECT pro_sbt_subscription_tier_id FROM pro_products WHERE pro_product_id = ?');
+        $q->execute(array((int)$order_item->get('odi_pro_product_id')));
+        return (bool)$q->fetchColumn();
+    }
+
     /**
      * Human-readable name for a payment source value.
      */
@@ -121,10 +137,15 @@ class TierBilling {
     }
 
     /**
-     * Revoke a user's tier when their subscription expires/cancels, and notify.
-     * Called from the Stripe/PayPal webhooks.
+     * Revoke a user's tier when their tier subscription expires or cancels,
+     * and notify. Called from the Stripe, PayPal and app store paths with the
+     * line that ended: a line whose product grants no tier (hosting, our
+     * services) leaves the user's tier alone.
      */
-    public static function handleSubscriptionExpired($user_id) {
+    public static function handleSubscriptionExpired($user_id, $order_item) {
+        if (!self::lineGrantsTier($order_item)) {
+            return;
+        }
         $current_tier = SubscriptionTier::GetUserTier($user_id);
         if ($current_tier) {
             $old_tier_level = $current_tier->get('sbt_tier_level');

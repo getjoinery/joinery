@@ -12,6 +12,7 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.22 - a Starter host holds 7 sites (hosting_paid_launch B3)
  * @version 1.21 - Install Type shows and hides the site fields by visibility_rules (no inline script)
  * @version 1.20 - Install Type 'Starter host': a bare instance made a multi-tenant host for Starter sites
  *                 (specs/starter_tier.md); a Linode 4 GB holds eight
@@ -301,7 +302,7 @@ $formwriter->radioinput('install_mode', 'Install Type', [
 	'options'  => [
 		'fresh'       => 'Fresh install — empty Joinery site with default schema and admin user',
 		'bare'        => 'Bare instance — no site install (infrastructure node, e.g. mail relay shard); cloud target only',
-		'starter_host' => 'Starter host — a bare instance made a shared host for $4.99 Starter sites (Ubuntu 26.04, g6-standard-2 = 4 GB, holds 8); its host record is made when the install finishes, with provisioning off until you turn it on',
+		'starter_host' => 'Starter host — a bare instance made a shared host for $4.99 Starter sites (Ubuntu 26.04, g6-standard-2 = 4 GB, holds 7); its host record is made when the install finishes, with provisioning off until you turn it on',
 	],
 	// The site-defining fields belong to a fresh install only.
 	'visibility_rules' => [

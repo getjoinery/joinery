@@ -22,6 +22,7 @@
  * zone that could not be read leaves it unset, reported, and asked again
  * next pass.
  *
+ * @version 1.2 - every site whose plan grants a slot and holds a site key, Managed as well as Starter: no landing filter (hosting_paid_launch B11)
  * @version 1.1 - a skipped record is not placed; a record in the way or an unreadable zone is reported every pass;
  *               a drifted record of ours is updated
  * @version 1.0
@@ -42,7 +43,6 @@ class ProvisionSiteInboundMail {
 		$rows = new MultiCustomerCloudProvision(array(
 			'statuses'          => array('done'),
 			'fleet_seed_states' => array('done'),
-			'landing'           => 'container',
 			'deleted'           => false,
 		));
 		// provision_id: advance that one site only (a person retrying one, a test).
@@ -51,6 +51,11 @@ class ProvisionSiteInboundMail {
 		$advanced = 0;
 		foreach ($rows as $provision) {
 			if (($only > 0 && (int)$provision->key !== $only) || $provision->get('cvp_inbound_dns_state') !== null || !FleetService::site_plan_grants_slot($provision)) {
+				continue;
+			}
+			// A site seeded with its buyer's tier key (before its plan granted
+			// a slot) has no slot of its own to place records for.
+			if ((int)$provision->get('cvp_fleet_apk_api_key_id') <= 0) {
 				continue;
 			}
 			$waiting++;

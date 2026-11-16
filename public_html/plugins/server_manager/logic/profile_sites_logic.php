@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.10 - dmarc_record: the optional DMARC record while the buyer's domain has none (hosting_paid_launch B4)
  * @version 1.9 - suspended: an open suspension's reason, for the customer (HostedSuspensions, hosting_launch S6)
  * @version 1.8 - mail_records lists a Starter site's inbound records (MX, ownership TXT) on the buyer's own domain (S5)
  * @version 1.7 - lists only rows that hold a site: a starter host or relay shard made by an admin is not one of their sites
@@ -184,6 +185,7 @@ function profile_sites_logic(array $input): LogicResult {
 		$sites[] = array(
 			'dns_record'      => profile_sites_dns_record($provision),
 			'mail_records'    => profile_sites_mail_records($provision),
+			'dmarc_record'    => profile_sites_dmarc_record($provision),
 			'id'              => (int)$provision->key,
 			'domain'          => (string)$provision->get('cvp_domain'),
 			'url'             => 'https://' . (string)$provision->get('cvp_domain'),
@@ -278,7 +280,8 @@ function profile_sites_dns_record($provision): ?array {
  * A Starter site's inbound records come first (profile_sites_inbound_records).
  * Until they are in place the site's mail goes out unsigned and is more
  * likely to be filtered. Only CNAMEs can be checked here; a record of another
- * type is listed until mail setup has verified the domain.
+ * type is listed until mail setup has verified the domain. The optional DMARC
+ * record is profile_sites_dmarc_record()'s, shown on its own.
  */
 function profile_sites_mail_records($provision): array {
 	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
@@ -315,6 +318,21 @@ function profile_sites_mail_records($provision): array {
 			'note' => (string)($record['note'] ?? ''));
 	}
 	return $missing;
+}
+
+/**
+ * The DMARC record a hosted site on its buyer's own domain is offered while
+ * the domain has none (ProvisionHostedMail::dmarc_record), or null. Optional,
+ * so it is shown on its own and never keeps the email records box open: mail
+ * arrives and sends without it.
+ */
+function profile_sites_dmarc_record($provision): ?array {
+	if (!$provision->is_operator_hosted() || $provision->is_pre_payment()
+			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionHostedMail::records_of($provision)) {
+		return null;
+	}
+	$domain = (string)$provision->get('cvp_domain');
+	return ($domain !== '' && !ProvisionHostedMail::has_dmarc($domain)) ? ProvisionHostedMail::dmarc_record($domain) : null;
 }
 
 /**

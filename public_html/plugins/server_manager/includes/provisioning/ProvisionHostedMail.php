@@ -47,6 +47,8 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.11 - dmarc_record(): a monitoring DMARC record for a hosted site's domain, published for a name we
+ *                registered when it has none (hosting_paid_launch B4)
  * @version 1.10 - registrar_dns_driver() is public, shared with the site inbound records leg
  * @version 1.9 - the push allowance counts only attempts since the site last took one (B12)
  * @version 1.8 - the mail push carries the DKIM key name from the provider's records (dkim_key_name, B7)
@@ -287,7 +289,38 @@ class ProvisionHostedMail {
 		$provision->set('cvp_mail_state', 'records_published');
 		$provision->set('cvp_mail_error', null);
 		$provision->save();
+		self::publish_dmarc($driver, $domain);
 		return 1;
+	}
+
+	/**
+	 * Add the monitoring DMARC record to a zone we hold, where the domain has
+	 * none. Its own plan, after the mail records are in: the provider never
+	 * asked for it, so it can never fail or hold up the mail leg, and a
+	 * refusal is only logged. Additive, so a DMARC record already in the zone
+	 * (another value, or one the public lookup missed) is left alone, never
+	 * doubled: two would make receivers ignore both. Returns whether it is in
+	 * place or was added.
+	 */
+	public static function publish_dmarc($driver, string $domain): bool {
+		if (self::has_dmarc($domain)) {
+			return true;
+		}
+		$dmarc = self::dmarc_record($domain);
+		$plan = new DnsRecordPlan($domain, 'server_manager');
+		$plan->addRecord($dmarc['type'], $dmarc['name'], $dmarc['value'], null, null, $dmarc['note']);
+		try {
+			foreach ((new DnsReconciler())->apply($driver, $domain, $plan, array(), DnsReconciler::APPLY_ADDITIVE) as $result) {
+				if (empty($result['ok'])) {
+					error_log('ProvisionHostedMail: DMARC record for ' . $domain . ' not added: ' . trim((string)($result['reason'] ?? 'unknown reason')));
+					return false;
+				}
+			}
+		} catch (Throwable $e) {
+			error_log('ProvisionHostedMail: DMARC record for ' . $domain . ' not added: ' . $e->getMessage());
+			return false;
+		}
+		return true;
 	}
 
 	// ── Step 4: let the provider check them ───────────────────────────────────
@@ -540,6 +573,36 @@ class ProvisionHostedMail {
 	/** The monthly send allowance every hosted subaccount is capped at. */
 	public static function send_allowance(): int {
 		return Smtp2GoLeg::sendAllowance();
+	}
+
+	/**
+	 * The DMARC record a hosted site's domain gets when it has none: policy
+	 * none, so other servers report but still deliver while the owner sets up.
+	 * Not stored with the provider's records (cvp_mail_records): the provider
+	 * never asked for it, and the domain's verification never waits on it.
+	 */
+	public static function dmarc_record(string $domain): array {
+		return array(
+			'type'  => 'TXT',
+			'name'  => '_dmarc.' . strtolower(trim($domain)),
+			'value' => 'v=DMARC1; p=none',
+			'note'  => 'Tells other servers what to do with mail that pretends to be from you. Add it only if your domain has no DMARC record yet.',
+		);
+	}
+
+	/** Whether $domain publishes a DMARC record. A failed lookup reads as none. */
+	public static function has_dmarc(string $domain): bool {
+		try {
+			foreach (DnsResolver::getTxt('_dmarc.' . strtolower(trim($domain))) as $txt) {
+				if (stripos(trim((string)$txt), 'v=DMARC1') === 0) {
+					return true;
+				}
+			}
+		} catch (DnsLookupException $e) {
+			// Unknown: listed again for the buyer, which is harmless; for a zone
+			// we hold the additive publish leaves any DMARC record in place.
+		}
+		return false;
 	}
 
 	/** The DNS records the provider described, as stored. */

@@ -364,6 +364,38 @@ $key_prov->set('cvp_mail_records', json_encode(array(
 check(ProvisionHostedMail::dkim_key_name($key_prov) === 's1217236', 'the DKIM key name is read from the provider\'s records');
 $key_prov->set('cvp_mail_records', json_encode(array()));
 check(ProvisionHostedMail::dkim_key_name($key_prov) === '', 'no DKIM record, no key name');
+// B4: a hosted site's domain is offered a monitoring DMARC record while it has none.
+require_once(PathHelper::getIncludePath('tests/lib/dns_fixtures.php'));
+DnsResolver::setBackend(new FakeDnsBackend(array(
+	'_dmarc.has.example.com|' . DNS_TXT  => array(array('txt' => 'v=DMARC1; p=reject')),
+	'_dmarc.none.example.com|' . DNS_TXT => array(),
+	'_dmarc.down.example.com|' . DNS_TXT => false,
+)));
+$dm = ProvisionHostedMail::dmarc_record('None.Example.com ');
+check($dm['type'] === 'TXT' && $dm['name'] === '_dmarc.none.example.com' && $dm['value'] === 'v=DMARC1; p=none'
+	&& strpos($dm['note'], 'only if your domain has no DMARC record') !== false, 'the DMARC record offered is monitoring only, with its condition');
+check(ProvisionHostedMail::has_dmarc('has.example.com') && !ProvisionHostedMail::has_dmarc('none.example.com')
+	&& !ProvisionHostedMail::has_dmarc('down.example.com'), 'a domain with its own DMARC record is left alone; none, or an unanswered lookup, is offered one');
+// The zone we hold gets the DMARC record in a plan of its own, which can never fail the mail leg.
+require_once(PathHelper::getIncludePath('tests/dns/fixtures/FakeDnsDriver.php'));
+$fake = new FakeDnsDriver(array('api_token' => 'unused'));
+$fake->seed('none.example.com', array(new DnsRecord('A', 'none.example.com', '192.0.2.9')));
+$added = ProvisionHostedMail::publish_dmarc($fake, 'none.example.com');
+check($added && count($fake->writes) === 1 && strpos($fake->writes[0], 'create') === 0
+		&& strpos($fake->writes[0], '_dmarc.none.example.com') !== false && strpos($fake->writes[0], 'v=DMARC1; p=none') !== false,
+	'a zone we hold with no DMARC record gets one', implode(' | ', $fake->writes));
+$fake2 = new FakeDnsDriver(array('api_token' => 'unused'));
+$fake2->seed('none.example.com', array(new DnsRecord('TXT', '_dmarc.none.example.com', 'v=DMARC1; p=reject')));
+ProvisionHostedMail::publish_dmarc($fake2, 'none.example.com');
+check($fake2->writes === array(), 'a DMARC record of another value already in the zone is left alone, never doubled', implode(' | ', $fake2->writes));
+$fake3 = new FakeDnsDriver(array('api_token' => 'unused'));
+$fake3->seed('none.example.com', array(new DnsRecord('A', 'none.example.com', '192.0.2.9')));
+$fake3->fail_value = 'v=DMARC1; p=none';
+$threw = false;
+try { $ok3 = ProvisionHostedMail::publish_dmarc($fake3, 'none.example.com'); } catch (Throwable $e) { $threw = true; }
+check(!$threw && $ok3 === false, 'a provider that refuses it is only logged: false, never an exception');
+check(ProvisionHostedMail::publish_dmarc(new FakeDnsDriver(array('api_token' => 'unused')), 'has.example.com'), 'a domain whose DMARC record resolves is not touched');
+DnsResolver::clearBackend();
 $key_node = ht_node('httest-key-' . $suffix);
 $key_node->set('mgn_agent_version', JobCommandBuilder::HOSTED_MAIL_KEY_NAME_AGENT);
 $key_node->save();

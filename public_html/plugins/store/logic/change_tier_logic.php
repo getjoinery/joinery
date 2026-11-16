@@ -55,10 +55,12 @@ function change_tier_logic(array $input): LogicResult {
     $has_cancelled_subscription = false;
     $is_expired = false;
 
-    // Find the current subscription: active, or scheduled to cancel at a
+    // Find the current tier subscription: active, or scheduled to cancel at a
     // future period end (still entitled, and the row reactivation acts on).
+    // Only a line whose product grants a tier: the buyer's hosting or service
+    // subscription is never re-priced or cancelled from this page.
     $subscriptions = new MultiOrderItem(
-        array('user_id' => $user_id, 'is_current_subscription' => true),
+        array('user_id' => $user_id, 'is_current_subscription' => true, 'grants_tier' => true),
         array('order_item_id' => 'DESC')
     );
     $subscriptions->load();

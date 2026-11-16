@@ -21,7 +21,8 @@
  *
  *   2. The live endpoint (/ajax/stripe_webhook) is driven over real HTTP with
  *      constructed events signed by the site's configured stripe_endpoint_secret
- *      — the exact shape Stripe posts. A valid checkout marks an order paid; an
+ *      — the exact shape Stripe posts. A paid session with its checkout record is
+ *      completed into its order with its lines; an
  *      invalid-signature post is refused with 400 and writes nothing; a replayed
  *      event id is suppressed (no second order); a session the buyer's return
  *      already made an order for gets no second one; and customer.subscription.deleted
@@ -33,12 +34,15 @@
  *
  * Run: php plugins/store/tests/stripe_webhook_test.php [base_url] [origin_ip]
  *
+ * @version 1.2.0 - the first checkout has its record and is completed from it (no operator alert, B156);
+ *   a deleted subscription ends every line on it, revoking the tier once (hosting_paid_launch B10)
  * @version 1.1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
 
 require_once(__DIR__ . '/../../../tests/lib/http.php');
+require_once(__DIR__ . '/../../../tests/lib/logic.php');
 harness_http_boot(isset($argv) ? $argv : array());
 harness_boot();
 
@@ -191,9 +195,52 @@ if (!$endpoint_secret || strpos($endpoint_secret, 'whsec_') !== 0) {
 
 $subscriber = make_user('SwSub');
 
-// --- valid checkout marks an order paid -----------------------------------
+// --- a paid session the buyer never came back from is completed -----------
+// The checkout's record of what was paid for, as the buyer's Pay button
+// leaves it (ShoppingCart::record_payment()): the webhook makes the order from
+// it, lines and all, with nothing for the operator to do (B156).
+
+$admin = make_user('SwAdmin' . $run_id, 10);
+$_SESSION['loggedin'] = 1;
+$_SESSION['usr_user_id'] = (int)$admin->key;
+$_SESSION['permission'] = 10;
+$_SESSION['test_mode'] = true;
+$_SESSION['send_emails'] = false;
+harness_set_setting_mem('checkout_type', 'none');
+harness_set_setting_mem('products_active', '1');
+$made = harness_call_logic_ok('plugins/store/admin/logic/admin_product_edit_logic.php', 'admin_product_edit_logic', array(
+	'action' => 'add', 'json_confirm' => '1', 'pro_name' => 'SW Widget ' . $run_id,
+	'pro_description' => 'stripe_webhook fixture', 'pro_short_description' => 'fixture',
+	'pro_is_active' => '1', 'pro_max_purchase_count' => '0', 'pro_max_cart_count' => '0', 'pro_expires' => '0',
+	'pro_link' => 'sw-widget-' . $run_id, 'system_requirements' => array('FullNameRequirement', 'EmailRequirement'),
+));
+preg_match('/pro_product_id=(\d+)/', (string)$made->redirect, $m);
+$widget_id = (int)($m[1] ?? 0);
+harness_defer(function () use ($widget_id) {
+	try { $p = new Product($widget_id, TRUE); if ($p->key) $p->permanent_delete(); } catch (\Throwable $e) {}
+});
+harness_call_logic_ok('plugins/store/admin/logic/admin_product_edit_logic.php', 'admin_product_edit_logic', array(
+	'action' => 'new_version', 'p' => $widget_id, 'version_name' => 'V', 'version_price' => '49.99',
+	'prv_price_type' => 'single', 'prv_trial_period_days' => '0',
+), 'POST');
+$widget = new Product($widget_id, TRUE);
 
 $sess_a = 'cs_test_sw_' . $run_id . '_a';
+harness_defer(function () use ($sess_a) {
+	DbConnector::get_instance()->get_db_link()->prepare('DELETE FROM gpr_gateway_payment_records WHERE gpr_ref = ?')->execute(array($sess_a));
+});
+$_SESSION['usr_user_id'] = (int)$subscriber->key;
+$_SESSION['permission'] = 0;
+GatewayPaymentRecord::$session_id_stand_in = 'swsess' . $run_id;
+$cart = ShoppingCart::current();
+$cart->clear_cart();
+$cart->add_item($widget, array('product_version' => $widget->get_product_versions(TRUE)->get(0)->key,
+	'full_name_first' => 'Sw', 'full_name_last' => 'Buyer', 'email' => $subscriber->get('usr_email')));
+$cart->record_payment($sess_a, 'stripe_checkout');
+$cart->clear_cart();
+$_SESSION = array();
+GatewayPaymentRecord::$session_id_stand_in = null;
+
 $payload_a = sw_event('evt_sw_' . $run_id . '_checkout', 'checkout.session.completed', array(
 	'id'                  => $sess_a,
 	'object'              => 'checkout.session',
@@ -210,10 +257,19 @@ $order = Order::GetByStripeSession($sess_a);
 check($order !== NULL && $order->key, 'an order was created for the checkout session');
 if ($order !== NULL && $order->key) {
 	harness_register_row('ord_orders', 'ord_order_id', $order->key);
+	$lines = array();
+	foreach (new MultiOrderItem(array('odi_ord_order_id' => $order->key)) as $line) {
+		$lines[] = $line;
+		harness_register_row('odi_order_items', 'odi_order_item_id', $line->key);
+	}
 	check((int)$order->get('ord_status') === Order::STATUS_PAID, 'order is marked STATUS_PAID');
 	check((int)$order->get('ord_usr_user_id') === (int)$subscriber->key, 'order is linked to the client_reference_id user');
-	check((float)$order->get('ord_total_cost') === 49.99, 'order total is amount_total / 100');
+	check(count($lines) === 1 && (int)$lines[0]->get('odi_pro_product_id') === $widget_id,
+		'the order is completed from the record, with its line', count($lines) . ' line(s)');
+	check(trim((string)$order->get('ord_error')) === '', 'nothing for the operator: the order carries no error', (string)$order->get('ord_error'));
 }
+$gpr = GatewayPaymentRecord::GetByRef($sess_a);
+check($gpr && $gpr->get('gpr_state') === GatewayPaymentRecord::STATE_COMPLETED, 'the checkout record is spent');
 
 // --- invalid signature is refused and writes nothing ----------------------
 
@@ -375,6 +431,65 @@ check($oi->get('odi_subscription_cancelled_time') !== null, 'cancellation timest
 
 SubscriptionTier::clearUserCache($subscriber->key);
 check(SubscriptionTier::GetUserTier($subscriber->key) === null, 'subscription deletion strips the subscriber tier (entitlement revoked)');
+
+// --- every line on the subscription ends; a replaced line is left ----------
+// One Stripe Checkout session can put a tier line and a hosting line on one
+// subscription, and a tier change leaves the line it replaced on the same id.
+
+$plain = new Product(NULL);
+$plain->set('pro_name', 'SW Hosting ' . $run_id);
+$plain->set('pro_link', 'sw-hosting-' . $run_id);
+$plain->set('pro_is_active', true);
+$plain->save();
+harness_register_row('pro_products', 'pro_product_id', $plain->key);
+$sw_line = function ($product, $sub, $cancelled = null, $order = null) use ($order_d, $subscriber) {
+	$line = new OrderItem(NULL);
+	$line->set('odi_ord_order_id', ($order ?: $order_d)->key);
+	$line->set('odi_pro_product_id', $product->key);
+	$line->set('odi_usr_user_id', $subscriber->key);
+	$line->set('odi_stripe_subscription_id', $sub);
+	$line->set('odi_subscription_status', 'active');
+	if ($cancelled) { $line->set('odi_subscription_cancelled_time', $cancelled); }
+	$line->save();
+	harness_register_row('odi_order_items', 'odi_order_item_id', $line->key);
+	return $line;
+};
+$sub_mix = 'sub_swmix_' . $run_id;
+// The tier line carries the period-end date (a cancel at period end marks one
+// line), so its end is just past when the deletion arrives: it still ends.
+$mix_tier = $sw_line($product, $sub_mix, gmdate('Y-m-d H:i:s', time() - 60));
+$mix_host = $sw_line($plain, $sub_mix);
+$tier->addUser($subscriber->key, 'manual');
+SubscriptionTier::clearUserCache($subscriber->key);
+$payload_mix = sw_event('evt_sw_' . $run_id . '_submix', 'customer.subscription.deleted', array(
+	'id' => $sub_mix, 'object' => 'subscription', 'status' => 'canceled', 'cancel_at_period_end' => false));
+$r = sw_post($payload_mix, sw_sign_header($payload_mix, $endpoint_secret));
+check($r['status'] === 200, 'a subscription paying for two lines is deleted (200)', 'status ' . $r['status']);
+$mix_tier->load();
+$mix_host->load();
+check($mix_tier->get('odi_subscription_status') === 'canceled' && $mix_host->get('odi_subscription_status') === 'canceled',
+	'both lines on it end, the tier line and the hosting line');
+SubscriptionTier::clearUserCache($subscriber->key);
+check(SubscriptionTier::GetUserTier($subscriber->key) === null, 'and the tier is revoked, whichever line came first');
+
+$sub_up = 'sub_swup_' . $run_id;
+$replaced = $sw_line($product, $sub_up, gmdate('Y-m-d H:i:s', time() - 86400));
+// A tier change makes its new line in an order of its own (change_tier_logic).
+$up_order = new Order(NULL);
+$up_order->set('ord_usr_user_id', $subscriber->key);
+$up_order->set('ord_total_cost', 15.00);
+$up_order->set('ord_status', Order::STATUS_PAID);
+$up_order->save();
+harness_register_row('ord_orders', 'ord_order_id', $up_order->key);
+$current = $sw_line($product, $sub_up, null, $up_order);
+$payload_up = sw_event('evt_sw_' . $run_id . '_subup', 'customer.subscription.deleted', array(
+	'id' => $sub_up, 'object' => 'subscription', 'status' => 'canceled', 'cancel_at_period_end' => false));
+$r = sw_post($payload_up, sw_sign_header($payload_up, $endpoint_secret));
+$replaced->load();
+$current->load();
+check($r['status'] === 200 && $current->get('odi_subscription_status') === 'canceled',
+	'after a tier change, the line now on the subscription ends');
+check($replaced->get('odi_subscription_status') === 'active', 'the line it replaced is left as the change left it');
 
 // --- a price change re-points the order item and the tier ------------------
 

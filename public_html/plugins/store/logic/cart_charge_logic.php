@@ -845,13 +845,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
-	//Source exclusivity, pre-charge: a recipient whose active subscription is
-	//billed through the App Store or Google Play can't start a web-billed one
-	//— they must cancel in the store first. Surfaces before any card charge.
+	//Source exclusivity, pre-charge: a recipient whose active tier subscription
+	//is billed through the App Store or Google Play can't start a web-billed
+	//tier — they must cancel in the store first. A subscription that grants no
+	//tier (hosting, our services) is not part of the rule. Surfaces before any
+	//card charge.
 	require_once(PathHelper::getIncludePath('plugins/store/includes/TierBilling.php'));
 	foreach(($resuming_card ? array() : $cart->items) as $key => $cart_item) {
 		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
-		if($product_version->is_subscription()){
+		if($product_version->is_subscription() && $product->get('pro_sbt_subscription_tier_id')){
 			$conflict = TierBilling::sourceConflict($resolved_users[$key]->key, 'stripe');
 			if ($conflict !== null && in_array($conflict, array('app_store', 'play_store'))) {
 				return $refuse('This subscription is billed through ' . TierBilling::sourceLabel($conflict)

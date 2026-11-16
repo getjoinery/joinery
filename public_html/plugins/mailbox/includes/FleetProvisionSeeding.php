@@ -24,6 +24,8 @@
  * The plane already mints this key, holds its hash, and is the API it
  * authenticates TO, so the job row is not a new holder of anything.
  *
+ * @version 2.5 - seededElsewhere() skips a site by the key it holds (its own recorded key), not by what its plan
+ *                would grant, so a Managed site seeded with the tier key still holds the tier slot (B11)
  * @version 2.4 - a hosted site whose plan grants it a slot (FleetService::site_plan_grants_slot) gets a key of
  *               its own, named for its provision and recorded on its provision; re-seeding it retires only that key, and
  *               no other site of the buyer's is refused or touched (hosting_launch S5). applies() and
@@ -154,8 +156,11 @@ class FleetProvisionSeeding {
 		);
 		$q->execute(array($buyer_user_id, (int)$node->key));
 		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $provision_id) {
-			// A site whose own plan grants its slot holds no part of the tier's.
-			if (FleetService::site_plan_grants_slot(new CustomerCloudProvision((int)$provision_id, TRUE))) {
+			// A site seeded with a key of its own holds a slot of its own and
+			// no part of the tier's. Asked of what the site holds, not of
+			// what its plan would grant: a site seeded with the buyer's tier
+			// key before its plan granted one still holds the tier slot.
+			if (intval((new CustomerCloudProvision((int)$provision_id, TRUE))->get('cvp_fleet_apk_api_key_id')) > 0) {
 				continue;
 			}
 			return (string)(new CustomerCloudProvision((int)$provision_id, TRUE))->get('cvp_domain');

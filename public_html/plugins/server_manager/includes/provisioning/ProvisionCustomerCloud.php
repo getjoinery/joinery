@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.27 - a starter host is born with ManagedHost::STARTER_PLACES (7) places (hosting_paid_launch B3)
  * @version 2.26 - seeding_applies() is public, takes the provision to FleetProvisionSeeding (a Starter site's plan
  *                grants its own relay slot, hosting_launch S5), and the Starter worker queues it too
  * @version 2.25 - a bare machine's node has no uptime check (no URL to fetch); its agent watches it (hosting_launch S3 run)
@@ -741,8 +742,8 @@ class ProvisionCustomerCloud {
 	/**
 	 * A starter host's install finished: its host record is the starter
 	 * host's. Made from the machine's own address (the instance's IPv4), its
-	 * own node named as the host's agent, eight places (a Linode 4 GB at the
-	 * starter limits, specs/starter_tier.md), and provisioning left off: an
+	 * own node named as the host's agent, ManagedHost::STARTER_PLACES places (a
+	 * Linode 4 GB at the starter limits), and provisioning left off: an
 	 * operator turns it on from the host's Edit page once the host agent is
 	 * connected and its report says its sites run on the site container engine.
 	 */
@@ -762,7 +763,7 @@ class ProvisionCustomerCloud {
 			$host->set('mgh_tier', 'starter');
 		}
 		if ((int)$host->get('mgh_max_sites') < 1) {
-			$host->set('mgh_max_sites', 8);
+			$host->set('mgh_max_sites', ManagedHost::STARTER_PLACES);
 		}
 		$host->set('mgh_name', substr('Starter ' . (string)$node->get('mgn_name'), 0, 100));
 		$host->set('mgh_cloud_account', (string)$node->get('mgn_cloud_account') ?: $host->get('mgh_cloud_account'));

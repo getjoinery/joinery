@@ -136,6 +136,15 @@ Six settings control subscription management behaviors (Products → Settings):
 
 Users manage their subscriptions from a dedicated subscription management page:
 
+The page, the app stores' one-source rule and a lapse act only on a **tier
+subscription**: an order line whose product grants a tier
+(`pro_sbt_subscription_tier_id`, the `grants_tier` collection option). A buyer
+can hold other subscriptions beside it (hosting, our services); those are never
+re-priced or cancelled here, never block a tier bought in an app, and never
+revoke the tier when they end. Whether a line is a tier line is read from its
+product at the time: clearing the tier on a product means its subscribers keep
+their tier when their subscription lapses, so move them off the tier first.
+
 **View Current Tier:**
 - See their current subscription tier and features
 - View billing information and renewal date

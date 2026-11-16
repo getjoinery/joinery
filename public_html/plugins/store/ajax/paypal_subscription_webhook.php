@@ -161,7 +161,7 @@ try {
             // Handle tier expiration
             $user_id = $order_item->get('odi_usr_user_id');
             if ($user_id) {
-                TierBilling::handleSubscriptionExpired($user_id);
+                TierBilling::handleSubscriptionExpired($user_id, $order_item);
             }
 
             error_log("PayPal webhook: subscription $subscription_id expired");

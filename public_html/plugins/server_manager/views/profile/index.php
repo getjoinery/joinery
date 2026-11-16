@@ -7,6 +7,8 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.9 - an optional DMARC record on its own, below the email records (hosting_paid_launch B4);
+ *   the move card says email sent to the domain stops reaching the site when the move finishes (B11)
  * @version 2.8 - a suspended site shows its reason (HostedSuspensions)
  * @version 2.7 - the email records box covers the records that bring mail in as well as those that sign it
  * @version 2.6 - no inline script: the move card is assets/js/profile-move.js, the reload data-jy-reload-after
@@ -179,6 +181,19 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 		</section>
 		<?php endif; ?>
 
+		<?php if ($site['dmarc_record'] !== null): $d = $site['dmarc_record']; ?>
+		<section class="sms-dns">
+			<h3>Optional: a forgery policy for your domain</h3>
+			<p>Your email works without this. Adding it tells other servers what to do with mail that pretends to
+				be from you. Skip it if your domain already has a DMARC record.</p>
+			<dl class="sms-facts">
+				<dt>Type</dt><dd><?php echo htmlspecialchars($d['type']); ?></dd>
+				<dt>Name</dt><dd><code><?php echo htmlspecialchars($d['name']); ?></code></dd>
+				<dt>Value</dt><dd><code><?php echo htmlspecialchars($d['value']); ?></code></dd>
+			</dl>
+		</section>
+		<?php endif; ?>
+
 		<?php if ($site['status'] === 'done'): ?>
 			<p><a href="<?php echo htmlspecialchars($site['url']); ?>" class="sms-visit">Visit your site</a></p>
 		<?php endif; ?>
@@ -224,7 +239,9 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<?php if ($t['state'] === ''): ?>
 				<p>Your site runs on its own server in our Linode account. It can move into a Linode account of your
 					own — running, with the same address, nothing copied or rebuilt. Linode then bills you for the
-					server, and we stop billing you for hosting. Your email and backups keep working through us.</p>
+					server, and we stop billing you for hosting. Your outgoing email and backups keep working through us.
+					Email sent to your domain stops reaching your site when the move finishes: set up receiving of your
+					own before then.</p>
 				<button type="button" class="sms-secondary-btn" data-do="request">Move to my own Linode account</button>
 			<?php elseif ($t['state'] === 'requested'): ?>
 				<p><strong><?php echo htmlspecialchars($t['state_label']); ?>.</strong> We check your server first and
@@ -254,7 +271,8 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 				<p><strong>Your server is now in your own Linode account.</strong>
 					<?php if ($t['was_shut_down']): ?>It moved powered off: boot it in Cloud Manager to bring the site back.<?php endif; ?></p>
 				<ul class="sms-steps">
-					<li>Your email and backups carry on through us<?php if ($t['paid_until'] !== ''): ?>, paid until
+					<li>Email sent to your domain no longer reaches your site through us: set up receiving of your own.</li>
+					<li>Your outgoing email and backups carry on through us<?php if ($t['paid_until'] !== ''): ?>, paid until
 						<?php echo htmlspecialchars($t['paid_until']); endif; ?>. See
 						<a href="/profile/server_manager/services">Connected sites</a>.</li>
 					<li>The server takes no password over SSH and holds no key of ours. To get in as root, reset the root

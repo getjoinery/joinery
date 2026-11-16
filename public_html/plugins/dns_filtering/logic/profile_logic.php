@@ -87,7 +87,7 @@ function profile_logic(array $input): LogicResult{
 
 	//SUBSCRIPTIONS
 	$subscriptions = new MultiOrderItem(
-		array('user_id' => $session->get_user_id(), 'is_active_subscription' => true),
+		array('user_id' => $session->get_user_id(), 'is_active_subscription' => true, 'grants_tier' => true),
 		array('order_item_id' => 'DESC')
 	);
 	$subscriptions->load();

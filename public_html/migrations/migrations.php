@@ -2024,3 +2024,13 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE sbt_subscription_tiers SET sbt_features = jsonb_set(sbt_features, '{drive_versioning_depth}', '50') WHERE sbt_features->>'drive_versioning_depth' = '0';";
 	$migrations[] = $migration;
+
+	// Starter sites run at 448m, seven to a host (hosting_paid_launch B3): the
+	// old default setting row and starter hosts still at eight places move.
+	// Plugin table guarded in the file. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '238';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'starter_seven_places.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

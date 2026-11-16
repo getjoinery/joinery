@@ -23,8 +23,9 @@
  * refuses a Starter line while the hosts are full, so this is a race.
  *
  * The site's limits are the starter settings (server_manager_starter_memory,
- * _cpus, _disk), sized so 8 sites share a Linode 4 GB.
+ * _cpus, _disk), sized so 7 sites share a Linode 4 GB.
  *
+ * @version 1.4 - the starter memory default is 448m, 7 sites a host (hosting_paid_launch B3)
  * @version 1.3 - a finished site queues its relay slot seeding (cvp_fleet_seed_state), as a Managed install does (S5)
  * @version 1.2 - a place is reserved under the place lock (ManagedHost::reserve_starter_place, R2-2); note_free_places()
  *                alerts the operator at or under server_manager_starter_free_places_alert free places (S10)
@@ -79,7 +80,7 @@ class ProvisionStarterSites {
 	public static function limits(): array {
 		$settings = Globalvars::get_instance();
 		// One spelling each, whatever case the operator typed: the host takes
-		// memory as 384m and disk as 5G.
+		// memory as 448m and disk as 5G.
 		return array(
 			'memory' => strtolower(trim((string)$settings->get_setting('server_manager_starter_memory'))),
 			'cpus'   => trim((string)$settings->get_setting('server_manager_starter_cpus')),

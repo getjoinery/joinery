@@ -1037,8 +1037,8 @@ See [Hosted tier § Abuse](hosted_tier.md#abuse-terms-reports-suspend).
     `next_container_port()`), the admin password minted and sealed, and a
     `site_create` job on the host's own agent (`cvp_install_job_id`). Each
     site is installed with the starter limits (`server_manager_starter_memory`
-    384m, `_cpus` 1, `_disk` 5G: eight sites share a Linode 4 GB, so set the
-    host's Max Sites to 8). When the host answers, the node is installed and
+    448m, `_cpus` 1, `_disk` 5G: seven sites share a Linode 4 GB, and a
+    starter host is born with Max Sites 7, `ManagedHost::STARTER_PLACES`). When the host answers, the node is installed and
     awaits its certificate, the site agent's key is recorded
     (`cvp_expected_site_key`), the welcome email goes out, and the row is
     done. With no starter host with room the paid row waits at `ready`, the
@@ -1048,7 +1048,10 @@ See [Hosted tier § Abuse](hosted_tier.md#abuse-terms-reports-suspend).
     and `server_manager_starter_free_places_alert` free places or fewer are
     left (default 2), the operator is emailed to make another starter host.
     A starter host has no port 25, so a finished site gets its own slot on the
-    mailbox plugin's relay fleet: its fleet seeding is queued
+    mailbox plugin's relay fleet (a Managed site gets one the same way: it runs
+    in a container with no mail server of its own; a Managed site moved to its
+    buyer's own Linode account loses it when the move finishes, which its move
+    card says): its fleet seeding is queued
     (`cvp_fleet_seed_state`, see the mailbox overview, *Two ways a slot is
     granted*), the site enrolls itself, and **Inbound mail**
     (`ProvisionSiteInboundMail`, a phase of the umbrella) places the MX and

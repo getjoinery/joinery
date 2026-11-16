@@ -6,6 +6,7 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.12 - STARTER_PLACES: a starter host takes 7 sites at 448m (hosting_paid_launch B3)
  * @version 1.11 - reserve_starter_place(): pick and record a Starter place under one lock (R2-2); starter_free_places()
  * @version 1.10 - places taken = the host's site nodes, not its own agent's node, plus paid starter sites reserved
  *                on it with no node yet (reviewer2 F2-2, F2-3); a starter host's address is its IPv4; a host's
@@ -34,6 +35,12 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 class ManagedHostException extends SystemBaseException {}
 
 class ManagedHost extends SystemBase {
+	/**
+	 * The places a starter host is born with: 7 sites at the starter memory
+	 * (448m) on a Linode 4 GB, leaving about 830 MB for the host itself.
+	 */
+	const STARTER_PLACES = 7;
+
 	public static $prefix = 'mgh';
 	public static $tablename = 'mgh_managed_hosts';
 	public static $access_class = 'config';

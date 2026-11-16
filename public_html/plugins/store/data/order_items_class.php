@@ -20,6 +20,7 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.6 - option grants_tier: only lines whose product grants a subscription tier (hosting_paid_launch B10)
  * @version 1.5 - odi_product_info unserializes only Address and stdClass objects, the two the checkout
  *                stores; any other class comes back incomplete (v1_key_retirement C2)
  * @version 1.4 - refund_payment(): a line is refunded from the payment that paid it (a subscription's own
@@ -664,6 +665,13 @@ class MultiOrderItem extends SystemMultiBase {
 		if (isset($this->options['is_current_subscription'])) {
 			$filters['odi_is_subscription'] = "= TRUE AND odi_status = " . OrderItem::STATUS_PAID
 				. " AND (odi_subscription_cancelled_time IS NULL OR odi_subscription_cancelled_time > now())";
+		}
+
+		// Lines whose product grants a subscription tier: a tier's own
+		// subscription, never a hosting or service subscription the same buyer
+		// holds beside it.
+		if (!empty($this->options['grants_tier'])) {
+			$filters['(odi_pro_product_id'] = "IN (SELECT pro_product_id FROM pro_products WHERE pro_sbt_subscription_tier_id IS NOT NULL))";
 		}
 
 		if (isset($this->options['is_cancelled_subscription'])) {

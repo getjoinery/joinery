@@ -193,18 +193,42 @@ try {
             $subscription = $event->data->object;
             $subscription_id = $subscription->id;
 
-            $order_items = new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id]);
+            // Every line the subscription pays for ends: one checkout can put
+            // several lines on one subscription (Stripe Checkout mode), and a
+            // tier change leaves the line it replaced on the same id. A tier
+            // change makes its new line in an order of its own, so a line
+            // with a newer line on the id from another order was replaced:
+            // it ended with the change and is left as it is. Lines of one
+            // checkout share an order, and all end.
+            $order_items = new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id],
+                ['order_item_id' => 'DESC']);
             $order_items->load();
 
             if ($order_items->count() > 0) {
-                $order_item = $order_items->get(0);
-                if ((string)$order_item->get('odi_subscription_status') === 'incomplete_expired'
-                    && $order_item->get('odi_subscription_cancelled_time')) {
-                    // Ended already by its .updated (above).
-                    error_log("Stripe webhook: subscription $subscription_id deleted, already ended as incomplete_expired");
-                    break;
+                $ended_tier_line = null;
+                $newest_order = null;
+                foreach ($order_items as $order_item) {
+                    $ends = (string)$order_item->get('odi_subscription_cancelled_time');
+                    $order_id = (int)$order_item->get('odi_ord_order_id');
+                    if ($newest_order === null) {
+                        $newest_order = $order_id;
+                    } elseif ($order_id !== $newest_order) {
+                        continue;
+                    }
+                    if ((string)$order_item->get('odi_subscription_status') === 'incomplete_expired' && $ends !== '') {
+                        // Ended already by its .updated (above).
+                        error_log("Stripe webhook: subscription $subscription_id line #" . $order_item->key . " already ended as incomplete_expired");
+                        continue;
+                    }
+                    _stripe_webhook_subscription_ended($order_item, $subscription_id, false);
+                    if ($ended_tier_line === null && TierBilling::lineGrantsTier($order_item)) {
+                        $ended_tier_line = $order_item;
+                    }
                 }
-                _stripe_webhook_subscription_ended($order_item, $subscription_id);
+                // The tier is revoked once, for the tier line among them.
+                if ($ended_tier_line !== null && $ended_tier_line->get('odi_usr_user_id')) {
+                    TierBilling::handleSubscriptionExpired($ended_tier_line->get('odi_usr_user_id'), $ended_tier_line);
+                }
                 error_log("Stripe webhook: subscription $subscription_id deleted");
             } else {
                 error_log("Stripe webhook: no order item found for subscription $subscription_id");
@@ -355,9 +379,10 @@ http_response_code(200);
 /**
  * A Stripe subscription has ended: record it on its line, tell whatever
  * listens for a cancelled subscription (a hosted site's wind-down), and let
- * the buyer's tier lapse.
+ * the buyer's tier lapse when the line is a tier's ($revoke_tier false: the
+ * caller revokes it once for several lines).
  */
-function _stripe_webhook_subscription_ended($order_item, $subscription_id) {
+function _stripe_webhook_subscription_ended($order_item, $subscription_id, $revoke_tier = true) {
     if ((string)$order_item->get('odi_subscription_status') !== 'incomplete_expired') {
         $order_item->set('odi_subscription_status', 'canceled');
     }
@@ -375,8 +400,8 @@ function _stripe_webhook_subscription_ended($order_item, $subscription_id) {
     ));
 
     $user_id = $order_item->get('odi_usr_user_id');
-    if ($user_id) {
-        TierBilling::handleSubscriptionExpired($user_id);
+    if ($revoke_tier && $user_id) {
+        TierBilling::handleSubscriptionExpired($user_id, $order_item);
     }
 }
 

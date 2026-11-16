@@ -13,6 +13,7 @@
  * grant/revoke all work through the existing paths. Tier changes go through
  * TierBilling::handleProductPurchase / handleSubscriptionExpired only.
  *
+ * @version 1.0.3 — an expiry passes its line to handleSubscriptionExpired, which acts only on a tier's line
  * @version 1.0.2 — a first claim is refused unless the receipt's account token
  *   names the claiming member.
  * @version 1.0.1 — a member's claim grants the tier inside rule_checked_write().
@@ -545,7 +546,7 @@ class MobileBilling {
 
 		$user_id = $order_item->get('odi_usr_user_id');
 		if ($user_id) {
-			TierBilling::handleSubscriptionExpired($user_id);
+			TierBilling::handleSubscriptionExpired($user_id, $order_item);
 		}
 	}
 
