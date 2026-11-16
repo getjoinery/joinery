@@ -10,6 +10,8 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.11 - plans list what they bring; the bundle card is the Joinery Managed Bundle with the same list; the
+ *                sign-in card asks for an existing, working email
  * @version 1.10 - the summary names the domain's yearly renewal price
  * @version 1.9 - less text and a calmer layout: the form is four cards (plan, domain, email and backups, sign-in),
  *                the summary one card; no server size, region or after-payment notes
@@ -58,7 +60,7 @@ if ($price_sentence === 'free') {
 	$price_parts[] = preg_replace('/ from today$/', '', $price_sentence);
 }
 if ($own_linode && $row->get('cvp_services_wanted') && $bundle_price !== '') {
-	$price_parts[] = $bundle_price . ' for email and backups';
+	$price_parts[] = $bundle_price . ' for the Joinery Managed Bundle';
 }
 if ($domain_sentence !== '') {
 	$price_parts[] = preg_replace('/^and /', '', $domain_sentence);
@@ -72,7 +74,7 @@ if ($domain_sentence !== '') {
 		<dt>Domain</dt>
 		<dd><?php echo (string)$row->get('cvp_domain_source') === 'register' ? 'We register it for you' : 'Your own'; ?></dd>
 		<?php if ($own_linode): ?>
-		<dt>Email and backups</dt>
+		<dt>Joinery Managed Bundle</dt>
 		<dd><?php echo $row->get('cvp_services_wanted') ? 'Included' : 'Not included'; ?></dd>
 		<?php endif; ?>
 		<dt>Admin sign-in</dt>
@@ -153,9 +155,11 @@ if ($show_plans || count($regions) > 1) {
 	echo '<section class="smc-card"><h3 class="smc-title">Plan</h3>';
 	if ($show_plans) {
 		$plan_options = array();
+		$plan_features = array();
 		foreach ($plans as $plan => $def) {
 			$price = $plan_prices[$plan] === 'free' ? 'Free' : preg_replace('/ from today$/', '', $plan_prices[$plan]);
-			$plan_options[$plan] = $def['label'] . ($price !== '' ? ' — ' . $price : '') . '. ' . $def['blurb'];
+			$plan_options[$plan] = $def['label'] . ($price !== '' ? ' — ' . $price : '');
+			$plan_features[$plan] = $def['features'];
 		}
 		$plan_rules = array();
 		foreach ($plans as $plan => $def) {
@@ -165,6 +169,7 @@ if ($show_plans || count($regions) > 1) {
 		}
 		$formwriter->radioinput('plan', '', array(
 			'options'          => $plan_options,
+			'descriptions'     => $plan_features,
 			'value'            => $values['plan'],
 			'visibility_rules' => $plan_rules,
 		));
@@ -203,7 +208,6 @@ $formwriter->textinput('cvp_domain', 'Domain name', array(
 	'value'       => $values['cvp_domain'],
 	'maxlength'   => 253,
 	'placeholder' => 'smithfamily.com',
-	'helptext'    => $sellable ? 'New domains (' . $offered_tlds . ') are registered at cost.' : '',
 	'validation'  => array('required' => true),
 ));
 echo '<div id="managed_domain_status" class="form-text" aria-live="polite"></div>';
@@ -242,20 +246,24 @@ echo '</section>';
 
 // ── Email and backups (On your own Linode only; unticked, Q7) ──
 if (isset($plans['own_linode']) && $bundle_price !== '') {
-	echo '<section class="smc-card" id="smc_services"><h3 class="smc-title">Email and backups</h3>';
-	$formwriter->checkboxinput('with_services', 'Add email and backups — ' . $bundle_price, array(
+	echo '<section class="smc-card" id="smc_services"><h3 class="smc-title">Joinery Managed Bundle</h3>';
+	$formwriter->checkboxinput('with_services', 'Add the Joinery Managed Bundle — ' . $bundle_price, array(
 		'checked' => $values['with_services'] !== '',
 	));
-	echo '<p class="form-text smc-indent">Without it, your site can\'t send email until you set up your own mail provider.</p>';
+	echo '<ul class="smc-features">';
+	foreach (ManagedSiteDraft::BUNDLE_FEATURES as $feature) {
+		echo '<li>' . htmlspecialchars($feature) . '</li>';
+	}
+	echo '</ul>';
 	echo '</section>';
 }
 
 // ── Sign-in ──
-echo '<section class="smc-card"><h3 class="smc-title">Your sign-in</h3>';
-$formwriter->textinput('cvp_buyer_email', 'Admin email', array(
+echo '<section class="smc-card"><h3 class="smc-title">Your sign-in and backup email</h3>';
+$formwriter->textinput('cvp_buyer_email', 'Existing email', array(
 	'value'      => $values['cvp_buyer_email'],
 	'maxlength'  => 255,
-	'helptext'   => 'You\'ll sign in to your new site with this.',
+	'helptext'   => 'This must be a currently working email.',
 	'validation' => array('required' => true),
 ));
 echo '</section>';
@@ -291,6 +299,16 @@ echo $formwriter->end_form();
 .smc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
 @media (max-width: 600px) { .smc-row { grid-template-columns: 1fr; } }
 .smc-indent { margin: .6rem 0 0; color: #6b7280; font-size: .92em; }
+/* What a plan or the bundle brings, as a short list under its choice. */
+.smc-card .jy-radio-card-desc { display: block; margin-top: .4rem; }
+.smc-card .jy-radio-card-desc span { display: block; position: relative; padding-left: 1.1rem; color: #4b5563;
+	font-size: .93em; line-height: 1.5; }
+.smc-card .jy-radio-card-desc span::before { content: "\2713"; position: absolute; left: 0; color: #02b159; }
+/* On your own Linode: what is left to the buyer is not ticked. */
+.smc-card #plan_own_linode ~ label .jy-radio-card-desc span:nth-child(2)::before { content: "\2013"; color: #9ca3af; }
+.smc-features { list-style: none; margin: .75rem 0 0; padding: 0; }
+.smc-features li { position: relative; padding-left: 1.1rem; color: #4b5563; font-size: .93em; line-height: 1.6; }
+.smc-features li::before { content: "\2713"; position: absolute; left: 0; color: #02b159; }
 .smc-submit { margin: 1.5rem 0 2rem; }
 .smc-facts { display: grid; grid-template-columns: max-content 1fr; gap: .6rem 2rem; margin: 0 0 1.5rem; }
 .smc-facts dt { color: #6b7280; font-weight: 500; }

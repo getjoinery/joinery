@@ -8,6 +8,7 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.16 - a site the operator hosts offers no Disconnect, and says why
  * @version 1.15 - the log list names the converger's log where root keeps it (specs/shell_command_audit.md D1)
  * @version 1.14 - The agent's on/off switch and the "Turn off the agent" card are gone: the agent runs on every machine,
  *                 and the page is about joining a management node; What the agent does splits what it does on its own from what
@@ -129,6 +130,9 @@ if ($is_managed) {
 		   . '<input type="hidden" name="action" value="cancel_disconnect">'
 		   . '<button type="submit" class="btn btn-secondary">Cancel the disconnect</button>'
 		   . '</form>';
+	} elseif (!empty($page_vars['hosted_here'])) {
+		echo '<p class="text-muted">This site is hosted by its management node, so it stays connected: its email, '
+		   . 'backups and updates run through it.</p>';
 	} else {
 		echo '<p class="text-muted">Either side can end the connection. '
 		   . 'Leaving here makes the agent tell the management node to forget this machine\'s key and go back to local work only.</p>';

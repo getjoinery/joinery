@@ -21,6 +21,8 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.8 - each plan carries a features list in place of a blurb; the bundle's is BUNDLE_FEATURES (email and
+ *                backups), Managed's adds our management, which an own-Linode site has free during the beta
  * @version 1.7 - the domain's yearly renewal is recorded with its quote (cvp_domain_renew_quote, domain_renewal_sentence)
  * @version 1.6 - a third plan, On your own Linode (reference 0, specs/own_linode_we_install.md W1): the plan is
  *                recorded on the draft (cvp_plan) and read back by plan_of(); its server is in us-east; a free
@@ -106,13 +108,30 @@ class ManagedSiteDraft {
 	 * The plans a buyer chooses between, cheapest first. Each is one product
 	 * (found by its fulfilment reference) and one landing for the site.
 	 */
+	/** What the Joinery Managed Bundle brings an own-Linode site: email and backups. */
+	const BUNDLE_FEATURES = array(
+		'2,000 sent emails a month',
+		'Daily backups',
+	);
+
+	/** What Managed hosting brings: the bundle's two, and our management of the server. */
+	const MANAGED_FEATURES = array(
+		'2,000 sent emails a month',
+		'Daily backups',
+		'Joinery monitors and manages your server',
+	);
+
 	const PLANS = array(
 		'starter' => array('ref' => self::STARTER_REF, 'landing' => 'container', 'label' => 'Starter',
-			'blurb' => 'We host it on a server shared with other sites. Email and backups included.'),
+			'features' => self::MANAGED_FEATURES),
 		'managed' => array('ref' => self::MANAGED_REF, 'landing' => 'instance', 'label' => 'Managed',
-			'blurb' => 'We host and run it for you. Email and backups included.'),
+			'features' => self::MANAGED_FEATURES),
+		// Management is free while in beta; email and backups are the buyer's own, or the bundle.
 		'own_linode' => array('ref' => self::OWN_LINODE_REF, 'landing' => 'instance', 'label' => 'On your own Linode',
-			'blurb' => 'We set it up in your own Linode account. Linode bills you for the server.'),
+			'features' => array(
+				'Joinery monitors and manages your server (optional), free during the beta',
+				'You set up your own email provider and backups, or add them as a bundle below',
+			)),
 	);
 
 	/** What a site's internal name may look like: the install directory and database name. */

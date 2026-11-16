@@ -12,6 +12,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 2.1 - a site the operator hosts (HostedPlanNotice::hostedHere) cannot disconnect from its management node
  * @version 2.0 - the agent's on/off switch is gone: the agent runs on every machine, and joining a
  *                management node is the owner's decision here
  * @version 1.9 - root_access_off: the owner turns emergency root access off, one-way (specs/implemented/beta_break_glass_root_access.md 4.2)
@@ -119,6 +120,11 @@ function admin_management_node_logic(array $input): LogicResult {
 	// forgets this machine's key immediately, then deletes its own identity —
 	// and does all of that whether or not the management node is reachable.
 	if (isset($input['action']) && $input['action'] === 'disconnect') {
+		// A site we host stays connected: its hosting runs through it.
+		if (HostedPlanNotice::hostedHere()) {
+			return LogicResult::redirect('/admin/admin_management_node?error=' . urlencode(
+				'This site is hosted by its management node, so it stays connected: its email, backups and updates run through it.'));
+		}
 		Setting::put('agent_leave_request', json_encode([
 			'requested_time' => gmdate('Y-m-d H:i:s'),
 		]));
@@ -154,6 +160,7 @@ function admin_management_node_logic(array $input): LogicResult {
 		'agent_installed' => file_exists(ADMIN_MANAGEMENT_NODE_AGENT_BINARY),
 		'installer_hint'  => admin_management_node_installer_hint(),
 		'error'           => isset($input['error']) ? (string)$input['error'] : '',
+		'hosted_here'     => HostedPlanNotice::hostedHere(),
 		'requested'       => !empty($input['requested']),
 		'cancelled'       => !empty($input['cancelled']),
 	]);

@@ -34,6 +34,7 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.7 - HOSTED_STATES and hostedHere(): a site the operator hosts, which may not leave its management node
  * @version 1.6 - a site with a disk allowance shows its own figure in the disk row, read here and now
  *               (DiskAllowance), not the management node's copy from its last status check; a site whose
  *               node sent no disk row still gets one (hosting_paid_launch B6)
@@ -96,6 +97,23 @@ class HostedPlanNotice {
 	/** Days left in a trial or grace period before the notice sharpens. */
 	const URGENT_DAYS = 7;
 	const SOON_DAYS   = 21;
+
+	/**
+	 * The states of a site the operator hosts (Managed or Starter): its
+	 * management node is how its hosting is delivered. Not 'services', a
+	 * self-hosted site that only rents our mail and backup storage.
+	 */
+	const HOSTED_STATES = array('trial', 'subscribed', 'grace', 'shutdown');
+
+	/**
+	 * Is this site one the operator hosts? Then it may not disconnect from its
+	 * management node: its mail settings, backups and updates all come through
+	 * that connection, and a hosted site that left would keep being billed for
+	 * hosting it no longer gets.
+	 */
+	public static function hostedHere(): bool {
+		return in_array(self::state(), self::HOSTED_STATES, true);
+	}
 
 	/** Does this deployment have hosting somebody else runs? */
 	public static function applies(): bool {

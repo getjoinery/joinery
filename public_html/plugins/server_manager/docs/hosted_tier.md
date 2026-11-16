@@ -58,6 +58,13 @@ own account, 0, besides the two above), and the one a product stores becomes
 `cvp_hosting_mode` (and, for Starter, the landing) on every provision it
 creates. Which a deployment sells is a product decision.
 
+A hosted site stays connected to its management node: its email settings,
+backups and updates run through that connection, so the site's Admin →
+Management Node page offers no Disconnect and the action is refused while its
+`hosted_plan_state` is a hosted billing state (`HostedPlanNotice::hostedHere`).
+A self-hosted site, including one renting our email and backups (`services`),
+may disconnect.
+
 ## What the buyer sees
 
 They describe the site on one page — **`/profile/server_manager/configure`**:
