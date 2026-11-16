@@ -806,6 +806,11 @@ naming it.
 On a server with its own mail stack, `install_email.sh` runs `ufw allow 25/tcp`
 when ufw is active, and that server's Postfix owns port 25.
 
+A starter host and a Managed site's server open no port 25: their sites run in
+containers with no mail server (below), and receive through a slot on the
+operator's relay fleet, which the site's plan grants (see *Two ways a slot is
+granted*).
+
 ### A site container has no mail server
 
 A site in a Docker container carries no Postfix and no rspamd. The base image
@@ -3283,7 +3288,11 @@ Tenant lifecycle on a relay is `relay-sealer tenant-add | tenant-set-domains |
 tenant-remove` — the same functions the operator-signed tenant routes call — so
 a tenant is a spool directory, a fragment drop and a registry entry (public
 key, allowlist, limits): no account, no peer, no sudoers rule. `tenant-remove`
-refuses while the tenant's spool holds undrained sealed mail.
+refuses while the tenant's spool holds undrained sealed mail, unless the
+operator sends it with `force` (`--force` at the command line), which removes
+the tenant with what its spool still holds. Removing a tenant that is not
+registered answers ok: the removal is already done. An empty
+`tenant-set-domains` list leaves the tenant allowed nothing.
 
 The main box's half is `provisioning/provision_relay_main.sh` (root, once per
 deployment): it installs two narrow root helpers with their sudoers rule —
@@ -3664,6 +3673,21 @@ grace-then-suspend ladder every rented service shares: a lapse starts a
 shard allowlist, and a subscription that returns at any point reactivates the
 slot in place. The slot's `provisioning | active | suspended | released`
 states are the ladder's vocabulary; `evicted` is the fleet's own last rung.
+What a shard may accept for a slot is `MailboxFleetSlot::shardDomains()`: its
+verified domains while it is provisioning or active, and nothing once it is
+suspended or released, so senders are refused at once instead of the shard
+keeping mail nobody collects. A suspended slot keeps its verified claims, and
+reactivation sends them again. Release (`FleetService::releaseSlot`) revokes
+the slot's claims, stamps `mft_release_time` and empties the shard's list;
+the next passes remove the tenant once its site has collected what is
+waiting. A spool still undrained `mailbox_fleet_release_drain_days` (default
+30) after the release goes with a forced remove, and the operator is told
+(`mailbox.fleet_slot_mail_discarded`). A `set_domains` counts as sent once
+the shard has installed its maps, even when the site's own map no longer fits
+the narrower list: the shard then takes nothing from that map until the list
+fits it again (a reactivated slot's map comes back with no push) or the site
+pushes one that does. A shard older than relay 3.20 cannot force a removal;
+the reconcile says so in its message until the shard is renewed.
 Every decision is effected as
 one operator-signed request to the shard's tenant routes
 (`FleetService::applyTenant`) from the relay reconcile task, the slot's status

@@ -491,6 +491,36 @@ check($r['status'] === 200 && $current->get('odi_subscription_status') === 'canc
 	'after a tier change, the line now on the subscription ends');
 check($replaced->get('odi_subscription_status') === 'active', 'the line it replaced is left as the change left it');
 
+// A cart of a tier and hosting, then a tier change: the hosting line was not
+// replaced by anything, so the deletion still ends it (reviewer2 B12 F2).
+$sub_f2 = 'sub_swf2_' . $run_id;
+$f2_old_tier = $sw_line($product, $sub_f2, gmdate('Y-m-d H:i:s', time() - 86400));
+$f2_host = $sw_line($plain, $sub_f2);
+$f2_order = new Order(NULL);
+$f2_order->set('ord_usr_user_id', $subscriber->key);
+$f2_order->set('ord_total_cost', 15.00);
+$f2_order->set('ord_status', Order::STATUS_PAID);
+$f2_order->save();
+harness_register_row('ord_orders', 'ord_order_id', $f2_order->key);
+$f2_new_tier = $sw_line($product, $sub_f2, null, $f2_order);
+$payload_f2u = sw_event('evt_sw_' . $run_id . '_subf2u', 'customer.subscription.updated', array(
+	'id' => $sub_f2, 'object' => 'subscription', 'status' => 'past_due', 'cancel_at_period_end' => false,
+	'current_period_end' => time() + 86400, 'items' => array('object' => 'list', 'data' => array())));
+$r = sw_post($payload_f2u, sw_sign_header($payload_f2u, $endpoint_secret));
+$f2_host->load();
+$f2_new_tier->load();
+check($r['status'] === 200 && $f2_host->get('odi_subscription_status') === 'past_due' && $f2_new_tier->get('odi_subscription_status') === 'past_due',
+	'after a tier change, a failed payment reaches the hosting line bought beside the tier as well as the new tier line');
+$payload_f2 = sw_event('evt_sw_' . $run_id . '_subf2', 'customer.subscription.deleted', array(
+	'id' => $sub_f2, 'object' => 'subscription', 'status' => 'canceled', 'cancel_at_period_end' => false));
+$r = sw_post($payload_f2, sw_sign_header($payload_f2, $endpoint_secret));
+$f2_old_tier->load();
+$f2_host->load();
+$f2_new_tier->load();
+check($r['status'] === 200 && $f2_host->get('odi_subscription_status') === 'canceled' && $f2_new_tier->get('odi_subscription_status') === 'canceled'
+	&& $f2_old_tier->get('odi_subscription_status') === 'active',
+	'and the deletion ends both, leaving the replaced tier line as the change left it');
+
 // --- a price change re-points the order item and the tier ------------------
 
 // This is how a downgrade scheduled for end-of-period actually lands: Stripe

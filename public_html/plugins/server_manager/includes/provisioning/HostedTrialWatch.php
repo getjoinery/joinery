@@ -39,6 +39,10 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.11 - a held Starter site whose backups were pruned is marked ready to remove (htr_remove_ready_time)
+ *                and hosted.removal_ready tells the operator once; a site with no storage space has nothing to
+ *                prune, and its keep-period ends with none (hosting_paid_launch B1); a shut-down site a person
+ *                brought back is subscribed again once its host has started it (HostedLateReturn::settle, O3)
  * @version 1.10 - a suspended site gets no banner and no storage pause, and a Starter stop that did not take is asked
  *                 again (HostedSuspensions::recheck_hold); its grace still runs
  * @version 1.9 - a container site is recorded shut down only when its host's answer says the container is stopped
@@ -147,6 +151,15 @@ class HostedTrialWatch {
 			return 1;
 		}
 		if ((string)$trial->get('htr_state') === HostedTrial::STATE_SHUTDOWN) {
+			// A held site a person brought back is subscribed again once its
+			// host has started it (HostedLateReturn).
+			if (HostedLateReturn::settle($provision, $trial) > 0) {
+				return 1;
+			}
+			// Nor is it pruned while its host is starting it.
+			if (HostedLateReturn::open_start_job($provision) !== null) {
+				return 0;
+			}
 			return $this->prune_shelf_if_due($provision, $trial);
 		}
 
@@ -695,14 +708,34 @@ class HostedTrialWatch {
 			$this->errors[] = $provision->get('cvp_domain') . ': backup storage could not be emptied (' . $e->getMessage() . ').';
 			return 0;
 		}
-		if ($deleted === null) {
-			return 0;   // no target to reach yet; tried again next tick
-		}
+		// No storage space at all: the site was never backed up here (no
+		// recovery key, or held before its first backup), so nothing is kept
+		// and the keep-period ends with nothing to empty. Its backups were
+		// switched off at the shutdown, so no space can appear later.
+		$deleted = $deleted ?? 0;
 		$trial->set('htr_shelf_ends_time', null);
 		$trial->set('htr_note', 'Backup storage was pruned on ' . gmdate('Y-m-d') . '.');
+		// A Starter site still holds its place on its host. With its backups
+		// gone nothing of it is wanted, and a person removes it from its node
+		// page; the platform never removes a customer's site on its own.
+		$held = $provision->is_container();
+		if ($held) {
+			$trial->set('htr_remove_ready_time', gmdate('Y-m-d H:i:s'));
+		}
 		$trial->save();
 		error_log('HostedTrialWatch: pruned ' . $deleted . ' object(s) from backup storage of '
 			. $provision->get('cvp_domain') . ' after its keep-period ended.');
+		if ($held) {
+			$host = new ManagedHost((int)$node->get('mgn_mgh_managed_host_id'), TRUE);
+			SignalBus::dispatch('hosted.removal_ready', array(
+				'provision_id' => (int)$provision->key,
+				'node_id'      => (int)$node->key,
+				'domain'       => (string)$provision->get('cvp_domain'),
+				'host'         => (string)($host->key ? $host->get('mgh_name') : ''),
+				'container'    => (string)$node->get('mgn_container_name'),
+				'host_accepts_date' => JobCommandBuilder::held_removal_accepted_date($trial),
+			));
+		}
 		return 1;
 	}
 

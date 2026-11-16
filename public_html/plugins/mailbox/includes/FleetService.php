@@ -17,6 +17,10 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
+ * @version 1.12 - the shard allowlist is shardDomains(): empty for a suspended or released slot; release
+ *                empties it before removing the tenant, and a spool still undrained after
+ *                mailbox_fleet_release_drain_days goes with a forced remove; set_domains is applied
+ *                once the shard installed its maps, whatever it made of the site's map (hosting_paid_launch B6)
  * @version 1.11 - a Managed site on our account gets its own relay slot too (site_plan_grants_slot, hosting_paid_launch B11);
  *                a site moved to its buyer's own account is gone from its slot (siteGone): released, its key retired
  * @version 1.10 - a site's key answers only for its site's slot, never its buyer's tier slot (isSiteKey); a removed
@@ -431,6 +435,9 @@ class FleetService {
 	 */
 	public static function releaseSlot(MailboxFleetSlot $slot): void {
 		$slot->set('mft_status', MailboxFleetSlot::STATUS_RELEASED);
+		$slot->set('mft_release_time', gmdate('Y-m-d H:i:s'));
+		// The shard stops accepting for its domains before anything else.
+		$slot->set('mft_needs_domain_sync', true);
 		$slot->save();
 
 		$claims = new MultiMailboxFleetDomainClaim(array(
@@ -589,9 +596,11 @@ class FleetService {
 	 * Perform one tenant lifecycle act for a slot: add_tenant | set_domains |
 	 * remove_tenant - one operator-signed request to the shard's tenant routes,
 	 * the slot's status moving on the verdict here and now. Returns true when
-	 * the act was performed.
+	 * the act was performed; $verdict receives the shard's answer. A
+	 * remove_tenant with $extra['force'] removes the tenant with its spool.
 	 */
-	public static function applyTenant(MailboxFleetSlot $slot, string $kind, array $extra = array()): bool {
+	public static function applyTenant(MailboxFleetSlot $slot, string $kind, array $extra = array(), ?array &$verdict = null): bool {
+		$verdict = array();
 		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
 		if (trim((string)$shard->get('mfs_identity_fingerprint')) === '' || trim((string)$shard->get('mfs_public_ip')) === '') {
 			error_log('FleetService: shard ' . $shard->key . ' has not been born yet; cannot ' . $kind . ' for slot ' . $slot->key);
@@ -604,7 +613,7 @@ class FleetService {
 			switch ($kind) {
 				case 'add_tenant':
 					$mx_hostname = strtolower(trim((string)$slot->get('mft_mx_hostname')));
-					$verdict = $client->tenantAdd($slug, (string)$slot->get('mft_public_key'), $slot->verifiedDomains(), array(
+					$verdict = $client->tenantAdd($slug, (string)$slot->get('mft_public_key'), $slot->shardDomains(), array(
 						'forward_hourly_limit' => intval($slot->get('mft_forward_hourly_limit')),
 						'spool_max_mib'        => intval($slot->get('mft_spool_max_mib')),
 						'spool_max_entries'    => intval($slot->get('mft_spool_max_entries')),
@@ -624,14 +633,14 @@ class FleetService {
 					}
 					break;
 				case 'set_domains':
-					$verdict = $client->tenantSetDomains($slug, $slot->verifiedDomains());
-					if (($verdict['status'] ?? '') === 'ok' && (bool)$slot->get('mft_needs_domain_sync')) {
+					$verdict = $client->tenantSetDomains($slug, $slot->shardDomains());
+					if (self::allowlistApplied($verdict) && (bool)$slot->get('mft_needs_domain_sync')) {
 						$slot->set('mft_needs_domain_sync', false);
 						$slot->save();
 					}
 					break;
 				case 'remove_tenant':
-					$verdict = $client->tenantRemove($slug);
+					$verdict = $client->tenantRemove($slug, !empty($extra['force']));
 					if (($verdict['status'] ?? '') === 'ok'
 							&& (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_RELEASED) {
 						$slot->set('mft_status', MailboxFleetSlot::STATUS_EVICTED);
@@ -645,6 +654,9 @@ class FleetService {
 			error_log('FleetService: ' . $kind . ' for slot ' . $slot->key . ' failed (' . $e->failure_class . '): ' . $e->getMessage());
 			return false;
 		}
+		if ($kind === 'set_domains' && self::allowlistApplied($verdict)) {
+			return true;
+		}
 		if (($verdict['status'] ?? '') !== 'ok') {
 			// A refusal (an undrained spool on remove, a bad domain) is the
 			// shard's answer; the next reconcile pass asks again.
@@ -652,6 +664,45 @@ class FleetService {
 				. (string)($verdict['status'] ?? '?') . ': ' . (string)($verdict['reason'] ?? ''));
 		}
 		return true;
+	}
+
+	/**
+	 * Did the shard write a set_domains allowlist? It did when its answer is
+	 * ok, and also when it answers rejected with its maps installed: the
+	 * rejection is then of the site's own map naming a domain the new list
+	 * leaves out, which an emptied or narrowed list is meant to do. A list the
+	 * shard refused outright carries no installed merge.
+	 */
+	public static function allowlistApplied(array $verdict): bool {
+		$status = (string)($verdict['status'] ?? '');
+		if ($status === 'ok') {
+			return true;
+		}
+		return $status === 'rejected' && !empty($verdict['merge']['installed']);
+	}
+
+	/** Does the slot's shard run a relay that removes a tenant with mail left (3.20)? Unknown reads as no. */
+	public static function shardForcesRemoval(MailboxFleetSlot $slot): bool {
+		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
+		return RelayVersion::removesWithMailLeft((string)$shard->get('mfs_provisioned_version'));
+	}
+
+	/**
+	 * Has a released slot waited long enough for its site to collect what
+	 * its shard holds? After mailbox_fleet_release_drain_days the shard is
+	 * told to remove it with whatever is left.
+	 */
+	public static function releaseDrainOver(MailboxFleetSlot $slot, ?int $now = null): bool {
+		$released = trim((string)$slot->get('mft_release_time'));
+		if ($released === '') {
+			// Released before the time was kept: the time counts from now.
+			$slot->set('mft_release_time', gmdate('Y-m-d H:i:s'));
+			$slot->save();
+			return false;
+		}
+		$raw = trim((string)Globalvars::get_instance()->get_setting('mailbox_fleet_release_drain_days'));
+		$days = $raw === '' ? 30 : max(1, intval($raw));
+		return strtotime($released . ' UTC') + $days * 86400 <= ($now ?? time());
 	}
 
 }

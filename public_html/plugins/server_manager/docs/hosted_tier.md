@@ -268,8 +268,8 @@ The watch then acts on those dates, on its own schedule:
 | A charge fails | The grace period starts and the site's banner says so. It does not restart on a second failed retry — a card that never works would otherwise buy unlimited hosting. |
 | The grace ends | The instance is **shut down** by API and `hosted.deletion_required` is raised, asking a person to delete it at the provider. It keeps billing until they do; that is the price of rule 4. The node's fleet backups and uptime checks are switched off in the same step, so a machine somebody turned off on purpose does not spend the next month failing runs and tripping down-alerts over the one line that is actually actionable. |
 | The grace ends, for a Starter site | Its host's agent stops the site's container and keeps it stopped (`hold_container`); the host and its other sites are not touched, and nothing is deleted. The site is recorded as shut down only when the host's answer says the container is stopped and held (the job's `done`, not its status): until then it stays in grace, its backups and uptime checks stay on, and its backup storage is not pruned. A hold that failed or did not take is asked for again once an hour, and said in the task's result each run. Once held, backups and uptime checks are switched off and `hosted.container_held` is raised: the container still takes a place on its host until a person removes the site. |
-| Backup storage date passes | The customer's whole prefix is pruned. Between the shutdown and this, a returning customer is recoverable — a fresh install plus restore-over-agent, with **their** recovery key. |
-| A payment arrives | Everything pending is cancelled. After a shutdown, bringing the site back is a deliberate manual step: the machine may have been deleted by then, and a signal cannot know that. |
+| Backup storage date passes | The customer's whole prefix is pruned. Between the shutdown and this, a returning customer is recoverable — a fresh install plus restore-over-agent, with **their** recovery key. A Starter site is then marked ready to remove and `hosted.removal_ready` is raised; a person removes it with Permanently Delete Site on its node page, and its host does so only for a container it has held stopped for 55 days. Nothing removes it on its own. A late payment clears the mark. |
+| A payment arrives | Everything pending is cancelled. After a shutdown, bringing the site back is a deliberate manual step: the machine may have been deleted by then, and a signal cannot know that. For a Starter site that step is **Bring back** on its node page (see O3 below). |
 
 Both dates are counted from the **failed payment**, not from the shutdown, so
 "your backups are kept ninety days" is something a customer can check against
@@ -285,13 +285,15 @@ one action for its service, and only once that allowance is actually near.
 |---|---|---|
 | Sends per month | the mail provider's own count | the banner says so. The provider refuses at its cap, the smallest subaccount size it offers that covers the allowance (the default allowance, 2,000, is itself the smallest), until its billing cycle rolls |
 | Backup storage | the retention pass's listing (`mgn_backup_shelf_bytes`) | this node's fleet backups are paused, the site's banner says so, and nothing is deleted. They resume on their own once backup storage comes back under the allowance. |
-| Disk | the node's own status check | nothing automatic — a full disk stops the site on its own |
+| Disk | the node's own status check; on a starter host, the site's own disk allowance (`server_manager_starter_disk`, 5 GB), which the site reads itself (`DiskAllowance`) and its agent reports against | nothing automatic — a full disk stops the site on its own. A Starter site stops taking uploads and stored mail at its allowance, and pulled mail waits on the relay. The way out is a site of its own: a Starter site that outgrows its allowance is offered Managed (O1 below) |
 | Outbound transfer | the account-wide pool | one operator alert per billing period. There is no per-customer figure, because there is no per-customer bill. |
 
 Sending health is the provider's. It enforces the monthly limit on the
 customer's subaccount and applies its own bounce and complaint controls there;
 this platform keeps no threshold of its own and removes nothing on the strength
 of a webhook.
+
+**A Starter host** holds seven sites (`ManagedHost::STARTER_PLACES`), each at 448 MB of memory (`server_manager_starter_memory`), one CPU and a 5 GB disk allowance. Every plan includes 500 GB of backup storage (`server_manager_hosted_shelf_allowance_gb`).
 
 ## Abuse: terms, reports, Suspend
 
@@ -456,6 +458,86 @@ tier tab for the default account, then name each missing scope and what it is
 needed for. The list is `OperatorCloudAccount::SCOPES`. A default account
 missing `linodes:read_write` cannot fulfil a hosted order; one missing another
 scope is kept, and only what needs that scope is refused.
+
+## Operator steps
+
+These are done by a person, from the dashboard. Each names what the platform
+does on its own and what it leaves to you.
+
+**One rule they share: a site copy is not a sold site.** A copy's own
+provision is an admin's (install mode `copy`), never billed, seeded or held.
+At a switch-over the sold provision stays with the site and only its machine
+columns move (`SiteCopySwap`): its order line, hosting row, relay slot, fleet
+key and mail subaccount go on describing the site on its new machine, and
+removing the old machine afterwards removes none of them.
+
+**O1. Starter to Managed by hand** (the answer to a Starter site that has
+outgrown its disk).
+
+1. Agree it with the buyer: Managed is billed at its own price.
+2. On the site's node page, **Copies**, copy it to a new server in our account
+   (Server Manager → Provisioning → Hosting names the account), the plan the
+   Managed product sells.
+3. When the copy is ready, **Switch over**. The site's row now holds the new
+   server; its sold provision names it.
+4. At Stripe, change the subscription item's price to the Managed price. The
+   `customer.subscription.updated` webhook moves the order line to the
+   Managed product.
+5. Remove the old container: **Permanently Delete Site** on the old
+   container's row, once the domain reaches the new server. Its place on the
+   starter host comes back.
+6. Mail: a copy onto a new server is installed bare metal, and a bare-metal
+   site receives its own mail rather than through a relay slot
+   (`FleetService::site_plan_grants_slot`). Until that is settled, check the
+   site's Mail setup after the switch and publish what it asks for.
+
+**O2. Moving one Starter site to another starter host.**
+
+1. On the site's node page, **Copies**, **Copy onto a host**, choosing a
+   starter host with a free place.
+2. When the copy is ready, **Switch over**. The sold provision stays on the
+   site's row and names the new host and port; the old container's row holds
+   nothing billed.
+3. Point the site's name at the new host if its DNS names the old host's
+   address.
+4. Remove the old container with **Permanently Delete Site** on its row. Its
+   place comes back.
+5. Check, a day later, that the site still receives mail: its relay slot and
+   fleet key are the same ones.
+
+**O3. Bringing back a held Starter site after a late payment.** A payment
+that arrives after the shutdown clears the ready-to-remove mark and writes a
+note on the hosting row; nothing else happens on its own. On the site's node
+page, **Bring back** (level 10, `HostedLateReturn`) is offered once a
+subscription pays for it again: its own line active again, or, when the
+processor had cancelled that one and the buyer bought again, the one active
+subscription to the same product that no other site is on, which the site is
+moved to. It asks the host to start the container, and the page says
+**Starting**. Once the host answers that the container runs, the hosting watch
+sets the hosting row to subscribed with every date cleared, puts the node's
+backups back on the fleet's defaults and turns its uptime checks on
+(`HostedLateReturn::settle`). A start that did not take changes nothing: the
+page names the job and offers Bring back again. The relay slot comes back on
+its own on the next relay pass, and the banner on the next watch. A suspended
+site is unsuspended first, and Bring back waits while a removal is under way.
+A buyer who bought again usually has a new site on the new subscription
+already, so the old one has no subscription free to take: either the buyer
+keeps the new site (copy what they want across, then remove the old one), or
+cancel and remove the new site's order first, and Bring back then takes its
+subscription. A site already removed is not brought back: it is a new order,
+restored from the buyer's own backups if they kept any.
+
+**O4. A domain registered through us.** The platform never renews it. Before
+its first expiry, push it to the buyer's own registrar account
+(`ManagedDomainWatch`); the buyer's copy says so. On a refund, push it then:
+the records we published in it go with it and stay working until the buyer
+changes them. On an abuse suspension, do nothing: it lapses.
+
+**O5. Losing a Starter host.** Its seven sites are restored one by one, each
+from its own backups with its owner's recovery key: make a new starter host,
+then for each site a new Starter install restored over the agent from that
+site's backups. A site whose owner never made a recovery key has no backups
+and is not rebuilt; its owner is told so.
 
 ## Setting it up
 

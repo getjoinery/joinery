@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.184",
+  "version": "1.30.185",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -564,7 +564,7 @@
       "group": "hosted",
       "label": "Grace after a failed payment (days)",
       "type": "number",
-      "helptext": "How long a hosted site keeps running after a charge fails. At the end the instance is shut down by API and a deletion task is raised for a person — the platform never deletes a cloud instance itself."
+      "helptext": "How long a hosted site keeps running after a charge fails. At the end the instance is shut down by API and a deletion task is raised for a person — the platform never deletes a cloud instance itself. A Starter site's host removes it only once it has held it stopped for 55 days, so keep the backup storage days at least 55 more than this or Remove waits."
     },
     {
       "name": "server_manager_hosted_shelf_days",
@@ -572,7 +572,7 @@
       "group": "hosted",
       "label": "Backup storage kept after non-payment (days)",
       "type": "number",
-      "helptext": "How long a shut-down customer's backups stay in backup storage before the retention pass prunes them. Counted from the failed payment, not the shutdown."
+      "helptext": "How long a shut-down customer's backups stay in backup storage before the retention pass prunes them. Counted from the failed payment, not the shutdown. A Starter site is offered for removal at the prune, and its host removes it only once held 55 days, so keep this at least 55 more than the grace."
     },
     {
       "name": "server_manager_hosted_manage_url",
@@ -844,6 +844,27 @@
         "title_template": "Starter site {domain} is held on {host}",
         "body_template": "Hosting for {domain} ended unpaid. Its container {container} on {host} is stopped and held, and still takes a place there until somebody removes it. Their backups are kept until {shelf_ends_time}.",
         "link_template": "/admin/server_manager"
+      }
+    },
+    "hosted.removal_ready": {
+      "label": "A held Starter site is ready to remove",
+      "description": "A Starter site held after its hosting ended unpaid has had its backups pruned, so nothing of it is wanted any more. It still takes a place on its host until a person removes it with Permanently Delete Site on its node page. A late payment clears this.",
+      "category": "Hosting",
+      "payload": {
+        "provision_id": "Customer cloud provision id",
+        "node_id": "The site's node",
+        "domain": "The site's domain",
+        "host": "The starter host it is on",
+        "container": "The site's container name",
+        "host_accepts_date": "The day its host's 55-day hold is up (UTC)"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "default_email": true,
+        "title_template": "Starter site {domain} is ready to remove from {host}",
+        "body_template": "Hosting for {domain} ended unpaid and its backups have now been pruned. Its container {container} still takes a place on {host}. Remove it with Permanently Delete Site on its node page; its host does so from {host_accepts_date}, once it has held the site stopped for 55 days.",
+        "link_template": "/admin/server_manager/node_detail?mgn_managed_node_id={node_id}"
       }
     },
     "hosted.deletion_required": {

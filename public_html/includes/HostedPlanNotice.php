@@ -34,6 +34,9 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.6 - a site with a disk allowance shows its own figure in the disk row, read here and now
+ *               (DiskAllowance), not the management node's copy from its last status check; a site whose
+ *               node sent no disk row still gets one (hosting_paid_launch B6)
  * @version 1.5 - an email allowance at 95% or over leads with "Connect your own email provider", linking the
  *               site's own email settings (spec email_lists_plugin §5); emailAllowance()
  * @version 1.4 - a services site's rows may be due (the paid period, from the notice window out) and urgent
@@ -183,12 +186,9 @@ class HostedPlanNotice {
 	 */
 	public static function allowances(): array {
 		$raw = trim((string)Globalvars::get_instance()->get_setting('hosted_plan_allowances', false, true));
-		if ($raw === '') {
-			return array();
-		}
-		$decoded = json_decode($raw, true);
+		$decoded = $raw === '' ? array() : json_decode($raw, true);
 		if (!is_array($decoded)) {
-			return array();
+			$decoded = array();
 		}
 		$out = array();
 		foreach ($decoded as $entry) {
@@ -211,7 +211,47 @@ class HostedPlanNotice {
 				'second_url'   => (string)($entry['second_url'] ?? ''),
 			);
 		}
-		return $out;
+		return self::withOwnDisk($out);
+	}
+
+	/** The label the management node gives the disk row. */
+	const DISK_ALLOWANCE_LABEL = 'Disk used';
+
+	/**
+	 * A site on a shared host knows its own disk better than the management
+	 * node does: its allowance and use, read now, against the allowance it
+	 * stops taking uploads and stored mail at (DiskAllowance). The node's
+	 * row keeps its door; a site whose node sent no disk row gets one.
+	 */
+	private static function withOwnDisk(array $rows): array {
+		$own = DiskAllowance::state();
+		if ($own === null || $own['percent'] === null) {
+			return $rows;
+		}
+		$figures = array(
+			'used'      => self::bytesPhrase((int)$own['used']),
+			'allowance' => self::bytesPhrase((int)$own['allowance']),
+			'percent'   => max(0, min(999, (int)$own['percent'])),
+		);
+		foreach ($rows as $i => $row) {
+			if (($row['service'] ?? '') === 'disk' || trim((string)$row['label']) === self::DISK_ALLOWANCE_LABEL) {
+				$rows[$i] = array_merge($row, $figures);
+				return $rows;
+			}
+		}
+		$rows[] = array_merge(array(
+			'label' => self::DISK_ALLOWANCE_LABEL, 'due' => false, 'urgent' => false, 'service' => 'disk',
+			'action_label' => '', 'action_url' => '', 'second_label' => '', 'second_url' => '',
+		), $figures);
+		return $rows;
+	}
+
+	/** A byte count the way a person reads it: 3.2 GB, 640 MB. */
+	private static function bytesPhrase(int $bytes): string {
+		if ($bytes >= 1073741824) {
+			return round($bytes / 1073741824, 1) . ' GB';
+		}
+		return max(0, (int)round($bytes / 1048576)) . ' MB';
 	}
 
 	/**

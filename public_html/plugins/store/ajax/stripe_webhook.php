@@ -111,74 +111,95 @@ try {
             $subscription = $event->data->object;
             $subscription_id = $subscription->id;
 
-            $order_items = new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id]);
-            $order_items->load();
+            // Every line the subscription currently pays for: one checkout
+            // can put several on it, one item each; a tier line a tier
+            // change replaced is not one (StripeHelper::subscription_current_lines).
+            $current_lines = StripeHelper::subscription_current_lines($subscription_id);
 
-            if ($order_items->count() > 0) {
-                $order_item = $order_items->get(0);
-
-                // Sync subscription status
+            if ($current_lines) {
                 $status = $subscription->status; // active, past_due, canceled, unpaid, etc.
-                $order_item->set('odi_subscription_status', $status);
-
-                if ($subscription->current_period_end) {
-                    $order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $subscription->current_period_end));
+                foreach ($current_lines as $line) {
+                    $line->set('odi_subscription_status', $status);
+                    if ($subscription->current_period_end) {
+                        $line->set('odi_subscription_period_end', date('Y-m-d H:i:s', $subscription->current_period_end));
+                    }
+                    $line->set('odi_subscription_cancel_at_period_end', (bool)$subscription->cancel_at_period_end);
                 }
 
-                if ($subscription->cancel_at_period_end) {
-                    $order_item->set('odi_subscription_cancel_at_period_end', true);
-                } else {
-                    $order_item->set('odi_subscription_cancel_at_period_end', false);
+                // Re-derive a line's product from whatever price Stripe is now
+                // billing it. A scheduled downgrade lands here at period end,
+                // when Stripe swaps the price on its own — nothing else would
+                // move the subscriber onto the new tier; so does a price change
+                // made in the Stripe dashboard. Each item is matched to the line
+                // it bills; the one item that bills none of them is the changed
+                // one, and it moves the one line no item bills. Anything else is
+                // logged and left.
+                $items = $subscription->items->data ?? array();
+                $unbilled = $current_lines;
+                $unmatched_items = array();
+                foreach ($items as $item) {
+                    $found = false;
+                    foreach ($unbilled as $k => $line) {
+                        if ($stripe_helper->item_bills_line($item, $line)) {
+                            unset($unbilled[$k]);
+                            $found = true;
+                            break;
+                        }
+                    }
+                    if (!$found) {
+                        $unmatched_items[] = $item;
+                    }
                 }
-
-                $user_id = $order_item->get('odi_usr_user_id');
-
-                // Re-derive the product from whatever price Stripe is now billing.
-                // A scheduled downgrade lands here at period end, when Stripe swaps
-                // the price on its own — nothing else would move the subscriber onto
-                // the new tier. This also picks up price changes made directly in
-                // the Stripe dashboard.
-                $new_price_id = null;
-                if (!empty($subscription->items->data)) {
-                    $new_price_id = $subscription->items->data[0]->price->id;
-                }
-
-                if ($new_price_id) {
+                if (count($unmatched_items) === 1 && count($unbilled) === 1) {
+                    $line = reset($unbilled);
+                    $new_price_id = (string)($unmatched_items[0]->price->id ?? '');
                     // $stripe_helper is the instance that already verified this event.
                     $price_column = $stripe_helper->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id';
-                    $version = ProductVersion::GetByColumn($price_column, $new_price_id);
-
-                    if ($version && $version->get('prv_pro_product_id') != $order_item->get('odi_pro_product_id')) {
+                    $version = $new_price_id !== '' ? ProductVersion::GetByColumn($price_column, $new_price_id) : null;
+                    if ($version && $version->get('prv_pro_product_id') != $line->get('odi_pro_product_id')) {
                         $new_product = new Product($version->get('prv_pro_product_id'), TRUE);
-
-                        $order_item->set('odi_pro_product_id', $new_product->key);
-                        $order_item->set('odi_prv_product_version_id', $version->key);
-                        $order_item->set('odi_price', $version->get('prv_version_price'));
+                        $line->set('odi_pro_product_id', $new_product->key);
+                        $line->set('odi_prv_product_version_id', $version->key);
+                        $line->set('odi_price', $version->get('prv_version_price'));
 
                         // 'subscription_change' is the reason that permits a move in
                         // either direction; 'purchase' would refuse the downgrade.
+                        $user_id = $line->get('odi_usr_user_id');
                         if ($new_product->get('pro_sbt_subscription_tier_id') && $user_id) {
                             $new_tier = new SubscriptionTier($new_product->get('pro_sbt_subscription_tier_id'), TRUE);
-                            $new_tier->addUser($user_id, 'subscription_change', 'order_item', $order_item->key, null);
+                            $new_tier->addUser($user_id, 'subscription_change', 'order_item', $line->key, null);
                         }
-
-                        error_log("Stripe webhook: subscription $subscription_id price changed to $new_price_id, moved to product " . $new_product->key);
+                        error_log("Stripe webhook: subscription $subscription_id price changed to $new_price_id, line #"
+                            . $line->key . " moved to product " . $new_product->key);
                     }
+                } elseif ($unmatched_items) {
+                    error_log("Stripe webhook: subscription $subscription_id bills " . count($unmatched_items)
+                        . " item(s) no line matches and " . count($unbilled) . " line(s) no item bills; no line was moved");
                 }
 
-                $order_item->save();
-
-                // A first payment never made within Stripe's 23 hours ends the
-                // subscription as incomplete_expired. Whichever of this and
-                // .deleted arrives first sends the one cancellation; the other
-                // finds the line already ended (its cancelled time is set). A
-                // failed first invoice may have marked the line past_due in
-                // between, so the line's earlier status is not what decides.
-                if ($status === 'incomplete_expired' && !$order_item->get('odi_subscription_cancelled_time')) {
-                    _stripe_webhook_subscription_ended($order_item, $subscription_id);
+                $ended_tier_line = null;
+                foreach ($current_lines as $line) {
+                    $line->save();
+                    // A first payment never made within Stripe's 23 hours ends the
+                    // subscription as incomplete_expired. Whichever of this and
+                    // .deleted arrives first sends the one cancellation; the other
+                    // finds the line already ended (its cancelled time is set). A
+                    // failed first invoice may have marked the line past_due in
+                    // between, so the line's earlier status is not what decides.
+                    if ($status === 'incomplete_expired' && !$line->get('odi_subscription_cancelled_time')) {
+                        _stripe_webhook_subscription_ended($line, $subscription_id, false);
+                        if ($ended_tier_line === null && TierBilling::lineGrantsTier($line)) {
+                            $ended_tier_line = $line;
+                        }
+                    }
+                }
+                // The tier is revoked once, for the tier line among them.
+                if ($ended_tier_line !== null && $ended_tier_line->get('odi_usr_user_id')) {
+                    TierBilling::handleSubscriptionExpired($ended_tier_line->get('odi_usr_user_id'), $ended_tier_line);
                 }
 
                 // Trigger tier validation
+                $user_id = $current_lines[0]->get('odi_usr_user_id');
                 if ($user_id) {
                     SubscriptionTier::GetUserTier($user_id);
                 }
@@ -194,27 +215,16 @@ try {
             $subscription_id = $subscription->id;
 
             // Every line the subscription pays for ends: one checkout can put
-            // several lines on one subscription (Stripe Checkout mode), and a
-            // tier change leaves the line it replaced on the same id. A tier
-            // change makes its new line in an order of its own, so a line
-            // with a newer line on the id from another order was replaced:
-            // it ended with the change and is left as it is. Lines of one
-            // checkout share an order, and all end.
-            $order_items = new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id],
-                ['order_item_id' => 'DESC']);
-            $order_items->load();
+            // several lines on one subscription (Stripe Checkout mode). A tier
+            // line a tier change replaced ended with the change and is left
+            // as it is; every other line on the id ends here
+            // (StripeHelper::subscription_current_lines).
+            $order_items = StripeHelper::subscription_current_lines($subscription_id);
 
-            if ($order_items->count() > 0) {
+            if ($order_items) {
                 $ended_tier_line = null;
-                $newest_order = null;
                 foreach ($order_items as $order_item) {
                     $ends = (string)$order_item->get('odi_subscription_cancelled_time');
-                    $order_id = (int)$order_item->get('odi_ord_order_id');
-                    if ($newest_order === null) {
-                        $newest_order = $order_id;
-                    } elseif ($order_id !== $newest_order) {
-                        continue;
-                    }
                     if ((string)$order_item->get('odi_subscription_status') === 'incomplete_expired' && $ends !== '') {
                         // Ended already by its .updated (above).
                         error_log("Stripe webhook: subscription $subscription_id line #" . $order_item->key . " already ended as incomplete_expired");

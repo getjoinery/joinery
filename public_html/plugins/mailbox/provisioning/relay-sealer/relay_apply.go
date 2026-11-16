@@ -81,7 +81,12 @@ type relayRequest struct {
 	// shard): the only name the mail apps pass-through routes to the tenant,
 	// and the only one it issues the tenant a certificate for.
 	MxHostname string `json:"mx_hostname,omitempty"`
-	FiledUTC   string `json:"filed_utc"`
+	// Force (tenant-remove): remove the tenant with what its spool still
+	// holds. The operator sends it for a slot released long enough ago that
+	// nobody will collect that mail; without it a spool that never drains
+	// keeps the tenant for good.
+	Force    bool   `json:"force,omitempty"`
+	FiledUTC string `json:"filed_utc"`
 }
 
 // relayVerdict is root's answer, returned to the caller in the response body.
@@ -300,9 +305,13 @@ func applyRequest(p relayPaths, req relayRequest) relayVerdict {
 			return reject("tenant changes are the operator's act")
 		}
 		if !tenantExists(p, req.Tenant) {
-			return reject("tenant is not registered on this relay")
+			// Already gone: the removal the operator asks for is done.
+			v.Status = "ok"
+			v.Reason = "tenant was not registered on this relay"
+			return v
 		}
-		if n := spoolEntryCount(p.spoolDir(req.Tenant)); n > 0 {
+		n := spoolEntryCount(p.spoolDir(req.Tenant))
+		if n > 0 && !req.Force {
 			// An undrained spool is accepted mail that exists nowhere else.
 			return reject(fmt.Sprintf("spool still holds %d undrained entries", n))
 		}
@@ -317,6 +326,9 @@ func applyRequest(p relayPaths, req relayRequest) relayVerdict {
 			return errorVerdict(v, "the map merge failed after the removal")
 		}
 		v.Status = "ok"
+		if n > 0 {
+			v.Reason = fmt.Sprintf("removed with %d undrained entries", n)
+		}
 		return v
 	}
 	return reject("unknown request type")
@@ -573,6 +585,7 @@ func runTenantCommand(command string, args []string) int {
 	forwardLimit := fs.Int("forward-limit", 0, "forward_hourly_limit (tenant-add)")
 	spoolMaxMiB := fs.Int("spool-max-mib", 0, "spool_max_mib (tenant-add)")
 	spoolMaxEntries := fs.Int("spool-max-entries", 0, "spool_max_entries (tenant-add)")
+	force := fs.Bool("force", false, "remove with undrained entries (tenant-remove)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -593,6 +606,7 @@ func runTenantCommand(command string, args []string) int {
 		req.Domains = splitDomains(*domains)
 	case "tenant-remove":
 		req.Type = requestTypeTenantRemove
+		req.Force = *force
 	default:
 		return 2
 	}

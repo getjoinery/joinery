@@ -777,3 +777,84 @@ func TestProcNetPortParse(t *testing.T) {
 		t.Fatal("an unbound port read as bound")
 	}
 }
+
+// A released slot (hosting_paid_launch B6): the operator empties its allowlist,
+// then removes it; a spool nobody will drain goes only on a forced remove, and
+// removing a tenant that is already gone is done, not refused.
+func TestOperatorEmptiesThenForceRemovesATenant(t *testing.T) {
+	f := newRelayFixture(t)
+	f.addKey("acme")
+	add, _ := json.Marshal(map[string]any{
+		"public_key": f.publicB64("acme"),
+		"domains":    []string{"acme.test"},
+		"limits":     map[string]int{"forward_hourly_limit": 50, "spool_max_mib": 100, "spool_max_entries": 0},
+	})
+	if status, out := f.call(http.MethodPost, "/relay/tenants/acme", add, "operator"); status != http.StatusOK {
+		t.Fatalf("operator add: %d %s", status, out)
+	}
+
+	// An empty list is accepted and leaves nothing allowed.
+	empty, _ := json.Marshal(map[string]any{"domains": []string{}})
+	if status, out := f.call(http.MethodPut, "/relay/tenants/acme/domains", empty, "operator"); status != http.StatusOK {
+		t.Fatalf("empty set domains: %d %s", status, out)
+	}
+	if got := readAllowlist(filepath.Join(f.paths.tenantDir("acme"), "allowed_domains")); len(got) != 0 {
+		t.Fatalf("allowlist after emptying: %v", got)
+	}
+
+	// A tenant whose map is accepted: emptying its list is written and the
+	// maps are rebuilt without it, though the verdict names its map refused.
+	full, _ := json.Marshal(map[string]any{"domains": []string{"acme.test"}})
+	if status, out := f.call(http.MethodPut, "/relay/tenants/acme/domains", full, "operator"); status != http.StatusOK {
+		t.Fatalf("restore domains: %d %s", status, out)
+	}
+	fragBody, _ := json.Marshal(simpleFragment("acme", "acme.test"))
+	if status, out := f.call(http.MethodPut, "/relay/fragment", fragBody, "acme"); status != http.StatusOK {
+		t.Fatalf("acme fragment: %d %s", status, out)
+	}
+	if m, err := loadRoutingMap(filepath.Join(f.paths.home, "routing.json")); !routed(m, err, "info@acme.test") {
+		t.Fatalf("acme's map was not merged: %v %v", err, m)
+	}
+	status, out := f.call(http.MethodPut, "/relay/tenants/acme/domains", empty, "operator")
+	var v relayVerdict
+	if err := json.Unmarshal(out, &v); err != nil || status != http.StatusUnprocessableEntity || v.Status != "rejected" || v.Merge == nil || !v.Merge.Installed {
+		t.Fatalf("emptying a tenant with a map: %d %s", status, out)
+	}
+	if m, err := loadRoutingMap(filepath.Join(f.paths.home, "routing.json")); err != nil || routed(m, err, "info@acme.test") {
+		t.Fatalf("an emptied tenant's recipients are still routed: %v", err)
+	}
+
+	f.spoolWrite("acme", "1-x", "meta", "{}")
+	f.spoolWrite("acme", "1-x", "seal", "v1")
+	// Without force the undrained spool keeps the tenant.
+	if status, out := f.call(http.MethodDelete, "/relay/tenants/acme", nil, "operator"); status != http.StatusUnprocessableEntity || !strings.Contains(string(out), "undrained") {
+		t.Fatalf("remove with spool: %d %s", status, out)
+	}
+	// A tenant cannot force its own removal.
+	force, _ := json.Marshal(map[string]any{"force": true})
+	if status, _ := f.call(http.MethodDelete, "/relay/tenants/acme", force, "acme"); status != http.StatusForbidden {
+		t.Fatalf("tenant forcing a removal: %d", status)
+	}
+	status, out = f.call(http.MethodDelete, "/relay/tenants/acme", force, "operator")
+	if status != http.StatusOK || !strings.Contains(string(out), "removed with 1 undrained") {
+		t.Fatalf("forced remove: %d %s", status, out)
+	}
+	if tenantExists(f.paths, "acme") {
+		t.Fatal("tenant directory survived a forced removal")
+	}
+	if _, err := os.Stat(f.paths.spoolDir("acme")); !os.IsNotExist(err) {
+		t.Fatal("spool survived a forced removal")
+	}
+	// Asked again, the removal is already done.
+	if status, out := f.call(http.MethodDelete, "/relay/tenants/acme", nil, "operator"); status != http.StatusOK {
+		t.Fatalf("remove of a removed tenant: %d %s", status, out)
+	}
+}
+
+func routed(m *routingMap, err error, addr string) bool {
+	if err != nil || m == nil {
+		return false
+	}
+	_, ok := m.Recipients[addr]
+	return ok
+}

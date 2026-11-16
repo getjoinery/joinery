@@ -598,6 +598,7 @@ func (s *relayServer) tenantRoute(w http.ResponseWriter, r *http.Request, caller
 		Domains    []string      `json:"domains"`
 		Limits     *tenantLimits `json:"limits"`
 		MxHostname string        `json:"mx_hostname"`
+		Force      bool          `json:"force"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &change); err != nil {
@@ -618,6 +619,7 @@ func (s *relayServer) tenantRoute(w http.ResponseWriter, r *http.Request, caller
 		req.Domains = change.Domains
 	case tail == "" && r.Method == http.MethodDelete:
 		req.Type = requestTypeTenantRemove
+		req.Force = change.Force
 	default:
 		refuse(w, http.StatusNotFound, "no such route")
 		return

@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.146.19",
+    "version": "1.146.20",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
     "status": "stable",
@@ -676,6 +676,21 @@
             "helptext": "How long mail keeps flowing after the relay subscription lapses."
         },
         {
+            "name": "mailbox_fleet_release_drain_days",
+            "default": "30",
+            "group": "fleet",
+            "label": "Days a released slot's mail is kept",
+            "type": "number",
+            "validation": {
+                "number": true,
+                "min": 1,
+                "messages": {
+                    "min": "Must be 1 or more."
+                }
+            },
+            "helptext": "A released slot is removed from its shard once its site has collected what is waiting. Mail still waiting this many days after the release is deleted with the slot, and you are told."
+        },
+        {
             "name": "mailbox_import_enabled",
             "default": "1",
             "group": "import",
@@ -890,6 +905,23 @@
                 "title_template": "{relay_name} is scanning mail for spam again",
                 "body_template": "{detail}",
                 "link_template": "/plugins/mailbox/admin/admin_mailbox_server#relay-section"
+            }
+        },
+        "mailbox.fleet_slot_mail_discarded": {
+            "label": "A released relay slot was removed with mail still waiting",
+            "description": "A slot released on a relay shard (its site removed or moved away, or its domains released) still held mail nobody collected when its keeping time ran out, so the shard removed the slot and deleted that mail. Raised once per slot.",
+            "category": "Mailbox",
+            "payload": {
+                "slot": "The slot, by number and tenant name",
+                "detail": "What the shard reported deleting"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": true,
+                "default_email": true,
+                "title_template": "Relay slot {slot} was removed with mail nobody collected",
+                "body_template": "{detail}",
+                "link_template": "/plugins/mailbox/admin/admin_mailbox_fleet"
             }
         },
         "mailbox.relay_pickup_stopped": {

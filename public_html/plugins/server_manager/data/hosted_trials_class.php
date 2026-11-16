@@ -38,6 +38,8 @@
  * site. Shutdown is the strongest automatic action there is, and the deletion
  * that stops the bill is a person at the provider.
  *
+ * @version 1.3 - htr_remove_ready_time: a held Starter site whose backups were pruned, ready for a person to
+ *                remove (specs/hosting_paid_launch.md B1)
  * @version 1.2 - the transferred state
  * @version 1.1
  */
@@ -90,6 +92,10 @@ class HostedTrial extends SystemBase {
 		'htr_grace_ends_time'     => array('type'=>'timestamp(6)'),
 		'htr_shelf_ends_time'     => array('type'=>'timestamp(6)'),
 		'htr_shutdown_time'       => array('type'=>'timestamp(6)'),
+		// A held Starter site whose backups were pruned: nothing of it is
+		// wanted any more, and a person may remove it from its node page
+		// (decommission_held_site). Cleared by a payment that arrives late.
+		'htr_remove_ready_time'   => array('type'=>'timestamp(6)'),
 		// Sends this month, from the provider's webhook events. It moves the
 		// banner's allowance line and nothing else: a webhook can be spoofed or
 		// dropped, so the cap is the provider's own count of the same thing.

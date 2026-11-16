@@ -33,6 +33,7 @@
  * host into a grace period minutes after it left
  * (specs/managed_to_self_hosted_transfer.md §5 step 3).
  *
+ * @version 1.3 - a late payment on a shut-down row clears its ready-to-remove mark (hosting_paid_launch B1)
  * @version 1.2 - catch_up(): a row opened after a cancel or a failed payment starts its wind-down then
  * @version 1.1 - a transferred row is left alone by every signal
  * @version 1.0
@@ -130,6 +131,9 @@ class HostedTrialSignals {
 			// Already off. Bringing it back is a deliberate act with a person
 			// behind it — the machine may have been deleted at the provider by
 			// now, and a signal cannot know that.
+			// Nor is it removed while that is decided: the Remove button and
+			// its alert go with the mark.
+			$trial->set('htr_remove_ready_time', null);
 			$trial->set('htr_note', 'A payment arrived after this site was shut down; '
 				. 'bringing it back is a manual step.');
 			$trial->save();

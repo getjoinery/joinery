@@ -26,6 +26,8 @@
  *
  * Run: php tests/run.php db --filter=relay_fleet
  *
+ * @version 1.6 - a suspended or released slot's shard allowlist is empty; release asks for it to be sent,
+ *                stamps the release time, and the keeping time decides a forced remove (hosting_paid_launch B6)
  * @version 1.5 - FleetService::mailNameOwed(): a slot's mail name owed to a 3.13 shard, settled once delivered
  * @version 1.4 - the fleet on the core skeleton: client, state vocabulary, the ladder on a slot row
  * @version 1.3 - fleet_status exercised through the action
@@ -246,6 +248,44 @@ class RelayFleetTest {
 			'releaseSlot revokes the slot\'s live claims');
 		check(MailboxFleetDomainClaim::liveClaimByOtherSlot('relay-fleet-release.example', intval($slot_b->key)) === null,
 			'a released slot\'s domains are claimable elsewhere');
+
+		// B6: what the shard may accept is nothing once a slot is released,
+		// and the release asks for that empty list to be sent first.
+		check((bool)$slot_a->get('mft_needs_domain_sync') && trim((string)$slot_a->get('mft_release_time')) !== '',
+			'releaseSlot asks for the allowlist to be sent and stamps the release time');
+		check($slot_a->shardDomains() === array(), 'a released slot\'s shard allowlist is empty');
+		$keep_verified = new MailboxFleetDomainClaim(NULL);
+		$keep_verified->set('mfd_mft_mailbox_fleet_slot_id', intval($slot_b->key));
+		$keep_verified->set('mfd_domain', 'relay-fleet-suspend.example');
+		$keep_verified->set('mfd_txt_token', 'joinery-fleet-verify-test3');
+		$keep_verified->set('mfd_status', MailboxFleetDomainClaim::STATUS_VERIFIED);
+		$keep_verified->save();
+		$this->cleanup[] = array('mfd_mailbox_fleet_domain_claims', 'mfd_mailbox_fleet_domain_claim_id', intval($keep_verified->key));
+		$b_status = (string)$slot_b->get('mft_status');
+		$slot_b->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
+		check(in_array('relay-fleet-suspend.example', $slot_b->shardDomains(), true), 'an active slot\'s allowlist is its verified domains');
+		$slot_b->set('mft_status', MailboxFleetSlot::STATUS_SUSPENDED);
+		check($slot_b->shardDomains() === array() && in_array('relay-fleet-suspend.example', $slot_b->verifiedDomains(), true),
+			'a suspended slot sends an empty allowlist, and keeps its verified domains for its return');
+		$slot_b->set('mft_status', $b_status);
+
+		check(FleetService::allowlistApplied(array('status' => 'ok'))
+			&& FleetService::allowlistApplied(array('status' => 'rejected', 'merge' => array('installed' => true, 'status' => 'rejected')))
+			&& !FleetService::allowlistApplied(array('status' => 'rejected', 'reason' => '"x" is not a valid domain'))
+			&& !FleetService::allowlistApplied(array('status' => 'error', 'merge' => array('installed' => false))),
+			'a list the shard wrote counts as sent even when the site\'s own map no longer fits it; a refused list does not');
+
+		check(RelayVersion::removesWithMailLeft('3.20') && RelayVersion::removesWithMailLeft('3.21')
+			&& !RelayVersion::removesWithMailLeft('3.19') && !RelayVersion::removesWithMailLeft(''),
+			'only a 3.20 shard or newer is asked to remove a tenant with mail left; unknown reads as no');
+		harness_set_setting_mem('mailbox_fleet_release_drain_days', '30');
+		$slot_a->set('mft_release_time', gmdate('Y-m-d H:i:s', time() - 29 * 86400));
+		check(!FleetService::releaseDrainOver($slot_a), 'a slot released 29 days ago is still waiting for its site');
+		$slot_a->set('mft_release_time', gmdate('Y-m-d H:i:s', time() - 31 * 86400));
+		check(FleetService::releaseDrainOver($slot_a), 'after 30 days its spool goes with a forced remove');
+		$slot_a->set('mft_release_time', null);
+		check(!FleetService::releaseDrainOver($slot_a) && trim((string)$slot_a->get('mft_release_time')) !== '',
+			'a slot released before the time was kept starts its count now');
 
 		// The status action a tenant polls: it renders the slot as the reconcile
 		// task left it. Exercised through the action so a call into a method

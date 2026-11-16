@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.110 - a shut-down Starter site shows Bring back (level 10) once a subscription pays for it again (O3)
+ * @version 1.109 - a held Starter site marked ready to remove says so, and its Permanently Delete Site names the host's
+ *                 hold as the gate (hosting_paid_launch B1)
  * @version 1.108 - Suspension: Suspend (with the reason the customer is emailed) and Unsuspend for a hosted site,
  *                 with the open suspension's record and what the host answered to a Starter stop; a suspended
  *                 site's container offers no Start (HostedSuspensions, hosting_launch S6, reviewer2 B1 B2)
@@ -513,7 +516,7 @@
 						<input type="hidden" name="action" value="decommission_node">
 						<input type="hidden" name="confirm_site_name" value="<?php echo htmlspecialchars($decommission_site); ?>">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" data-jy-confirm="<?php echo htmlspecialchars(JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? It needs a check from the last ten minutes that the domain reaches the new server, and the host checks again that the domain no longer reaches this container. Otherwise nothing is removed. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.'), ENT_QUOTES); ?>" data-jy-confirm-typed="<?php echo htmlspecialchars($decommission_site, ENT_QUOTES); ?>" data-jy-submit="decommission_node_form">Permanently Delete Site&hellip;</button>
+						<button type="button" class="dropdown-item text-danger" data-jy-confirm="<?php echo htmlspecialchars(JobCommandBuilder::decommission_is_held($node) && !JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete this held customer site? Its hosting ended unpaid and its backups were pruned, so nothing of it can be brought back. Its host checks that it has held the container stopped for at least 55 days, then destroys the container, its database and every uploaded file; its mail account is closed and its domain parked for its buyer. This cannot be undone.' : (JobCommandBuilder::decommission_is_moved($node) ? 'Permanently delete the old machine\'s site on its host? It needs a check from the last ten minutes that the domain reaches the new server, and the host checks again that the domain no longer reaches this container. Otherwise nothing is removed. Then it destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : ($is_removed ? 'Permanently delete the site on the host? If it is still running there, this destroys the container, its database, and every uploaded file. Offsite backups are kept. This cannot be undone.' : 'Permanently delete this site? This destroys the container, its database, and every uploaded file on the host. Offsite backups are kept. This cannot be undone.')), ENT_QUOTES); ?>" data-jy-confirm-typed="<?php echo htmlspecialchars($decommission_site, ENT_QUOTES); ?>" data-jy-submit="decommission_node_form">Permanently Delete Site&hellip;</button>
 					</form>
 				</li>
 			<?php elseif ($decommission_site !== null && $is_removed): ?>
@@ -688,6 +691,50 @@
 
 
 	echo '</div>'; // end the node at a glance
+
+	// A held Starter site whose backups were pruned: nothing of it is wanted,
+	// and only a person removes it.
+	$held_removal = (!$is_removed && JobCommandBuilder::held_removal_trial($node)) ?: null;
+	if ($held_removal !== null) {
+		echo '<div class="alert alert-warning"><div><strong>Ready to remove.</strong> Hosting for this site ended unpaid, '
+			. 'its container is held stopped on its host, and its backups were pruned on '
+			. htmlspecialchars(substr((string)$held_removal->get('htr_remove_ready_time'), 0, 10)) . '. It still takes a place on its host. '
+			. 'Remove it with Permanently Delete Site in the menu above'
+			. (($accepts = JobCommandBuilder::held_removal_accepted_date($held_removal)) !== '' && $accepts > gmdate('Y-m-d')
+				? ' from ' . htmlspecialchars($accepts) . ', when its host has held it stopped for ' . JobCommandBuilder::HELD_SITE_MIN_DAYS . ' days' : '')
+			. '; a payment that arrives first takes this away.</div></div>';
+	}
+
+	// A held Starter site whose payment came late is brought back by a person.
+	if (!$is_removed && class_exists('HostedLateReturn') && SessionControl::get_instance()->get_permission() >= 10) {
+		$late_provision = CustomerCloudProvision::latest_for_node($node->key);
+		$late_trial = ($late_provision && $late_provision->is_container() && $late_provision->is_sold())
+			? HostedTrial::for_provision($late_provision->key) : null;
+		if ($late_trial && (string)$late_trial->get('htr_state') === HostedTrial::STATE_SHUTDOWN) {
+			$late_why = HostedLateReturn::refusal($node);
+			$late_open = HostedLateReturn::open_start_job($late_provision);
+			$late_last = HostedLateReturn::last_start_job($late_provision);
+			echo '<div class="alert alert-secondary"><div><strong>Hosting shut down.</strong> ';
+			if ($late_open !== null) {
+				echo 'Starting: its host was asked to start it (<a href="/admin/server_manager/job_detail?job_id=' . (int)$late_open['mjb_management_job_id']
+					. '">job #' . (int)$late_open['mjb_management_job_id'] . '</a>). Its hosting is subscribed again once the host says it runs.</div></div>';
+			} elseif ($late_why === '') {
+				if ($late_last !== null && HostedLateReturn::start_outcome($late_provision) === false) {
+					echo 'The last start did not take (<a href="/admin/server_manager/job_detail?job_id=' . (int)$late_last['mjb_management_job_id']
+						. '">job #' . (int)$late_last['mjb_management_job_id'] . '</a>); it is still held. ';
+				}
+				echo 'A subscription pays for it again. Bring it back to start its container, set its hosting to subscribed '
+					. 'and turn its backups and uptime checks on.</div>';
+				echo '<form method="post" action="' . $base_url . '" style="margin:0" id="bring_back_form">'
+					. '<input type="hidden" name="action" value="bring_back_hosted">' . SmAdminCsrf::field()
+					. '<button type="button" class="btn btn-sm btn-primary mt-2" data-jy-confirm="'
+					. htmlspecialchars('Bring this site back? Its container starts on its host and its hosting is subscribed again.', ENT_QUOTES)
+					. '" data-jy-submit="bring_back_form">Bring back</button></form></div>';
+			} else {
+				echo 'Bring back is not offered: ' . htmlspecialchars($late_why) . '</div></div>';
+			}
+		}
+	}
 
 	// Install state banner (takes precedence over regular status)
 	$install_state = $node->get('mgn_install_state');

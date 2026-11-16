@@ -153,6 +153,9 @@ the target off and keeps its row, so the backups already kept read back until
 getjoinery prunes them, and clears `backup_target_id`, so every surface says no
 backups are running.
 
+The allowance is checked when a run opens (`shelf_begin_run`), so one run
+that starts under it may write past it; the next is refused.
+
 On getjoinery, a tenant's storage is pruned by `ServiceTenantWatch`, which files
 the ledger into restore points as a node's storage is filed
 (`FleetBackupRetention::group()`): a chain by its directory, a standalone archive

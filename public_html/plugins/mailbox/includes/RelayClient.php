@@ -21,6 +21,7 @@
  * that answered something this code cannot read. MailboxRelay::pollHealth
  * records the class so the Setup tab can say which.
  *
+ * @version 1.5 - tenantRemove() takes force (relay 3.20, hosting_paid_launch B6)
  * @version 1.4.1 - sealTarget() comment: the browser refuses an answer without its challenge
  * @version 1.4 - sealTarget() passes the browser's challenge for the relay to sign (relay 3.18)
  * @version 1.3 - tenantAdd() carries the slot's mail name (mx_hostname) for a shard (relay 3.13)
@@ -258,9 +259,14 @@ class RelayClient {
 			json_encode(array('domains' => array_values($domains))));
 	}
 
-	/** DELETE /relay/tenants/{slug}: operator only; the spool must be empty. */
-	public function tenantRemove(string $slug): array {
-		return $this->verdict('DELETE', '/relay/tenants/' . rawurlencode($slug), '');
+	/**
+	 * DELETE /relay/tenants/{slug}: operator only. The spool must be empty
+	 * unless $force, which removes the tenant with what it still holds
+	 * (relay 3.20; an older shard ignores it and keeps refusing).
+	 */
+	public function tenantRemove(string $slug, bool $force = false): array {
+		return $this->verdict('DELETE', '/relay/tenants/' . rawurlencode($slug),
+			$force ? json_encode(array('force' => true)) : '');
 	}
 
 	private function verdict(string $method, string $uri, string $body): array {

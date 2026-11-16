@@ -590,6 +590,42 @@ $disk_node->save();
 check(HostedTrialWatch::disk_percent($disk_node) === 83,
 	'and once it has, that is the figure the banner shows');
 
+// A site on a shared host shows its own disk, read now against its allowance
+// (hosting_paid_launch B6): the node's copy is the host's view and an hour old.
+harness_set_setting_mem('hosted_plan_state', 'subscribed');
+harness_set_setting_mem('hosted_plan_allowances', json_encode(array(
+	array('label' => 'Email sent this month', 'used' => '10', 'allowance' => '1,000', 'percent' => 1),
+	array('label' => 'Disk used', 'used' => '40%', 'allowance' => '100%', 'percent' => 40,
+		'action_label' => 'Move to your own server', 'action_url' => 'https://example.test/linode'),
+)));
+$GB = 1073741824;
+DiskAllowance::readWith(function () use ($GB) { return array(5 * $GB, (int)(4.8 * $GB), (int)(5.5 * $GB)); });
+harness_defer(function () { DiskAllowance::readWith(null); });
+$disk_row = null;
+foreach (HostedPlanNotice::allowances() as $a) { if ($a['label'] === 'Disk used') { $disk_row = $a; } }
+check($disk_row && $disk_row['percent'] === 95 && $disk_row['used'] === '4.8 GB' && $disk_row['allowance'] === '5 GB'
+	&& $disk_row['action_url'] === 'https://example.test/linode',
+	'the disk row carries the site\'s own figure and keeps the node\'s door', json_encode($disk_row));
+check(HostedPlanNotice::level('subscribed', 200, HostedPlanNotice::allowances()) === 'urgent',
+	'at 95% of its own allowance the banner urges, though the node said 40%');
+harness_set_setting_mem('hosted_plan_allowances', json_encode(array(
+	array('label' => 'Email sent this month', 'used' => '10', 'allowance' => '1,000', 'percent' => 1),
+)));
+$labels = array_column(HostedPlanNotice::allowances(), 'label');
+check(in_array('Disk used', $labels, true), 'a site whose node sent no disk row still gets one');
+harness_set_setting_mem('hosted_plan_allowances', '');
+check(array_column(HostedPlanNotice::allowances(), 'label') === array('Disk used'),
+	'a site whose node sent no rows at all still gets its disk row');
+harness_set_setting_mem('hosted_plan_allowances', json_encode(array(
+	array('label' => 'Email sent this month', 'used' => '10', 'allowance' => '1,000', 'percent' => 1),
+)));
+DiskAllowance::readWith(function () { return array(null, null, null); });
+$labels = array_column(HostedPlanNotice::allowances(), 'label');
+check($labels === array('Email sent this month'), 'a site with no allowance adds nothing');
+DiskAllowance::readWith(null);
+harness_set_setting_mem('hosted_plan_state', '');
+harness_set_setting_mem('hosted_plan_allowances', '');
+
 // ---------------------------------------------------------------------------
 section('A site opens on trial only where a trial is configured');
 

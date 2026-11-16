@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.9 - REMOVES_WITH_MAIL_LEFT 3.20: the shard that takes force on tenant-remove (hosting_paid_launch B6)
  * @version 1.8 - SEALS_POST_QUANTUM 3.16: the relay that seals to an X-Wing key (post_quantum_sealing Q8)
  * @version 1.7 - PASSES_MAIL_APPS_SHARED 3.13: a shared shard passes each tenant's mail programs under its slot name
  * @version 1.6 - PASSES_MAIL_APPS 3.12: 3.11 dialed the server's 465 onward, which cloud providers block, so
@@ -171,6 +172,16 @@ class RelayVersion {
 	 * tenant-add (specs/mail_apps_plugin.md § Shared hosted relays). A hosted
 	 * site is offered mail apps through its shard only from this version.
 	 */
+	/** The shard that removes a tenant with its spool when the operator forces it. */
+	const REMOVES_WITH_MAIL_LEFT = '3.20';
+
+	/** Does a shard running $running take a forced tenant-remove? Unknown reads as no. */
+	public static function removesWithMailLeft(string $running): bool {
+		$running = trim($running);
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::REMOVES_WITH_MAIL_LEFT, '>=');
+	}
+
 	const PASSES_MAIL_APPS_SHARED = '3.13';
 
 	/** Does a shared shard running $running pass its tenants' mail apps through? Unknown reads as no. */

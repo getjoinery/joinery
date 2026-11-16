@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.170 - build_decommission_node takes decommission_held_site (agent 1.123.0) for a held Starter site
+ *                 marked ready to remove: the host's own hold stands in for the approval (hosting_paid_launch B1)
  * @version 1.169 - build_mail_test_send: one fixed test message to the probe mailbox (operate)
  * @version 1.168 - build_mailbox_status: spam_learning_status widened to one hosted domain's Setup rows, flags and DNS
  * @version 1.167 - SITE_LOG_COUNT_MARKERS: dkim_unsigned, authoritative_dns_fallback, dns_reconciler_failed; the
@@ -791,7 +793,7 @@ class JobCommandBuilder {
 	 * this list decides what the plane will not ask for, and the agent decides
 	 * what it will not do.
 	 */
-	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site', 'copy_export', 'decommission_moved_site'];
+	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain', 'decommission_site', 'copy_export', 'decommission_moved_site', 'decommission_held_site'];
 
 	/**
 	 * May this node be sent a destructive primitive job?
@@ -5454,17 +5456,21 @@ class JobCommandBuilder {
 
 		$host_node = self::decommission_host_node_for($node);
 		$moved = self::decommission_is_moved($node);
-		$word = $moved ? 'decommission_moved_site' : 'decommission_site';
+		$held = !$moved && self::decommission_is_held($node);
+		$word = $moved ? 'decommission_moved_site' : ($held ? 'decommission_held_site' : 'decommission_site');
 		if (!self::has_primitive($host_node, $word)) {
 			throw new Exception(
 				"The host agent '{$host_node->get('mgn_slug')}' cannot remove "
-				. ($moved ? "the old machine of a switch-over. " : "a site. ")
+				. ($moved ? "the old machine of a switch-over. " : ($held ? "a site held after its hosting ended. " : "a site. "))
 				. AgentVocabulary::needs_newer_agent_text($host_node, [$word])
 			);
 		}
 
 		$core = trim((string)$node->get('mgn_joinery_version'));
-		if ($moved) {
+		if ($held) {
+			// Stopped, so it renders no approval and runs no code: the host's
+			// own hold is the gate, whatever release the site was on.
+		} elseif ($moved) {
 			$hv = AgentVocabulary::version($host_node);
 			if ($hv === '' || version_compare($hv, self::MOVED_SITE_HELD_MIN_AGENT_VERSION, '<')) {
 				throw new Exception(
@@ -5526,9 +5532,57 @@ class JobCommandBuilder {
 			);
 		}
 
-		return $moved
-			? self::build_decommission_moved_site_primitive($host_node, ['site' => $site])
+		if ($moved) {
+			return self::build_decommission_moved_site_primitive($host_node, ['site' => $site]);
+		}
+		return $held
+			? self::build_decommission_held_site_primitive($host_node, ['site' => $site])
 			: self::build_decommission_site_primitive($host_node, ['site' => $site]);
+	}
+
+	/**
+	 * Whether a removal takes the host's hold instead of the site's approval:
+	 * a sold Starter site held after its hosting ended unpaid, whose backups
+	 * were pruned (htr_remove_ready_time, hosting_paid_launch B1). The host
+	 * refuses unless it has itself held the container stopped for 55 days.
+	 */
+	public static function decommission_is_held($node) {
+		return self::held_removal_trial($node) !== null;
+	}
+
+	/** Days a host holds a site stopped before it removes it (the agent's HeldSiteMinAge). */
+	const HELD_SITE_MIN_DAYS = 55;
+
+	/**
+	 * The day a held site's host accepts its removal: its hold, which began at
+	 * the shutdown, HELD_SITE_MIN_DAYS old (UTC, Y-m-d). A row with no shutdown
+	 * time counts from today, which is late, never early.
+	 */
+	public static function held_removal_accepted_date($trial) {
+		$shut = trim((string)$trial->get('htr_shutdown_time'));
+		$from = $shut === '' ? time() : strtotime($shut . ' UTC');
+		return gmdate('Y-m-d', $from + self::HELD_SITE_MIN_DAYS * 86400 + 86399);
+	}
+
+	/** The hosted trial that marks a container site ready to remove, or null. */
+	public static function held_removal_trial($node) {
+		if (!$node || !$node->key || !trim((string)$node->get('mgn_container_name')) || !class_exists('CustomerCloudProvision')) {
+			return null;
+		}
+		$provision = CustomerCloudProvision::latest_for_node($node->key);
+		if ($provision === null || !$provision->is_container() || !$provision->is_sold()) {
+			return null;
+		}
+		$trial = HostedTrial::for_provision($provision->key);
+		if ($trial === null || (string)$trial->get('htr_state') !== HostedTrial::STATE_SHUTDOWN
+				|| trim((string)$trial->get('htr_remove_ready_time')) === '') {
+			return null;
+		}
+		// A person is bringing it back: its host is starting it.
+		if (class_exists('HostedLateReturn') && HostedLateReturn::open_start_job($provision) !== null) {
+			return null;
+		}
+		return $trial;
 	}
 
 	/**
@@ -5705,6 +5759,11 @@ class JobCommandBuilder {
 	/** The envelope, addressed to the HOST node: the site's name only. */
 	public static function build_moved_site_check_primitive($host_node, $params = []) {
 		return ['primitive' => 'moved_site_check', 'params' => ['site' => (string)($params['site'] ?? '')]];
+	}
+
+	/** The envelope, addressed to the HOST node: the site's name, as decommission_site. */
+	public static function build_decommission_held_site_primitive($host_node, $params = []) {
+		return ['primitive' => 'decommission_held_site', 'params' => ['site' => (string)($params['site'] ?? '')]];
 	}
 
 	/** The envelope, addressed to the HOST node: the site's name, as decommission_site. */

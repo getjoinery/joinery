@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.48 - decommission_held_site's claim budget: the teardown and the host's hold check
  * @version 1.47 - latestForNode() takes before_id: the run before a given one
  * @version 1.46 - ROUTINE_TYPES and option hide_routine: a completed never_do_check (every five minutes)
  *                 is left out of job lists unless its type is asked for (filterTypes offers it); a failed one still shows
@@ -384,6 +385,9 @@ class ManagementJob extends SystemBase {
 		// host's proof that the domain left instead of an approval wait.
 		// Sized above the agent's declared 20m.
 		'decommission_moved_site' => 1500, // 20m + slack
+		// A Starter site held long enough that its hosting is over: the same
+		// teardown, gated by the host's own hold.
+		'decommission_held_site'  => 1500, // 20m + slack
 		// A copy onto a host (specs/site_container_engine.md D9): its install
 		// builds the copy's image there (the agent's 75m), and a dormant copy's
 		// removal is a teardown (its 20m).

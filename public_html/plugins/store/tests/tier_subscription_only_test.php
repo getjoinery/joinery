@@ -19,6 +19,10 @@
  *    hosting subscription, so it never blocks a tier bought in an app.
  *  - **handleSubscriptionExpired** leaves the tier alone when the hosting line ends,
  *    and revokes it when the tier's line ends.
+ *  - **The billing page** shows each subscription in its own section, and a cycle
+ *    change acts only on a subscription of the buyer's own, to a cycle it offers (B12).
+ *  - **One Stripe subscription can pay for two lines**: a change finds the item
+ *    that bills its own line (StripeHelper::subscription_item_for_line).
  *
  * Every row is made inside one transaction and rolled back.
  */
@@ -29,6 +33,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/store/logic/change_tier_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/store/logic/billing_logic.php'));
 
 $db = DbConnector::get_instance()->get_db_link();
 $db->beginTransaction();
@@ -51,7 +56,7 @@ $tier->load();
 $make_product = function (string $name, $tier_id) use ($suffix) {
 	$p = new Product(NULL);
 	$p->set('pro_name', $name . ' ' . $suffix);
-	$p->set('pro_link', strtolower($name) . '-' . $suffix);
+	$p->set('pro_link', str_replace(' ', '-', strtolower($name)) . '-' . $suffix);
 	if ($tier_id) {
 		$p->set('pro_sbt_subscription_tier_id', (int)$tier_id);
 	}
@@ -132,6 +137,93 @@ $result = change_tier_logic(array());
 $picked = $result->data['current_subscription'] ?? null;
 check($picked && (int)$picked->key === (int)$tier_line->key, 'change_tier_logic picks the tier subscription, not the newer hosting one',
 	$picked ? 'picked #' . $picked->key : 'none (' . json_encode(array_keys((array)$result->data)) . ')');
+
+section('The billing page shows each subscription, and changes only the one it names');
+$billing = billing_logic(array());
+$listed = array_map(function ($sec) { return (int)$sec['item']->key; }, $billing->data['subscriptions'] ?? array());
+check(in_array((int)$tier_line->key, $listed, true) && in_array((int)$hosting_line->key, $listed, true) && count($listed) === 2,
+	'both the tier and the hosting subscription get a section', json_encode($listed));
+check(!empty($billing->data['has_tier_subscription']), 'the change-tier link is offered for the tier subscription');
+$other = make_user_row('tso2' . $suffix);
+$_SESSION['usr_user_id'] = (int)$other->key;
+$theirs = billing_logic(array());
+check(($theirs->data['subscriptions'] ?? null) === array() && empty($theirs->data['has_tier_subscription']),
+	'another buyer sees none of them');
+$refused = billing_logic(array('action' => 'change_billing_cycle', 'odi_order_item_id' => (int)$tier_line->key, 'new_version_id' => 1));
+check(strpos((string)($refused->data['error_message'] ?? ''), 'your own Stripe subscriptions') !== false,
+	'a cycle change naming someone else\'s subscription is refused', json_encode($refused->data['error_message'] ?? null));
+$_SESSION['usr_user_id'] = $uid;
+$bad_version = billing_logic(array('action' => 'change_billing_cycle', 'odi_order_item_id' => (int)$hosting_line->key, 'new_version_id' => 1));
+check(strpos((string)($bad_version->data['error_message'] ?? ''), 'your own Stripe subscriptions') !== false
+	|| strpos((string)($bad_version->data['error_message'] ?? ''), 'Invalid billing option') !== false,
+	'a cycle the page does not offer that line is refused', json_encode($bad_version->data['error_message'] ?? null));
+
+section('One Stripe subscription paying for two lines: each line finds its own item');
+$sh = (new ReflectionClass('StripeHelper'))->newInstanceWithoutConstructor();
+$sh->test_mode = false;
+$db->exec("UPDATE pro_products SET pro_stripe_product_id = 'prod_tso_tier_" . $suffix . "' WHERE pro_product_id = " . (int)$tier_product->key);
+$db->exec("UPDATE pro_products SET pro_stripe_product_id = 'prod_tso_host_" . $suffix . "' WHERE pro_product_id = " . (int)$hosting_product->key);
+$tier_line = new OrderItem((int)$tier_line->key, TRUE);
+$hosting_line = new OrderItem((int)$hosting_line->key, TRUE);
+$item = function ($id, $product) { return (object)array('id' => $id, 'price' => (object)array('id' => 'price_x_' . $id, 'product' => $product)); };
+$two = (object)array('items' => (object)array('data' => array(
+	$item('si_tier', 'prod_tso_tier_' . $suffix),
+	$item('si_host', (object)array('id' => 'prod_tso_host_' . $suffix)),
+)));
+check($sh->subscription_item_for_line($two, $hosting_line)->id === 'si_host' && $sh->subscription_item_for_line($two, $tier_line)->id === 'si_tier',
+	'the hosting line finds the hosting item (first or second, string or expanded product), the tier line the tier item');
+$none = (object)array('items' => (object)array('data' => array($item('si_a', 'prod_other'), $item('si_b', 'prod_other2'))));
+$why = '';
+try { $sh->subscription_item_for_line($none, $tier_line); } catch (Exception $e) { $why = $e->getMessage(); }
+check(strpos($why, 'no item for this plan') !== false, 'no matching item refuses rather than taking the first', $why);
+$dup = (object)array('items' => (object)array('data' => array($item('si_a', 'prod_tso_tier_' . $suffix), $item('si_b', 'prod_tso_tier_' . $suffix))));
+$why = '';
+try { $sh->subscription_item_for_line($dup, $tier_line); } catch (Exception $e) { $why = $e->getMessage(); }
+check(strpos($why, 'more than once') !== false, 'two matching items refuse', $why);
+$one = (object)array('items' => (object)array('data' => array($item('si_only', 'prod_renamed'))));
+check($sh->subscription_item_for_line($one, $tier_line)->id === 'si_only', 'a one-item subscription is that item');
+
+section('A tier change replaces the tier line only: the hosting line bought beside it stays current');
+$sub = 'sub_tso_cart_' . $suffix;
+$cart = new Order(NULL);
+$cart->set('ord_usr_user_id', $uid);
+$cart->set('ord_status', Order::STATUS_PAID);
+$cart->set('ord_total_cost', 10);
+$cart->save();
+$line_on = function ($order, $product) use ($uid, $sub) {
+	$i = new OrderItem(NULL);
+	$i->set('odi_ord_order_id', $order->key);
+	$i->set('odi_usr_user_id', $uid);
+	$i->set('odi_pro_product_id', $product->key);
+	$i->set('odi_price', 5);
+	$i->set('odi_status', OrderItem::STATUS_PAID);
+	$i->set('odi_is_subscription', true);
+	$i->set('odi_stripe_subscription_id', $sub);
+	$i->set('odi_subscription_status', 'active');
+	$i->save();
+	return (int)$i->key;
+};
+$cart_tier = $line_on($cart, $tier_product);
+$cart_host = $line_on($cart, $hosting_product);
+$ids_now = function () use ($sub) {
+	return array_map(function ($l) { return (int)$l->key; }, StripeHelper::subscription_current_lines($sub));
+};
+check($ids_now() === array($cart_host, $cart_tier), 'one cart: both lines are current');
+$change = new Order(NULL);
+$change->set('ord_usr_user_id', $uid);
+$change->set('ord_status', Order::STATUS_PAID);
+$change->set('ord_total_cost', 5);
+$change->save();
+$new_tier = $line_on($change, $tier_product);
+check($ids_now() === array($new_tier, $cart_host), 'after a tier change: the new tier line and the hosting line, not the replaced tier line',
+	json_encode($ids_now()));
+$change2 = new Order(NULL);
+$change2->set('ord_usr_user_id', $uid);
+$change2->set('ord_status', Order::STATUS_PAID);
+$change2->set('ord_total_cost', 5);
+$change2->save();
+$newer_tier = $line_on($change2, $tier_product);
+check($ids_now() === array($newer_tier, $cart_host), 'and after a second change, still the hosting line');
 
 $_SESSION = array();
 $db->rollBack();

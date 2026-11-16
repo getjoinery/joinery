@@ -101,7 +101,7 @@ class NeverDoCheck {
 		'copy_import', 'copy_restore', 'copy_stage', 'move_to_plane', 'fleet_enroll', 'take_node_id',
 		'data_root_encrypt', 'data_root_decrypt', 'data_root_enrol', 'data_root_migrate', 'data_root_rekey',
 		'data_root_provider_layer', 'data_root_recipient',
-		'decommission_site', 'decommission_moved_site', 'disable_root_login',
+		'decommission_site', 'decommission_moved_site', 'decommission_held_site', 'disable_root_login',
 		'provision_certificate', 'remove_site_certificate', 'site_certificate_stage',
 		'outbound_limits', 'site_limits', 'hold_container', 'restart_container', 'restart_unit',
 		'reset_failed_unit', 'restart_agent', 'reboot_machine', 'trust_forwarder', 'hosted_mail_settings',

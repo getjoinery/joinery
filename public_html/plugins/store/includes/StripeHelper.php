@@ -977,6 +977,88 @@ class StripeHelper {
 		SystemBase::server_initiated_write(function () use ($order_item) { $order_item->save(); });
 	}
 
+	/**
+	 * The order lines a Stripe subscription pays for now, newest first. One
+	 * checkout can put several lines on one subscription (a tier and a hosted
+	 * site), and a tier change puts its new tier line, in an order of its
+	 * own, on the same subscription: the tier line it replaced is not
+	 * current. Only that is replaced: a line is left out when it grants a
+	 * tier and a newer tier line from another order is on the same id. A
+	 * hosting line bought beside a tier stays current through any number of
+	 * tier changes.
+	 *
+	 * @return OrderItem[]
+	 */
+	public static function subscription_current_lines(string $subscription_id): array {
+		$current = array();
+		$newer_tier_orders = array();
+		foreach (new MultiOrderItem(array('odi_stripe_subscription_id' => $subscription_id), array('order_item_id' => 'DESC')) as $line) {
+			$order_id = (int)$line->get('odi_ord_order_id');
+			$tier = TierBilling::lineGrantsTier($line);
+			if ($tier && array_diff($newer_tier_orders, array($order_id))) {
+				continue;
+			}
+			$current[] = $line;
+			if ($tier) {
+				$newer_tier_orders[] = $order_id;
+			}
+		}
+		return $current;
+	}
+
+	/**
+	 * Does this Stripe subscription item bill for this order line? One
+	 * checkout can put several recurring lines on one subscription, one item
+	 * each, so an item is told by what it sells: its price's product is the
+	 * line's product at Stripe (pro_stripe_product_id, per mode), or its
+	 * price is one of the line's product's own versions. The line's stored
+	 * price id is not asked: it may be a coupon's.
+	 */
+	public function item_bills_line($item, $line): bool {
+		$product = new Product((int)$line->get('odi_pro_product_id'), TRUE);
+		if (!$product->key) {
+			return false;
+		}
+		$want = (string)$product->get($this->test_mode ? 'pro_stripe_product_id_test' : 'pro_stripe_product_id');
+		$price = $item->price ?? null;
+		$sold = $price ? (is_string($price->product ?? null) ? $price->product : (string)($price->product->id ?? '')) : '';
+		if ($want !== '' && $sold === $want) {
+			return true;
+		}
+		$price_id = $price ? (string)($price->id ?? '') : '';
+		if ($price_id === '') {
+			return false;
+		}
+		$version = ProductVersion::GetByColumn($this->test_mode ? 'prv_stripe_price_id_test' : 'prv_stripe_price_id', $price_id);
+		return $version && (int)$version->get('prv_pro_product_id') === (int)$product->key;
+	}
+
+	/**
+	 * The item of $subscription that bills $line. A subscription of one item
+	 * is that item. Throws when none or more than one matches, so a change
+	 * never lands on another line's item: two lines of one product on one
+	 * subscription (two Starter sites in one cart) cannot be told apart, and
+	 * a cycle change on either asks the buyer to contact support.
+	 */
+	public function subscription_item_for_line($subscription, $line) {
+		$items = $subscription->items->data ?? array();
+		if (count($items) === 1) {
+			return $items[0];
+		}
+		$hits = array();
+		foreach ($items as $item) {
+			if ($this->item_bills_line($item, $line)) {
+				$hits[] = $item;
+			}
+		}
+		if (count($hits) !== 1) {
+			throw new Exception(count($hits) === 0
+				? 'The payment processor\'s subscription has no item for this plan. Please contact support.'
+				: 'The payment processor\'s subscription bills this plan more than once. Please contact support.');
+		}
+		return $hits[0];
+	}
+
 	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){
 		$subscription = $this->client()->subscriptions->update(
 			$subscription_id,

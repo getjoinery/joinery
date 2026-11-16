@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.95 - bring_back_hosted: a held Starter site started again after a late payment (HostedLateReturn, O3)
+ * @version 1.94 - decommission_node on a held Starter site marked ready to remove: level 10, the host's hold
+ *                is the gate (hosting_paid_launch B1)
  * @version 1.93 - suspend_site and unsuspend_site: Suspend and Unsuspend a hosted site (HostedSuspensions, hosting_launch S6);
  *                hold_container start and recreate_site are refused for a suspended site (reviewer2 B2)
  * @version 1.92 - mail_test_send, from a mailbox domain answer's Send test message button
@@ -280,6 +283,7 @@ class NodeDetailActions {
 		'save_node'                => 'overview',
 		'delete_node'              => 'overview',
 		'decommission_node'        => 'overview',
+		'bring_back_hosted'        => 'overview',
 		'remove_site_certificate'  => 'overview',
 		'purge_node'               => 'overview',
 		'restore_node'             => 'overview',
@@ -1491,6 +1495,16 @@ class NodeDetailActions {
 				return '/admin/server_manager';
 			}
 
+			case 'bring_back_hosted': {
+				// A held Starter site whose late payment came in (HostedLateReturn).
+				if (!$node->key) {
+					return $base_url;
+				}
+				$steps = HostedLateReturn::bring_back($node, (int)$uid);
+				self::ok($session, $page_regex, 'Bring back started. ' . implode(' ', $steps));
+				return $base_url . '&tab=overview';
+			}
+
 			case 'decommission_node': {
 				if (!$node->key) {
 					return $base_url;
@@ -1512,10 +1526,20 @@ class NodeDetailActions {
 				// processor finalizes the right record. Built first, so every
 				// refusal (unpaired host, core too old, open jobs) lands before
 				// anything is filed.
+				// A held customer site is removed with no approval from the site,
+				// so only the top level starts it.
+				$held = !JobCommandBuilder::decommission_is_moved($node) && JobCommandBuilder::decommission_is_held($node);
+				if ($held && !Access::decide(10, $session)) {
+					$session->save_message(new DisplayMessage(
+						'Removing a held customer site needs permission level 10. Nothing was deleted.', 'Error',
+						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+					));
+					return $base_url . '&tab=overview';
+				}
 				$built = JobCommandBuilder::build_decommission_node($node, []);
 				$host_node = JobCommandBuilder::decommission_host_node_for($node);
 				$job = ManagementJob::createFromBuild($host_node->key, 'decommission_node', $built,
-					['victim_node_id' => $node->key, 'site' => $expected], $uid);
+					['victim_node_id' => $node->key, 'site' => $expected] + ($held ? ['held_removal' => '1'] : []), $uid);
 				// The victim goes quiet: its agent dies with the container, and
 				// that death is a deliberate silence, not a node that broke.
 				$node->set('mgn_agent_quiet_time', gmdate('Y-m-d H:i:s'));
@@ -1524,8 +1548,12 @@ class NodeDetailActions {
 					JobCommandBuilder::decommission_is_moved($node)
 						? 'Permanent deletion started. The domain was seen reaching the new server; the host now checks '
 							. 'that it no longer reaches this site, and removes nothing if it still does or cannot be reached.'
-						: 'Permanent deletion started. The site must approve its own removal on its Backups page; '
-							. 'the record is removed once the host verifies the site gone.', 'Success',
+						: ($held
+							? 'Permanent deletion started. The host checks that it has held this site stopped for at least 55 days, '
+								. 'and removes nothing otherwise. Once it verifies the site gone, its mail account is closed, its relay '
+								. 'slot freed, its domain parked for its buyer and its record removed.'
+							: 'Permanent deletion started. The site must approve its own removal on its Backups page; '
+								. 'the record is removed once the host verifies the site gone.'), 'Success',
 					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return self::jobUrl($job);

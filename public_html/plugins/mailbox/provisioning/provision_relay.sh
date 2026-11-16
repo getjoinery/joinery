@@ -14,6 +14,9 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.20 - the operator's tenant-remove takes force: a released slot's spool nobody will collect
+#                is removed with it; removing a tenant already gone answers ok
+#                (specs/hosting_paid_launch.md B6)
 # Version: 3.19 - the identity's code as people compare it (SHA-256 of the public key, 16 bytes as hex) in the
 #                banner and in /etc/issue, so the provider's console login screen shows it
 #                (specs/relay_update_trust_step.md R4)
@@ -128,7 +131,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.19"
+RELAY_VERSION="3.20"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

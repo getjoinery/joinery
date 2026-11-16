@@ -28,6 +28,9 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.11 - phase 5 empties a released slot's allowlist before removing it, and removes it with its
+ *                spool once mailbox_fleet_release_drain_days have passed, telling the operator
+ *                (mailbox.fleet_slot_mail_discarded; hosting_paid_launch B6)
  * @version 1.10 - phase 5 releases a site's slot once its site is removed (FleetService::siteGone)
  * @version 1.9 - phase 0 (Hosted slot): a seeded site that can receive only through a relay enrolls itself
  * @version 1.8 - phase 5 asks FleetService::slotEntitled(): a hosted site's slot is entitled by the site's hosting
@@ -375,8 +378,34 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 				continue;
 			}
 			if ($status === MailboxFleetSlot::STATUS_RELEASED) {
-				if (FleetService::applyTenant($slot, 'remove_tenant')) {
+				// The shard stops accepting for the slot's domains first, so
+				// nothing more arrives for a site that will not collect it.
+				// The remove follows whatever the shard made of the list: a
+				// tenant the shard does not have refuses the list and answers
+				// the remove ok, and an undrained spool still refuses an
+				// unforced remove.
+				if ((bool)$slot->get('mft_needs_domain_sync') && FleetService::applyTenant($slot, 'set_domains')) {
 					$dispatched++;
+				}
+				// The shard removes it once its site has collected what is
+				// waiting; past the keeping time, with whatever is left. A
+				// shard older than relay 3.20 cannot remove with mail left.
+				$force = FleetService::releaseDrainOver($slot);
+				$verdict = array();
+				if (FleetService::applyTenant($slot, 'remove_tenant', array('force' => $force), $verdict)) {
+					$dispatched++;
+				}
+				if ($force && (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_RELEASED
+						&& !FleetService::shardForcesRemoval($slot)) {
+					$notes[] = 'slot ' . $slot->key . ' is past its keeping time, but its shard runs a relay older than '
+						. RelayVersion::REMOVES_WITH_MAIL_LEFT . ' and keeps it until its mail is collected: renew the shard';
+				}
+				if ($force && (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_EVICTED) {
+					$detail = (string)($verdict['reason'] ?? '');
+					if (strpos($detail, 'undrained') !== false) {
+						$this->announceDiscarded($slot, $detail);
+						$notes[] = 'slot ' . $slot->key . ' removed with mail nobody collected';
+					}
 				}
 				continue;
 			}
@@ -433,6 +462,25 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 			$message .= '. ' . implode('; ', $notes);
 		}
 		return array('status' => 'success', 'message' => $message);
+	}
+
+	/**
+	 * Tell the operator a released slot went from its shard with mail still
+	 * waiting: that mail exists nowhere else and is now gone. Raised once,
+	 * on the pass that removed the slot.
+	 */
+	private function announceDiscarded(MailboxFleetSlot $slot, string $detail): void {
+		try {
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			$days = trim((string)Globalvars::get_instance()->get_setting('mailbox_fleet_release_drain_days')) ?: '30';
+			SignalBus::dispatch('mailbox.fleet_slot_mail_discarded', array(
+				'slot'   => '#' . $slot->key . ' (' . (string)$slot->get('mft_slug') . ')',
+				'detail' => 'The slot was released ' . $days . ' or more days ago and its site never collected what '
+					. 'its shard held, so the shard removed it: ' . $detail . '. Those messages were deleted.',
+			));
+		} catch (Throwable $e) {
+			error_log('MailboxRelayReconcile: could not announce slot ' . $slot->key . ' removed with mail: ' . $e->getMessage());
+		}
 	}
 
 	private function truthy($value): bool {

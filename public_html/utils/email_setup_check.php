@@ -75,6 +75,14 @@ $page->admin_header([
                 // Perform the checks
                 $checker = new EmailAuthChecker($domain, $is_comprehensive, $assessment['service_key_names']);
                 $results = $checker->checkAll();
+                // The verdict on each check is the plain assessment's, the one
+                // Settings > Email shows: on hosted mail a missing SPF is
+                // advice, not a failure. The scan below adds detail only.
+                $tone_of = array();
+                foreach ($assessment['explanation']['rows'] as $row) {
+                    $tone_of[$row['tech']] = $row['tone'];
+                }
+                $marks = array('success' => '✓', 'warning' => '!', 'danger' => '✗');
                 
                 // Display results
                 ?>
@@ -123,8 +131,8 @@ $page->admin_header([
                                 </ul>
                             <?php endif; ?>
                         <?php else: ?>
-                            <div class="alert alert-danger">
-                                No SPF record found for this domain.
+                            <div class="alert alert-<?php echo ($tone_of['SPF'] ?? 'danger') === 'warning' ? 'warning' : 'danger'; ?>">
+                                No SPF record found for this domain.<?php echo ($tone_of['SPF'] ?? '') === 'warning' ? ' Your mail service already passes SPF under its own domain, so this is advice, not a failure.' : ''; ?>
                             </div>
                         <?php endif; ?>
                         
@@ -363,25 +371,22 @@ $page->admin_header([
                         <div class="row text-center">
                             <div class="col-md-4">
                                 <div class="p-3">
-                                    <h2 class="<?php echo $results['spf']['valid'] ? 'text-success' : 'text-danger'; ?>">
-                                        <?php echo $results['spf']['valid'] ? '✓' : '✗'; ?>
-                                    </h2>
+                                    <?php $t = $tone_of['SPF'] ?? ($results['spf']['valid'] ? 'success' : 'danger'); ?>
+                                    <h2 class="text-<?php echo $t; ?>"><?php echo $marks[$t]; ?></h2>
                                     <h5>SPF</h5>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="p-3">
-                                    <h2 class="<?php echo $validDkimCount > 0 ? 'text-success' : 'text-danger'; ?>">
-                                        <?php echo $validDkimCount > 0 ? "✓ ($validDkimCount)" : '✗'; ?>
-                                    </h2>
+                                    <?php $t = $tone_of['DKIM'] ?? ($validDkimCount > 0 ? 'success' : 'danger'); ?>
+                                    <h2 class="text-<?php echo $t; ?>"><?php echo $marks[$t] . ($validDkimCount > 0 ? " ($validDkimCount)" : ''); ?></h2>
                                     <h5>DKIM</h5>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="p-3">
-                                    <h2 class="<?php echo $results['dmarc']['valid'] ? 'text-success' : 'text-danger'; ?>">
-                                        <?php echo $results['dmarc']['valid'] ? '✓' : '✗'; ?>
-                                    </h2>
+                                    <?php $t = $tone_of['DMARC'] ?? ($results['dmarc']['valid'] ? 'success' : 'danger'); ?>
+                                    <h2 class="text-<?php echo $t; ?>"><?php echo $marks[$t]; ?></h2>
                                     <h5>DMARC</h5>
                                 </div>
                             </div>

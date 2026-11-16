@@ -12,7 +12,12 @@
  *                    new machine. The copy's row takes S's old machine and
  *                    becomes `retired`, kept out of every automation, holding
  *                    the key the way back needs. Provision rows and escrow
- *                    rows follow their machines.
+ *                    rows follow their machines, except a SOLD provision
+ *                    (an order or a buyer's checkout made it): that is the
+ *                    site's purchase, its billing row, relay slot and mail
+ *                    account hang on it, and removing the old machine would
+ *                    remove them all. It stays on the site's row and only
+ *                    its machine columns follow the machine.
  *   go_back(N, R)    the inverse: the node takes back the machine on the
  *                    retired row and returns to `switching` (its owner unfreezes
  *                    it); the other row becomes `copy` again.
@@ -29,6 +34,9 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.11 - a sold provision stays with the site: only its machine columns move (PROVISION_MACHINE_COLUMNS),
+ *                 so its order, billing row, relay slot and mail account are not removed with the old machine
+ *                 (hosting_paid_launch B5, R17)
  * @version 1.10 - mgn_agent_unseal_daemon moves with the machine, beside the agent's other reports
  * @version 1.9 - the agent's X-Wing key and its signature move with the machine, beside its agent key
  * @version 1.8 - mgn_agent_root_access moves with the machine, beside mgn_agent_log_access
@@ -62,6 +70,22 @@ class SiteCopySwap {
 		'mgn_agent_version', 'mgn_agent_primitives', 'mgn_agent_recipes', 'mgn_agent_bundle_version',
 		'mgn_agent_log_access', 'mgn_agent_root_access', 'mgn_agent_server_manager', 'mgn_agent_update_state', 'mgn_agent_update_offered', 'mgn_agent_bundle_state', 'mgn_agent_unseal_daemon',
 		'mgn_script_trust', 'mgn_script_trust_since', 'mgn_script_trust_reason', 'mgn_script_trust_job_type',
+	);
+
+	/**
+	 * The columns of a provision that describe its machine rather than the
+	 * purchase: whose account it is in, the instance or the host place, and
+	 * the machine's own keys. At a switch-over these follow the machine while
+	 * a sold provision stays with the site. The docker mode is settled on its
+	 * own (settle_sold_provisions): a copy's provision must stay bare metal.
+	 */
+	const PROVISION_MACHINE_COLUMNS = array(
+		'cvp_hosting_mode', 'cvp_oca_operator_cloud_account_id', 'cvp_cca_customer_cloud_account_id', 'cvp_provider',
+		'cvp_instance_id', 'cvp_instance_ip', 'cvp_instance_ipv6', 'cvp_region', 'cvp_instance_type',
+		'cvp_landing', 'cvp_mgh_managed_host_id', 'cvp_port',
+		'cvp_root_pass_sealed', 'cvp_root_ssh_keys', 'cvp_root_pass_vault_sealed', 'cvp_root_access_offered',
+		'cvp_data_root_encrypted', 'cvp_provider_disk_encryption',
+		'cvp_expected_site_key', 'cvp_expected_host_key', 'cvp_keys_captured_time',
 	);
 
 	/**
@@ -107,6 +131,83 @@ class SiteCopySwap {
 		if ($have !== $other_state || (int)$other->get('mgn_copy_of_node_id') !== (int)$node->key) {
 			throw new Exception("Cannot {$what}: '{$other->get('mgn_slug')}' is not the {$other_state} row of '{$node->get('mgn_slug')}'.");
 		}
+	}
+
+	/**
+	 * Keep each row's sold provision on its row, and make it describe the
+	 * machine the row now holds. Called after the node rows' machine columns
+	 * have moved and before the provision links move.
+	 *
+	 * With a provision on the other row too (a copy onto a new server has
+	 * one), the two trade machine columns, so each still describes the
+	 * machine on its own row: neither changes row. A copy onto a host has
+	 * none: a sold container provision then takes the host and port its row
+	 * now holds. A sold instance provision with nothing to trade with is
+	 * left to follow its machine, and the error log says so: its row would
+	 * otherwise name an instance it no longer runs on.
+	 *
+	 * @return int[] the provision ids that stay where they are
+	 */
+	private static function settle_sold_provisions(ManagedNode $node, ManagedNode $other): array {
+		$on = function (ManagedNode $row) {
+			$out = array();
+			foreach (new MultiCustomerCloudProvision(array('node_id' => (int)$row->key, 'deleted' => false)) as $p) {
+				$out[] = $p;
+			}
+			return $out;
+		};
+		$sides = array(array($node, $on($node), $other, $on($other)), array($other, $on($other), $node, $on($node)));
+		$stay = array();
+		$traded = array();
+		foreach ($sides as list($row, $mine, $far, $theirs)) {
+			foreach ($mine as $p) {
+				if (!$p->is_sold() || isset($traded[(int)$p->key])) {
+					continue;
+				}
+				$partner = null;
+				foreach ($theirs as $q) {
+					if (!$q->is_sold() && !isset($traded[(int)$q->key])) {
+						$partner = $q;
+						break;
+					}
+				}
+				if ($partner !== null) {
+					foreach (self::PROVISION_MACHINE_COLUMNS as $col) {
+						$a = $p->get($col);
+						$p->set($col, $partner->get($col));
+						$partner->set($col, $a);
+					}
+					// A container site is a docker one; a site on a server of
+					// its own runs as that server was installed. A copy's own
+					// provision is bare metal whatever it now describes: that
+					// is what its copy install was.
+					$pd = (string)($p->get('cvp_docker_mode') ?: 'docker');
+					$qd = (string)($partner->get('cvp_docker_mode') ?: 'docker');
+					$p->set('cvp_docker_mode', $p->is_container() ? 'docker' : $qd);
+					if ((string)$partner->get('cvp_install_mode') !== 'copy') {
+						$partner->set('cvp_docker_mode', $partner->is_container() ? 'docker' : $pd);
+					}
+					// Each validates against the machine it now describes;
+					// saved through the model only once both have moved.
+					$p->save();
+					$partner->save();
+					$traded[(int)$p->key] = true;
+					$traded[(int)$partner->key] = true;
+					$stay[] = (int)$p->key;
+					$stay[] = (int)$partner->key;
+				} elseif ($p->is_container() && trim((string)$row->get('mgn_container_name')) !== '') {
+					$p->set('cvp_mgh_managed_host_id', (int)$row->get('mgn_mgh_managed_host_id') ?: null);
+					$p->set('cvp_port', (int)$row->get('mgn_port') ?: 8080);
+					$p->save();
+					$stay[] = (int)$p->key;
+				} else {
+					error_log('SiteCopySwap: sold provision #' . $p->key . ' (' . $p->get('cvp_domain') . ') has no provision on '
+						. $far->get('mgn_slug') . ' to trade machines with, so it follows its machine to that row; '
+						. 'removing that row removes the purchase with it.');
+				}
+			}
+		}
+		return $stay;
 	}
 
 	/**
@@ -157,11 +258,17 @@ class SiteCopySwap {
 			$node->save();
 			$other->save();
 
-			// A provision row names the machine it created; it follows that machine.
+			// A sold provision stays with the site; its machine columns follow
+			// the machine. Read before the links below move.
+			$sold = self::settle_sold_provisions($node, $other);
+
+			// A provision row names the machine it created; it follows that
+			// machine. The sold ones settled above are left where they are.
+			$keep = $sold ? ' AND cvp_customer_cloud_provision_id NOT IN (' . implode(',', array_map('intval', $sold)) . ')' : '';
 			$q = $db->prepare(
 				'UPDATE cvp_customer_cloud_provisions SET cvp_mgn_managed_node_id = CASE cvp_mgn_managed_node_id
 				   WHEN ?::bigint THEN ?::bigint WHEN ?::bigint THEN ?::bigint END
-				 WHERE cvp_mgn_managed_node_id IN (?::bigint, ?::bigint)');
+				 WHERE cvp_mgn_managed_node_id IN (?::bigint, ?::bigint)' . $keep);
 			$q->execute(array((int)$node->key, (int)$other->key, (int)$other->key, (int)$node->key,
 				(int)$node->key, (int)$other->key));
 			// So does an escrow row: its unlock identity is on that machine's disk.

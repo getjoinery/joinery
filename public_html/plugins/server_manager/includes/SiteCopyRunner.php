@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.46 - a sold Starter site may be copied onto another starter host (O2); a sold Managed site is never
+ *                 copied onto a host, where its purchase would follow the old server (hosting_paid_launch B5)
  * @version 1.45 - a suspended site is refused as a copy's source: only Unsuspend lifts a suspension (reviewer2 B2)
  * @version 1.44 - a starter host is refused as a copy's host: its places are sold Starter sites (reviewer2 F2-8)
  * @version 1.43 - copy_encryption() says a copy not encrypted by us is born under the provider's own disk encryption,
@@ -998,9 +1000,19 @@ class SiteCopyRunner {
 		}
 		$why = array();
 		// A starter host's places are sold, each with the starter limits; an
-		// operator's copy would take one with its source's limits instead.
-		if ((string)$host->get('mgh_tier') === 'starter') {
+		// operator's copy would take one with its source's limits instead. A
+		// sold Starter site moving to another starter host is one of those
+		// sites, with those limits (hosting_paid_launch O2).
+		$sold = CustomerCloudProvision::latest_for_node($source->key);
+		$sold = ($sold !== null && $sold->is_sold()) ? $sold : null;
+		if ((string)$host->get('mgh_tier') === 'starter' && !($sold !== null && $sold->is_container())) {
 			$why[] = 'It is a starter host: it takes only the Starter sites the configure page sells.';
+		}
+		// A sold site on a server of its own keeps its purchase only by trading
+		// machines with its copy's own provision, and a copy onto a host has
+		// none: the purchase would follow the old server and go with it.
+		if ($sold !== null && !$sold->is_container()) {
+			$why[] = 'This site is a sold Managed site, and a copy onto a host would leave its purchase on the old server. Copy it to a new server instead.';
 		}
 		// Its agent installs the copy and holds it quiet: it must answer.
 		$heard = self::agent_heard_at($host_node);

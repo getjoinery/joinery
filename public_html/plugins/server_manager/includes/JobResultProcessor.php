@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.134 - a verified held removal (held_removal) closes the site's mail account and suspension first
+ *                (HostedHeldRemoval, hosting_paid_launch B1)
  * @version 1.133 - script_json reads the last JSON line when a script's logged lines come ahead of its answer
  * @version 1.132 - sanitise_mail_test_send: sent with its token, or why it was refused
  * @version 1.131 - sanitise_mailbox_status: the no-domain counts and domain list, or one domain's rows, flags, DNS and send outcomes
@@ -6232,13 +6234,19 @@ HTML;
 					self::record_moved_check($node, 'absent',
 						'Its container was removed from the host (job ' . (int)$job->key . ').');
 				}
+				if ($node->key && !$node->get('mgn_delete_time')
+						&& (string)(is_array($params) ? ($params['held_removal'] ?? '') : '') === '1') {
+					// A held customer site: its mail account and suspension go
+					// while its records are still live (HostedHeldRemoval).
+					$also = HostedHeldRemoval::finish($node);
+				}
 				if ($node->key) {
 					// The fact Remove Permanently waits for: the host saw the container gone.
 					$node->set('mgn_site_removed_time', gmdate('Y-m-d H:i:s'));
 					if (!$node->get('mgn_delete_time')) {
 						$node->soft_delete();
 						$soft_deleted = true;
-						$also = $node->removal_notes();
+						$also = array_merge($also, $node->removal_notes());
 					} else {
 						$node->save();
 					}

@@ -213,7 +213,13 @@ function change_tier_logic(array $input): LogicResult {
                         throw new Exception('Your subscription has no active items. Please contact support.');
                     }
 
-                    $item_id = $subscription->items->data[0]->id;
+                    // The item that bills the tier line: one subscription may pay
+                    // for several lines (a tier and hosting bought together).
+                    try {
+                        $item_id = $stripe_helper->subscription_item_for_line($subscription, $current_subscription)->id;
+                    } catch (Exception $e) {
+                        throw new Exception('Unable to find your plan on your subscription: ' . $e->getMessage());
+                    }
 
 
                     // Update subscription with Stripe
@@ -346,7 +352,13 @@ function change_tier_logic(array $input): LogicResult {
                         throw new Exception('Your subscription has no active items. Please contact support.');
                     }
 
-                    $item_id = $subscription->items->data[0]->id;
+                    // The item that bills the tier line: one subscription may pay
+                    // for several lines (a tier and hosting bought together).
+                    try {
+                        $item_id = $stripe_helper->subscription_item_for_line($subscription, $current_subscription)->id;
+                    } catch (Exception $e) {
+                        throw new Exception('Unable to find your plan on your subscription: ' . $e->getMessage());
+                    }
 
                     // Honor the configured timing. An end-of-period downgrade must
                     // leave the subscriber on the tier they already paid for until

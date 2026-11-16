@@ -11,6 +11,8 @@
  * fleet_status can reconcile lazily (server_manager never learns what a
  * tenant is).
  *
+ * @version 1.4 - mft_release_time, and shardDomains(): a suspended or released slot's shard allowlist is
+ *                empty (hosting_paid_launch B6)
  * @version 1.3 - mft_cvp_customer_cloud_provision_id: a slot a hosted site's plan grants belongs to that site;
  *                activeForUser() answers only for the buyer's tier slot, activeForProvision() for a site's
  * @version 1.2 - mft_mx_hostname_applied: the mail name last delivered to the slot's shard
@@ -92,6 +94,9 @@ class MailboxFleetSlot extends SystemBase {
 		// first observed (suspension fires after the grace window).
 		'mft_entitlement_check_time'=> array('type'=>'timestamp(6)'),
 		'mft_entitlement_lapse_time'=> array('type'=>'timestamp(6)'),
+		// When the slot was released: a spool its shard still holds this many
+		// days later (mailbox_fleet_release_drain_days) is removed with it.
+		'mft_release_time'          => array('type'=>'timestamp(6)'),
 		'mft_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mft_update_time'           => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mft_delete_time'           => array('type'=>'timestamp(6)'),
@@ -126,7 +131,20 @@ class MailboxFleetSlot extends SystemBase {
 		return null;
 	}
 
-	/** All verified domains claimed by this slot (the shard allowlist content). */
+	/**
+	 * What the shard may accept mail for: the verified domains of a slot that
+	 * is live, and nothing for one suspended or released, so the shard refuses
+	 * its mail at once rather than keeping it for nobody.
+	 */
+	public function shardDomains(): array {
+		$status = (string)$this->get('mft_status');
+		if ($status !== self::STATUS_ACTIVE && $status !== self::STATUS_PROVISIONING) {
+			return array();
+		}
+		return $this->verifiedDomains();
+	}
+
+	/** All verified domains claimed by this slot. */
 	public function verifiedDomains(): array {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_domain_claims_class.php'));
 		$claims = new MultiMailboxFleetDomainClaim(array(

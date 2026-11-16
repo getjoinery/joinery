@@ -1,4 +1,51 @@
 <?php
+/**
+ * The billing page: the card on file, each active subscription with its own
+ * billing cycle, and the history.
+ *
+ * A buyer may hold more than one subscription at once (a tier and a hosted
+ * site, say), so every subscription gets its own section, and a cycle change
+ * names the subscription it changes (odi_order_item_id) and is checked to be
+ * one of the buyer's own active ones. The card is one per Stripe customer,
+ * shown once.
+ *
+ * @version 1.1 - one section per active subscription; change_billing_cycle names its subscription
+ *                (hosting_paid_launch B12)
+ */
+
+/**
+ * One active subscription as the page shows it: the line, how it is paid, its
+ * product and price, and the other billing cycles it could switch to.
+ */
+function billing_subscription_section(OrderItem $item): array {
+    $section = array(
+        'item'            => $item,
+        'payment_system'  => $item->get('odi_stripe_subscription_id') ? 'stripe'
+            : ($item->get('odi_paypal_subscription_id') ? 'paypal' : null),
+        'product'         => null,
+        'version'         => null,
+        'alternatives'    => array(),
+        'show_switcher'   => false,
+    );
+    $product = new Product($item->get('odi_pro_product_id'), TRUE);
+    $section['product'] = $product->key ? $product : null;
+    $version = new ProductVersion($item->get('odi_prv_product_version_id'), TRUE);
+    $section['version'] = $version->key ? $version : null;
+    if ($section['payment_system'] !== 'stripe' || !$section['product'] || !$section['version']) {
+        return $section;
+    }
+    $type = $version->get('prv_price_type');
+    if ($type && $type !== 'single') {
+        foreach (($product->get_product_versions(true) ?: array()) as $alt) {
+            $alt_type = $alt->get('prv_price_type');
+            if ($alt_type && $alt_type !== 'single' && $alt_type !== $type) {
+                $section['alternatives'][] = $alt;
+            }
+        }
+        $section['show_switcher'] = !empty($section['alternatives']) && !$item->get('odi_subscription_cancelled_time');
+    }
+    return $section;
+}
 
 function billing_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -28,35 +75,27 @@ function billing_logic(array $input): LogicResult {
     $page_vars['user'] = $user;
     $page_vars['settings'] = $settings;
 
-    // Find active subscription
-    $current_subscription = null;
-    $subscriptions = new MultiOrderItem(
+    // Every active subscription, newest first, each with its own section.
+    $page_vars['subscriptions'] = array();
+    foreach (new MultiOrderItem(
         array('user_id' => $user_id, 'is_active_subscription' => true),
         array('order_item_id' => 'DESC')
-    );
-    $subscriptions->load();
-
-    if ($subscriptions->count() > 0) {
-        $current_subscription = $subscriptions->get(0);
+    ) as $item) {
+        $page_vars['subscriptions'][] = billing_subscription_section($item);
     }
-    $page_vars['current_subscription'] = $current_subscription;
-
-    // Determine payment system
-    $payment_system = null;
-    if ($current_subscription) {
-        if ($current_subscription->get('odi_stripe_subscription_id')) {
-            $payment_system = 'stripe';
-        } elseif ($current_subscription->get('odi_paypal_subscription_id')) {
-            $payment_system = 'paypal';
-        }
-    }
-    $page_vars['payment_system'] = $payment_system;
+    $systems = array_column($page_vars['subscriptions'], 'payment_system');
+    $page_vars['has_stripe'] = in_array('stripe', $systems, true);
+    $page_vars['has_paypal'] = in_array('paypal', $systems, true);
+    // Change tier manages a tier subscription; hosting is managed elsewhere.
+    $page_vars['has_tier_subscription'] = count(new MultiOrderItem(
+        array('user_id' => $user_id, 'is_active_subscription' => true, 'grants_tier' => true))) > 0;
 
     // Get Stripe customer ID (identity lives in the store's stc_stripe_customers table)
     require_once(PathHelper::getIncludePath('plugins/store/data/stripe_customers_class.php'));
     $stripe_cust = StripeCustomer::GetForUser($user->key);
     $stripe_customer_id = null;
-    if ($payment_system === 'stripe' || $stripe_cust->get('stc_customer_id') || $stripe_cust->get('stc_customer_id_test')) {
+    $stripe_helper = null;
+    if ($page_vars['has_stripe'] || $stripe_cust->get('stc_customer_id') || $stripe_cust->get('stc_customer_id_test')) {
         try {
             $stripe_helper = new StripeHelper();
             $stripe_customer_id = $stripe_helper->get_stripe_customer_id($user);
@@ -66,9 +105,9 @@ function billing_logic(array $input): LogicResult {
     }
     $page_vars['stripe_customer_id'] = $stripe_customer_id;
 
-    // Load payment method info (Stripe only)
+    // The card on file: one per Stripe customer, whatever it pays for.
     $page_vars['payment_method'] = null;
-    if ($stripe_customer_id && $payment_system === 'stripe') {
+    if ($stripe_customer_id && $page_vars['has_stripe']) {
         try {
             $methods = $stripe_helper->get_payment_methods($stripe_customer_id);
             if ($methods && count($methods->data) > 0) {
@@ -82,37 +121,6 @@ function billing_logic(array $input): LogicResult {
             }
         } catch (Exception $e) {
             // Payment method lookup failed
-        }
-    }
-
-    // Load current product and alternative billing cycles (Stripe only)
-    $page_vars['current_product'] = null;
-    $page_vars['current_version'] = null;
-    $page_vars['alternative_versions'] = array();
-    $page_vars['show_cycle_switcher'] = false;
-
-    if ($current_subscription && $payment_system === 'stripe') {
-        $product = new Product($current_subscription->get('odi_pro_product_id'), TRUE);
-        $page_vars['current_product'] = $product;
-
-        $current_version = new ProductVersion($current_subscription->get('odi_prv_product_version_id'), TRUE);
-        $page_vars['current_version'] = $current_version;
-
-        $current_price_type = $current_version->get('prv_price_type');
-
-        // Find alternative versions with different billing cycles
-        if ($current_price_type && $current_price_type !== 'single') {
-            $all_versions = $product->get_product_versions(true);
-            if ($all_versions) {
-                foreach ($all_versions as $version) {
-                    $vpt = $version->get('prv_price_type');
-                    if ($vpt && $vpt !== 'single' && $vpt !== $current_price_type) {
-                        $page_vars['alternative_versions'][] = $version;
-                    }
-                }
-            }
-            $page_vars['show_cycle_switcher'] = !empty($page_vars['alternative_versions'])
-                && !$current_subscription->get('odi_subscription_cancelled_time');
         }
     }
 
@@ -136,12 +144,18 @@ function billing_logic(array $input): LogicResult {
     }
 
     // Try PayPal transaction history if no Stripe invoices
-    if (empty($page_vars['invoices']) && $current_subscription && $current_subscription->get('odi_paypal_subscription_id')) {
+    // PayPal history, only when Stripe has none: the first PayPal
+    // subscription's (PayPal checkout is off at launch, B8).
+    $paypal_item = null;
+    foreach ($page_vars['subscriptions'] as $section) {
+        if ($section['payment_system'] === 'paypal') { $paypal_item = $section['item']; break; }
+    }
+    if (empty($page_vars['invoices']) && $paypal_item) {
         try {
             require_once(PathHelper::getIncludePath('plugins/store/includes/PaypalHelper.php'));
             $paypal = new PaypalHelper();
             $transactions = $paypal->get_subscription_transactions(
-                $current_subscription->get('odi_paypal_subscription_id'),
+                $paypal_item->get('odi_paypal_subscription_id'),
                 date('Y-m-d\TH:i:s\Z', strtotime('-1 year')),
                 date('Y-m-d\TH:i:s\Z')
             );
@@ -195,13 +209,29 @@ function billing_logic(array $input): LogicResult {
                     return LogicResult::redirect($portal_session->url);
 
                 case 'change_billing_cycle':
-                    if (!$current_subscription || $payment_system !== 'stripe') {
-                        throw new Exception('Billing cycle changes are only available for Stripe subscriptions.');
+                    // The subscription this changes, named by the form and
+                    // found among the buyer's own active ones.
+                    $current_subscription = null;
+                    $named = null;
+                    $wanted = intval($input['odi_order_item_id'] ?? 0);
+                    foreach ($page_vars['subscriptions'] as $section) {
+                        if ((int)$section['item']->key === $wanted && $section['payment_system'] === 'stripe') {
+                            $named = $section;
+                            $current_subscription = $section['item'];
+                        }
                     }
-                    $new_version_id = intval($input['new_version_id']);
-                    $new_version = new ProductVersion($new_version_id, TRUE);
-
-                    if (!$new_version->key || $new_version->get('prv_pro_product_id') != $current_subscription->get('odi_pro_product_id')) {
+                    if (!$current_subscription || !$stripe_helper) {
+                        throw new Exception('Billing cycle changes are only available for your own Stripe subscriptions.');
+                    }
+                    // Only a cycle the page offers this subscription: another
+                    // active recurring version of its product, while it runs.
+                    $new_version = null;
+                    foreach ($named['show_switcher'] ? $named['alternatives'] : array() as $alt) {
+                        if ((int)$alt->key === intval($input['new_version_id'] ?? 0)) {
+                            $new_version = $alt;
+                        }
+                    }
+                    if ($new_version === null) {
                         throw new Exception('Invalid billing option selected.');
                     }
 
@@ -210,9 +240,10 @@ function billing_logic(array $input): LogicResult {
                     // discounted price, and the lookup replaces it.
                     $new_price_id = $stripe_helper->get_or_create_price($new_version)->id;
 
-                    // Get the subscription item ID from Stripe
+                    // The item that bills this line: one subscription may pay
+                    // for several lines, one item each.
                     $stripe_sub = $stripe_helper->get_subscription($current_subscription->get('odi_stripe_subscription_id'));
-                    $item_id = $stripe_sub->items->data[0]->id;
+                    $item_id = $stripe_helper->subscription_item_for_line($stripe_sub, $current_subscription)->id;
 
                     $stripe_helper->change_subscription(
                         $current_subscription->get('odi_stripe_subscription_id'),

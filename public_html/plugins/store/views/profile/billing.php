@@ -7,13 +7,8 @@ $page_vars = process_logic(billing_logic(array_merge($_GET, $_POST, $params ?? [
 
 $user                = $page_vars['user'];
 $settings            = $page_vars['settings'];
-$current_subscription = $page_vars['current_subscription'];
-$payment_system      = $page_vars['payment_system'];
+$subscriptions       = $page_vars['subscriptions'];
 $payment_method      = $page_vars['payment_method'];
-$current_product     = $page_vars['current_product'];
-$current_version     = $page_vars['current_version'];
-$alternative_versions = $page_vars['alternative_versions'];
-$show_cycle_switcher = $page_vars['show_cycle_switcher'];
 $invoices            = $page_vars['invoices'];
 $session             = SessionControl::get_instance();
 
@@ -58,7 +53,7 @@ $page->public_header([
             <?php endif; ?>
 
             <!-- Payment Method -->
-            <?php if ($payment_system === 'stripe' && $page_vars['stripe_customer_id']): ?>
+            <?php if ($page_vars['has_stripe'] && $page_vars['stripe_customer_id']): ?>
             <div class="card">
                 <div class="card-header">
                     <h5 class="jy-tight">Payment Method</h5>
@@ -92,7 +87,8 @@ $page->public_header([
                 </div>
             </div>
 
-            <?php elseif ($payment_system === 'paypal'): ?>
+            <?php endif; ?>
+            <?php if ($page_vars['has_paypal']): ?>
             <div class="card">
                 <div class="card-header">
                     <h5 class="jy-tight">Payment Method</h5>
@@ -109,23 +105,35 @@ $page->public_header([
             </div>
             <?php endif; ?>
 
-            <!-- Billing Cycle Switcher -->
-            <?php if ($show_cycle_switcher): ?>
+            <!-- One section per active subscription -->
+            <?php foreach ($subscriptions as $sub):
+                $item = $sub['item'];
+                $version = $sub['version'];
+                $product_name = $sub['product'] ? $sub['product']->get('pro_name') : 'Subscription';
+                $period_end = $item->get('odi_subscription_period_end') ? $item->get_local('odi_subscription_period_end', 'M j, Y') : '';
+                $cancelled = (bool)$item->get('odi_subscription_cancelled_time');
+            ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 class="jy-tight">Billing Cycle</h5>
+                    <h5 class="jy-tight"><?php echo htmlspecialchars($product_name, ENT_QUOTES, 'UTF-8'); ?></h5>
                 </div>
                 <div class="card-body">
                     <div class="jy-mb-4">
+                        <?php if ($version): ?>
                         <span class="jy-billing-bold">Current:</span>
-                        <?php echo htmlspecialchars($current_version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?>
-                        &mdash; $<?php echo number_format($current_version->get('prv_version_price'), 2); ?>/<?php echo htmlspecialchars($current_version->get('prv_price_type'), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php echo htmlspecialchars($version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?>
+                        &mdash; $<?php echo number_format($version->get('prv_version_price'), 2); ?>/<?php echo htmlspecialchars($version->get('prv_price_type'), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php endif; ?>
+                        <?php if ($period_end !== ''): ?>
+                        <div class="muted text-sm"><?php echo $cancelled ? 'Ends' : 'Renews'; ?> <?php echo htmlspecialchars($period_end, ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
                     </div>
 
-                    <?php foreach ($alternative_versions as $alt): ?>
+                    <?php if ($sub['show_switcher']): ?>
+                    <?php foreach ($sub['alternatives'] as $alt): ?>
                     <?php
-                        $current_price = floatval($current_version->get('prv_version_price'));
-                        $current_type = $current_version->get('prv_price_type');
+                        $current_price = floatval($version->get('prv_version_price'));
+                        $current_type = $version->get('prv_price_type');
                         $alt_price = floatval($alt->get('prv_version_price'));
                         $alt_type = $alt->get('prv_price_type');
 
@@ -148,26 +156,22 @@ $page->public_header([
                             <span class="jy-billing-savings"><?php echo $savings_text; ?></span>
                             <?php endif; ?>
                         </div>
-                        <form method="POST" action="/profile/billing" data-jy-confirm="Switch to <?php echo htmlspecialchars($alt->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?> billing? Your subscription will be updated and prorated.">
+                        <form method="POST" action="/profile/billing" data-jy-confirm="Switch <?php echo htmlspecialchars($product_name, ENT_QUOTES, 'UTF-8'); ?> to <?php echo htmlspecialchars($alt->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?> billing? Your subscription will be updated and prorated.">
                             <input type="hidden" name="action" value="change_billing_cycle">
-                            <input type="hidden" name="new_version_id" value="<?php echo $alt->key; ?>">
+                            <input type="hidden" name="odi_order_item_id" value="<?php echo (int)$item->key; ?>">
+                            <input type="hidden" name="new_version_id" value="<?php echo (int)$alt->key; ?>">
                             <button type="submit" class="btn btn-primary btn-sm">Switch</button>
                         </form>
                     </div>
                     <?php endforeach; ?>
+                    <?php elseif ($sub['payment_system'] === 'paypal' && !$cancelled): ?>
+                    <div class="muted">
+                        To change this billing cycle, cancel the subscription and subscribe again with the new billing option.
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
-
-            <?php elseif ($payment_system === 'paypal' && $current_subscription && !$current_subscription->get('odi_subscription_cancelled_time')): ?>
-            <div class="card">
-                <div class="card-header">
-                    <h5 class="jy-tight">Billing Cycle</h5>
-                </div>
-                <div class="card-body muted">
-                    To change your billing cycle, please cancel your current subscription and re-subscribe with the new billing option on the <a href="/profile/change-tier">subscription management page</a>.
-                </div>
-            </div>
-            <?php endif; ?>
+            <?php endforeach; ?>
 
             <!-- Billing History -->
             <?php if (!empty($invoices)): ?>
@@ -217,7 +221,7 @@ $page->public_header([
             <?php endif; ?>
 
             <!-- No billing data -->
-            <?php if (!$current_subscription && empty($invoices)): ?>
+            <?php if (!$subscriptions && empty($invoices)): ?>
             <div class="jy-panel jy-billing-empty">
                 <div class="jy-billing-empty-icon">&#128179;</div>
                 <h4 class="jy-mb-2">No billing information</h4>
@@ -229,7 +233,7 @@ $page->public_header([
             <!-- Navigation -->
             <div class="jy-billing-nav">
                 <a href="/profile" class="muted">&larr; Back to Profile</a>
-                <?php if ($current_subscription): ?>
+                <?php if ($page_vars['has_tier_subscription']): ?>
                 <a href="/profile/change-tier">Manage Subscription Plan</a>
                 <?php endif; ?>
             </div>

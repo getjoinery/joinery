@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.14 - bring_back_hosted is level 10 (hosting_paid_launch O3)
  * @version 1.13 - suspend_site and unsuspend_site on the node page (10): an abuse call that stops a customer's site
  * @version 1.12 - mail_test_send is a change (8): it sends mail
  * @version 1.11 - mailbox_status is a look (7), as spam_learning_status, the word it widened, was
@@ -58,6 +59,8 @@ final class SmActionLevels {
 			'copy_retry_start' => 10, 'copy_retry_settle' => 10, 'copy_go_back' => 10, 'copy_finish' => 10,
 			// Stops a customer's hosted site and emails them why (HostedSuspensions).
 			'suspend_site' => 10, 'unsuspend_site' => 10,
+			// Starts a held customer site again after a late payment (HostedLateReturn).
+			'bring_back_hosted' => 10,
 		),
 		'index' => array(
 			'adopt_join' => 10, 'adopt_provision_join' => 10, 'adopt_container_join' => 10, 'reject_join' => 10, 'reopen_join' => 10,
