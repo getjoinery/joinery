@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.8 - OWNERSHIP_EACH: every purchase records one more ownership and none refuses a repeat (ownership_repeats())
  * @version 1.7 - seo_public_records(): none while the store is switched off
  * @version 1.6 - seo_public_records(): the sitemap lists active products only
  * @version 1.5 - output_javascript() writes a data-jy-validate block and the requirements' script files (no inline script)
@@ -82,6 +83,7 @@ class Product extends SystemBase {
 	const OWNERSHIP_ONCE   = 2;   // tag derived as product-{id}
 	const OWNERSHIP_SHARED = 3;   // operator-named tag shared with other products
 	const OWNERSHIP_BUNDLE = 4;   // the all-access tag
+	const OWNERSHIP_EACH   = 5;   // tag derived as each-product-{id}: one more per purchase, never refused
 
 	protected static $foreign_key_actions = [
 		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
@@ -158,7 +160,7 @@ public function get_requirement_info($output='text') {
 	
 	//GET ALL OF THE ADDITIONAL PRODUCT REQUIREMENTS FOR THIS PRODUCT
 	/**
-	 * Which of the four ownership meanings this product's stored tag carries.
+	 * Which of the five ownership meanings this product's stored tag carries.
 	 * The inverse of what the admin product edit page writes.
 	 */
 	public function get_ownership_mode() {
@@ -172,7 +174,18 @@ public function get_requirement_info($output='text') {
 		if ($this->key && $tag === Ownership::tag_for_product($this->key)) {
 			return self::OWNERSHIP_ONCE;
 		}
+		if ($this->key && $tag === Ownership::tag_each_for_product($this->key)) {
+			return self::OWNERSHIP_EACH;
+		}
 		return self::OWNERSHIP_SHARED;
+	}
+
+	/**
+	 * Is every purchase of this product one more of it? Then the store records
+	 * an ownership per purchase and never refuses a buyer who already has one.
+	 */
+	public function ownership_repeats() {
+		return Ownership::is_each_tag($this->get('pro_ownership_tag'));
 	}
 
 	function get_requirement_instances($deleted=false){

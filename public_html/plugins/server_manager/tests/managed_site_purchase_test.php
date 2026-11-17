@@ -184,6 +184,7 @@ function msp_post(array $overrides = array()): array {
 		'phn_cco_country_code_id' => (string)ManagedDomainIntake::countryIdFor('US'),
 		'phn_phone_number'        => '555 123 4567',
 		'md_email'                => 'jane@example.com',
+		'licence_use'             => 'free',
 	), $overrides);
 }
 function msp_register_provision($row) {

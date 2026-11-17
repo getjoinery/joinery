@@ -74,7 +74,7 @@ function product_logic(array $input): LogicResult {
 	// this" where the buy controls would be. Anonymous viewers see the normal
 	// buy button — we do not know who they are, and checkout is the authority.
 	$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
-	$page_vars['already_owned'] = ($ownership_tag !== '' && $user
+	$page_vars['already_owned'] = ($ownership_tag !== '' && $user && !Ownership::is_each_tag($ownership_tag)
 		&& Ownership::user_owns($user->key, $ownership_tag));
 
 	// Handle edit_item mode: pre-fill form with existing cart item data

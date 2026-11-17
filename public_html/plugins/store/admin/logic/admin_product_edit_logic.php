@@ -152,10 +152,12 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$ownership_mode = (int)($input['ownership_mode'] ?? Product::OWNERSHIP_NONE);
 		$ownership_tag_input = trim((string)($input['pro_ownership_tag'] ?? ''));
 		$derive_ownership_tag = false;
+		$ownership_tag_before = $product->key ? trim((string)$product->get('pro_ownership_tag')) : '';
 
-		if($ownership_mode == Product::OWNERSHIP_ONCE){
+		if($ownership_mode == Product::OWNERSHIP_ONCE || $ownership_mode == Product::OWNERSHIP_EACH){
+			$derive = $ownership_mode == Product::OWNERSHIP_EACH ? 'tag_each_for_product' : 'tag_for_product';
 			if($product->key){
-				$product->set('pro_ownership_tag', Ownership::tag_for_product($product->key));
+				$product->set('pro_ownership_tag', Ownership::$derive($product->key));
 			}
 			else{
 				// A brand-new product has no id to derive from until the row
@@ -168,6 +170,9 @@ function admin_product_edit_logic(array $input): LogicResult {
 			if($ownership_tag_input === ''){
 				return LogicResult::error('Name the ownership tag this product shares with the others, '
 					. 'or choose a different Ownership option.');
+			}
+			if(Ownership::is_each_tag($ownership_tag_input)){
+				return LogicResult::error('Tags starting each-product- are derived. Choose "Each purchase is one more" instead.');
 			}
 			$product->set('pro_ownership_tag', $ownership_tag_input);
 		}
@@ -226,8 +231,16 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product->load();
 
 		if($derive_ownership_tag && $product->key){
-			$product->set('pro_ownership_tag', Ownership::tag_for_product($product->key));
+			$product->set('pro_ownership_tag', $ownership_mode == Product::OWNERSHIP_EACH
+				? Ownership::tag_each_for_product($product->key) : Ownership::tag_for_product($product->key));
 			$product->save();
+		}
+
+		// A product whose ownership meaning changed keeps its buyers: what they
+		// bought is recorded under the tag it has now.
+		$ownership_tag_after = trim((string)$product->get('pro_ownership_tag'));
+		if($ownership_tag_before !== '' && $ownership_tag_after !== '' && $ownership_tag_before !== $ownership_tag_after){
+			Ownership::retag_purchases_of_product($product->key, $ownership_tag_before, $ownership_tag_after);
 		}
 
 		$product->save_requirement_instances($requirement_specs);

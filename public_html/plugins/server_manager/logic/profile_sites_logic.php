@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.19 - each site's licence line (BusinessLicense::site_line, hosting_after_purchase WP7)
  * @version 1.18 - each paid site links where it is managed (subscription, billing, domain, email and backups) and
  *                its hosting row names the price (hosting_after_purchase N2, S1)
  * @version 1.17 - the hosting row is one sentence per plan state with the date that matters: renews, cancelled to a
@@ -268,6 +269,7 @@ function profile_sites_logic(array $input): LogicResult {
 			'suspended'       => ($sus = HostedSuspension::open_for($provision->key)) ? (string)$sus->get('hsu_reason') : null,
 			'plan_state'      => $trial ? (string)$trial->get('htr_state') : '',
 			'plan_line'       => $trial ? profile_sites_plan_line($trial, $provision->local_order_item(), $session) : '',
+			'licence_line'    => BusinessLicense::site_line($provision),
 		);
 	}
 

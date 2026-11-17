@@ -49,6 +49,8 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.18 - a business licence chosen with the site must be in the cart, or held and free, before the charge;
+ *                a held one is named on the site at activation (BusinessLicense, hosting_after_purchase WP7)
  * @version 1.17 - rerun_activation(): Retry setup for a paid site that never got a server runs its activation again
  *                (hosting_after_purchase B18)
  * @version 1.16 - cancelNotice(): the subscriptions page's cancel question says what happens to the site (hosting_after_purchase S2)
@@ -198,6 +200,10 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 		if ((string)($draft->get('cvp_landing') ?: 'instance') !== self::landing_for_ref($ref)
 				|| ManagedSiteDraft::plan_of($draft) !== self::plan_for_ref($ref)) {
 			return self::WRONG_PLAN_SENTENCE;
+		}
+		$licence_refusal = BusinessLicense::refusal($draft);
+		if ($licence_refusal !== null) {
+			return $licence_refusal;
 		}
 		if ($ref === self::REF_CUSTOMER) {
 			// The email and backups the buyer ticked must still be in the cart:
@@ -361,6 +367,14 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 
 		$draft->set('cvp_external_order_item_id', (int)$order_item->key);
 		$draft->set('cvp_hosting_mode', $hosting_mode);
+		// A licence the buyer already held is named on the site now. One that
+		// went to another site since the charge check is an operator's matter,
+		// not a reason to withhold a paid site.
+		$licence_problem = BusinessLicense::attach_held($draft);
+		if ($licence_problem !== '') {
+			$this->alert_activation_problem($user, $order_item, 'the site is activated and goes ahead; only its licence '
+				. 'needs a person: ' . $licence_problem . '. Ask the buyer which licence covers it.');
+		}
 		// Whose account the server is born on is known only now, so the draft
 		// carries the encryption decision from here: a hosted birth's data root
 		// is encrypted by us, where this management node offers it.

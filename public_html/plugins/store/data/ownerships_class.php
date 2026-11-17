@@ -12,10 +12,16 @@ class OwnershipException extends SystemBaseException {}
  *
  * The tag '*' means "every tag in this store" — an all-access bundle.
  *
+ * A tag derived as each-product-{id} is the other way round: every purchase
+ * is one more of the thing (a licence that covers one site, say), so a buyer
+ * may hold as many rows as they bought, nothing refuses a repeat, and the
+ * bundle tag does not cover it.
+ *
  * own_license_key is fulfillment's business, not ownership's: an operator
  * whose product mails out a key string stamps it here. Core never reads it.
  *
- * Version: 1.0.0
+ * Version: 1.2.0 - retag_purchases_of_product(): a product's buyers keep owning it when its tag changes
+ * Version: 1.1.0 - each-product-{id} tags: every purchase is one more (tag_each_for_product, is_each_tag)
  */
 class Ownership extends SystemBase {
 	public static $prefix = 'own';
@@ -75,6 +81,46 @@ class Ownership extends SystemBase {
 	 */
 	public static function tag_for_product($product_id) {
 		return 'product-' . (int)$product_id;
+	}
+
+	/**
+	 * The tag a product with "Each purchase is one more" gets: every purchase
+	 * records its own row and none refuses a repeat. Derived, never typed.
+	 */
+	public static function tag_each_for_product($product_id) {
+		return 'each-product-' . (int)$product_id;
+	}
+
+	/**
+	 * Move the ownerships bought with this product from its old tag to its new
+	 * one, when an operator changes what owning it means (own once to each
+	 * purchase is one more, say). When the old tag was the product's own
+	 * derived tag, every row under it is this product's and moves, manual
+	 * grants included. A shared tag moves only the rows whose order item is
+	 * this product: another product sharing it keeps its buyers, and a grant
+	 * of the shared tag is left as granted. Returns how many moved.
+	 */
+	public static function retag_purchases_of_product($product_id, $old_tag, $new_tag) {
+		$old_tag = trim((string)$old_tag);
+		$new_tag = trim((string)$new_tag);
+		if (!(int)$product_id || $old_tag === '' || $new_tag === '' || $old_tag === $new_tag) {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		if ($old_tag === self::tag_for_product($product_id) || $old_tag === self::tag_each_for_product($product_id)) {
+			$q = $db->prepare('UPDATE own_ownerships SET own_tag = ? WHERE own_tag = ?');
+			$q->execute(array($new_tag, $old_tag));
+			return $q->rowCount();
+		}
+		$q = $db->prepare('UPDATE own_ownerships SET own_tag = ? WHERE own_tag = ?
+			AND own_odi_order_item_id IN (SELECT odi_order_item_id FROM odi_order_items WHERE odi_pro_product_id = ?)');
+		$q->execute(array($new_tag, $old_tag, (int)$product_id));
+		return $q->rowCount();
+	}
+
+	/** Is this a tag every purchase of which is one more (never own-once)? */
+	public static function is_each_tag($tag) {
+		return strpos(trim((string)$tag), 'each-product-') === 0;
 	}
 
 	/**
@@ -179,6 +225,7 @@ class MultiOwnership extends SystemMultiBase {
 			WHERE pro_ownership_tag IS NOT NULL AND pro_ownership_tag <> ''
 			AND pro_ownership_tag <> " . $dblink->quote(Ownership::TAG_ALL) . "
 			AND pro_ownership_tag NOT LIKE 'product-%'
+			AND pro_ownership_tag NOT LIKE 'each-product-%'
 			AND pro_delete_time IS NULL ORDER BY pro_ownership_tag";
 		$tags = array();
 		foreach ($dblink->query($sql, PDO::FETCH_ASSOC) as $row) {

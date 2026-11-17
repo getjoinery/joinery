@@ -30,6 +30,7 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.8 - the business licence the draft chose rides as a companion line naming the site (WP7)
  * @version 1.7 - the line names the draft's freeze token, not its update time (hosting_after_purchase B13)
  * @version 1.6 - the domain-year line carries the name's yearly renewal price (managed_domain_renewal)
  * @version 1.5 - an own-Linode draft with the email and backups bundle brings the bundle line with it
@@ -61,6 +62,9 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 
 	/** The line's form-data key saying the email and backups bundle rides with it (own-Linode). */
 	const SERVICES_FIELD = 'managed_site_services';
+
+	/** The line's form-data key carrying the business licence to buy with it (BusinessLicense::KINDS). */
+	const LICENCE_FIELD = 'managed_site_licence';
 
 	/**
 	 * The line's form-data key naming WHICH freeze the line was built from:
@@ -280,6 +284,11 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 			$data[self::SERVICES_FIELD] = array('question' => 'Email and backups for',
 				'answer' => (string)$draft->get('cvp_domain'), 'internal' => true);
 		}
+		if (BusinessLicense::buys((string)$draft->get('cvp_license_choice'))) {
+			// The licence line rides with this one (extra_cart_lines).
+			$data[self::LICENCE_FIELD] = array('question' => 'Business licence',
+				'answer' => (string)$draft->get('cvp_license_choice'), 'internal' => true);
+		}
 		$display = array('Site' => self::summary($draft));
 		return array($data, $display);
 	}
@@ -299,7 +308,21 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 	 * edit-cart path find the line it previously contributed.
 	 */
 	public function extra_cart_lines($form_data, $product) {
-		return array_merge($this->domain_line($form_data), $this->services_line($form_data));
+		return array_merge($this->domain_line($form_data), $this->services_line($form_data),
+			$this->licence_line($form_data));
+	}
+
+	/** The business licence line: the licence product, naming the draft it covers. */
+	private function licence_line($form_data): array {
+		$choice = (string)($form_data[self::LICENCE_FIELD]['answer'] ?? '');
+		$answer = $form_data[self::FIELD] ?? 0;
+		$draft_id = (int)(is_array($answer) ? ($answer['answer'] ?? 0) : $answer);
+		if (!BusinessLicense::buys($choice) || $draft_id <= 0) {
+			return array();
+		}
+		$domain = (string)($form_data[self::SUMMARY_FIELD]['answer'] ?? '');
+		// The summary is the domain and, in brackets, how it is held.
+		return BusinessLicense::cart_line($draft_id, $choice, preg_replace('/ \(.*$/', '', $domain));
 	}
 
 	/**

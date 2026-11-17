@@ -93,7 +93,7 @@ function ol_product(string $name, string $link, array $fields, string $price, st
 
 function ol_post(string $plan, string $domain, bool $services = false): array {
 	$post = array('plan' => $plan, 'cvp_domain_source' => 'own', 'cvp_domain' => $domain,
-		'cvp_sitename' => '', 'cvp_buyer_email' => 'admin@example.com');
+		'cvp_sitename' => '', 'cvp_buyer_email' => 'admin@example.com', 'licence_use' => 'free');
 	if ($services) {
 		$post['with_services'] = '1';
 	}

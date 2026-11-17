@@ -77,7 +77,7 @@ function sp_product(string $name, string $link, array $fields) {
 
 function sp_post(string $plan, string $domain): array {
 	return array('plan' => $plan, 'cvp_domain_source' => 'own', 'cvp_domain' => $domain,
-		'cvp_sitename' => '', 'cvp_buyer_email' => 'admin@example.com');
+		'cvp_sitename' => '', 'cvp_buyer_email' => 'admin@example.com', 'licence_use' => 'free');
 }
 
 function sp_paid_line($buyer, $product, $version, array $form_data): array {

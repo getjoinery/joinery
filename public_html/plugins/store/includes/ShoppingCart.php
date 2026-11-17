@@ -381,14 +381,15 @@ class ShoppingCart {
 		//the payment-time recorder credits, so an owner can still buy a gift.
 		//Unknown identity passes; the charge-time guard is the authority.
 		$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
-		if ($ownership_tag !== '' && !$product_version->is_subscription()) {
+		//A product every purchase of which is one more is never refused here.
+		if ($ownership_tag !== '' && !$product_version->is_subscription() && !Ownership::is_each_tag($ownership_tag)) {
 			$added_for = strtolower(trim((string)($form_data['email'] ?? '')));
 
 			foreach($this->items as $existing_item) {
 				$item_product = $existing_item[1];
 				$item_data = $existing_item[2];
 				$item_tag = trim((string)$item_product->get('pro_ownership_tag'));
-				if ($item_tag === '') {
+				if ($item_tag === '' || Ownership::is_each_tag($item_tag)) {
 					continue;
 				}
 				//A line for a different recipient is a different ownership —

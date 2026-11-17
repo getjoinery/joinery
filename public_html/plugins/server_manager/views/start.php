@@ -7,6 +7,7 @@
  * start_logic hands them to the platform's own sign-in and sign-up handlers
  * and every success lands on the configure page (step 2).
  *
+ * @version 1.6 - the advanced install line says a business needs a licence and links both (hosting_after_purchase Li3)
  * @version 1.5 - one small line to the advanced install at the bottom (specs/own_linode_we_install.md W7)
  * @version 1.4 - the passkey button's script is assets/js/passkey-pages.js (no inline script)
  * @version 1.3 - the lead names every plan on sale
@@ -112,7 +113,17 @@ $page->public_header(array(
 		</div>
 		<?php // The advanced install is here for whoever looks for it, and promoted nowhere (own_linode_we_install W7). ?>
 		<p class="sms-start-advanced">Prefer to install it yourself on a server of your own? See the
-			<a href="/page/install">advanced install</a>.</p>
+			<a href="/page/install">advanced install</a>.<?php
+			$sms_licences = BusinessLicense::offers();
+			if ($sms_licences) {
+				$sms_links = array();
+				foreach ($sms_licences as $sms_kind => $sms_offer) {
+					$sms_links[] = '<a href="' . htmlspecialchars($sms_offer['product']->get_url()) . '">'
+						. htmlspecialchars(BusinessLicense::label($sms_kind)) . '</a>';
+				}
+				echo ' A business needs a licence: ' . implode(' or ', $sms_links) . '.';
+			}
+			?></p>
 	</div>
 </div>
 </div>

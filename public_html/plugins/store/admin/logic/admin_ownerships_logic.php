@@ -2,7 +2,7 @@
 /**
  * Ownership list — who owns what, and the actions that change it.
  *
- * @version 1.1.0
+ * @version 1.2.0 - an each-product- tag (each purchase is one more) is granted as often as wanted
  */
 function admin_ownerships_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -44,7 +44,9 @@ function admin_ownerships_logic(array $input): LogicResult {
 			// A second active row for the same person would make revocation
 			// lie: revoking one row would leave the other quietly conferring
 			// ownership. One person, one live row per tag.
-			if (Ownership::user_owns($grant_user->key, $grant_tag)) {
+			// A tag every purchase of which is one more (a per-site licence)
+			// is granted as often as wanted: each row is one more.
+			if (!Ownership::is_each_tag($grant_tag) && Ownership::user_owns($grant_user->key, $grant_tag)) {
 				return LogicResult::error($grant_user->display_name()
 					. ' already owns this — there is nothing to grant.');
 			}

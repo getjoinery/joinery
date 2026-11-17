@@ -278,8 +278,8 @@ An operator who never tags a product never meets the feature.
 
 ### Tagging a product
 
-The **Ownership** dropdown on the admin product edit page offers the four
-meanings own-once can have, and writes the single `pro_ownership_tag` column:
+The **Ownership** dropdown on the admin product edit page offers five
+meanings, and writes the single `pro_ownership_tag` column:
 
 | Choice | Stored tag |
 | --- | --- |
@@ -287,10 +287,18 @@ meanings own-once can have, and writes the single `pro_ownership_tag` column:
 | Own once | `product-{id}`, derived |
 | Own once, shared with other products… | the tag the operator names |
 | Bundle — owning this grants every own-once product | `*` |
+| Each purchase is one more | `each-product-{id}`, derived |
 
 Products sharing a tag count as the same thing, which is how a second product
 joins an existing group: pick its tag from the list of tags already in use.
 `*` is the all-access tag — a buyer holding it owns every tag in the store.
+
+**Each purchase is one more** is for a thing bought per use, such as a business
+licence that covers one site. Every paid purchase records its own ownership
+row (so a key-minting script stamps one key per purchase), and none of the
+three guards below refuses a buyer who already holds one. The bundle tag does
+not cover it, and a manual grant of it may be repeated.
+`Ownership::is_each_tag()` answers whether a tag is one of these.
 
 Ownership applies to **one-time purchases only**, enforced from both
 directions: saving a tag on a product with a subscription version fails

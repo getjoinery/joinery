@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.17 - each site names its licence: free, the business licence covering it and its key (WP7)
  * @version 2.16 - Manage: links to the site's subscription, billing, domain, email and backups (hosting_after_purchase N2)
  * @version 2.15 - every setup state has words (held, failed with where to write); the hosting row is one sentence
  *                with its date (profile_sites_plan_line) (hosting_after_purchase P2, P4, P5, S3)
@@ -155,6 +156,10 @@ echo '<div class="jy-ui">';
 			<?php if ($site['plan_line'] !== ''): ?>
 			<dt>Hosting</dt>
 			<dd><?php echo htmlspecialchars($site['plan_line']); ?></dd>
+			<?php endif; ?>
+			<?php if ($site['licence_line'] !== ''): ?>
+			<dt>Licence</dt>
+			<dd><?php echo htmlspecialchars($site['licence_line']); ?></dd>
 			<?php endif; ?>
 		</dl>
 

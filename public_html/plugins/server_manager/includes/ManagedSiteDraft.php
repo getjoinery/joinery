@@ -21,6 +21,8 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.12 - who the site is for: the business licence choice is saved with the freeze, priced in the table
+ *                and taken out of the cart with the draft (BusinessLicense, hosting_after_purchase WP7)
  * @version 1.11 - the freeze is cvp_freeze_token, set by save_and_freeze and cleared by unfreeze (hosting_after_purchase B13)
  * @version 1.10 - price_table(): the summary's prices as lines with a total for today and after
  * @version 1.9 - the step strip and the payment button take the theme's colours (btn btn-primary, jy tokens)
@@ -215,8 +217,10 @@ class ManagedSiteDraft {
 				$product_id = isset($item[1]) && is_object($item[1]) ? (int)$item[1]->key : 0;
 				$companion = $domain_product_id > 0 && $product_id === $domain_product_id && $domain !== ''
 					&& strtolower(trim((string)($data['managed_domain']['answer'] ?? ''))) === $domain;
-				// The email and backups line that rode with this draft goes with it (B5).
-				$services = JoineryServiceRequirement::draft_id_from($data) === $draft_id;
+				// The email and backups line that rode with this draft goes with it (B5),
+				// and so does the business licence bought for it.
+				$services = JoineryServiceRequirement::draft_id_from($data) === $draft_id
+					|| BusinessLicense::draft_id_from_line($data) === $draft_id;
 				if (self::line_names_draft($data, $draft_id) || $companion || $services) {
 					$cart->remove_item($key);
 				}
@@ -377,6 +381,12 @@ class ManagedSiteDraft {
 			$errors[] = 'The site admin email address is not valid.';
 		}
 
+		// Who the site is for: a business needs a licence, on every plan.
+		$licence = BusinessLicense::choice_from($post, $user_id, $row ? (int)$row->key : 0);
+		if ($licence['error'] !== '') {
+			$errors[] = $licence['error'];
+		}
+
 		if (!empty($errors)) {
 			return array('errors' => $errors, 'row' => null);
 		}
@@ -428,6 +438,7 @@ class ManagedSiteDraft {
 		// The email and backups bundle rides with an own-Linode site, when ticked and on sale.
 		$row->set('cvp_services_wanted', $plan === 'own_linode' && !empty($post['with_services'])
 			&& JoineryServicesFulfillment::bundle_offer() !== null);
+		$row->set('cvp_license_choice', $licence['choice']);
 		$row->set('cvp_status', 'pending_payment');
 		$row->set('cvp_freeze_token', bin2hex(random_bytes(16)));
 		$row->set('cvp_error', null);
@@ -446,6 +457,8 @@ class ManagedSiteDraft {
 			'cvp_region'        => self::regions()[0],
 			'cvp_buyer_email'   => (string)$user->get('usr_email'),
 			'with_services'     => '',
+			'licence_use'       => '',
+			'licence_choice'    => '',
 			'md_first_name'     => (string)$user->get('usr_first_name'),
 			'md_last_name'      => (string)$user->get('usr_last_name'),
 			'md_email'          => (string)$user->get('usr_email'),
@@ -462,6 +475,11 @@ class ManagedSiteDraft {
 		}
 		$values['plan'] = self::plan_of($row);
 		$values['with_services'] = $row->get('cvp_services_wanted') ? '1' : '';
+		$choice = (string)$row->get('cvp_license_choice');
+		if ($choice !== '') {
+			$values['licence_use'] = $choice === 'free' ? 'free' : 'business';
+			$values['licence_choice'] = $choice === 'free' ? '' : $choice;
+		}
 		foreach (array('cvp_domain_source', 'cvp_domain', 'cvp_sitename', 'cvp_region', 'cvp_buyer_email') as $col) {
 			$stored = (string)$row->get($col);
 			if ($stored !== '') {
@@ -605,7 +623,7 @@ class ManagedSiteDraft {
 
 	/**
 	 * The summary's price table: one line per thing bought (the plan, the
-	 * bundle when chosen, the domain's first year) with what it costs today
+	 * bundle when chosen, the business licence, the domain's first year) with what it costs today
 	 * and what it costs after that, and the totals of both columns. Null when
 	 * the plan is not on sale.
 	 *
@@ -639,6 +657,12 @@ class ManagedSiteDraft {
 		$add('Plan: ' . self::PLANS[self::plan_of($row)]['label'], '', $version);
 		if ($bundle !== null && self::plan_of($row) === 'own_linode' && $row->get('cvp_services_wanted')) {
 			$add('Joinery Managed Bundle', '', $bundle['version']);
+		}
+		$licence = BusinessLicense::offers()[(string)$row->get('cvp_license_choice')] ?? null;
+		if ($licence !== null) {
+			$add(BusinessLicense::label((string)$row->get('cvp_license_choice')), 'Lifetime, for this site.', $licence['version']);
+		} elseif (BusinessLicense::held_id((string)$row->get('cvp_license_choice')) > 0) {
+			$lines[] = array('label' => 'Business licence', 'note' => 'One you already own.', 'today' => 'Free', 'then' => '');
 		}
 		if ((string)$row->get('cvp_domain_source') === 'register') {
 			$quote = (float)$row->get('cvp_domain_quote');

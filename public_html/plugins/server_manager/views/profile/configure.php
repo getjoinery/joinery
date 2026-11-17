@@ -10,6 +10,8 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.15 - Who is this site for?: personal use is free, a business picks a licence (or one it owns); the
+ *                summary names it (hosting_after_purchase WP7)
  * @version 1.14 - payment comes first for every plan; an own-Linode buyer is told the Linode connection follows it
  * @version 1.13 - the summary's price is a table: plan, bundle and domain lines, then the total due today and after
  * @version 1.12 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
@@ -65,6 +67,10 @@ echo $steps_html;
 		<?php if ($own_linode): ?>
 		<dt>Joinery Managed Bundle</dt>
 		<dd><?php echo $row->get('cvp_services_wanted') ? 'Included' : 'Not included'; ?></dd>
+		<?php endif; ?>
+		<?php if ($licence_line !== ''): ?>
+		<dt>Licence</dt>
+		<dd><?php echo htmlspecialchars($licence_line); ?></dd>
 		<?php endif; ?>
 		<dt>Admin sign-in</dt>
 		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
@@ -256,6 +262,47 @@ if (isset($plans['own_linode']) && $bundle_price !== '') {
 	echo '</section>';
 }
 
+// ── Who the site is for: a business needs a licence, on every plan (WP7) ──
+echo '<section class="smc-card"><h3 class="smc-title">Who is this site for?</h3>';
+$formwriter->radioinput('licence_use', '', array(
+	'options' => array(
+		'free'     => 'Personal, household, school or nonprofit — free',
+		'business' => 'A business',
+	),
+	'value'            => $values['licence_use'],
+	'visibility_rules' => array(
+		'free'     => array('hide' => array('smc_licences')),
+		'business' => array('show' => array('smc_licences')),
+	),
+));
+echo '<p class="smc-indent">A business running Joinery for its operations needs one lifetime licence per site. '
+	. 'If you&rsquo;re not sure if you need a business licence, you probably don&rsquo;t.</p>';
+echo '<div id="smc_licences" class="smc-subsection smc-licences">';
+$licence_options = array();
+$licence_descriptions = array();
+foreach ($licence_offers as $kind => $offer) {
+	$licence_options[$kind] = BusinessLicense::label($kind) . ' — ' . $offer['price'] . ' lifetime';
+	$licence_descriptions[$kind] = BusinessLicense::KINDS[$kind]['features'];
+}
+foreach ($licence_held as $choice => $label) {
+	$licence_options[$choice] = $label;
+	$licence_descriptions[$choice] = array('Covers this site.');
+}
+if ($licence_options) {
+	$formwriter->radioinput('licence_choice', '', array(
+		'options'      => $licence_options,
+		'descriptions' => $licence_descriptions,
+		'value'        => $values['licence_choice'],
+	));
+	if (isset($licence_offers['founder']) && BusinessLicense::KINDS['founder']['note'] !== '') {
+		echo '<p class="smc-indent">' . htmlspecialchars(BusinessLicense::KINDS['founder']['note']) . '</p>';
+	}
+} else {
+	echo '<p class="smc-indent">' . htmlspecialchars(BusinessLicense::NONE_ON_SALE) . '</p>';
+}
+echo '</div>';
+echo '</section>';
+
 // ── Sign-in ──
 echo '<section class="smc-card"><h3 class="smc-title">Your sign-in and backup email</h3>';
 $formwriter->textinput('cvp_buyer_email', 'Existing email', array(
@@ -308,6 +355,9 @@ echo $formwriter->end_form();
 .smc-features li { position: relative; padding-left: 1.1rem; color: var(--jy-color-text-muted); font-size: .93em; line-height: 1.6; }
 .smc-features li::before { content: "\2713"; position: absolute; left: 0; color: var(--jy-color-primary); }
 .smc-submit { margin: 1.5rem 0 2rem; }
+/* The licences side by side, as on the pricing page; stacked on a phone. */
+.smc-licences > div:has(.form-check) { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .6rem; }
+.smc-licences .form-check { margin: 0; }
 .smc-facts { display: grid; grid-template-columns: max-content 1fr; gap: .6rem 2rem; margin: 0 0 1.5rem; }
 .smc-facts dt { color: var(--jy-color-text-muted); font-weight: 500; }
 .smc-facts dd { margin: 0; color: var(--jy-color-text); }

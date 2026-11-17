@@ -21,6 +21,7 @@
  * before the buyer confirms. Delete removes a draft; a paid site is never
  * deletable here.
  *
+ * @version 1.7 - who the site is for: the licences on sale and the unused ones the buyer holds, and the summary's licence
  * @version 1.6 - an own-Linode summary offers payment straight away; the Linode connection comes after payment
  * @version 1.5 - the summary gets price_table (lines with totals)
  * @version 1.4 - On your own Linode (specs/own_linode_we_install.md): the summary shows Connect until the buyer's
@@ -126,8 +127,20 @@ function profile_configure_logic(array $input): LogicResult {
 	$own_linode = $row !== null && ManagedSiteDraft::plan_of($row) === 'own_linode';
 	$bundle = JoineryServicesFulfillment::bundle_offer();
 
+	// Who the site is for: the licences on sale, and those the buyer already
+	// holds that no other site uses, as choice => label.
+	$licence_held = array();
+	foreach (BusinessLicense::unused_by($user_id, $row ? (int)$row->key : 0) as $own) {
+		$licence_held[BusinessLicense::HELD_PREFIX . (int)$own->key] = 'Use my '
+			. BusinessLicense::label(BusinessLicense::kind_of_tag((string)$own->get('own_tag')))
+			. ', bought ' . $own->get_local('own_create_time', 'M j, Y');
+	}
+
 	return LogicResult::render(array(
 		'session'          => $session,
+		'licence_offers'   => BusinessLicense::offers(),
+		'licence_held'     => $licence_held,
+		'licence_line'     => $row ? BusinessLicense::site_line($row) : '',
 		'mode'             => $mode,
 		'row'              => $row,
 		'errors'           => $errors,

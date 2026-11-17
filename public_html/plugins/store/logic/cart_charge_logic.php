@@ -896,7 +896,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	foreach(($resuming_card ? array() : $cart->items) as $key => $cart_item) {
 		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
 		$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
-		if($ownership_tag === '' || $product_version->is_subscription()){
+		if($ownership_tag === '' || $product_version->is_subscription() || Ownership::is_each_tag($ownership_tag)){
 			continue;
 		}
 		$ownership_candidate = $resolved_users[$key];
