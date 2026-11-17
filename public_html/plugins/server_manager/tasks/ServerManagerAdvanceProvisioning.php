@@ -41,6 +41,8 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.9 - Buyer notices run last: each paid site's buyer is told, once, a state they need to know
+ *                (HostingBuyerNotices, specs/hosting_after_purchase.md WP2)
  * @version 1.8 - Own Linode: forget the buyer's grant after the build, and carry a bundle site into its Services rows
  *                (ProvisionOwnLinode, specs/own_linode_we_install.md)
  * @version 1.7 - Inbound mail: a Starter site's MX and ownership TXT for its relay slot (ProvisionSiteInboundMail, S5)
@@ -74,6 +76,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Own Linode'     => array($base . 'ProvisionOwnLinode.php', 'ProvisionOwnLinode'),
 			'Hosted watch'   => array($base . 'HostedTrialWatch.php', 'HostedTrialWatch'),
 			'Services'       => array($base . 'ServiceTenantWatch.php', 'ServiceTenantWatch'),
+			'Buyer notices'  => array($base . 'HostingBuyerNotices.php', 'HostingBuyerNotices'),
 		);
 
 		$parts = array();

@@ -47,6 +47,8 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.14 - push_attempts() counts from the last Retry email setup, so a retry gets a fresh allowance (hosting_after_purchase B19)
+ * @version 1.13 - the failure alert names Retry email setup on the node page (hosting_after_purchase E2)
  * @version 1.12 - a site on its buyer's own Linode paid with the email and backups bundle is set up too (own_linode_we_install W5)
  * @version 1.11 - dmarc_record(): a monitoring DMARC record for a hosted site's domain, published for a name we
  *                registered when it has none (hosting_paid_launch B4)
@@ -441,7 +443,7 @@ class ProvisionHostedMail {
 			return 0;
 		}
 
-		$attempts = $this->push_attempts($node);
+		$attempts = $this->push_attempts($node, $provision);
 		if ($attempts >= self::MAX_PUSH_ATTEMPTS) {
 			$this->fail_leg($provision, 'The site would not take its mail settings after '
 				. $attempts . ' attempts' . ($job ? ' (job #' . $job->key . ': '
@@ -499,9 +501,11 @@ class ProvisionHostedMail {
 	/**
 	 * How many mail-settings pushes this node has been sent since it last took
 	 * one. A push the site took ends the run of attempts, so a later re-push (a
-	 * new credential, a new key name) starts with its full allowance.
+	 * new credential, a new key name) starts with its full allowance. So does
+	 * Retry email setup: only pushes after the provision's last retry count.
 	 */
-	private function push_attempts($node): int {
+	private function push_attempts($node, $provision = null): int {
+		$retry = $provision ? trim((string)$provision->get('cvp_mail_retry_time')) : '';
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
 			"SELECT COUNT(*) FROM mjb_management_jobs j
@@ -510,8 +514,9 @@ class ProvisionHostedMail {
 				SELECT MAX(c.mjb_management_job_id) FROM mjb_management_jobs c
 				 WHERE c.mjb_mgn_managed_node_id = j.mjb_mgn_managed_node_id
 				   AND c.mjb_job_type = j.mjb_job_type AND c.mjb_delete_time IS NULL
-				   AND c.mjb_status = 'completed'), 0)");
-		$q->execute(array((int)$node->key, self::JOB_TYPE));
+				   AND c.mjb_status = 'completed'), 0)
+			   AND (CAST(? AS timestamp) IS NULL OR j.mjb_create_time > CAST(? AS timestamp))");
+		$q->execute(array((int)$node->key, self::JOB_TYPE, $retry !== '' ? $retry : null, $retry !== '' ? $retry : null));
 		return (int)$q->fetchColumn();
 	}
 
@@ -703,8 +708,8 @@ class ProvisionHostedMail {
 			. 'Domain: ' . $provision->get('cvp_domain') . "\n"
 			. 'Buyer: ' . $provision->get('cvp_buyer_email') . "\n"
 			. 'Reason: ' . $reason . "\n\n"
-			. "Until it sends, this customer cannot reset their own password. Clear cvp_mail_state on "
-			. "the provision row to start the leg again once the cause is fixed.\n");
+			. "Until it sends, this customer cannot reset their own password. Once the cause is fixed, "
+			. "press Retry email setup on the site's node page.\n");
 	}
 
 	/**

@@ -38,6 +38,9 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+// Its order-origin sites model getjoinery, which polls its own store, so
+// their order lines are this site's (CustomerCloudProvision::polls_own_store).
+harness_set_setting_mem('server_manager_getjoinery_api_url', LibraryFunctions::get_absolute_url('/api/v1'));
 harness_test_mode();
 
 /** The test account: what it says its company is, and its servers. */

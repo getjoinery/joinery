@@ -260,6 +260,9 @@ class SupportIntake {
 		if (!empty($f['key'])) {
 			$thread->set('sth_apk_api_key_id', (int)$f['key']['key_id']);
 			$thread->set('sth_account_user_id', (int)$f['key']['user_id']);
+		} elseif (!empty($f['account_user_id'])) {
+			// A signed-in member asking from the widget: the thread is theirs.
+			$thread->set('sth_account_user_id', (int)$f['account_user_id']);
 		}
 		if (!empty($f['bundle'])) {
 			$thread->set('sth_bundle', json_encode($f['bundle'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));

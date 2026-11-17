@@ -1342,14 +1342,88 @@ class StripeHelper {
 		return $result;
 	}
 
+	/** Metadata that marks the portal configuration this platform made. */
+	const PORTAL_CONFIG_MARK = 'card_and_invoices_v1';
+
 	/**
 	 * Create a Stripe Billing Portal session for payment method management.
+	 *
+	 * The portal shows what its configuration allows. The account's default
+	 * configuration is whatever the Stripe dashboard says, and may let a buyer
+	 * cancel or change a subscription there, where nothing tells them what the
+	 * cancel does to what they pay for and the store hears it only later. So
+	 * the session names a configuration of this platform's own: update the
+	 * card, see invoices, nothing else. Cancelling is done on the
+	 * subscriptions page. (hosting_after_purchase S5)
+	 *
+	 * The configuration's id is kept in a setting per mode. One that Stripe no
+	 * longer knows is found or made again once; a portal that cannot be given
+	 * it opens with the account default, and that is logged as an error the
+	 * operator sees on the errors page.
 	 */
 	public function create_billing_portal_session($stripe_customer_id, $return_url) {
-		return $this->client()->billingPortal->sessions->create([
+		$params = [
 			'customer' => $stripe_customer_id,
 			'return_url' => $return_url,
-		]);
+		];
+		$configuration = $this->portal_configuration_id(false);
+		if ($configuration !== null) {
+			try {
+				return $this->client()->billingPortal->sessions->create($params + ['configuration' => $configuration]);
+			} catch (\Stripe\Exception\InvalidRequestException $e) {
+				// The kept id is gone at Stripe: find or make it again, once.
+				$configuration = $this->portal_configuration_id(true);
+				if ($configuration !== null) {
+					return $this->client()->billingPortal->sessions->create($params + ['configuration' => $configuration]);
+				}
+			}
+		}
+		return $this->client()->billingPortal->sessions->create($params);
+	}
+
+	/**
+	 * This platform's portal configuration: the kept id, else one found by its
+	 * metadata mark, else one made now (only the features that are on are
+	 * named; a feature not named is off). Null when Stripe would not answer.
+	 */
+	public function portal_configuration_id(bool $refresh = false): ?string {
+		$setting = 'store_stripe_portal_configuration_' . ($this->test_mode ? 'test' : 'live');
+		$kept = trim((string)Globalvars::get_instance()->get_setting($setting, false, true));
+		if ($kept !== '' && !$refresh) {
+			return $kept;
+		}
+		$id = null;
+		try {
+			foreach ($this->client()->billingPortal->configurations->all(['active' => true, 'limit' => 100])->data as $config) {
+				if ((string)($config->metadata['joinery_portal'] ?? '') === self::PORTAL_CONFIG_MARK) {
+					$id = (string)$config->id;
+					break;
+				}
+			}
+			if ($id === null) {
+				$site_name = trim((string)Globalvars::get_instance()->get_setting('site_name', false, true));
+				$config = $this->client()->billingPortal->configurations->create([
+					'business_profile' => $site_name !== '' ? ['headline' => mb_substr($site_name, 0, 60)] : ['headline' => 'Billing'],
+					'features' => [
+						'payment_method_update' => ['enabled' => true],
+						'invoice_history'       => ['enabled' => true],
+					],
+					'metadata' => ['joinery_portal' => self::PORTAL_CONFIG_MARK],
+				]);
+				$id = (string)$config->id;
+			}
+		} catch (Exception $e) {
+			ErrorReference::log(new RuntimeException('The Stripe billing portal configuration (card and invoices only) could '
+				. 'not be found or made, so buyers get the account default portal, which may let them cancel there: '
+				. $e->getMessage()));
+			return null;
+		}
+		try {
+			Setting::put($setting, $id);
+		} catch (Throwable $e) {
+			error_log('StripeHelper: could not keep the portal configuration id: ' . $e->getMessage());
+		}
+		return $id;
 	}
 
 	/**

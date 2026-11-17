@@ -32,6 +32,7 @@
  *
  * A Managed site never buys this: its hosting is the entitlement.
  *
+ * @version 1.3 - the buy button is the theme's primary button
  * @version 1.2 - a line bought with an own-Linode site names its draft: checked against the site's install line in
  *                the same cart, recorded on the provision at payment; bundle_offer() (own_linode_we_install W4)
  * @version 1.1 - reviewer2: a released service takes a paid date without coming back (B1); past_due is not
@@ -443,7 +444,7 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 			. '<input type="hidden" name="product_id" value="' . (int)$offer['product']->key . '">'
 			. '<input type="hidden" name="product_version" value="' . (int)$offer['version']->key . '">'
 			. '<input type="hidden" name="' . JoineryServiceRequirement::FIELD . '" value="' . $row_id . '">'
-			. '<button type="submit" class="sms-buy-btn">' . htmlspecialchars($label) . '</button>'
+			. '<button type="submit" class="btn btn-primary">' . htmlspecialchars($label) . '</button>'
 			. '</form>';
 	}
 

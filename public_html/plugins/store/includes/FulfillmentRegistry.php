@@ -13,6 +13,7 @@
  * Store-owned registry. Fail soft: a product with no fulfillment provider simply
  * has nothing to fulfill.
  *
+ * @version 1.5.0 - FulfillmentCancelNotice: a provider may say what cancelling a line does to what it pays for
  * @version 1.4.0 - register(), get() and all() load the plugin bootstraps first, where providers register, so
  *                  a command-line run knows them too
  * @version 1.3.0 - cartRefusal(): one place asks every line's provider whether it can still be
@@ -69,6 +70,16 @@ interface FulfillmentProvider {
     public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array;
     /** Admin HTML label/link describing a reference. */
     public function displayReference(int $ref): string;
+}
+
+/**
+ * Optional, for a provider whose subscription keeps something running that
+ * its buyer should hear about before cancelling: what happens to it, said in
+ * one or two sentences, on the subscriptions page's cancel question.
+ */
+interface FulfillmentCancelNotice {
+    /** What cancelling this line does to what it pays for, or '' for nothing to add. */
+    public function cancelNotice(OrderItem $order_item): string;
 }
 
 class FulfillmentRegistry {

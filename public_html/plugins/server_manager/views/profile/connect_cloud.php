@@ -6,6 +6,7 @@
  * here; their provisions and setup progress are shown below. The Connect
  * button is a single-button action form (no user-entered fields).
  *
+ * @version 1.4 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
  * @version 1.3 - the reload is data-jy-reload-after
  * @version 1.2 - not found where this site does not sell hosting (SmHosting)
  * @version 1.1 - an expired grant renders as expired with a Reconnect button, never as connected
@@ -41,6 +42,7 @@ $hoptions = array(
 $page->public_header($hoptions, NULL);
 
 echo PublicPage::BeginPage('Your Server Account', $hoptions);
+echo '<div class="jy-ui">';
 ?>
 
 <?php if ($message): ?>
@@ -52,7 +54,7 @@ echo PublicPage::BeginPage('Your Server Account', $hoptions);
 	<p class="smcc-message">Your Linode grant expired<?php echo $grant_expires !== '' ? ' at ' . htmlspecialchars($grant_expires) . ' UTC' : ''; ?>. A grant lasts two hours and cannot be refreshed, so no server can be created until you reconnect.</p>
 	<form method="post" action="/profile/server_manager/connect_cloud">
 		<input type="hidden" name="action" value="connect">
-		<button type="submit" class="smcc-connect-btn">Reconnect your Linode account</button>
+		<button type="submit" class="btn btn-primary">Reconnect your Linode account</button>
 	</form>
 <?php elseif ($account_connected): ?>
 	<p class="smcc-connected">✓ Your Linode account is connected. Servers are created in your account and billed directly to you by Linode.</p>
@@ -66,7 +68,7 @@ echo PublicPage::BeginPage('Your Server Account', $hoptions);
 	<?php if ($provider_configured): ?>
 	<form method="post" action="/profile/server_manager/connect_cloud">
 		<input type="hidden" name="action" value="connect">
-		<button type="submit" class="smcc-connect-btn">Connect your Linode account</button>
+		<button type="submit" class="btn btn-primary">Connect your Linode account</button>
 	</form>
 	<?php endif; ?>
 	<?php if ($referral_url): ?>
@@ -95,15 +97,13 @@ echo PublicPage::BeginPage('Your Server Account', $hoptions);
 <?php endif; ?>
 
 <style>
-.smcc-message { padding: 12px 16px; background: #eef6ff; border-radius: 4px; }
+.smcc-message { padding: 12px 16px; background: var(--jy-color-info-bg); border-radius: 4px; }
 .smcc-connect { margin: 1.5em 0; }
-.smcc-connected { color: #1a7f37; font-weight: bold; }
-.smcc-connect-btn { background: #02b159; color: #fff; border: 0; padding: 12px 28px; border-radius: 4px; font-size: 1em; font-weight: bold; cursor: pointer; }
-.smcc-connect-btn:hover { filter: brightness(1.05); }
-.smcc-signup { color: #555; margin-top: 1em; }
-.smcc-reconnect-btn { background: none; border: 0; color: #1565c0; cursor: pointer; padding: 0; text-decoration: underline; font-size: .9em; }
+.smcc-connected { color: var(--jy-color-success); font-weight: bold; }
+.smcc-signup { color: var(--jy-color-text-muted); margin-top: 1em; }
+.smcc-reconnect-btn { background: none; border: 0; color: var(--jy-color-link); cursor: pointer; padding: 0; text-decoration: underline; font-size: .9em; }
 .smcc-table { border-collapse: collapse; width: 100%; }
-.smcc-table th, .smcc-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #e2e2e2; }
+.smcc-table th, .smcc-table td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--jy-color-border); }
 </style>
 
 <?php if ($in_progress): ?>
@@ -112,6 +112,7 @@ echo PublicPage::BeginPage('Your Server Account', $hoptions);
 <?php endif; ?>
 
 <?php
+echo '</div>';
 echo PublicPage::EndPage($hoptions);
 $page->public_footer();
 ?>

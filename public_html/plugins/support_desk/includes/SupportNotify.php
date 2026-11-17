@@ -15,6 +15,7 @@
  *                    has no address and learns of it from the Help button's
  *                    mark.
  *
+ * @version 0.2.0 - a widget thread's reply notice links the conversation on this node's own page
  * @version 0.1.0
  */
 class SupportNotify {
@@ -43,9 +44,18 @@ class SupportNotify {
 			return;
 		}
 		$last = self::lastQuestion($thread);
-		$who = (string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET
-			? 'A visitor on the public pages'
-			: ((string)$thread->get('sth_host') . ' (release ' . $thread->get('sth_version') . ')');
+		$who = (string)$thread->get('sth_host') . ' (release ' . $thread->get('sth_version') . ')';
+		if ((string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET) {
+			// A signed-in member is named, so whoever answers knows the buyer (B34).
+			$who = 'A visitor on the public pages';
+			$member = (int)$thread->get('sth_account_user_id');
+			if ($member > 0) {
+				$u = new User($member, TRUE);
+				if ($u->key) {
+					$who = 'Member ' . $u->display_name() . ' <' . $u->get('usr_email') . '> (user #' . $member . '), on the public pages';
+				}
+			}
+		}
 		$body = "A support thread is waiting for a person.\n\n"
 			. 'From: ' . $who . "\n"
 			. ($reason !== '' ? 'Why: ' . $reason . "\n" : '')
@@ -80,8 +90,13 @@ class SupportNotify {
 		if ($stmt->fetchColumn() === false) {
 			return;
 		}
+		// A widget thread is read on this node's own page, not in a site's Help.
+		$body = (string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET
+			? "A person replied to your question. Read it here (signed in):\n\n"
+				. LibraryFunctions::get_absolute_url('/support_desk/ask?thread=' . $id) . "\n"
+			: self::REPLY_BODY;
 		try {
-			EmailSender::quickSend($email, self::REPLY_SUBJECT, self::REPLY_BODY);
+			EmailSender::quickSend($email, self::REPLY_SUBJECT, $body);
 		} catch (\Throwable $e) {
 			error_log('[support_desk] the reply notice was not sent: ' . $e->getMessage());
 		}

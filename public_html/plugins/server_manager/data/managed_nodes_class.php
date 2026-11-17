@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.77 - hosting_billing_refusal(): a site whose hosting subscription still bills is not hidden or removed (hosting_after_purchase B10); reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.76 - prepare() lets an empty SSH user through to the column's default (root): a node made
  *                 without one (agent join, site copy, provisioning) logged a model-rule refusal on every save
  * @version 1.75 - prepare() refuses an SSH user that is not a plain account name and a host that is not a
@@ -1368,6 +1369,36 @@ class ManagedNode extends SystemBase {
 	}
 
 	/**
+	 * Why this site may not be hidden or removed yet, or '' when it may: a
+	 * hosting subscription this site's store sold still bills its buyer. The
+	 * hosting ends by cancelling it (the buyer's Subscriptions, or a refund
+	 * and cancel from the order), which runs the grace and shutdown the buyer
+	 * was promised; removing the site first would leave them paying for a
+	 * site that is gone from their page. A held site's removal cancels its own
+	 * subscription (HostedHeldRemoval) and is not refused here.
+	 */
+	public function hosting_billing_refusal(): string {
+		if (!$this->key) {
+			return '';
+		}
+		// Removed provisions too: a node hidden before this check existed had
+		// its provision removed with the subscription still billing, and
+		// Remove Permanently must not let that go unnoticed.
+		foreach (new MultiCustomerCloudProvision(['cvp_mgn_managed_node_id' => (int)$this->key]) as $provision) {
+			$item = $provision->local_order_item();
+			if ($item === null || !$item->get('odi_is_subscription') || $item->get('odi_subscription_cancelled_time')
+					|| !in_array((string)$item->get('odi_subscription_status'), ['active', 'trialing', 'grace_period', 'past_due'], true)) {
+				continue;
+			}
+			return 'The hosting subscription for ' . $provision->get('cvp_domain') . ' (order '
+				. (int)$item->get('odi_ord_order_id') . ') still bills its buyer. End the hosting first: cancel the '
+				. 'subscription on the buyer\'s user page under Subscriptions, or refund and cancel it from the order. '
+				. 'Nothing was changed.';
+		}
+		return '';
+	}
+
+	/**
 	 * Let go of what the provisioning task keeps working on for this site.
 	 *
 	 * Left alone, a removed site's hosting order kept its pipeline running:
@@ -1414,10 +1445,9 @@ class ManagedNode extends SystemBase {
 				$notes[] = $kept;
 			}
 
-			$item_id = (int)$provision->get('cvp_external_order_item_id');
-			if ($item_id > 0 && class_exists('OrderItem')) {
-				$item = new OrderItem($item_id, TRUE);
-				if ($item->key && $item->get('odi_is_subscription') && !$item->get('odi_subscription_cancelled_time')
+			$item = $provision->local_order_item();
+			if ($item !== null) {
+				if ($item->get('odi_is_subscription') && !$item->get('odi_subscription_cancelled_time')
 						&& in_array((string)$item->get('odi_subscription_status'), ['active', 'trialing', 'grace_period'], true)) {
 					$notes[] = 'Its hosting subscription (order ' . (int)$item->get('odi_ord_order_id')
 						. ') is still active and still bills the buyer: if the hosting has ended, cancel it on the buyer\'s user page, under Subscriptions.';

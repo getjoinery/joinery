@@ -4,6 +4,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.69 - Retry setup for a paid site that failed before its node (hosting_after_purchase O1)
+ * @version 1.68 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.67 - Approve's question names why the order was held (the limit, a suspension or a dispute)
  * @version 1.66 - a Starter site's join is tagged as its own and approved for its own node (adopt_container_join, hosting_launch S4)
  * @version 1.65 - no inline script: the row click and status refresh are assets/js/admin-dashboard.js
@@ -351,6 +353,26 @@ if ($_POST && ($_POST['action'] ?? '') === 'discard_test_provision') {
 // A paid hosted order held over the per-buyer limit (specs/hosted_abuse_response.md
 // section 1): a person approves it, and it goes on as any activation would, or
 // refuses it after refunding and cancelling it on its order page.
+// A paid site that failed before it had a node is sent back to be built
+// (CustomerCloudProvision::retry_setup; hosting_after_purchase O1).
+if ($_POST && ($_POST['action'] ?? '') === 'retry_provision') {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$prov = new CustomerCloudProvision((int)($_POST['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
+	try {
+		if (!$prov->key || $prov->get('cvp_delete_time')) {
+			throw new RuntimeException('That provision is no longer on the board.');
+		}
+		$prov->retry_setup();
+		$session->save_message(new DisplayMessage($prov->get('cvp_domain') . ' goes back to be built on the next provisioning pass.',
+			'Done', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	} catch (\Throwable $e) {
+		$session->save_message(new DisplayMessage($e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	}
+	header('Location: /admin/server_manager'); exit;
+}
+
 if ($_POST && in_array(($_POST['action'] ?? ''), array('approve_held_provision', 'refuse_held_provision'), true)) {
 	$page_regex = '/\/admin\/server_manager/';
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
@@ -1204,8 +1226,8 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 						if ($prov_auto): ?><span class="badge badge-subtle-success" title="<?php echo $prov_auto; ?> agent<?php echo $prov_auto === 1 ? '' : 's'; ?> on this machine approved automatically, matched against the keys its install showed.">auto-approved</span><?php endif; ?>
 						<?php if ($prov_host_id): ?><a href="#host-<?php echo $prov_host_id; ?>" class="svm-host-jump" title="Show this machine's host on the board">host</a><?php endif; ?>
 						<?php if ($pstatus === 'held'):
-							$held_order_item = new OrderItem((int)$prov->get('cvp_external_order_item_id'), TRUE);
-							$held_order_id = $held_order_item->key ? (int)$held_order_item->get('odi_ord_order_id') : 0; ?>
+							$held_order_item = $prov->local_order_item();
+							$held_order_id = $held_order_item !== null ? (int)$held_order_item->get('odi_ord_order_id') : 0; ?>
 							<form method="post" action="/admin/server_manager" id="approve_held_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
 								<input type="hidden" name="action" value="approve_held_provision">
 								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
@@ -1236,6 +1258,15 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 										data-jy-confirm="<?php echo htmlspecialchars('Discard the test site ' . $prov->get('cvp_domain') . '? This deletes its server at the test account, its DNS records in the test zone, its mail subaccount, its backups and its test subscription, then removes it from the dashboard. This cannot be undone.', ENT_QUOTES); ?>" data-jy-confirm-typed="<?php echo htmlspecialchars((string)$prov->get('cvp_domain'), ENT_QUOTES); ?>" data-jy-submit="discard_prov_<?php echo (int)$prov->key; ?>">Discard test site&hellip;</button>
 								</form>
 							<?php endif; ?>
+						<?php endif; ?>
+						<?php if ($prov->retry_setup_refusal() === ''): ?>
+							<form method="post" action="/admin/server_manager" id="retry_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
+								<input type="hidden" name="action" value="retry_provision">
+								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+								<?php echo SmAdminCsrf::field(); ?>
+								<button type="button" class="btn btn-sm btn-outline-secondary"
+									<?php echo $confirm_submit('retry_prov_' . (int)$prov->key, 'Retry setting up ' . $prov->get('cvp_domain') . '? It goes back to be built; a server it already has is used, not made again. Fix what failed it first, or it fails the same way.'); ?>>Retry setup</button>
+							</form>
 						<?php endif; ?>
 						<?php if (!$dismiss_blockers): ?>
 							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">

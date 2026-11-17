@@ -8,6 +8,7 @@
  * getKey(). Nothing anywhere names a registrar in a list, so adding a second
  * one is a class in this directory and no edits elsewhere.
  *
+ * @version 1.1 - configured() offers only the pretend registrar while the site's config file turns it on
  * @version 1.0
  */
 
@@ -59,6 +60,11 @@ class DomainRegistrarRegistry {
 
 	/** Only registrars whose credentials are present. */
 	public static function configured(): array {
+		// A workspace box running the pretend registrar offers nothing else, so
+		// a saved real key it cannot open is never tried.
+		if (isset(self::all()['pretend']) && PretendRegistrar::on()) {
+			return array(PretendRegistrar::getKey() => 'PretendRegistrar');
+		}
 		$out = array();
 		foreach (self::all() as $key => $class) {
 			if ($class::isConfigured()) {

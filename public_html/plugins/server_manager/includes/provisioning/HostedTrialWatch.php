@@ -39,6 +39,7 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.12 - the plan row records the paying line only when this site's store sold it, and reads its period end the same way (hosting_after_purchase B11)
  * @version 1.11 - a held Starter site whose backups were pruned is marked ready to remove (htr_remove_ready_time)
  *                and hosted.removal_ready tells the operator once; a site with no storage space has nothing to
  *                prune, and its keep-period ends with none (hosting_paid_launch B1); a shut-down site a person
@@ -198,7 +199,10 @@ class HostedTrialWatch {
 	private function open_row($provision, int $trial_days): void {
 		$trial = new HostedTrial(NULL);
 		$trial->set('htr_cvp_customer_cloud_provision_id', (int)$provision->key);
-		$trial->set('htr_external_order_item_id', $provision->get('cvp_external_order_item_id'));
+		// The paying line only when this site's store sold it: the store's
+		// signals find the row by it, and another store's id is not one of ours.
+		$paying = $provision->local_order_item();
+		$trial->set('htr_external_order_item_id', $paying !== null ? (int)$paying->key : null);
 		if ($trial_days > 0) {
 			$trial->set('htr_state', HostedTrial::STATE_TRIAL);
 			$trial->set('htr_trial_ends_time', $this->trial_end_for($provision, $trial_days));
@@ -223,17 +227,13 @@ class HostedTrialWatch {
 
 	/** When the free period ends, from the store's own dates where there are any. */
 	private function trial_end_for($provision, int $days): string {
-		$order_item_id = (int)$provision->get('cvp_external_order_item_id');
-		if ($order_item_id && class_exists('OrderItem')) {
-			try {
-				$item = new OrderItem($order_item_id, TRUE);
-				$end = trim((string)$item->get('odi_subscription_period_end'));
-				if ($item->key && $end !== '') {
-					return $end;
-				}
-			} catch (Throwable $e) {
-				// The store lives on another site in some deployments. The
-				// configured length is the answer then, and it is a good one.
+		// The store lives on another site in some deployments. The configured
+		// length is the answer then, and it is a good one.
+		$item = $provision->local_order_item();
+		if ($item !== null) {
+			$end = trim((string)$item->get('odi_subscription_period_end'));
+			if ($end !== '') {
+				return $end;
 			}
 		}
 		return gmdate('Y-m-d H:i:s', time() + ($days * 86400));

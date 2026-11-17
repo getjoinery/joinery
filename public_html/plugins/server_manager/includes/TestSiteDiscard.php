@@ -55,6 +55,7 @@
  * remove is on the Main side of the dashboard: the provision's account and the
  * dashboard's record must agree that the site is a test one.
  *
+ * @version 1.4 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.3 - a site in a container on a shared host (Starter): a test site by its host's side and account;
  *                its container removed by its host, its host, the host's node and the other sites never touched
  * @version 1.2 - refused when a box it would remove is on the Main side
@@ -498,12 +499,8 @@ class TestSiteDiscard {
 	 * $cancel: callable(OrderItem) doing the provider's part, for tests.
 	 */
 	private static function subscription(CustomerCloudProvision $provision, ?callable $cancel, array &$out): void {
-		$item_id = (int)$provision->get('cvp_external_order_item_id');
-		if ($item_id <= 0 || !$provision->is_test_purchase()) {
-			return;
-		}
-		$item = new OrderItem($item_id, TRUE);
-		if (!$item->key || !$item->get('odi_is_subscription') || $item->get('odi_subscription_cancelled_time')) {
+		$item = $provision->is_test_purchase() ? $provision->local_order_item() : null;
+		if ($item === null || !$item->get('odi_is_subscription') || $item->get('odi_subscription_cancelled_time')) {
 			return;
 		}
 		try {
@@ -519,7 +516,7 @@ class TestSiteDiscard {
 				}
 				$item->cancel_subscription_by_system('immediate');
 			});
-			$item = new OrderItem($item_id, TRUE);
+			$item = new OrderItem((int)$item->key, TRUE);
 			if (!$item->get('odi_subscription_cancelled_time')) {
 				$item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
 				$item->set('odi_subscription_status', 'canceled');

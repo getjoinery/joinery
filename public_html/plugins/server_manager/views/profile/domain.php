@@ -10,6 +10,7 @@
  * the renewal until they are, and a lapsed domain takes the site and the email
  * address with it.
  *
+ * @version 1.2 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
  * @version 1.1 - not found where this site does not sell hosting (SmHosting)
  * @version 1.0
  */
@@ -32,6 +33,7 @@ $hoptions = array(
 $page->public_header($hoptions, NULL);
 
 echo PublicPage::BeginPage('Your Domain', $hoptions);
+echo '<div class="jy-ui">';
 ?>
 
 <?php if (count($domains) === 0): ?>
@@ -123,17 +125,18 @@ echo PublicPage::BeginPage('Your Domain', $hoptions);
 <?php endforeach; ?>
 
 <style>
-.smdm-domain { margin: 0 0 2.5rem; padding: 0 0 2rem; border-bottom: 1px solid #e2e2e2; }
+.smdm-domain { margin: 0 0 2.5rem; padding: 0 0 2rem; border-bottom: 1px solid var(--jy-color-border); }
 .smdm-domain:last-child { border-bottom: 0; }
-.smdm-owned { color: #1a7f37; }
-.smdm-done { color: #1a7f37; font-weight: 600; }
-.smdm-progress { background: #eef6ff; padding: 12px 16px; border-radius: 4px; }
+.smdm-owned { color: var(--jy-color-success); }
+.smdm-done { color: var(--jy-color-success); font-weight: 600; }
+.smdm-progress { background: var(--jy-color-info-bg); padding: 12px 16px; border-radius: 4px; }
 .smdm-steps { line-height: 1.7; padding-left: 1.4rem; }
 .smdm-steps li { margin-bottom: .5rem; }
-.smdm-note { color: #555; }
+.smdm-note { color: var(--jy-color-text-muted); }
 </style>
 
 <?php
+echo '</div>';
 echo PublicPage::EndPage($hoptions);
 $page->public_footer();
 ?>

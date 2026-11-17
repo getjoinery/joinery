@@ -33,6 +33,8 @@
  * host into a grace period minutes after it left
  * (specs/managed_to_self_hosted_transfer.md §5 step 3).
  *
+ * @version 1.4 - a signal or a catch-up acts only when the row's line is one this site's store sold
+ *                (hosting_after_purchase B14)
  * @version 1.3 - a late payment on a shut-down row clears its ready-to-remove mark (hosting_paid_launch B1)
  * @version 1.2 - catch_up(): a row opened after a cancel or a failed payment starts its wind-down then
  * @version 1.1 - a transferred row is left alone by every signal
@@ -51,6 +53,12 @@ class HostedTrialSignals {
 		if ($trial === null) {
 			// Not a hosted subscription. Every other subscription on the
 			// platform passes through here and this is where they stop.
+			return;
+		}
+		$line = self::paying_line($trial);
+		if ($line === null || (int)$line->key !== $order_item_id) {
+			// The row names another store's line that happens to share this
+			// number: the event is about somebody else's purchase.
 			return;
 		}
 
@@ -75,17 +83,10 @@ class HostedTrialSignals {
 	 * one whose payment is failing, starts the wind-down it would have started.
 	 */
 	public static function catch_up($trial): void {
-		$order_item_id = (int)$trial->get('htr_external_order_item_id');
-		if (!$order_item_id || !class_exists('OrderItem')) {
-			// The store lives on another site in some deployments.
-			return;
-		}
-		try {
-			$item = new OrderItem($order_item_id, TRUE);
-		} catch (Throwable $e) {
-			return;
-		}
-		if (!$item->key) {
+		// The store lives on another site in some deployments; a line id from
+		// there is never read as one of ours.
+		$item = self::paying_line($trial);
+		if ($item === null || (int)$item->key !== (int)$trial->get('htr_external_order_item_id')) {
 			return;
 		}
 		if ($item->get('odi_subscription_cancelled_time')) {
@@ -145,6 +146,15 @@ class HostedTrialSignals {
 		$trial->set('htr_shelf_ends_time', null);
 		$trial->set('htr_note', null);
 		$trial->save();
+	}
+
+	/**
+	 * The line this row's site is paid by, when this site's store sold it
+	 * (CustomerCloudProvision::local_order_item); null otherwise.
+	 */
+	private static function paying_line($trial): ?OrderItem {
+		$provision = new CustomerCloudProvision((int)$trial->get('htr_cvp_customer_cloud_provision_id'), TRUE);
+		return $provision->key ? $provision->local_order_item() : null;
 	}
 
 	private static function plus_days(string $from, int $days): string {

@@ -30,6 +30,7 @@
  * Nothing here can stop the removal: the container is already gone. Each step
  * that fails says so in the job's notes and in the error log.
  *
+ * @version 1.1 - cancels only a subscription this site's store sold (hosting_after_purchase B11)
  * @version 1.0
  */
 
@@ -60,12 +61,10 @@ class HostedHeldRemoval {
 	}
 
 	private static function cancel_subscription(CustomerCloudProvision $provision, ?callable $cancel): array {
-		$item_id = (int)$provision->get('cvp_external_order_item_id');
-		if ($item_id <= 0 || !class_exists('OrderItem')) {
-			return array();
-		}
-		$item = new OrderItem($item_id, TRUE);
-		if (!$item->key || !$item->get('odi_is_subscription') || $item->get('odi_subscription_cancelled_time')) {
+		// Only a line this site's store sold: another store's line id names
+		// somebody else's purchase here.
+		$item = $provision->local_order_item();
+		if ($item === null || !$item->get('odi_is_subscription') || $item->get('odi_subscription_cancelled_time')) {
 			return array();
 		}
 		$order = (int)$item->get('odi_ord_order_id');
@@ -92,7 +91,7 @@ class HostedHeldRemoval {
 			return array('Its hosting subscription (order ' . $order . ') was not cancelled (' . $e->getMessage()
 				. '). Cancel it by hand on the buyer\'s user page, under Subscriptions, or the buyer may be charged again.');
 		}
-		$item = new OrderItem($item_id, TRUE);
+		$item = new OrderItem((int)$item->key, TRUE);
 		if (!$item->get('odi_subscription_cancelled_time')) {
 			$item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
 			$item->set('odi_subscription_status', 'canceled');

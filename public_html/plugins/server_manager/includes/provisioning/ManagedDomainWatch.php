@@ -41,6 +41,8 @@
  * that prompt is their first mention of a deadline that takes their site and
  * their email with it if they miss it.
  *
+ * @version 1.5 - a domain whose site is removed or shut down is told to its buyer by email at the notice's stages
+ *                (HostingBuyerNotices::tell_domain_expiry; hosting_after_purchase D2)
  * @version 1.4 - no notice is sent to a node removed from the dashboard
  * @version 1.3 - the notice travels the agent channel as a job, and the watcher converges
  *                on desired state instead of firing four separate pushes
@@ -105,13 +107,31 @@ class ManagedDomainWatch {
 			'deleted' => false,
 		));
 		$rows->load();
-		if (count($rows) === 0 && $worked === 0) {
-			return array('status' => 'skipped', 'message' => 'No active managed domains.');
-		}
 
 		foreach ($rows as $row) {
 			try {
 				$worked += $this->watch($row);
+			} catch (Throwable $e) {
+				$this->notes[] = $row->get('rdm_domain') . ': ' . $e->getMessage();
+				error_log('ManagedDomainWatch: ' . $row->get('rdm_domain') . ': ' . $e->getMessage());
+			}
+		}
+
+		// A name bought and then parked, because its site was removed before
+		// it was wired up, sits in our registrar account too and lapses at its
+		// expiry unless its buyer takes it: its expiry and custody are watched,
+		// and its buyer emailed at the notice's stages (hosting_after_purchase D2).
+		$parked = new MultiRegisteredDomain(array('status' => RegisteredDomain::STATUS_FAILED, 'deleted' => false));
+		foreach ($parked as $row) {
+			if (!trim((string)$row->get('rdm_registered_time'))
+					|| (string)$row->get('rdm_graduation_state') === RegisteredDomain::GRAD_SELF) {
+				continue;
+			}
+			try {
+				$worked += $this->refresh_expiry($row);
+				$worked += $this->check_custody($row);
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/HostingBuyerNotices.php'));
+				$worked += HostingBuyerNotices::tell_domain_expiry($row);
 			} catch (Throwable $e) {
 				$this->notes[] = $row->get('rdm_domain') . ': ' . $e->getMessage();
 				error_log('ManagedDomainWatch: ' . $row->get('rdm_domain') . ': ' . $e->getMessage());
@@ -144,8 +164,33 @@ class ManagedDomainWatch {
 			$changed += $this->refresh_expiry($row);
 			$changed += $this->check_custody($row);
 		}
-		$changed += $this->converge_notice($row);
+		if (self::has_live_box($row)) {
+			$changed += $this->converge_notice($row);
+		} else {
+			// No site of the buyer's is up to show the notice: they are
+			// emailed at its stages instead (hosting_after_purchase D2).
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/HostingBuyerNotices.php'));
+			$changed += HostingBuyerNotices::tell_domain_expiry($row);
+		}
 		return $changed;
+	}
+
+	/**
+	 * Is the site this domain was bought for up to show its notice: its node
+	 * on the dashboard, and its hosting not shut down?
+	 */
+	public static function has_live_box($row): bool {
+		$node_id = (int)$row->get('rdm_mgn_managed_node_id');
+		if ($node_id <= 0) {
+			return false;
+		}
+		$node = new ManagedNode($node_id, TRUE);
+		if (!$node->key || $node->get('mgn_delete_time')) {
+			return false;
+		}
+		$provision = CustomerCloudProvision::latest_for_node($node_id);
+		$trial = $provision ? HostedTrial::for_provision((int)$provision->key) : null;
+		return $trial === null || (string)$trial->get('htr_state') !== HostedTrial::STATE_SHUTDOWN;
 	}
 
 	// ------------------------------------------------------------------

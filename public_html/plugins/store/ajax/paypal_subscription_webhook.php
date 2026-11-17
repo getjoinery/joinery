@@ -247,7 +247,7 @@ WebhookLog::logEvent(
  */
 function _paypal_webhook_send_payment_failure_email($user_id, $order_item) {
     // Check for recent payment failure email
-    if (WebhookLog::hasRecentPaymentFailure('paypal', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED')) {
+    if (WebhookLog::hasRecentPaymentFailure('paypal', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED', (string)$order_item->get('odi_paypal_subscription_id'))) {
         error_log("PayPal webhook: skipping payment failure email, recent one exists");
         return;
     }
@@ -259,8 +259,14 @@ function _paypal_webhook_send_payment_failure_email($user_id, $order_item) {
         $user = new User($user_id, TRUE);
         if (!$user->key) return;
 
-        $tier = SubscriptionTier::GetUserTier($user_id);
-        $tier_name = $tier ? $tier->get('sbt_display_name') : 'your current plan';
+        // The line whose charge failed, by the name its buyer knows it by
+        // ('Managed hosting — example.com'); the buyer's tier only when the
+        // line has no product to name.
+        $tier_name = $order_item->buyer_label();
+        if ($tier_name === '') {
+            $tier = SubscriptionTier::GetUserTier($user_id);
+            $tier_name = $tier ? $tier->get('sbt_display_name') : 'your current plan';
+        }
 
         $billing_amount = '';
         if ($order_item->get('odi_price')) {

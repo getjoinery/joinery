@@ -24,6 +24,7 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.5 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.4 - link_node_services(): the node-linked mail and backup rows, shared with an own-Linode site built with the
  *                email and backups bundle (specs/own_linode_we_install.md W5); a newly built site's mail row may be unverified ($mail_verified), and its backups link without its mail ($link_mail)
  * @version 1.3 - asks the account of ours the server was in (cloud_accounts_list)
@@ -136,7 +137,7 @@ class InstanceTransferFinish {
 		if ($item_id <= 0) {
 			return true;
 		}
-		$item = self::local_order_item($provision);
+		$item = $provision->local_order_item();
 		if ($item === null) {
 			self::add_todo($row, 'Cancel the hosting subscription for order item #' . $item_id
 				. ' in the store that sold it (it is not on this site). Immediately, no refund.');
@@ -168,7 +169,7 @@ class InstanceTransferFinish {
 			$failed = trim((string)$trial->get('htr_payment_failed_time'));
 			return array($failed !== '' ? $failed : gmdate('Y-m-d H:i:s'), '');
 		}
-		$item = self::local_order_item($provision);
+		$item = $provision->local_order_item();
 		if ($item !== null) {
 			$end = trim((string)$item->get('odi_subscription_period_end'));
 			if ($end !== '') {
@@ -181,25 +182,6 @@ class InstanceTransferFinish {
 		$guess = gmdate('Y-m-d H:i:s', time() + 30 * 86400);
 		return array($guess, 'Confirm the paid-through date for this site\'s mail and backups on the Service Tenants page: '
 			. 'the store did not say when its hosting was paid to, so it was set 30 days out.');
-	}
-
-	/**
-	 * The order item behind a provision, when the store that sold it is THIS
-	 * site's store. A configure-page purchase (origin buyer) is; an order polled
-	 * from another site (origin order) names an item id from that store, and
-	 * a local row with the same number would be somebody else's.
-	 */
-	private static function local_order_item(CustomerCloudProvision $provision) {
-		$item_id = (int)$provision->get('cvp_external_order_item_id');
-		if ($item_id <= 0 || (string)$provision->get('cvp_origin') !== 'buyer' || !class_exists('OrderItem')) {
-			return null;
-		}
-		try {
-			$item = new OrderItem($item_id, TRUE);
-			return $item->key ? $item : null;
-		} catch (Throwable $e) {
-			return null;
-		}
 	}
 
 	/**

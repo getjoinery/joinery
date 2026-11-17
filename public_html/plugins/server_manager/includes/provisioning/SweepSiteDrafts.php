@@ -21,6 +21,7 @@
  * every status but the two above, and the origin rule refuses any other
  * origin in those states.
  *
+ * @version 1.1 - a draft swept back to draft loses its freeze token, so a cart line made from it is stale
  * @version 1.0 - specs/managed_hosting_phase1_purchase.md §5.2, §10 item 5
  */
 
@@ -60,6 +61,7 @@ class SweepSiteDrafts {
 		foreach ($frozen as $row) {
 			try {
 				$row->set('cvp_status', 'draft');
+				$row->set('cvp_freeze_token', null);
 				$row->save();
 				$unfrozen++;
 			} catch (Throwable $e) {

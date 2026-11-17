@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.15 - retry_hosted_mail (node page) and retry_provision (board) are level 10 (hosting_after_purchase E2, O1)
  * @version 1.14 - bring_back_hosted is level 10 (hosting_paid_launch O3)
  * @version 1.13 - suspend_site and unsuspend_site on the node page (10): an abuse call that stops a customer's site
  * @version 1.12 - mail_test_send is a change (8): it sends mail
@@ -61,6 +62,8 @@ final class SmActionLevels {
 			'suspend_site' => 10, 'unsuspend_site' => 10,
 			// Starts a held customer site again after a late payment (HostedLateReturn).
 			'bring_back_hosted' => 10,
+			// Starts a hosted site's failed email setup again (hosting_after_purchase E2).
+			'retry_hosted_mail' => 10,
 		),
 		'index' => array(
 			'adopt_join' => 10, 'adopt_provision_join' => 10, 'adopt_container_join' => 10, 'reject_join' => 10, 'reopen_join' => 10,
@@ -71,6 +74,8 @@ final class SmActionLevels {
 			'discard_test_provision' => 10,
 			// A paid hosted order held over the per-buyer limit: a money and abuse call.
 			'approve_held_provision' => 10, 'refuse_held_provision' => 10,
+			// A paid site that failed before its server: activation again, or back to be built (O1).
+			'retry_provision' => 10,
 		),
 		'job_detail' => array(
 			'cancel_job' => 8, 'rerun_job' => 8, 'mark_job_lost' => 8,

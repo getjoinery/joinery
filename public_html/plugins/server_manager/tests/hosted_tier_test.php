@@ -199,10 +199,29 @@ check(trim((string)$reveal->get('cvp_admin_pass_sealed')) === '',
 // ---------------------------------------------------------------------------
 section('The grace clock moves dates and never touches a machine');
 
-$graced = ht_provision('httest-grace-' . $suffix, 'operator');
+// A real paid line on a site bought here: a signal acts only when the row's
+// line is one this site's store sold (hosting_after_purchase B14).
+$grace_buyer = make_user('HtGrace' . $suffix);
+$grace_order = new Order(NULL);
+$grace_order->set('ord_usr_user_id', $grace_buyer->key);
+$grace_order->save();
+$grace_order->load();
+harness_register_row('ord_orders', 'ord_order_id', $grace_order->key);
+$grace_item = new OrderItem(NULL);
+$grace_item->set('odi_ord_order_id', $grace_order->key);
+$grace_item->set('odi_pro_product_id', 999999002);
+$grace_item->set('odi_usr_user_id', $grace_buyer->key);
+$grace_item->set('odi_price', '12.99');
+$grace_item->set('odi_is_subscription', true);
+$grace_item->set('odi_subscription_status', 'active');
+$grace_item->save();
+$grace_item->load();
+harness_register_row('odi_order_items', 'odi_order_item_id', $grace_item->key);
+$graced = ht_provision('httest-grace-' . $suffix, 'operator', array('cvp_origin' => 'buyer',
+	'cvp_external_order_item_id' => $grace_item->key));
 $trial = new HostedTrial(NULL);
 $trial->set('htr_cvp_customer_cloud_provision_id', (int)$graced->key);
-$trial->set('htr_external_order_item_id', 880000 + random_int(0, 9999));
+$trial->set('htr_external_order_item_id', $grace_item->key);
 $trial->set('htr_state', HostedTrial::STATE_SUBSCRIBED);
 $trial->save();
 $trial->load();
@@ -499,8 +518,8 @@ section('A push the site took ends the run of attempts (B12)');
 // The allowance stops a broken site being handed a fresh credential for ever.
 // A push that landed is not part of that run: a later re-push (a new key name,
 // a new credential) gets its full allowance.
-$attempts_of = function ($node) {
-	return (new ReflectionMethod('ProvisionHostedMail', 'push_attempts'))->invoke(new ProvisionHostedMail(), $node);
+$attempts_of = function ($node, $provision = null) {
+	return (new ReflectionMethod('ProvisionHostedMail', 'push_attempts'))->invoke(new ProvisionHostedMail(), $node, $provision);
 };
 $push_node = ht_node('httest-attempts-' . $suffix);
 $push_job = function ($status) use ($push_node) {
@@ -520,8 +539,17 @@ check($attempts_of($push_node) === 0, 'a push the site took starts the count aga
 $push_job('failed');
 check($attempts_of($push_node) === 1, 'and a failure after it is the first of a new run');
 
+section('Retry email setup gives the push a fresh allowance (hosting_after_purchase B19)');
+$push_job('failed');
+$push_job('failed');
+check($attempts_of($push_node) === 3, 'three failed pushes since the last one the site took');
+$retried = new CustomerCloudProvision(NULL);
+$retried->set('cvp_mail_retry_time', gmdate('Y-m-d H:i:s', time() + 1));
+check($attempts_of($push_node, $retried) === 0, 'a retry pressed after them starts the count again');
+$retried->set('cvp_mail_retry_time', gmdate('Y-m-d H:i:s', time() - 3600));
+check($attempts_of($push_node, $retried) === 3, 'a retry pressed before them does not');
+
 // ---------------------------------------------------------------------------
-section('The banner is loudest about the thing that is actually urgent');// ---------------------------------------------------------------------------
 section('The banner is loudest about the thing that is actually urgent');
 
 require_once(PathHelper::getIncludePath('includes/HostedPlanNotice.php'));
@@ -671,7 +699,10 @@ $early_item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s'));
 $early_item->save();
 $early_item->load();
 harness_register_row('odi_order_items', 'odi_order_item_id', $early_item->key);
-$early = ht_provision('httest-early-' . $suffix, 'operator', array('cvp_external_order_item_id' => $early_item->key));
+// Bought on this site's setup page (origin buyer): only such a site's line is
+// read as this store's (CustomerCloudProvision::local_order_item).
+$early = ht_provision('httest-early-' . $suffix, 'operator', array('cvp_external_order_item_id' => $early_item->key,
+	'cvp_origin' => 'buyer'));
 $open->invoke($watch, $early, 0);
 $et = HostedTrial::for_provision($early->key);
 check($et !== null && (string)$et->get('htr_state') === HostedTrial::STATE_GRACE,

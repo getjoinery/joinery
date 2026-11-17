@@ -30,6 +30,7 @@
  * Contributed by CustomerCloudFulfillment::extraRequirements(), never attached
  * as a pri_ row, so it does not appear in the product-edit picker.
  *
+ * @version 1.7 - the line names the draft's freeze token, not its update time (hosting_after_purchase B13)
  * @version 1.6 - the domain-year line carries the name's yearly renewal price (managed_domain_renewal)
  * @version 1.5 - an own-Linode draft with the email and backups bundle brings the bundle line with it
  *                (SERVICES_FIELD, extra_cart_lines; own_linode_we_install W4); a product page offers and accepts a
@@ -126,7 +127,7 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 			return null;
 		}
 		$frozen = self::frozen_from($data);
-		if ($frozen === '' || $frozen !== (string)$draft->get('cvp_update_time')) {
+		if ($frozen === '' || $frozen !== (string)$draft->get('cvp_freeze_token')) {
 			return null;
 		}
 		return $draft;
@@ -252,14 +253,14 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		$draft = $this->draft;
 		// Every key is stored on the order item as a labelled answer and shown
 		// on the admin's order page, so each carries a label a person can read.
-		// The draft id and its freeze time are bookkeeping: the buyer's cart
+		// The draft id and its freeze token are bookkeeping: the buyer's cart
 		// shows the site and skips them.
 		$data = array(
 			self::SUMMARY_FIELD => array('question' => 'Site', 'answer' => self::summary($draft)),
 			self::FIELD         => array('question' => 'Site setup', 'answer' => (string)$draft->key,
 				'internal' => true),
-			self::FROZEN_FIELD  => array('question' => 'Site setup frozen at',
-				'answer' => (string)$draft->get('cvp_update_time'), 'internal' => true),
+			self::FROZEN_FIELD  => array('question' => 'Site setup freeze',
+				'answer' => (string)$draft->get('cvp_freeze_token'), 'internal' => true),
 		);
 		if ((string)$draft->get('cvp_domain_source') === 'register') {
 			// The same keys the registration guard and the orphan sweep read:

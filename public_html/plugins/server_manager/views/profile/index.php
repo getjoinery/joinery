@@ -7,6 +7,11 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.16 - Manage: links to the site's subscription, billing, domain, email and backups (hosting_after_purchase N2)
+ * @version 2.15 - every setup state has words (held, failed with where to write); the hosting row is one sentence
+ *                with its date (profile_sites_plan_line) (hosting_after_purchase P2, P4, P5, S3)
+ * @version 2.14 - a draft's card offers payment for every plan; Connect belongs to a paid own-Linode site
+ * @version 2.13 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
  * @version 2.12 - an own-Linode draft waiting on its Linode connection offers Connect, not payment
  * @version 2.11 - a site on its buyer's own Linode says whose server it is and whether email and backups came with it
  * @version 2.10 - Add these records for me (the DNS publish box) above the record lists, and the optional
@@ -45,7 +50,8 @@ $status_labels = array(
 	'booting'         => 'Your server is starting',
 	'installing'      => 'Installing your site',
 	'done'            => 'Ready',
-	'failed'          => 'Needs attention — our team has been notified',
+	'failed'          => 'Something went wrong. We have been told, and we email you when it is sorted out',
+	'held'            => 'Being checked by a person. We email you within one working day',
 );
 $mail_labels = array(
 	'pending'            => 'Setting up',
@@ -57,12 +63,7 @@ $mail_labels = array(
 	'done'               => 'Working',
 	'failed'             => 'Needs attention',
 );
-$plan_labels = array(
-	'trial'      => 'Free trial',
-	'subscribed' => 'Subscribed',
-	'grace'      => 'Payment needed',
-	'shutdown'   => 'Shut down',
-);
+$support_email = SmHosting::support_email();
 
 $page = new PublicPage();
 $hoptions = array(
@@ -71,6 +72,7 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Your Sites', $hoptions);
+echo '<div class="jy-ui">';
 ?>
 
 <?php if ($error): ?>
@@ -89,7 +91,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 
 <?php if (count($sites) === 0): ?>
 	<p>You have no sites yet.<?php if ($managed_on_sale): ?>
-		<a href="<?php echo htmlspecialchars($configure_url); ?>" class="sms-visit">Set up a site</a><?php endif; ?></p>
+		<a href="<?php echo htmlspecialchars($configure_url); ?>" class="btn btn-primary">Set up a site</a><?php endif; ?></p>
 <?php else: ?>
 <section class="sms-sites">
 <?php foreach ($sites as $site): ?>
@@ -105,12 +107,9 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 		<div class="sms-actions">
 			<?php if ($site['status'] === 'draft'): ?>
 				<a href="<?php echo htmlspecialchars($configure_url . '?cvp_customer_cloud_provision_id=' . (int)$site['id']); ?>"
-					class="sms-visit">Continue</a>
-			<?php elseif ($site['needs_linode']): ?>
-				<a href="<?php echo htmlspecialchars($configure_url . '?cvp_customer_cloud_provision_id=' . (int)$site['id']); ?>"
-					class="sms-visit">Connect your Linode account</a>
+					class="btn btn-primary">Continue</a>
 			<?php elseif ($site['in_cart']): ?>
-				<a href="/cart" class="sms-visit">Finish payment</a>
+				<a href="/cart" class="btn btn-primary">Finish payment</a>
 			<?php elseif ($site['payment_form'] !== ''): ?>
 				<?php echo $site['payment_form']; ?>
 			<?php else: ?>
@@ -121,19 +120,23 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 				'confirm' => ($site['status'] === 'pending_payment')
 					? 'This removes the site from your cart; you will continue to payment again when you are done.'
 					: 'Continue editing this site setup?',
-				'class'   => 'sms-secondary-btn',
+				'class'   => 'btn btn-secondary',
 			)); ?>
 			<?php echo PublicPage::action_button('Delete', '/profile/server_manager', array(
 				'hidden'  => array('action' => 'delete_draft', 'cvp_customer_cloud_provision_id' => (int)$site['id']),
 				'confirm' => 'Remove this site setup? Nothing has been bought or created.',
-				'class'   => 'sms-secondary-btn',
+				'class'   => 'btn btn-secondary',
 			)); ?>
 		</div>
 	</article>
 	<?php continue; endif; ?>
 		<dl class="sms-facts">
 			<dt>Setup</dt>
-			<dd><?php echo htmlspecialchars($status_labels[$site['status']] ?? $site['status']); ?></dd>
+			<dd><?php echo htmlspecialchars($status_labels[$site['status']] ?? $site['status']);
+				if (in_array($site['status'], array('failed', 'held'), true) && $support_email !== '') {
+					echo '. Questions? Write to <a href="mailto:' . htmlspecialchars($support_email) . '">'
+						. htmlspecialchars($support_email) . '</a>.';
+				} ?></dd>
 			<?php if ($site['own_linode']): ?>
 			<dt>Server</dt>
 			<dd>In your own Linode account. Linode bills you for it.</dd>
@@ -149,13 +152,9 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<dt>Suspended</dt>
 			<dd><?php echo htmlspecialchars($site['suspended']); ?> Reply to the email we sent if this is a mistake or once it is fixed.</dd>
 			<?php endif; ?>
-			<?php if ($site['plan_state'] !== ''): ?>
+			<?php if ($site['plan_line'] !== ''): ?>
 			<dt>Hosting</dt>
-			<dd><?php echo htmlspecialchars($plan_labels[$site['plan_state']] ?? $site['plan_state']);
-				if ($site['plan_until'] !== '') {
-					echo ' until ' . htmlspecialchars(LibraryFunctions::convert_time($site['plan_until'], 'UTC',
-						$session->get_timezone(), 'F j, Y'));
-				} ?></dd>
+			<dd><?php echo htmlspecialchars($site['plan_line']); ?></dd>
 			<?php endif; ?>
 		</dl>
 
@@ -237,7 +236,11 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 		<?php endif; ?>
 
 		<?php if ($site['status'] === 'done'): ?>
-			<p><a href="<?php echo htmlspecialchars($site['url']); ?>" class="sms-visit">Visit your site</a></p>
+			<p><a href="<?php echo htmlspecialchars($site['url']); ?>" class="btn btn-primary">Visit your site</a></p>
+		<?php endif; ?>
+		<?php if (!empty($site['links'])): ?>
+			<p class="sms-links">Manage:
+			<?php $sep = ''; foreach ($site['links'] as $label => $href): ?><?php echo $sep; ?><a href="<?php echo htmlspecialchars($href); ?>"><?php echo htmlspecialchars($label); ?></a><?php $sep = ' · '; endforeach; ?></p>
 		<?php endif; ?>
 
 		<?php if ($site['taken']): ?>
@@ -266,7 +269,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 			<form method="post" action="/profile/server_manager">
 				<input type="hidden" name="action" value="reveal_password">
 				<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$site['id']; ?>">
-				<button type="submit" class="sms-reveal-btn">Show my admin password</button>
+				<button type="submit" class="btn btn-secondary">Show my admin password</button>
 			</form>
 			<p class="sms-note">Shown once, then we forget it. Your site asks you to choose a new one
 				at first sign-in.</p>
@@ -284,7 +287,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 					server, and we stop billing you for hosting. Your outgoing email and backups keep working through us.
 					Email sent to your domain stops reaching your site when the move finishes: set up receiving of your
 					own before then.</p>
-				<button type="button" class="sms-secondary-btn" data-do="request">Move to my own Linode account</button>
+				<button type="button" class="btn btn-secondary" data-do="request">Move to my own Linode account</button>
 			<?php elseif ($t['state'] === 'requested'): ?>
 				<p><strong><?php echo htmlspecialchars($t['state_label']); ?>.</strong> We check your server first and
 					email you the next step.</p>
@@ -294,13 +297,13 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 						rel="noopener" target="_blank">sign up at Linode</a>, and add a payment card to it.</li>
 					<li>When it is ready, get your transfer code here. It works for 24 hours.</li>
 				</ol>
-				<button type="button" class="sms-visit" data-do="get_code">I'm ready — get my transfer code</button>
+				<button type="button" class="btn btn-primary" data-do="get_code">I'm ready — get my transfer code</button>
 			<?php elseif ($t['state'] === 'code_issued'): ?>
 				<p>Your transfer code is ready, valid until <strong><?php echo htmlspecialchars($t['code_expiry']); ?></strong>.
 					Anyone with this code can take the server, so keep it to yourself.</p>
 				<p class="sms-code" hidden><code data-code></code>
-					<button type="button" class="sms-secondary-btn" data-copy>Copy</button></p>
-				<button type="button" class="sms-reveal-btn" data-do="reveal_code">Show my transfer code</button>
+					<button type="button" class="btn btn-secondary" data-copy>Copy</button></p>
+				<button type="button" class="btn btn-secondary" data-do="reveal_code">Show my transfer code</button>
 				<ol class="sms-steps">
 					<li>Sign in to Linode Cloud Manager with your own account.</li>
 					<li>Open <strong>Account</strong> (your name at the top right), then <strong>Service Transfers</strong>.</li>
@@ -323,7 +326,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 				</ul>
 				<?php if ($t['managed']): ?>
 				<p class="sms-note">We still look after this site: updates, backups and alerts.</p>
-				<button type="button" class="sms-secondary-btn" data-do="stop_managing"
+				<button type="button" class="btn btn-secondary" data-do="stop_managing"
 					data-confirm="Stop our management of this site? We forget its agent and stop its updates, backups and alerts. Backups already stored with us are deleted after 90 days. Outbound email carries on until its paid-through date.">Stop managing this site</button>
 				<?php else: ?>
 				<p class="sms-note">We no longer manage this site.</p>
@@ -332,7 +335,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 				<p><strong><?php echo htmlspecialchars($t['state_label']); ?>.</strong></p>
 			<?php endif; ?>
 			<?php if ($t['cancelable']): ?>
-				<button type="button" class="sms-secondary-btn" data-do="cancel"
+				<button type="button" class="btn btn-secondary" data-do="cancel"
 					data-confirm="Cancel the move? Your site stays with us as it is.">Cancel the move</button>
 			<?php endif; ?>
 			<p class="sms-move-notice" role="status" aria-live="polite"></p>
@@ -347,12 +350,22 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 	<p class="sms-note"><a href="<?php echo htmlspecialchars($configure_url); ?>">Set up another site</a></p>
 <?php endif; ?>
 
+<?php
+// Where a buyer gets help: the support chat, with a person behind it, and the
+// address to write to (hosting_after_purchase H1).
+$chat_on = class_exists('SupportWidget') && SupportWidget::enabled();
+if ($chat_on || $support_email !== ''): ?>
+	<p class="sms-note">Questions?
+		<?php if ($chat_on): ?><a href="/support_desk/ask">Ask us</a><?php echo $support_email !== '' ? ', or write to ' : ''; else: ?>Write to <?php endif; ?>
+		<?php if ($support_email !== ''): ?><a href="mailto:<?php echo htmlspecialchars($support_email); ?>"><?php echo htmlspecialchars($support_email); ?></a><?php endif; ?>.</p>
+<?php endif; ?>
+
 <?php if ($needs_connect): ?>
 <section class="sms-connect">
 	<h2>Connect your cloud account</h2>
 	<p>One of your sites runs on a server in your own cloud account, billed directly to you with no
 		markup from us. It cannot be created until you connect that account.</p>
-	<p><a href="/profile/server_manager/connect_cloud" class="sms-visit">Connect your account</a></p>
+	<p><a href="/profile/server_manager/connect_cloud" class="btn btn-primary">Connect your account</a></p>
 </section>
 <?php elseif ($account_connected): ?>
 	<p class="sms-note">Your cloud account is connected.
@@ -360,34 +373,29 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 <?php endif; ?>
 
 <style>
-.sms-error { padding: 12px 16px; background: #fef2f2; border-radius: 4px; }
-.sms-reveal { padding: 16px; margin: 1em 0 1.5em; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; }
-.sms-password code { font-size: 1.4em; letter-spacing: .05em; background: #fff; padding: 8px 14px;
-	border: 1px solid #e2e2e2; border-radius: 4px; display: inline-block; }
-.sms-site { padding: 16px 0; border-bottom: 1px solid #e2e2e2; }
+.sms-error { padding: 12px 16px; background: var(--jy-color-danger-bg); border-radius: 4px; }
+.sms-reveal { padding: 16px; margin: 1em 0 1.5em; background: var(--jy-color-warning-bg); border: 1px solid var(--jy-color-warning); border-radius: 6px; }
+.sms-password code { font-size: 1.4em; letter-spacing: .05em; background: var(--jy-color-bg); padding: 8px 14px;
+	border: 1px solid var(--jy-color-border); border-radius: 4px; display: inline-block; }
+.sms-site { padding: 16px 0; border-bottom: 1px solid var(--jy-color-border); }
 .sms-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: .5em 0 1em; }
 .sms-facts dt { font-weight: 600; }
 .sms-facts dd { margin: 0; }
-.sms-visit { display: inline-block; background: #02b159; color: #fff; padding: 10px 22px;
-	border-radius: 4px; text-decoration: none; font-weight: bold; }
-.sms-reveal-btn { background: #1f2937; color: #fff; border: 0; padding: 10px 22px; border-radius: 4px;
-	font-size: 1em; cursor: pointer; }
-.sms-note { color: #555; font-size: .9em; }
+.sms-links { font-size: .95em; }
+.sms-note { color: var(--jy-color-text-muted); font-size: .9em; }
 .sms-connect { margin-top: 2em; }
 .sms-actions form, .sms-pay { display: inline-block; margin-right: .5em; }
-.sms-actions .sms-visit { border: 0; font-size: 1em; cursor: pointer; margin-right: .5em; }
-.sms-secondary-btn { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; padding: 8px 18px;
-	border-radius: 4px; font-size: .95em; cursor: pointer; }
-.sms-move { padding: 12px 16px; margin: 1em 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
+.sms-actions .btn { margin-right: .5em; }
+.sms-move { padding: 12px 16px; margin: 1em 0; background: var(--jy-color-surface); border: 1px solid var(--jy-color-border); border-radius: 6px; }
 .sms-move h3 { margin: 0 0 .5em; font-size: 1.05em; }
 .sms-steps { margin: .5em 0 1em; padding-left: 1.4em; }
-.sms-code code { font-size: 1.1em; background: #fff; padding: 6px 10px; border: 1px solid #e2e2e2;
+.sms-code code { font-size: 1.1em; background: var(--jy-color-bg); padding: 6px 10px; border: 1px solid var(--jy-color-border);
 	border-radius: 4px; display: inline-block; word-break: break-all; }
 .sms-move-notice:empty { display: none; }
-.sms-move-notice { color: #b42318; }
-.sms-taken { padding: 12px 16px; margin: 1em 0; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; }
-#alternate_domain_status[data-state="available"] { color: #1a7f37; }
-#alternate_domain_status[data-state="unavailable"] { color: #b42318; }
+.sms-move-notice { color: var(--jy-color-danger); }
+.sms-taken { padding: 12px 16px; margin: 1em 0; background: var(--jy-color-warning-bg); border: 1px solid var(--jy-color-warning); border-radius: 6px; }
+#alternate_domain_status[data-state="available"] { color: var(--jy-color-success); }
+#alternate_domain_status[data-state="unavailable"] { color: var(--jy-color-danger); }
 </style>
 
 <?php echo PageScript::src('plugins/server_manager/assets/js/profile-move.js'); ?>
@@ -398,6 +406,7 @@ echo PublicPage::BeginPage('Your Sites', $hoptions);
 <?php endif; ?>
 
 <?php
+echo '</div>';
 echo PublicPage::EndPage($hoptions);
 $page->public_footer();
 ?>

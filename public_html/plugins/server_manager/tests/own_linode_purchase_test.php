@@ -200,8 +200,8 @@ check($provider->checkAvailability($own, 0, 1, ol_line_data($mdraft, $managed)) 
 	'a Managed draft is never paid for with the free product');
 check($provider->checkAvailability($managed, 1, 1, $own_data) === CustomerCloudFulfillment::WRONG_PLAN_SENTENCE,
 	'nor an own-Linode draft with the Managed product');
-check($provider->checkAvailability($own, 0, 1, $plain_data) === CustomerCloudFulfillment::CONNECT_LINODE_SENTENCE,
-	'with no Linode connection, the buyer is told to connect');
+check($provider->checkAvailability($own, 0, 1, $plain_data) === null,
+	'with no Linode connection the line still passes: the buyer connects after paying');
 
 $account = new CustomerCloudAccount(NULL);
 $account->set('cca_usr_user_id', $buyer->key);
@@ -212,8 +212,6 @@ $account->set('cca_token_expires', gmdate('Y-m-d H:i:s', time() + 1800));
 $account->save();
 $account->load();
 harness_register_row('cca_customer_cloud_accounts', 'cca_customer_cloud_account_id', $account->key);
-check($provider->checkAvailability($own, 0, 1, $plain_data) === CustomerCloudFulfillment::CONNECT_LINODE_SENTENCE,
-	'a grant with half an hour left cannot carry a build');
 $account->set('cca_token_expires', gmdate('Y-m-d H:i:s', time() + 7000));
 $account->save();
 check(CustomerCloudAccount::live_for_build((int)$buyer->key) !== null, 'a grant with nearly two hours left can');

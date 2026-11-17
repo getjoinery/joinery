@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.136 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.135 - the hosted welcome email for a bring-your-own domain names both things left to add: the
  *                  address record, and the email records the sites page lists
  * @version 1.134 - a verified held removal (held_removal) closes the site's mail account and suspension first
@@ -2097,11 +2098,11 @@ class JobResultProcessor {
 
 	/** Did this plane register the provision's domain (a registration row on its order)? */
 	public static function plane_registered_domain($provision): bool {
-		$order_item_id = (int)$provision->get('cvp_external_order_item_id');
-		if ($order_item_id <= 0 || !class_exists('MultiRegisteredDomain')) {
+		$item_id = $provision->local_order_item_id();
+		if ($item_id <= 0 || !class_exists('MultiRegisteredDomain')) {
 			return false;
 		}
-		$rows = new MultiRegisteredDomain(['external_order_item_id' => $order_item_id, 'deleted' => false]);
+		$rows = new MultiRegisteredDomain(['external_order_item_id' => $item_id, 'deleted' => false]);
 		foreach ($rows as $row) {
 			return true;
 		}

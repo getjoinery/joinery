@@ -355,7 +355,7 @@ check(($data['managed_site_summary']['question'] ?? '') === 'Site'
 	&& strpos((string)($data['managed_site_summary']['answer'] ?? ''), 'msp-register-test.com') === 0,
 	'the site itself travels as a labelled answer, so the cart and the order show the domain');
 check(is_array($data['managed_site_frozen'] ?? null) && ($data['managed_site_frozen']['question'] ?? '') !== ''
-	&& ManagedSiteRequirement::frozen_from($data) === (string)$draft->get('cvp_update_time'),
+	&& ManagedSiteRequirement::frozen_from($data) === (string)$draft->get('cvp_freeze_token') && (string)$draft->get('cvp_freeze_token') !== '',
 	'the freeze is labelled too, and read back through frozen_from()');
 foreach ($data as $k => $v) {
 	check(is_array($v) && isset($v['question'], $v['answer']) || $k === 'managed_domain_price_line',
@@ -537,11 +537,25 @@ $f4 = $provider->fulfill($buyer, $managed, $item3, $order3, 1);
 check(($f4['ref_id'] ?? null) === null && stripos((string)$f4['label'], 'attention') !== false,
 	'a draft that moved is not activated', var_export($f4, true));
 check(count(MspFulfillment::$alerts) === 1 && MspFulfillment::$alerts[0]['order_item'] === (int)$item3->key
-	&& stripos(MspFulfillment::$alerts[0]['reason'], 'pending_payment') !== false,
+	&& stripos(MspFulfillment::$alerts[0]['reason'], 'reopened or changed') !== false,
 	'and the operator is told which order item, and why', var_export(MspFulfillment::$alerts, true));
 $edited->load();
-check($edited->get('cvp_status') === 'draft' && $edited->get('cvp_external_order_item_id') === null,
-	'the draft itself is untouched — a person decides');
+check($edited->get('cvp_status') === 'failed' && (int)$edited->get('cvp_external_order_item_id') === (int)$item3->key,
+	'the row fails closed holding the paid order item: on the board and the buyer\'s page, and never swept away',
+	$edited->get('cvp_status') . ' / ' . var_export($edited->get('cvp_external_order_item_id'), true));
+// A person confirms the setup with the buyer and presses Retry setup: the
+// activation runs again against the paid line, all of it (hosting_after_purchase B18).
+MspFulfillment::$alerts = array();
+$edited->retry_setup();
+$edited = new CustomerCloudProvision($edited->key, TRUE);
+check($edited->get('cvp_status') === 'ready' && (int)$edited->get('cvp_external_order_item_id') === (int)$item3->key
+	&& (string)$edited->get('cvp_hosting_mode') === 'operator' && trim((string)$edited->get('cvp_buyer_email')) !== ''
+	&& (string)$edited->get('cvp_mail_state') === 'pending',
+	'Retry setup activates it in full: built on our account, with its buyer, its line and its mail leg owed',
+	$edited->get('cvp_status') . ' / ' . $edited->get('cvp_hosting_mode') . ' / ' . $edited->get('cvp_mail_state'));
+foreach (new MultiRegisteredDomain(array('external_order_item_id' => (int)$item3->key)) as $retry_rdm) {
+	harness_register_row('rdm_registered_domains', 'rdm_registered_domain_id', $retry_rdm->key);
+}
 
 // The slug rule at activation: a live provision took the name meanwhile.
 $_SESSION['usr_user_id'] = (int)$stranger->key;

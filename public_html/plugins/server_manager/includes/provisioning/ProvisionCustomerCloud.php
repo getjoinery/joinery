@@ -58,6 +58,9 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.30 - a parked site this store sold is told by the buyer notices, not a second email here (hosting_after_purchase B24)
+ * @version 2.29 - a ready site that already has its server resumes at booting (or installing, with a node) instead of
+ *                creating a second one (hosting_after_purchase B3)
  * @version 2.28 - a free own-Linode site with no email and backups bundle is given no space on our backup storage (own_linode_we_install B8)
  * @version 2.27 - a starter host is born with ManagedHost::STARTER_PLACES (7) places (hosting_paid_launch B3)
  * @version 2.26 - seeding_applies() is public, takes the provision to FleetProvisionSeeding (a Starter site's plan
@@ -235,6 +238,16 @@ class ProvisionCustomerCloud {
 	 * Returns 1 if the provision advanced, 0 otherwise.
 	 */
 	protected function handle_ready($provision) {
+		// A site sent back here with its server already made (a rejected grant
+		// parks it at pending_connect mid-build, and a new grant sets it ready)
+		// resumes where it was. Creating another would leave the first running,
+		// unused, on the buyer's own cloud bill.
+		if (trim((string)$provision->get('cvp_instance_id')) !== '') {
+			$resume = (int)$provision->get('cvp_mgn_managed_node_id') > 0 ? 'installing' : 'booting';
+			$provision->set('cvp_status', $resume);
+			$provision->save();
+			return 1;
+		}
 		$driver = $this->get_driver($provision);
 		if ($driver === null) return 0;
 
@@ -1338,6 +1351,12 @@ class ProvisionCustomerCloud {
 		$this->errors[] = "Provision #{$provision->key}: parked for re-connect — {$reason}";
 
 		// The buyer must act (re-grant) or the provision waits forever — tell them.
+		// A site this store sold is told by the buyer notices, once, as any
+		// wait for a connection is (HostingBuyerNotices); only another
+		// store's site is told here (hosting_after_purchase B24).
+		if ((string)$provision->get('cvp_origin') === 'buyer' && $provision->local_order_item() !== null) {
+			return;
+		}
 		$to = trim((string)$provision->get('cvp_buyer_email'));
 		if ($to === '') return;
 		$connect_url = LibraryFunctions::get_absolute_url('/profile/server_manager/connect_cloud');

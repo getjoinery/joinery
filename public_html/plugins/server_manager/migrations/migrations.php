@@ -873,4 +873,115 @@ return [
 			error_log('sm_031: this management node has sold hosting; server_manager_offer_hosting turned on.');
 		},
 	],
+	[
+		// The emails HostingBuyerNotices sends a hosting buyer, one per state
+		// (specs/hosting_after_purchase.md WP2). A template of the same name is
+		// never overwritten: its words are the operator's once edited.
+		'id' => 'sm_032_hosting_buyer_notice_templates',
+		'version' => '1.30.188',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			// Said only when there is an address to write to (B33).
+			$ask = '{support_email}<p>Questions? Write to <a href="mailto:*support_email*">*support_email*</a>.</p>{end}';
+			$templates = array(
+				array('hosting_waiting_connect', 'Connect your Linode account to build *domain*',
+					'<p>Hi *buyer_name*,</p>
+<p>Thanks for your order. Your site <strong>*domain*</strong> will be built on a server in your own Linode account.</p>
+<p>Connect your Linode account from <a href="*sites_url*">your sites</a> and we start building it straight away. It takes about fifteen minutes, and we email you when it is ready.</p>' . $ask),
+				array('hosting_held', 'We are checking your order for *domain*',
+					'<p>Hi *buyer_name*,</p>
+<p>Thanks for your order. Before we build <strong>*domain*</strong>, a person here needs to look at it. This happens now and then, for example when an account already has several sites.</p>
+<p>We will email you within one working day.</p>' . $ask),
+				array('hosting_setup_failed', 'Setting up *domain* hit a problem',
+					'<p>Hi *buyer_name*,</p>
+<p>Something went wrong while we were setting up <strong>*domain*</strong>. We have been told and are looking into it, and we will email you when it is sorted out.</p>
+<p>You can see where it stands on <a href="*sites_url*">your sites</a>.</p>' . $ask),
+				array('hosting_cancel_scheduled', 'Your hosting for *domain* is cancelled',
+					'<p>Hi *buyer_name*,</p>
+<p>The hosting subscription for <strong>*domain*</strong> is cancelled. You will not be charged again.</p>
+<ul>
+<li>Your site keeps running until *period_end*, the end of what you have paid for.</li>
+<li>After that it stays up for *grace_days* more days, then it is shut down.</li>
+<li>Its backups are kept for *shelf_days* days after the end, and can be restored with your recovery key.</li>
+</ul>
+<p>Changed your mind? Press <em>Undo cancel</em> on <a href="*subscriptions_url*">your subscriptions</a> before *period_end*.</p>' . $ask),
+				array('hosting_grace_payment', 'Payment needed for *domain*',
+					'<p>Hi *buyer_name*,</p>
+<p>We could not take the payment for your hosting of <strong>*domain*</strong>.</p>
+<p>Your site keeps running until <strong>*grace_ends*</strong>. <a href="*billing_url*">Update your card</a> and the payment is tried again. If it has not gone through by then, the site is shut down.</p>' . $ask),
+				array('hosting_grace_ended', 'Hosting for *domain* has ended',
+					'<p>Hi *buyer_name*,</p>
+<p>The hosting subscription for <strong>*domain*</strong> has ended.</p>
+<p>Your site keeps running until <strong>*grace_ends*</strong>, then it is shut down. Its backups are kept until *shelf_ends*.</p>
+<p>To keep the site, let us know before *grace_ends*.</p>' . $ask),
+				array('hosting_shutdown_soon', '*domain* shuts down in *days_left* days',
+					'<p>Hi *buyer_name*,</p>
+<p>Your site <strong>*domain*</strong> is shut down on <strong>*grace_ends*</strong>, in *days_left* days.</p>
+<p>If the payment for it failed, <a href="*billing_url*">update your card</a> and it carries on. If you cancelled, nothing more is needed; download a backup from your site before then if you want one.</p>' . $ask),
+				array('hosting_shut_down', '*domain* has been shut down',
+					'<p>Hi *buyer_name*,</p>
+<p>Your site <strong>*domain*</strong> has been shut down.</p>
+<p>Its backups are kept until *shelf_ends* and can be restored with your recovery key. To bring the site back, write to us before then.</p>' . $ask),
+			);
+			foreach ($templates as $t) {
+				$insert->execute(array($t[0], $t[1], $t[2], $t[0]));
+			}
+		},
+	],
+	[
+		// HostingBuyerNotices tells a state once. The sites already past
+		// payment when it arrived have lived in their state without it: their
+		// current state is marked told, so the first run does not email every
+		// buyer about something they already know.
+		'id' => 'sm_033_buyer_notices_mark_current',
+		'version' => '1.30.188',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/HostingBuyerNotices.php'));
+			$rows = new MultiCustomerCloudProvision(array('origin' => 'buyer', 'deleted' => false));
+			$marked = 0;
+			foreach ($rows as $provision) {
+				// One row that will not save never stops update_database (B23).
+				try {
+					if ($provision->is_pre_payment() || HostingBuyerNotices::told($provision) !== array()) {
+						continue;
+					}
+					$item = $provision->local_order_item();
+					if ($item === null) {
+						continue;
+					}
+					$keys = array_keys(HostingBuyerNotices::due($provision, $item));
+					if ($keys === array()) {
+						continue;
+					}
+					$provision->set('cvp_buyer_notices', json_encode($keys));
+					$provision->save();
+					$marked++;
+				} catch (Throwable $e) {
+					error_log('sm_033: provision #' . $provision->key . ' was not marked: ' . $e->getMessage());
+				}
+			}
+			error_log('sm_033: ' . $marked . ' paid site(s) had their current state marked as told.');
+		},
+	],
+	[
+		// The email a buyer gets about a domain we registered for them when no
+		// site of theirs is up to show the take-ownership notice
+		// (HostingBuyerNotices::tell_domain_expiry; hosting_after_purchase D2).
+		'id' => 'sm_034_hosting_domain_expiring_template',
+		'version' => '1.30.189',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			$insert->execute(array('hosting_domain_expiring', 'Your domain *domain* expires on *expiry_date*',
+				'<p>Hi *buyer_name*,</p>
+<p>You own <strong>*domain*</strong>, but it is still kept in our registrar account, and we do not renew it. It expires on <strong>*expiry_date*</strong>, in *days_left* days.</p>
+<p>To keep it, move it into a registrar account of your own and turn on auto-renew there. It takes a few minutes: <a href="*domain_url*">see the steps</a>.</p>
+{support_email}<p>Questions? Write to <a href="mailto:*support_email*">*support_email*</a>.</p>{end}', 'hosting_domain_expiring'));
+		},
+	],
 ];

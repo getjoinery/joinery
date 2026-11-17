@@ -20,6 +20,9 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.8 - cancel_notice() (the provider's words on what a cancel does), can_resume() and
+ *                resume_subscription_order_item() (take back a cancel at period end) (hosting_after_purchase S2, S4)
+ * @version 1.7 - buyer_label(): the product and the site a line is for, as its buyer names it
  * @version 1.6 - option grants_tier: only lines whose product grants a subscription tier (hosting_paid_launch B10)
  * @version 1.5 - odi_product_info unserializes only Address and stdClass objects, the two the checkout
  *                stores; any other class comes back incomplete (v1_key_retirement C2)
@@ -217,6 +220,29 @@ function get_order() {
 		return unserialize(base64_decode((string)$this->get('odi_product_info')), ['allowed_classes' => array('Address', 'stdClass')]);
 	}
 
+	/**
+	 * What this line is, as its buyer would name it: the product, and the
+	 * line's first answer a buyer reads (the site, for a per-site product),
+	 * "Managed hosting — example.com". Bookkeeping answers are marked internal,
+	 * and a bare number is an id an older line stored unmarked; both are
+	 * skipped. '' when the product is gone.
+	 */
+	function buyer_label(): string {
+		$product = new Product((int)$this->get('odi_pro_product_id'), TRUE);
+		$name = $product->key ? trim((string)$product->get('pro_name')) : '';
+		if ($name === '') {
+			return '';
+		}
+		foreach ((array)$this->get_raw_data() as $answer) {
+			if (is_array($answer) && empty($answer['internal'])
+					&& trim((string)($answer['answer'] ?? '')) !== ''
+					&& !ctype_digit(trim((string)$answer['answer']))) {
+				return $name . ' — ' . trim((string)$answer['answer']);
+			}
+		}
+		return $name;
+	}
+
 	function get_product_version($product_id){
 		
 		if($this->get('odi_prv_product_version_id')){
@@ -323,6 +349,68 @@ function get_order() {
 		
 	}
 	
+	/**
+	 * What cancelling this line does, beyond ending the billing, when its
+	 * product's fulfillment provider says (FulfillmentCancelNotice); ''.
+	 */
+	public function cancel_notice(): string {
+		$product = new Product((int)$this->get('odi_pro_product_id'), TRUE);
+		$key = $product->key ? trim((string)$product->get('pro_fulfillment_provider')) : '';
+		$provider = $key !== '' ? FulfillmentRegistry::get($key) : null;
+		if (!$provider instanceof FulfillmentCancelNotice) {
+			return '';
+		}
+		try {
+			return trim($provider->cancelNotice($this));
+		} catch (Throwable $e) {
+			error_log('OrderItem::cancel_notice: line #' . (int)$this->key . ': ' . $e->getMessage());
+			return '';
+		}
+	}
+
+	/**
+	 * Whether this buyer may take back a cancel: a Stripe subscription set to
+	 * end at the end of its paid period, which has not ended yet. A PayPal
+	 * cancel ends the subscription at once, so there is nothing to take back.
+	 */
+	public function can_resume(): bool {
+		if (!$this->get('odi_is_subscription') || $this->get_payment_source() !== 'stripe') {
+			return false;
+		}
+		$ends = trim((string)$this->get('odi_subscription_cancelled_time'));
+		return $this->get('odi_subscription_cancel_at_period_end') && $ends !== '' && strtotime($ends . ' UTC') > time()
+			&& (string)$this->get('odi_subscription_status') !== 'canceled';
+	}
+
+	/**
+	 * Take back a cancel at period end, as its buyer (or an admin acting for
+	 * them): billing carries on as before. Throws SystemDisplayablePermanentError
+	 * when it cannot.
+	 */
+	public function resume_subscription_order_item(): void {
+		$this->assert_can_write(SessionControl::get_instance());
+		if (!$this->can_resume()) {
+			throw new SystemDisplayablePermanentError('This subscription has no cancel waiting to be taken back.');
+		}
+		$stripe_helper = $this->stripe_helper();
+		try {
+			$ok = $stripe_helper->reactivate_subscription((string)$this->get('odi_stripe_subscription_id'));
+		} catch (Exception $e) {
+			throw new SystemDisplayablePermanentError('The payment provider would not take back the cancel: ' . $e->getMessage());
+		}
+		if (!$ok) {
+			throw new SystemDisplayablePermanentError('The payment provider would not take back the cancel. Please contact support.');
+		}
+		// Every field the cancel set, as the provider now has it; and by hand
+		// if the read back fails, since the provider has taken it back.
+		if (!$stripe_helper->update_subscription_in_order_item($this)) {
+			$this->set('odi_subscription_cancel_at_period_end', false);
+			$this->set('odi_subscription_cancelled_time', null);
+			$this->set('odi_subscription_status', 'active');
+			$this->save();
+		}
+	}
+
 	/**
 	 * Cancel this subscription on the plane's own decision, from a scheduled
 	 * task: there is no signed-in user to check, and the buyer is told by the

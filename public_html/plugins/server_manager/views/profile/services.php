@@ -6,6 +6,7 @@
  * was connected, and per service the state, the paid-through date and the
  * figure against the allowance. Disconnect (a POST) cuts a site off.
  *
+ * @version 1.4 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
  * @version 1.3 - not found where this site does not sell hosting (SmHosting)
  * @version 1.3 - a row paid for that the site has not switched on says so, not 'Not yet entitled'
  * @version 1.2 - the services are bought here, per site: Buy, Keep going, or renewing by subscription
@@ -40,6 +41,7 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Connected sites', $hoptions);
+echo '<div class="jy-ui">';
 ?>
 
 <p class="sms-lead">Sites you have linked to this account for Joinery-run services. A linked site holds one
@@ -108,7 +110,7 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 			<?php echo PublicPage::action_button('Disconnect', $self_url, array(
 				'hidden'  => array('action' => 'disconnect', 'host' => $site['host']),
 				'confirm' => 'Disconnect ' . $site['host'] . '? Its key stops working, its outbound email through getjoinery is closed, and its backup storage is kept 90 days and then pruned.',
-				'class'   => 'sms-secondary-btn',
+				'class'   => 'btn btn-secondary',
 			)); ?>
 		</div>
 		<?php endif; ?>
@@ -118,21 +120,18 @@ echo PublicPage::BeginPage('Connected sites', $hoptions);
 <?php endif; ?>
 
 <style>
-.sms-lead { color: #374151; }
-.sms-site { padding: 16px 0; border-bottom: 1px solid #e2e2e2; }
+.sms-lead { color: var(--jy-color-text-muted); }
+.sms-site { padding: 16px 0; border-bottom: 1px solid var(--jy-color-border); }
 .sms-site h3 { margin: 0 0 .25em; }
 .sms-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: .5em 0 1em; }
 .sms-facts dt { font-weight: 600; }
 .sms-facts dd { margin: 0; }
-.sms-note { color: #555; font-size: .9em; }
+.sms-note { color: var(--jy-color-text-muted); font-size: .9em; }
 .sms-actions form { display: inline-block; margin-right: .5em; }
-.sms-buy-btn { background: #1f2937; color: #fff; border: 1px solid #1f2937; padding: 8px 18px;
-	border-radius: 4px; font-size: .95em; cursor: pointer; }
-.sms-secondary-btn { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; padding: 8px 18px;
-	border-radius: 4px; font-size: .95em; cursor: pointer; }
 </style>
 
 <?php
+echo '</div>';
 echo PublicPage::EndPage($hoptions);
 $page->public_footer();
 ?>

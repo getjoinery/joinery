@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.112 - Email setup: a failed hosted mail leg shows why and offers Retry email setup (hosting_after_purchase E2)
  * @version 1.111 - Bring back asks Access::permits(10) instead of comparing the level inline
  * @version 1.110 - a shut-down Starter site shows Bring back (level 10) once a subscription pays for it again (O3)
  * @version 1.109 - a held Starter site marked ready to remove says so, and its Permanently Delete Site names the host's
@@ -3031,6 +3032,24 @@
 		'summary' => htmlspecialchars(CloudAccounts::hosted_at_label($hosted_at))
 			. ($target ? ' · backups to ' . htmlspecialchars((string)$target->get('bkt_name')) : ''),
 		'body' => ob_get_clean());
+
+	// ── Email setup that failed (hosting_after_purchase E2) ──
+	// The hosted mail leg stops at failed; Retry starts it again from the
+	// step after the last one that left something at the provider.
+	$mail_provision = CustomerCloudProvision::latest_for_node($node->key);
+	if ($mail_provision && (string)$mail_provision->get('cvp_mail_state') === 'failed') {
+		$mail_h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+		$page->begin_box(['title' => 'Email setup']);
+		echo '<p class="mb-1"><span class="badge bg-danger">Failed</span> This site\'s outbound email was not finished, so it cannot send '
+			. '(its buyer cannot reset a password by email).</p>';
+		echo '<p class="small mb-2"><strong>Why:</strong> ' . $mail_h($mail_provision->get('cvp_mail_error')) . '</p>';
+		echo '<form id="nodeActionRetryMail" method="post" action="' . $mail_h($base_url) . '" hidden>'
+			. '<input type="hidden" name="action" value="retry_hosted_mail">' . SmAdminCsrf::field() . '</form>';
+		echo '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-submit="nodeActionRetryMail"'
+			. ' data-jy-confirm="' . $mail_h('Retry the email setup for ' . $mail_provision->get('cvp_domain') . '? It carries on from the step '
+			. 'after the last one that was finished; fix the cause first or it stops the same way.') . '">Retry email setup</button>';
+		$page->end_box();
+	}
 
 	// ── Suspension (a hosted site a customer bought) ──
 	// Suspend stops the site (its container held, or its instance powered

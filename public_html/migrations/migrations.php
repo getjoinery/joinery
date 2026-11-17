@@ -2034,3 +2034,14 @@
 	$migration['migration_file'] = 'starter_seven_places.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Subscription emails link a page that exists (hosting_after_purchase B2):
+	// the payment-failed email to Billing, where the card is updated, the rest
+	// to Subscriptions. Only the exact old address is replaced, so an edited
+	// template keeps its edits. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '239';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE emt_email_templates SET emt_body = replace(emt_body, '*web_dir*/change-tier', CASE WHEN emt_name = 'subscription_payment_failed' THEN '*web_dir*/profile/billing' ELSE '*web_dir*/profile/subscriptions' END), emt_update_time = now() WHERE emt_name LIKE 'subscription\\_%' AND emt_body LIKE '%*web_dir*/change-tier%';";
+	$migrations[] = $migration;

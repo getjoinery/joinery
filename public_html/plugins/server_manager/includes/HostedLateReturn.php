@@ -28,6 +28,7 @@
  * on the next watch. A site still suspended is refused: Unsuspend first; so
  * is one whose removal is under way on its host, and one already starting.
  *
+ * @version 1.1 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.0
  */
 
@@ -74,8 +75,8 @@ class HostedLateReturn {
 
 	/** The line that pays for the site now, or null. */
 	public static function paying_line(CustomerCloudProvision $provision): ?OrderItem {
-		$own_id = (int)$provision->get('cvp_external_order_item_id');
-		$own = $own_id > 0 ? new OrderItem($own_id, TRUE) : null;
+		$own = $provision->local_order_item();
+		$own_id = $own !== null ? (int)$own->key : 0;
 		if ($own && $own->key && self::pays($own)) {
 			return $own;
 		}

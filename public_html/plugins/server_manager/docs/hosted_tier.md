@@ -22,11 +22,13 @@ A hosted site lands in one of two places, and this is the buyer's choice of
 The configure page offers a third plan beside them that is not hosted:
 
 - **On your own Linode** — free (fulfillment reference 0, `cvp_plan`
-  `own_linode`). The buyer connects their Linode account on the summary step,
-  before paying; the server (1 GB, us-east, the customer-cloud defaults) is
-  created in their account with their grant and built the same way Managed is.
-  The grant is asked for `linodes:read_write` only, must have an hour left when
-  the buyer pays (`CustomerCloudAccount::live_for_build`), and is let go once
+  `own_linode`). The buyer pays first, then connects their Linode account:
+  a paid site with no grant that can carry the build
+  (`CustomerCloudAccount::live_for_build`, an hour left) waits at
+  `pending_connect`, and Your Sites offers Connect. The server (1 GB, us-east,
+  the customer-cloud defaults) is created in their account with their grant and
+  built the same way Managed is. The grant is asked for `linodes:read_write`
+  only, whenever the buyer has an own-Linode site to build, and is let go once
   per site after the build, when none of the buyer's sites is still being
   built or retried, and only when it is that build-only grant: the account
   then reads `released` and the pages ask to connect again
@@ -583,6 +585,39 @@ from its own backups with its owner's recovery key: make a new starter host,
 then for each site a new Starter install restored over the agent from that
 site's backups. A site whose owner never made a recovery key has no backups
 and is not rebuilt; its owner is told so.
+
+**O6. Restoring a hosted site from its backups** (the buyer asks, or after a
+loss). Follow [Backups](../../../docs/backups.md) § *Restoring a managed node from
+its management node*: on the site's node page, Backups tab, **Bring back to
+node** (or **Prepare** for a chain), then ask for the restore. The site's own
+Backups page then shows a pending approval that only its recovery key opens,
+so the buyer approves it in their browser (or the operator, when the buyer has
+handed the key over). A site whose buyer never made a recovery key has no
+backups to restore; tell them so. Tell the buyer when it is done.
+
+**O7. A Managed site paid for after its shutdown.** A shut-down Managed site's
+server is powered off and waiting to be deleted (O8); a late payment writes a
+note on the hosting row and brings nothing back by itself. There is no Bring
+back for a server-based site, and no step that carries its content onto a new
+site: a copy from its backups makes a new server, but its hosting row stays
+shut down and would still prune those backups on their date. So a shut-down
+Managed site is not brought back. Refund the late payment and tell the buyer;
+they may order a new site, which starts empty. Then delete the old server as
+in O8.
+
+**O8. Deleting a shut-down Managed server.** When a hosted site's grace runs
+out, the platform powers its server off and sends **Hosted instance needs
+deleting by a person** (`hosted.deletion_required`, to the operator's
+notifications). It never deletes a server itself.
+
+1. Check the site has no payment pending and no O7 under way.
+2. Delete the server at the provider (for Linode, Cloud Manager, the instance
+   named in the notice). Its backups are not on it: they stay in backup
+   storage until the date the notice names.
+3. On the site's node page, **Remove Permanently**, confirming the server is
+   gone. The removal refuses while the site's hosting subscription still bills,
+   which it should not after a shutdown; if it does, the subscription has to be
+   cancelled first.
 
 ## Setting it up
 

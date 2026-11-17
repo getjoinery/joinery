@@ -204,6 +204,25 @@ class CustomerCloudProvisioningTest {
 		check($open['state'] === 'ok' && $open['value'] === $opts['root_pass'],
 			'the provision row seals exactly that password (SecretBox round-trip)');
 
+		// hosting_after_purchase B3: a site set ready again with its server
+		// already made (a rejected grant parked it, a new grant set it ready)
+		// resumes; no second server is created on the buyer's account.
+		$again = new CustomerCloudProvision(NULL);
+		$again->set('cvp_origin', 'admin');
+		$again->set('cvp_usr_user_id', $this->user_id);
+		$again->set('cvp_domain', 'resume-' . $suffix . '.example.com');
+		$again->set('cvp_slug', 'resume-' . $suffix);
+		$again->set('cvp_instance_id', '77009');
+		$again->set('cvp_status', 'ready');
+		$again->save();
+		$fake->lastCreateOpts = null;
+		$probe->probeReady($again);
+		$again->load();
+		check($fake->lastCreateOpts === null, 'a ready site that has its server creates no second one');
+		check($again->get('cvp_status') === 'booting' && (string)$again->get('cvp_instance_id') === '77009',
+			'and resumes waiting for that server to start', (string)$again->get('cvp_status'));
+		$again->permanent_delete();
+
 		// B3 — handle_booting mints the container's placement record, so the
 		// host agent's later join has something to link and host-scope work has
 		// a route. The cloud path used to skip this entirely.

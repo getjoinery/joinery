@@ -15,10 +15,29 @@
  * not count. Every hosting page asks here, so they appear and disappear
  * together; the menus follow the setting.
  *
+ * @version 1.2 - support_email() falls back to the site's own From address, never ours (B25)
+ * @version 1.1 - support_email(): where a hosting buyer writes to a person (hosting_after_purchase WP2)
  * @version 1.0
  */
 class SmHosting {
 	const SETTING = 'server_manager_offer_hosting';
+
+	/**
+	 * Where a hosting buyer writes to a person: the Support email address
+	 * setting, else the welcome email's From address.
+	 */
+	public static function support_email(): string {
+		$settings = Globalvars::get_instance();
+		// Then the site's own From address: another operator's buyers are
+		// never sent to us (hosting_after_purchase B25).
+		foreach (array('server_manager_support_email', 'server_manager_provisioning_welcome_from_email', 'defaultemail') as $name) {
+			$value = trim((string)$settings->get_setting($name, false, true));
+			if ($value !== '') {
+				return $value;
+			}
+		}
+		return '';
+	}
 
 	/** @var bool|null The in-use answer for this request. */
 	private static $in_use = null;

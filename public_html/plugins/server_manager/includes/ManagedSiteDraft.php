@@ -21,6 +21,9 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.11 - the freeze is cvp_freeze_token, set by save_and_freeze and cleared by unfreeze (hosting_after_purchase B13)
+ * @version 1.10 - price_table(): the summary's prices as lines with a total for today and after
+ * @version 1.9 - the step strip and the payment button take the theme's colours (btn btn-primary, jy tokens)
  * @version 1.8 - each plan carries a features list in place of a blurb; the bundle's is BUNDLE_FEATURES (email and
  *                backups), Managed's adds our management, which an own-Linode site has free during the beta
  * @version 1.7 - the domain's yearly renewal is recorded with its quote (cvp_domain_renew_quote, domain_renewal_sentence)
@@ -69,13 +72,13 @@ class ManagedSiteDraft {
 			$styled = true;
 			$html .= '<style>'
 				. '.sms-steps{display:flex;gap:.75rem;list-style:none;margin:0 0 1.25rem;padding:0;flex-wrap:wrap}'
-				. '.sms-steps li{display:flex;align-items:center;gap:.45rem;color:#6b7280;font-size:.95em}'
+				. '.sms-steps li{display:flex;align-items:center;gap:.45rem;color:var(--jy-color-text-muted);font-size:.95em}'
 				. '.sms-steps li .sms-step-n{display:inline-flex;width:1.6em;height:1.6em;border-radius:50%;'
-				. 'align-items:center;justify-content:center;border:1px solid #cbd5e1;font-size:.85em}'
-				. '.sms-steps li.is-current{color:#111827;font-weight:600}'
-				. '.sms-steps li.is-current .sms-step-n{background:#02b159;border-color:#02b159;color:#fff}'
-				. '.sms-steps li.is-done .sms-step-n{background:#e6f7ee;border-color:#02b159;color:#02b159}'
-				. '.sms-steps li+li:before{content:"\2192";color:#cbd5e1;margin-right:.3rem}'
+				. 'align-items:center;justify-content:center;border:1px solid var(--jy-color-border-strong);font-size:.85em}'
+				. '.sms-steps li.is-current{color:var(--jy-color-text);font-weight:600}'
+				. '.sms-steps li.is-current .sms-step-n{background:var(--jy-color-primary);border-color:var(--jy-color-primary);color:var(--jy-color-primary-text)}'
+				. '.sms-steps li.is-done .sms-step-n{background:color-mix(in srgb, var(--jy-color-primary) 12%, var(--jy-color-bg));border-color:var(--jy-color-primary);color:var(--jy-color-primary)}'
+				. '.sms-steps li+li:before{content:"\2192";color:var(--jy-color-border-strong);margin-right:.3rem}'
 				. '</style>';
 		}
 		$html .= '<ol class="sms-steps" aria-label="Steps">';
@@ -176,6 +179,7 @@ class ManagedSiteDraft {
 	public static function unfreeze(CustomerCloudProvision $row): void {
 		if ((string)$row->get('cvp_status') === 'pending_payment') {
 			$row->set('cvp_status', 'draft');
+			$row->set('cvp_freeze_token', null);
 			$row->save();
 		}
 		self::drop_from_cart($row);
@@ -425,6 +429,7 @@ class ManagedSiteDraft {
 		$row->set('cvp_services_wanted', $plan === 'own_linode' && !empty($post['with_services'])
 			&& JoineryServicesFulfillment::bundle_offer() !== null);
 		$row->set('cvp_status', 'pending_payment');
+		$row->set('cvp_freeze_token', bin2hex(random_bytes(16)));
 		$row->set('cvp_error', null);
 		$row->save();
 		$row->load();
@@ -598,6 +603,73 @@ class ManagedSiteDraft {
 		return $amount . ' once';
 	}
 
+	/**
+	 * The summary's price table: one line per thing bought (the plan, the
+	 * bundle when chosen, the domain's first year) with what it costs today
+	 * and what it costs after that, and the totals of both columns. Null when
+	 * the plan is not on sale.
+	 *
+	 * @param array|null $bundle JoineryServicesFulfillment::bundle_offer(), counted only for an
+	 *                           own-Linode draft that asked for it
+	 * @return array|null ['lines' => [['label', 'note', 'today', 'then']], 'today' => string, 'then' => string]
+	 */
+	public static function price_table(CustomerCloudProvision $row, $product, ?array $bundle): ?array {
+		$version = self::managed_version($product);
+		if ($version === null) {
+			return null;
+		}
+		$lines = array();
+		$today = 0.0;
+		$recurring = array();
+		$add = function (string $label, string $note, $version) use (&$lines, &$today, &$recurring) {
+			$amount = (float)$version->get('prv_version_price');
+			$period = self::period_word((string)$version->get('prv_price_type'));
+			$today += $amount;
+			if ($amount <= 0) {
+				$lines[] = array('label' => $label, 'note' => $note, 'today' => 'Free', 'then' => 'Free');
+				return;
+			}
+			if ($period !== '') {
+				$recurring[$period] = ($recurring[$period] ?? 0.0) + $amount;
+			}
+			$lines[] = array('label' => $label, 'note' => $note, 'today' => self::money((string)$amount),
+				'then' => $period !== '' ? self::money((string)$amount) . ' a ' . $period : '');
+		};
+
+		$add('Plan: ' . self::PLANS[self::plan_of($row)]['label'], '', $version);
+		if ($bundle !== null && self::plan_of($row) === 'own_linode' && $row->get('cvp_services_wanted')) {
+			$add('Joinery Managed Bundle', '', $bundle['version']);
+		}
+		if ((string)$row->get('cvp_domain_source') === 'register') {
+			$quote = (float)$row->get('cvp_domain_quote');
+			$today += $quote;
+			$renew = trim((string)$row->get('cvp_domain_renew_quote'));
+			$lines[] = array(
+				'label' => 'Domain: ' . (string)$row->get('cvp_domain'),
+				'note'  => 'First year. ' . ($renew !== ''
+					? 'Then ' . self::money($renew) . ' a year, paid to the registrar once the domain is in your own account.'
+					: 'After that it renews with the registrar, once the domain is in your own account.'),
+				'today' => self::money((string)$quote),
+				'then'  => '',
+			);
+		}
+
+		$then = array();
+		foreach ($recurring as $period => $amount) {
+			$then[] = self::money((string)$amount) . ' a ' . $period;
+		}
+		return array(
+			'lines' => $lines,
+			'today' => $today > 0 ? self::money((string)$today) : 'Free',
+			'then'  => $then ? implode(' + ', $then) : 'Free',
+		);
+	}
+
+	/** 'month' for a monthly price type, and so on; '' for a one-time price. */
+	private static function period_word(string $type): string {
+		return in_array($type, array('month', 'year', 'week', 'day'), true) ? $type : '';
+	}
+
 	/** "Renews at $Y a year, paid to the registrar once the domain is yours", for a register draft with a renewal quote; '' otherwise. */
 	public static function domain_renewal_sentence(CustomerCloudProvision $row): string {
 		if ((string)$row->get('cvp_domain_source') !== 'register' || trim((string)$row->get('cvp_domain_renew_quote')) === '') {
@@ -638,7 +710,10 @@ class ManagedSiteDraft {
 		} catch (Throwable $e) {
 			return false;
 		}
-		$frozen = (string)$row->get('cvp_update_time');
+		$frozen = (string)$row->get('cvp_freeze_token');
+		if ($frozen === '') {
+			return false;
+		}
 		foreach ($cart->items as $item) {
 			$data = (array)($item[2] ?? array());
 			if (self::line_names_draft($data, (int)$row->key)
@@ -667,7 +742,7 @@ class ManagedSiteDraft {
 			. '<input type="hidden" name="product_id" value="' . (int)$product->key . '">'
 			. '<input type="hidden" name="product_version" value="' . (int)$version->key . '">'
 			. '<input type="hidden" name="managed_site" value="' . (int)$row->key . '">'
-			. '<button type="submit" class="sms-visit">' . htmlspecialchars($label) . '</button>'
+			. '<button type="submit" class="btn btn-primary">' . htmlspecialchars($label) . '</button>'
 			. '</form>';
 	}
 }

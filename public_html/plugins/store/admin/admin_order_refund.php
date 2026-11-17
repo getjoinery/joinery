@@ -102,7 +102,7 @@ else{
 				'value' => $order_item->get('odi_refund_note')
 			]);
 			if ($order_item->get('odi_is_subscription') && !$order_item->get('odi_subscription_cancelled_time')) {
-				$formwriter->checkboxinput('cancel_subscription', 'Also cancel the subscription now (billing and service stop today)', [
+				$formwriter->checkboxinput('cancel_subscription', 'Also cancel the subscription now: billing stops today. What happens to the service follows the product (a hosted site keeps its grace period before it is shut down).', [
 					'value' => 1,
 					'checked' => false,
 				]);

@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.187",
+  "version": "1.30.189",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -19,6 +19,14 @@
     "assets/css/server_manager.css"
   ],
   "settingsMenu": [
+    {
+      "slug": "server-manager-sites",
+      "title": "Your Sites",
+      "url": "/profile/server_manager",
+      "icon": "globe",
+      "order": 94,
+      "settingActivate": "server_manager_offer_hosting"
+    },
     {
       "slug": "server-manager-account",
       "title": "Server Account",
@@ -168,6 +176,14 @@
       "label": "Provisioning alert email",
       "type": "text",
       "helptext": "Who to tell when a customer provisioning job needs attention."
+    },
+    {
+      "name": "server_manager_support_email",
+      "default": "",
+      "group": "provisioning",
+      "label": "Support email address",
+      "type": "text",
+      "helptext": "Where buyers write to a person. Named in every email to a hosting buyer and on their sites page. Empty uses the welcome email's From address."
     },
     {
       "name": "server_manager_provisioning_welcome_from_email",

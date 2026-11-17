@@ -58,23 +58,33 @@ class WebhookLog extends SystemBase {
 	}
 
 	/**
-	 * Check if a payment failure email was recently sent for this event type
-	 * Used for dedup of payment failure notification emails
+	 * Was this subscription's payment already reported as failed within the
+	 * lookback window? One failure email per subscription a day, however many
+	 * times the provider retries the charge; another buyer's failure never
+	 * counts. The event being handled is logged only after it is handled, so
+	 * any matching row is an earlier one.
+	 *
+	 * The subscription is read from the logged payload: a Stripe invoice's
+	 * 'subscription', a PayPal event's resource id.
+	 *
 	 * @param string $provider 'stripe' or 'paypal'
 	 * @param string $event_type The payment failure event type
+	 * @param string $subscription_id The provider's subscription id
 	 * @param int $hours Number of hours to look back (default 24)
-	 * @return bool True if a matching event was processed in the lookback window
 	 */
-	public static function hasRecentPaymentFailure($provider, $event_type, $hours = 24) {
-		$dbconnector = DbConnector::get_instance();
-		$dblink = $dbconnector->get_db_link();
-		$sql = "SELECT COUNT(*) as cnt FROM wbh_webhook_logs
+	public static function hasRecentPaymentFailure($provider, $event_type, $subscription_id, $hours = 24) {
+		if (trim((string)$subscription_id) === '') {
+			return false;
+		}
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT COUNT(*) AS cnt FROM wbh_webhook_logs
 				WHERE wbh_provider = ? AND wbh_event_type = ? AND wbh_processed = TRUE
-				AND wbh_create_time > NOW() - INTERVAL '{$hours} hours'";
+				AND wbh_create_time > NOW() - make_interval(hours => ?)
+				AND (wbh_payload->>'subscription' = ? OR wbh_payload#>>'{resource,id}' = ?)";
 		$q = $dblink->prepare($sql);
-		$q->execute([$provider, $event_type]);
+		$q->execute([$provider, $event_type, (int)$hours, (string)$subscription_id, (string)$subscription_id]);
 		$row = $q->fetch(PDO::FETCH_ASSOC);
-		return ($row['cnt'] > 1); // > 1 because current event is already logged
+		return ((int)$row['cnt'] > 0);
 	}
 }
 

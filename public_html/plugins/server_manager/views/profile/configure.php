@@ -10,6 +10,9 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.14 - payment comes first for every plan; an own-Linode buyer is told the Linode connection follows it
+ * @version 1.13 - the summary's price is a table: plan, bundle and domain lines, then the total due today and after
+ * @version 1.12 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
  * @version 1.11 - plans list what they bring; the bundle card is the Joinery Managed Bundle with the same list; the
  *                sign-in card asks for an existing, working email
  * @version 1.10 - the summary names the domain's yearly renewal price
@@ -46,26 +49,12 @@ $hoptions = array(
 );
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Set up your site', $hoptions);
+echo '<div class="jy-ui">';
 echo $steps_html;
 ?>
 
 <?php if ($mode === 'summary'): ?>
 
-<?php
-// The price as the buyer pays it: the plan, the bundle when chosen, the domain year.
-$price_parts = array();
-if ($price_sentence === 'free') {
-	$price_parts[] = 'Free';
-} elseif ($price_sentence !== '') {
-	$price_parts[] = preg_replace('/ from today$/', '', $price_sentence);
-}
-if ($own_linode && $row->get('cvp_services_wanted') && $bundle_price !== '') {
-	$price_parts[] = $bundle_price . ' for the Joinery Managed Bundle';
-}
-if ($domain_sentence !== '') {
-	$price_parts[] = preg_replace('/^and /', '', $domain_sentence);
-}
-?>
 <section class="smc-card smc-summary">
 	<h2 class="smc-title smc-title-lg"><?php echo htmlspecialchars($row->get('cvp_domain')); ?></h2>
 	<dl class="smc-facts">
@@ -79,28 +68,37 @@ if ($domain_sentence !== '') {
 		<?php endif; ?>
 		<dt>Admin sign-in</dt>
 		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
-		<dt>Price</dt>
-		<dd><?php echo $price_parts ? htmlspecialchars(implode(', plus ', $price_parts)) : htmlspecialchars($plan_label) . ' is not on sale right now'; ?></dd>
-		<?php if (($renewal = ManagedSiteDraft::domain_renewal_sentence($row)) !== ''): ?>
-		<dt>Domain renewal</dt>
-		<dd><?php echo htmlspecialchars($renewal); ?></dd>
-		<?php endif; ?>
 	</dl>
 
+	<?php if ($price_table !== null): ?>
+	<table class="smc-prices">
+		<thead>
+			<tr><th scope="col"></th><th scope="col">Due today</th><th scope="col">After that</th></tr>
+		</thead>
+		<tbody>
+		<?php foreach ($price_table['lines'] as $line): ?>
+			<tr>
+				<th scope="row"><?php echo htmlspecialchars($line['label']); ?>
+					<?php if ($line['note'] !== ''): ?><span><?php echo htmlspecialchars($line['note']); ?></span><?php endif; ?></th>
+				<td><?php echo htmlspecialchars($line['today']); ?></td>
+				<td><?php echo $line['then'] !== '' ? htmlspecialchars($line['then']) : '&ndash;'; ?></td>
+			</tr>
+		<?php endforeach; ?>
+		</tbody>
+		<tfoot>
+			<tr><th scope="row">Total</th><td><?php echo htmlspecialchars($price_table['today']); ?></td>
+				<td><?php echo htmlspecialchars($price_table['then']); ?></td></tr>
+		</tfoot>
+	</table>
+	<?php endif; ?>
+
 	<div class="smc-next">
-	<?php if ($own_linode && !$linode_live && $product !== null): ?>
-		<h3 class="smc-title">Connect your Linode account</h3>
-		<p>We'll create your server there. We only use this access to set up your site.</p>
-		<?php if ($linode_connected): ?>
-		<p class="sms-error">That connection didn't work. Please connect again.</p>
+	<?php if ($payment_form !== ''): ?>
+		<?php if ($own_linode): ?>
+		<p>After payment, you'll connect your Linode account and we'll build your site there.</p>
 		<?php endif; ?>
-		<?php echo PublicPage::action_button('Connect your Linode account', '/profile/server_manager/connect_cloud', array(
-			'hidden' => array('action' => 'connect', 'cvp_customer_cloud_provision_id' => (int)$row->key),
-			'class'  => 'sms-visit',
-		)); ?>
-	<?php elseif ($payment_form !== ''): ?>
 		<?php if ($in_cart): ?>
-			<a href="/cart" class="sms-visit">Finish payment</a>
+			<a href="/cart" class="btn btn-primary">Finish payment</a>
 			<span class="sms-note">Already in your cart.</span>
 		<?php else: ?>
 			<?php echo $payment_form; ?>
@@ -115,12 +113,12 @@ if ($domain_sentence !== '') {
 		<?php echo PublicPage::action_button('Edit', ManagedSiteDraft::CONFIGURE_URL, array(
 			'hidden'  => array('action' => 'edit', 'cvp_customer_cloud_provision_id' => (int)$row->key),
 			'confirm' => 'This removes the site from your cart; you will continue to payment again when you are done.',
-			'class'   => 'sms-secondary-btn',
+			'class'   => 'btn btn-secondary',
 		)); ?>
 		<?php echo PublicPage::action_button('Delete', ManagedSiteDraft::CONFIGURE_URL, array(
 			'hidden'  => array('action' => 'delete', 'cvp_customer_cloud_provision_id' => (int)$row->key),
 			'confirm' => 'Remove this site setup? Nothing has been bought or created.',
-			'class'   => 'sms-secondary-btn',
+			'class'   => 'btn btn-secondary',
 		)); ?>
 	</div>
 </section>
@@ -279,57 +277,72 @@ echo $formwriter->end_form();
 <?php endif; ?>
 
 <style>
-.smc-lead { margin: 0 0 1.5rem; color: #4b5563; }
-.smc-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1.25rem 1.5rem 1.4rem;
+.smc-lead { margin: 0 0 1.5rem; color: var(--jy-color-text-muted); }
+.smc-card { background: var(--jy-color-bg); border: 1px solid var(--jy-color-border); border-radius: 10px; padding: 1.25rem 1.5rem 1.4rem;
 	margin: 0 0 1.25rem; max-width: 760px; }
-.smc-card .smc-title { margin: 0 0 1rem; font-size: 1.05rem; font-weight: 600; color: #111827; letter-spacing: 0; }
+.smc-card .smc-title { margin: 0 0 1rem; font-size: 1.05rem; font-weight: 600; color: var(--jy-color-text); letter-spacing: 0; }
 .smc-card .smc-title-lg { font-size: 1.4rem; margin-bottom: 1.25rem; }
 /* Each choice is a tile: the whole box is the label, the chosen one is marked. */
 .smc-card .form-check { position: relative; margin: 0 0 .6rem; padding: .8rem 1rem .8rem 2.6rem;
-	border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; transition: border-color .15s, background .15s; }
+	border: 1px solid var(--jy-color-border); border-radius: 8px; background: var(--jy-color-bg); transition: border-color .15s, background .15s; }
 .smc-card .form-check:last-child { margin-bottom: 0; }
-.smc-card .form-check:hover { border-color: #cbd5e1; }
-.smc-card .form-check:has(input:checked) { border-color: #02b159; background: #f0fdf4; }
+.smc-card .form-check:hover { border-color: var(--jy-color-border-strong); }
+.smc-card .form-check:has(input:checked) { border-color: var(--jy-color-primary); background: color-mix(in srgb, var(--jy-color-primary) 6%, var(--jy-color-bg)); }
 .smc-card .form-check-input { position: absolute; left: 1rem; top: 1.05rem; margin: 0; }
 .smc-card .form-check-label { display: block; line-height: 1.45; cursor: pointer; }
 .smc-card .mb-3:last-child, .smc-card .form-group:last-child { margin-bottom: 0; }
-.smc-subsection { margin-top: 1.25rem; padding-top: 1.1rem; border-top: 1px solid #f0f1f3; }
+.smc-subsection { margin-top: 1.25rem; padding-top: 1.1rem; border-top: 1px solid var(--jy-color-border); }
 .smc-subhead { font-weight: 600; margin: 0 0 .75rem; }
-.smc-subhead span { display: block; font-weight: 400; color: #6b7280; font-size: .9em; margin-top: .15rem; }
+.smc-subhead span { display: block; font-weight: 400; color: var(--jy-color-text-muted); font-size: .9em; margin-top: .15rem; }
 .smc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
 @media (max-width: 600px) { .smc-row { grid-template-columns: 1fr; } }
-.smc-indent { margin: .6rem 0 0; color: #6b7280; font-size: .92em; }
+.smc-indent { margin: .6rem 0 0; color: var(--jy-color-text-muted); font-size: .92em; }
 /* What a plan or the bundle brings, as a short list under its choice. */
 .smc-card .jy-radio-card-desc { display: block; margin-top: .4rem; }
-.smc-card .jy-radio-card-desc span { display: block; position: relative; padding-left: 1.1rem; color: #4b5563;
+.smc-card .jy-radio-card-desc span { display: block; position: relative; padding-left: 1.1rem; color: var(--jy-color-text-muted);
 	font-size: .93em; line-height: 1.5; }
-.smc-card .jy-radio-card-desc span::before { content: "\2713"; position: absolute; left: 0; color: #02b159; }
+.smc-card .jy-radio-card-desc span::before { content: "\2713"; position: absolute; left: 0; color: var(--jy-color-primary); }
 /* On your own Linode: what is left to the buyer is not ticked. */
-.smc-card #plan_own_linode ~ label .jy-radio-card-desc span:nth-child(2)::before { content: "\2013"; color: #9ca3af; }
+.smc-card #plan_own_linode ~ label .jy-radio-card-desc span:nth-child(2)::before { content: "\2013"; color: var(--jy-color-text-subtle); }
 .smc-features { list-style: none; margin: .75rem 0 0; padding: 0; }
-.smc-features li { position: relative; padding-left: 1.1rem; color: #4b5563; font-size: .93em; line-height: 1.6; }
-.smc-features li::before { content: "\2713"; position: absolute; left: 0; color: #02b159; }
+.smc-features li { position: relative; padding-left: 1.1rem; color: var(--jy-color-text-muted); font-size: .93em; line-height: 1.6; }
+.smc-features li::before { content: "\2713"; position: absolute; left: 0; color: var(--jy-color-primary); }
 .smc-submit { margin: 1.5rem 0 2rem; }
 .smc-facts { display: grid; grid-template-columns: max-content 1fr; gap: .6rem 2rem; margin: 0 0 1.5rem; }
-.smc-facts dt { color: #6b7280; font-weight: 500; }
-.smc-facts dd { margin: 0; color: #111827; }
-.smc-next { padding-top: 1.25rem; border-top: 1px solid #f0f1f3; }
+.smc-facts dt { color: var(--jy-color-text-muted); font-weight: 500; }
+.smc-facts dd { margin: 0; color: var(--jy-color-text); }
+/* A receipt, not a data grid: the kit's table bands and capitals are left off. */
+.jy-ui table.smc-prices { width: 100%; border-collapse: collapse; margin: 0 0 1.5rem; font-size: 1em;
+	font-variant-numeric: tabular-nums; }
+.jy-ui table.smc-prices th, .jy-ui table.smc-prices td { padding: .65rem 0; background: none; text-transform: none;
+	letter-spacing: 0; font-size: 1em; color: var(--jy-color-text); border-bottom: 1px solid var(--jy-color-border);
+	vertical-align: top; text-align: left; }
+.jy-ui table.smc-prices tbody tr td, .jy-ui table.smc-prices tbody tr:hover td { background: none; }
+.jy-ui table.smc-prices td { text-align: right; padding-left: 1.5rem; white-space: nowrap; }
+.jy-ui table.smc-prices thead th { font-size: .85em; font-weight: 500; color: var(--jy-color-text-muted);
+	text-align: right; padding-top: 0; white-space: nowrap; }
+.jy-ui table.smc-prices thead th:first-child { text-align: left; }
+.jy-ui table.smc-prices tbody th { font-weight: 500; }
+.jy-ui table.smc-prices tbody th span { display: block; font-weight: 400; font-size: .88em;
+	color: var(--jy-color-text-muted); margin-top: .2rem; white-space: normal; }
+.jy-ui table.smc-prices tbody tr:last-child td, .jy-ui table.smc-prices tbody tr:last-child th { border-bottom: 0; }
+.jy-ui table.smc-prices tfoot th, .jy-ui table.smc-prices tfoot td { font-weight: 700; border-bottom: 0;
+	border-top: 2px solid var(--jy-color-border-strong); }
+.smc-next { padding-top: 1.25rem; border-top: 1px solid var(--jy-color-border); }
 .smc-next h3 { margin-bottom: .35rem; }
-.smc-next p { margin: 0 0 1rem; color: #4b5563; }
+.smc-next p { margin: 0 0 1rem; color: var(--jy-color-text-muted); }
 .smc-actions { margin-top: 1.5rem; }
-.sms-error { padding: 12px 16px; background: #fef2f2; border-radius: 6px; margin-bottom: 1.25rem; }
+.smc-actions form { display: inline-block; margin-right: .5em; }
+.sms-error { padding: 12px 16px; background: var(--jy-color-danger-bg); border-radius: 6px; margin-bottom: 1.25rem; }
 .sms-error ul { margin: 0; padding-left: 1.2em; }
-.sms-note { color: #6b7280; font-size: .9em; margin-left: .6em; }
-.sms-visit { display: inline-block; background: #02b159; color: #fff; padding: 10px 22px; border: 0;
-	border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 1em; cursor: pointer; }
+.sms-note { color: var(--jy-color-text-muted); font-size: .9em; margin-left: .6em; }
 .sms-pay { display: inline-block; margin: 0; }
-.sms-secondary-btn { background: #fff; color: #1f2937; border: 1px solid #cbd5e1; padding: 8px 18px;
-	border-radius: 6px; font-size: .95em; cursor: pointer; margin-right: .5em; }
-#managed_domain_status[data-state="available"] { color: #1a7f37; }
-#managed_domain_status[data-state="unavailable"] { color: #b42318; }
+#managed_domain_status[data-state="available"] { color: var(--jy-color-success); }
+#managed_domain_status[data-state="unavailable"] { color: var(--jy-color-danger); }
 </style>
 
 <?php
+echo '</div>';
 echo PublicPage::EndPage($hoptions);
 $page->public_footer();
 ?>

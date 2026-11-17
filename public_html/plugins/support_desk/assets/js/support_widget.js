@@ -5,7 +5,10 @@
  * session; the first question of a session sends the captcha answer when the
  * page shows one.
  *
- * Vanilla JS, no framework. @version 0.1.0
+ * A signed-in member's open conversation is drawn by the page (data-thread-id),
+ * and Talk to a person hands it to a person (support_desk/widget_escalate).
+ *
+ * Vanilla JS, no framework. @version 0.2.0
  */
 (function () {
 	'use strict';
@@ -14,8 +17,14 @@
 	var send = document.getElementById('sdk-widget-send');
 	var errorBox = document.getElementById('sdk-widget-error');
 	if (!transcript || !input || !send) return;
-	var threadId = 0;
+	var threadId = parseInt(transcript.getAttribute('data-thread-id') || '0', 10) || 0;
 	var busy = false;
+	var person = document.getElementById('sdk-widget-person');
+	var handed = document.getElementById('sdk-widget-handed');
+	if (threadId) {
+		var captchaBox = document.getElementById('sdk-widget-captcha');
+		if (captchaBox) captchaBox.hidden = true;
+	}
 
 	function showError(text) {
 		errorBox.textContent = text || '';
@@ -39,6 +48,7 @@
 		if (!threadId) captchaAnswer(body);
 		window.joineryApi.post('support_desk/widget_ask', body).then(function (r) {
 			threadId = r.thread_id;
+			if (person) person.hidden = false;
 			var captcha = document.getElementById('sdk-widget-captcha');
 			if (captcha) captcha.hidden = true;
 			input.value = '';
@@ -80,6 +90,20 @@
 	}
 
 	send.addEventListener('click', ask);
+	if (person) {
+		person.addEventListener('click', function () {
+			if (!threadId || busy) return;
+			person.disabled = true;
+			showError('');
+			window.joineryApi.post('support_desk/widget_escalate', { thread_id: threadId }).then(function () {
+				person.hidden = true;
+				if (handed) handed.hidden = false;
+			}).catch(function (err) {
+				person.disabled = false;
+				showError((err && err.message) || 'That did not go through. Try again.');
+			});
+		});
+	}
 	input.addEventListener('keydown', function (e) {
 		if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); ask(); }
 	});

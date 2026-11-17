@@ -60,9 +60,11 @@ function nr_node(string $name, bool $register = true) {
 	return $node;
 }
 
-function nr_provision($buyer, $node, string $domain, int $order_item_id = 0, bool $register = true) {
+function nr_provision($buyer, $node, string $domain, int $order_item_id = 0, bool $register = true, string $origin = '') {
 	$prov = new CustomerCloudProvision(NULL);
-	$prov->set('cvp_origin', 'admin');
+	// A site with an order was bought on this site's setup page (origin
+	// buyer); one without was installed by an admin.
+	$prov->set('cvp_origin', $origin !== '' ? $origin : ($order_item_id ? 'buyer' : 'admin'));
 	$prov->set('cvp_usr_user_id', $buyer->key);
 	$prov->set('cvp_domain', $domain);
 	$prov->set('cvp_slug', substr(preg_replace('/[^a-z0-9]+/', '-', $domain), 0, 50));
@@ -151,6 +153,42 @@ $neighbour = nr_node('nr-neighbour-' . $suffix);
 $n_prov = nr_provision($buyer, $neighbour, 'nr-neighbour-' . $suffix . '.example.com');
 $n_trial = nr_trial($n_prov);
 $n_domain = nr_domain($buyer, $neighbour, 'nr-neighbour-' . $suffix . '.com', RegisteredDomain::STATUS_REGISTERED);
+
+// ---------------------------------------------------------------------------
+section('A site whose hosting still bills is not hidden or removed (hosting_after_purchase B10)');
+$refusal = $site->hosting_billing_refusal();
+check(strpos($refusal, 'order ' . $order_id) !== false && strpos($refusal, 'still bills its buyer') !== false,
+	'its subscription is named as the reason', $refusal);
+check($neighbour->hosting_billing_refusal() === '', 'a site with no paying line may go');
+
+section('Another store\'s line id is never read as one of ours (hosting_after_purchase B11)');
+// An order polled from another store names that store's line id. Here the
+// same number is a live subscription of this site's own store that no site
+// points to (a membership, say): somebody else's purchase.
+list(, $stranger_item) = nr_subscription($buyer);
+// Another store is polled here; a blank setting would mean this site's own.
+harness_set_setting_mem('server_manager_getjoinery_api_url', 'https://store.elsewhere.example/api/v1');
+$foreign_node = nr_node('nr-foreign-' . $suffix);
+$foreign = nr_provision($buyer, $foreign_node, 'nr-foreign-' . $suffix . '.example.com', $stranger_item, true, 'order');
+if (!CustomerCloudProvision::polls_own_store()) {
+	check($foreign->local_order_item() === null,
+		'a polled order\'s line id names no line here while the polled store is another site');
+	check($foreign_node->hosting_billing_refusal() === '',
+		'and a polled site is never refused over a stranger\'s subscription');
+}
+check($prov->local_order_item() !== null && (int)$prov->local_order_item()->key === $item_id,
+	'a setup-page purchase finds its own line');
+// The other branch: the polled store is this very site (getjoinery sells and
+// provisions from one place), so a polled order's line id is one of ours.
+harness_set_setting_mem('server_manager_getjoinery_api_url', LibraryFunctions::get_absolute_url('/api/v1'));
+check(CustomerCloudProvision::polls_own_store() && $foreign->local_order_item() !== null
+	&& (int)$foreign->local_order_item()->key === (int)$stranger_item,
+	'a polled order finds its line when the polled store is this site');
+check(strpos($foreign_node->hosting_billing_refusal(), 'still bills its buyer') !== false,
+	'and that site is refused removal while it bills');
+harness_set_setting_mem('server_manager_getjoinery_api_url', 'https://store.elsewhere.example/api/v1');
+check(!CustomerCloudProvision::polls_own_store() && $foreign->local_order_item() === null,
+	'while another store\'s is never read as ours');
 
 $site->soft_delete();
 $notes = $site->removal_notes();

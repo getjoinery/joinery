@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.97 - retry_hosted_mail: a failed hosted email setup starts again (hosting_after_purchase E2)
+ * @version 1.96 - Hide, Permanently Delete Site (not held) and Remove Permanently refuse while the hosting still bills (hosting_after_purchase B10)
  * @version 1.95 - bring_back_hosted: a held Starter site started again after a late payment (HostedLateReturn, O3)
  * @version 1.94 - decommission_node on a held Starter site marked ready to remove: level 10, the host's hold
  *                is the gate (hosting_paid_launch B1)
@@ -239,6 +241,7 @@ class NodeDetailActions {
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
 		'suspend_site'             => 'overview',
+		'retry_hosted_mail'        => 'overview',
 		'unsuspend_site'           => 'overview',
 		'recreate_site'            => 'overview',
 		'site_limits'              => 'overview',
@@ -483,6 +486,25 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_hold_container($node, (string)($_POST['name'] ?? ''), $op);
 				$job = ManagementJob::createFromBuild($node->key, 'hold_container', $built, $record, $uid);
 				return self::jobUrl($job);
+			}
+
+			case 'retry_hosted_mail': {
+				// A hosted site's email setup that stopped at failed
+				// (CustomerCloudProvision::retry_mail).
+				$provision = CustomerCloudProvision::latest_for_node($node->key);
+				if ($provision === null) {
+					self::fail($session, $page_regex, 'This node has no hosted site on record.');
+					return $base_url . '&tab=overview';
+				}
+				try {
+					$from = $provision->retry_mail();
+				} catch (CustomerCloudProvisionException $e) {
+					self::fail($session, $page_regex, $e->getMessage());
+					return $base_url . '&tab=overview';
+				}
+				self::ok($session, $page_regex, 'The email setup for ' . $provision->get('cvp_domain') . ' starts again (from '
+					. str_replace('_', ' ', $from) . ') on the next provisioning pass.');
+				return $base_url . '&tab=overview';
 			}
 
 			case 'suspend_site':
@@ -1486,6 +1508,11 @@ class NodeDetailActions {
 				if (!$node->key) {
 					return $base_url;
 				}
+				if (($billing = $node->hosting_billing_refusal()) !== '') {
+					$session->save_message(new DisplayMessage($billing, 'Error', $page_regex,
+						DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+					return $base_url . '&tab=overview';
+				}
 				$node->hide();
 				$session->save_message(new DisplayMessage(
 					trim('Hidden from the dashboard. The site itself keeps running on its host, and every record is kept; '
@@ -1529,6 +1556,11 @@ class NodeDetailActions {
 				// A held customer site is removed with no approval from the site,
 				// so only the top level starts it.
 				$held = !JobCommandBuilder::decommission_is_moved($node) && JobCommandBuilder::decommission_is_held($node);
+				if (!$held && ($billing = $node->hosting_billing_refusal()) !== '') {
+					$session->save_message(new DisplayMessage($billing, 'Error', $page_regex,
+						DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+					return $base_url . '&tab=overview';
+				}
 				if ($held && !Access::decide(10, $session)) {
 					$session->save_message(new DisplayMessage(
 						'Removing a held customer site needs permission level 10. Nothing was deleted.', 'Error',
@@ -1601,6 +1633,11 @@ class NodeDetailActions {
 						'Type the exact site slug to remove it permanently. Nothing was removed.', 'Error',
 						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 					));
+					return $base_url . '&tab=overview';
+				}
+				if (($billing = $node->hosting_billing_refusal()) !== '') {
+					$session->save_message(new DisplayMessage($billing, 'Error', $page_regex,
+						DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 					return $base_url . '&tab=overview';
 				}
 				$ours = CloudAccounts::is_ours($node);

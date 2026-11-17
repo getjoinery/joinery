@@ -1,4 +1,7 @@
 <?php
+	// @version 1.5 - Undo cancel for a cancel waiting for the period end; the cancel question adds the provider's own
+	//                words on what happens to what the line pays for (hosting_after_purchase S2, S4)
+	// @version 1.4 - the line's name is OrderItem::buyer_label(), shared with the payment-failed email
 	// @version 1.3 - each subscription names its product and its first answer a buyer reads (the site, for a per-site product)
 	// @version 1.2 - a subscription cancelled to end at the period end stays listed, 'Cancelled — active until <date>' (B91);
 	//                the price shows the plan's own period and the site's currency, not '$X/month' (B92)
@@ -70,6 +73,16 @@
                             $status = (strtotime($ends . ' UTC') > time() ? 'Cancelled — active until ' : 'Canceled on ')
                                 . LibraryFunctions::convert_time($ends, 'UTC', $page_vars['session']->get_timezone());
                             $action = '';
+                            if ($subscription->can_resume()) {
+                                // Taken back before the end of the paid period: billing carries on.
+                                $action = '<form method="post" action="/profile/orders_recurring_action" class="jy-inline"'
+                                    . ' data-jy-confirm="' . htmlspecialchars('Undo the cancel? The subscription carries on and renews as before.', ENT_QUOTES) . '">'
+                                    . '<input type="hidden" name="order_item_id" value="' . (int)$subscription->key . '">'
+                                    . '<input type="hidden" name="action" value="resume">'
+                                    . '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars((string)$cancel_token) . '">'
+                                    . '<button type="submit" class="btn btn-secondary btn-sm">Undo cancel</button>'
+                                    . '</form>';
+                            }
                         } else {
                             $status = $subscription->get('odi_subscription_status') ?: 'Active';
                             $blocker = $subscription->subscription_cancel_blocker();
@@ -82,6 +95,12 @@
                                 $confirm = $subscription->get_payment_source() === 'paypal'
                                     ? 'Cancel this subscription? PayPal ends it now.'
                                     : 'Cancel this subscription? It stays active until the end of the period you have paid for.';
+                                // What the subscription pays for may carry on, or end, on its
+                                // own terms (a hosted site's grace): its provider says.
+                                $notice = $subscription->cancel_notice();
+                                if ($notice !== '') {
+                                    $confirm .= ' ' . $notice;
+                                }
                                 $action = '<form method="post" action="/profile/orders_recurring_action" class="jy-inline"'
                                     . ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '">'
                                     . '<input type="hidden" name="order_item_id" value="' . (int)$subscription->key . '">'
@@ -96,24 +115,10 @@
                                 <?php
                                 // What the subscription is for: a buyer with two at the same
                                 // price cannot otherwise tell which one to cancel.
-                                $sub_product = new Product((int)$subscription->get('odi_pro_product_id'), TRUE);
-                                $sub_name = $sub_product->key ? trim((string)$sub_product->get('pro_name')) : '';
-                                // And the line's first answer a buyer reads (the site, for a
-                                // per-site product); bookkeeping answers are marked internal.
-                                $sub_site = '';
-                                foreach ((array)$subscription->get_raw_data() as $sub_answer) {
-                                    // A bare number is an id an older line stored unmarked.
-                                    if (is_array($sub_answer) && empty($sub_answer['internal'])
-                                            && trim((string)($sub_answer['answer'] ?? '')) !== ''
-                                            && !ctype_digit(trim((string)$sub_answer['answer']))) {
-                                        $sub_site = trim((string)$sub_answer['answer']);
-                                        break;
-                                    }
-                                }
+                                $sub_label = $subscription->buyer_label();
                                 ?>
-                                <?php if($sub_name !== ''): ?>
-                                <p class="jy-tight"><strong><?php echo htmlspecialchars($sub_name); ?></strong><?php
-                                    echo $sub_site !== '' ? ' — ' . htmlspecialchars((string)$sub_site) : ''; ?></p>
+                                <?php if($sub_label !== ''): ?>
+                                <p class="jy-tight"><strong><?php echo htmlspecialchars($sub_label); ?></strong></p>
                                 <?php endif; ?>
                                 <p class="jy-subs-amt"><?php echo htmlspecialchars($subscription->subscription_price_label()); ?></p>
                                 <p class="muted text-sm jy-tight"><?php echo htmlspecialchars($status); ?></p>

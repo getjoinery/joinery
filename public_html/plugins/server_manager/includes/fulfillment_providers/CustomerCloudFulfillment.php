@@ -49,6 +49,14 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.17 - rerun_activation(): Retry setup for a paid site that never got a server runs its activation again
+ *                (hosting_after_purchase B18)
+ * @version 1.16 - cancelNotice(): the subscriptions page's cancel question says what happens to the site (hosting_after_purchase S2)
+ * @version 1.15 - a paid line whose draft changed after the line was made fails closed holding the order item, never
+ *                left as a draft the sweep deletes (hosting_after_purchase B12)
+ * @version 1.14 - approving a held site files its domain from the line this site's store sold (hosting_after_purchase B11)
+ * @version 1.13 - an own-Linode line no longer needs a Linode grant to be paid for: the buyer connects after paying,
+ *                and activation parks the site at pending_connect until they do
  * @version 1.12 - reference 0 is On your own Linode (specs/own_linode_we_install.md W2, W3): the draft's plan must
  *                match the product before and after the charge; it needs a Linode grant with an hour left and
  *                room under the own-Linode limit, and the email and backups it was set up with still in the cart;
@@ -77,7 +85,7 @@
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedSiteRequirement.php'));
 
-class CustomerCloudFulfillment implements FulfillmentProvider {
+class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancelNotice {
 
 	public function key(): string {
 		return 'customer_cloud';
@@ -123,10 +131,6 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	/** What the buyer reads when the line's site was set up for the other plan. */
 	const WRONG_PLAN_SENTENCE = 'This site was set up for a different plan. '
 		. 'Remove it from the cart and continue to payment from your site setup again.';
-
-	/** What the buyer reads when their Linode connection cannot carry a build. */
-	const CONNECT_LINODE_SENTENCE = 'Connect your Linode account again before paying: we build the server in it, '
-		. 'and the connection lasts only a short while. Use Connect on your site setup.';
 
 	/** What the buyer reads when the email and backups they chose have left the cart. */
 	const BUNDLE_MISSING_SENTENCE = 'The email and backups you chose for this site are no longer in your cart. '
@@ -196,9 +200,6 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			return self::WRONG_PLAN_SENTENCE;
 		}
 		if ($ref === self::REF_CUSTOMER) {
-			if (CustomerCloudAccount::live_for_build($user_id) === null) {
-				return self::CONNECT_LINODE_SENTENCE;
-			}
 			// The email and backups the buyer ticked must still be in the cart:
 			// a removed or refused bundle line would build the site without
 			// them while the summary said yes (reviewer2 B8).
@@ -237,6 +238,30 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			$answer = $answer['answer'] ?? 0;
 		}
 		return (int)$answer;
+	}
+
+	/**
+	 * On the subscriptions page's cancel question: what happens to the site
+	 * this line pays for. It runs to the end of the paid period, then the
+	 * grace, then it is shut down; its backups are kept from the end of the
+	 * period (HostedTrialSignals). (hosting_after_purchase S2)
+	 */
+	public function cancelNotice(OrderItem $order_item): string {
+		// A PayPal cancel ends the subscription at once: there is no period
+		// left for the site to run to (B29).
+		if ($order_item->get_payment_source() === 'paypal') {
+			return '';
+		}
+		$rows = new MultiCustomerCloudProvision(array('external_order_item_id' => (int)$order_item->key, 'deleted' => false));
+		foreach ($rows as $provision) {
+			if ($provision->local_order_item() === null || !$provision->is_operator_hosted()) {
+				return '';
+			}
+			return 'Your site ' . $provision->get('cvp_domain') . ' keeps running to the end of that period and for '
+				. HostedTrialSignals::grace_days() . ' days after, then it is shut down. Its backups are kept for '
+				. HostedTrialSignals::shelf_days() . ' days from the end of the period and can be restored with your recovery key.';
+		}
+		return '';
 	}
 
 	public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array {
@@ -294,9 +319,24 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			throw new RuntimeException('Site draft #' . $draft_id . ' belongs to user #'
 				. (int)$draft->get('cvp_usr_user_id') . ', not the buyer (#' . (int)$user->key . ').');
 		}
-		if ((string)$draft->get('cvp_status') !== 'pending_payment') {
-			throw new RuntimeException('Site draft #' . $draft_id . " is at '" . $draft->get('cvp_status')
-				. "', not pending_payment; the buyer edited it after adding it to the cart.");
+		// The paid line names the freeze it was made from (cvp_freeze_token,
+		// set only when the buyer saves the setup). A row reopened, re-saved or
+		// swept back to draft since may not be what was paid for, and nothing
+		// records what was. It is not built:
+		// it fails closed holding the paid order item, so it is on the
+		// operator's board and the buyer's page, and the draft sweep (which
+		// skips a row with an order item) can never delete a paid site.
+		$frozen = ManagedSiteRequirement::frozen_from((array)$order_item->get_raw_data());
+		if ((string)$draft->get('cvp_status') !== 'pending_payment' || $frozen === ''
+				|| $frozen !== (string)$draft->get('cvp_freeze_token')) {
+			if (!$draft->is_pre_payment()) {
+				throw new RuntimeException('Site draft #' . $draft_id . " is at '" . $draft->get('cvp_status')
+					. "' and was not activated.");
+			}
+			$draft->set('cvp_external_order_item_id', (int)$order_item->key);
+			$draft->fail('Paid for, but the buyer reopened or changed the site setup after it went into the cart, '
+				. 'so what was paid for is not certain. Confirm the setup with the buyer, then Retry, or refund.');
+			throw new RuntimeException('Site draft #' . $draft_id . ' failed at activation: ' . $draft->get('cvp_error'));
 		}
 		if ((string)($draft->get('cvp_landing') ?: 'instance') !== $landing
 				|| ($plan !== '' && ManagedSiteDraft::plan_of($draft) !== $plan)) {
@@ -434,6 +474,54 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 	 * A person releases a held order: it goes on exactly as an activation
 	 * under the limit would have (ready, mail owed, the domain row filed).
 	 */
+	/**
+	 * Retry setup for a paid site that never got a server: its activation
+	 * runs again against its own paid line, after a person confirmed the
+	 * setup with the buyer (hosting_after_purchase B18). A row failed closed
+	 * at activation (a changed draft, a name another site held) never ran
+	 * the rest of activation, so sending it straight to be built would build
+	 * it with no hosting mode, no buyer, no mail leg and no domain row; and
+	 * activation is safe to run again for one that did. The row is put back
+	 * as the frozen draft its line names, so activation accepts it; whatever
+	 * failed it before must have been put right, or it fails the same way.
+	 * Returns the row as activation left it; throws with the reason.
+	 */
+	public static function rerun_activation(CustomerCloudProvision $prov): CustomerCloudProvision {
+		$item = $prov->local_order_item();
+		if ($item === null) {
+			throw new RuntimeException('Its paid line is not in this site\'s store, so its activation cannot be run here.');
+		}
+		$product = new Product((int)$item->get('odi_pro_product_id'), TRUE);
+		$user = new User((int)$prov->get('cvp_usr_user_id'), TRUE);
+		$order = new Order((int)$item->get('odi_ord_order_id'), TRUE);
+		if (!$product->key || !$user->key || !$order->key) {
+			throw new RuntimeException('Its product, buyer or order can no longer be read.');
+		}
+		// The put-back and the activation are one transaction: a process that
+		// died between them would leave a paid site looking like an unpaid
+		// draft, which the draft sweep would in time delete (B32).
+		$prov = DbConnector::transaction(function () use ($prov, $item, $user, $product, $order) {
+			$prov->set('cvp_external_order_item_id', null);
+			$prov->set('cvp_status', 'pending_payment');
+			$prov->set('cvp_freeze_token', ManagedSiteRequirement::frozen_from((array)$item->get_raw_data()));
+			$prov->set('cvp_error', null);
+			$prov->save();
+			$result = (new self())->fulfill($user, $product, $item, $order, (int)$product->get('pro_fulfillment_ref'));
+			$prov = new CustomerCloudProvision((int)$prov->key, TRUE);
+			if (($result['ref_id'] ?? null) === null && $prov->is_pre_payment()) {
+				// Activation said why in its alert. A row it did not fail
+				// closed again is put back on the board holding its line.
+				$prov->set('cvp_external_order_item_id', (int)$item->key);
+				$prov->fail('Retry setup ran its activation again and it did not finish; see the alert for why.');
+			}
+			return $prov;
+		});
+		if ((string)$prov->get('cvp_status') === 'failed') {
+			throw new RuntimeException(trim((string)$prov->get('cvp_error')) ?: 'Its activation did not finish.');
+		}
+		return $prov;
+	}
+
 	public static function approve_held(CustomerCloudProvision $prov, int $by_user_id): void {
 		if ((string)$prov->get('cvp_status') !== 'held') {
 			throw new RuntimeException('Only a held provision can be approved.');
@@ -446,8 +534,10 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 		error_log('CustomerCloudFulfillment: held provision #' . $prov->key . ' approved by user #' . $by_user_id);
 		if ((string)$prov->get('cvp_domain_source') === 'register') {
 			$user = new User((int)$prov->get('cvp_usr_user_id'), TRUE);
-			$order_item = new OrderItem((int)$prov->get('cvp_external_order_item_id'), TRUE);
-			(new self())->file_domain_row($prov, $user, $order_item);
+			$order_item = $prov->local_order_item();
+			if ($order_item !== null) {
+				(new self())->file_domain_row($prov, $user, $order_item);
+			}
 		}
 	}
 

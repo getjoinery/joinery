@@ -3,6 +3,8 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.31 - a site we host is not sent to its management node's admin to verify a backup; it is told who checks
+ *                them (hosting_after_purchase K2)
  * @version 1.30 - a run that failed before it chose full or incremental shows no kind, not 'Full'
  * @version 1.29 - no inline script: the build's reload is data-jy-reload-after, the download button assets/js/admin-backups-download.js
  * @version 1.28 - the data-root confirm is the submit button's 'confirm' option (no inline handler)
@@ -231,7 +233,12 @@ if ($verified) {
 }
 // A site its management node backs up is verified from there: the
 // management node holds the links to its backup storage, not this site.
-if ($is_managed) {
+// A site we host is run by its buyer, who has no way into the host's admin:
+// they are told who checks it instead (hosting_after_purchase K2).
+if ($is_managed && HostedPlanNotice::hostedHere()) {
+	echo '<div class="text-muted small">Your host checks these backups on a schedule. To have one checked now, '
+	   . (SupportChatClient::enabled() ? 'ask your host in the Help panel.' : 'ask your host\'s support.') . '</div>';
+} elseif ($is_managed) {
 	echo '<div class="text-muted small">To verify a backup now, use <strong>Verify the newest backup</strong> on this site\'s '
 	   . 'Backups tab at its management node'
 	   . ($manager_url !== '' ? ' (<a href="' . htmlspecialchars(rtrim($manager_url, '/') . '/admin/server_manager') . '">'

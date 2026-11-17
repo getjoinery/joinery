@@ -428,6 +428,7 @@ $rule_permitted = array(
 	'plugins/support_desk/logic/desk_escalate_logic.php' => 'escalation behind the thread token',
 	'plugins/support_desk/logic/desk_feedback_logic.php' => 'feedback behind the thread token',
 	'plugins/support_desk/logic/desk_threads_logic.php' => 'the unread flag behind the thread token',
+	'plugins/support_desk/includes/SupportWidget.php' => 'a member\'s own thread: escalating it, taking a browser-held thread they asked as a guest, clearing its reply mark',
 	'includes/DriveSealed.php' => 'a sealed file\'s own blob re-typed as ciphertext, under the level change the owner made',
 	'logic/drive_device_link_deny_logic.php' => 'a member answering a device code actionable_by() proved is theirs',
 	'logic/drive_device_link_approve_logic.php' => 'a member approving a device code actionable_by() proved is theirs: the save binds the link to them',

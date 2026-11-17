@@ -32,6 +32,12 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.18 - each paid site links where it is managed (subscription, billing, domain, email and backups) and
+ *                its hosting row names the price (hosting_after_purchase N2, S1)
+ * @version 1.17 - the hosting row is one sentence per plan state with the date that matters: renews, cancelled to a
+ *                date, payment needed by, shut down, moved (hosting_after_purchase P2, S3)
+ * @version 1.16 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
+ * @version 1.15 - an own-Linode draft is paid for like any other; its Linode is connected after payment
  * @version 1.14 - an own-Linode draft without a live Linode grant sends its buyer to Connect on the setup (needs_linode)
  * @version 1.13 - a site built on its buyer's own Linode is described like a hosted one (profile_sites_we_built):
  *                its records, and its email only with the bundle; own_linode and with_services for its card
@@ -199,7 +205,7 @@ function profile_sites_logic(array $input): LogicResult {
 		// A domain we could not register because the name was taken after
 		// payment: the card offers an alternate.
 		$taken = null;
-		$order_item_id = (int)$provision->get('cvp_external_order_item_id');
+		$order_item_id = $provision->local_order_item_id();
 		if ($order_item_id > 0 && (string)$provision->get('cvp_domain_source') === 'register') {
 			$rows = new MultiRegisteredDomain(array('external_order_item_id' => $order_item_id, 'deleted' => false));
 			foreach ($rows as $rdm) {
@@ -238,16 +244,14 @@ function profile_sites_logic(array $input): LogicResult {
 			'pre_payment'     => $provision->is_pre_payment(),
 			'summary'         => $provision->is_pre_payment()
 				? profile_sites_draft_summary($provision, ManagedSiteDraft::product_for_row($provision)) : '',
-			// An own-Linode draft pays only on a grant that can carry the build;
-			// without one, its card sends the buyer to Connect on the setup
-			// (reviewer2 B7).
-			'needs_linode'    => $status === 'pending_payment' && ManagedSiteDraft::plan_of($provision) === 'own_linode'
-				&& CustomerCloudAccount::live_for_build($user_id) === null,
-			'payment_form'    => ($status === 'pending_payment' && !ManagedSiteDraft::in_cart($provision)
-					&& !(ManagedSiteDraft::plan_of($provision) === 'own_linode' && CustomerCloudAccount::live_for_build($user_id) === null))
+			'payment_form'    => ($status === 'pending_payment' && !ManagedSiteDraft::in_cart($provision))
 				? ManagedSiteDraft::payment_form($provision, ManagedSiteDraft::product_for_row($provision), 'Finish payment') : '',
 			'in_cart'         => $status === 'pending_payment' && ManagedSiteDraft::in_cart($provision),
 			'taken'           => $taken,
+			// Where the buyer manages what this site is paid by and holds
+			// (hosting_after_purchase N2): its subscription, its card, the
+			// domain we registered, and the email and backups it rents.
+			'links'           => $provision->is_pre_payment() ? array() : profile_sites_links($provision),
 			// Offered only for a site that exists: a button that spends a
 			// one-time secret must not be reachable before the secret means
 			// anything.
@@ -263,8 +267,7 @@ function profile_sites_logic(array $input): LogicResult {
 			// An open suspension's reason, shown to the customer (HostedSuspensions).
 			'suspended'       => ($sus = HostedSuspension::open_for($provision->key)) ? (string)$sus->get('hsu_reason') : null,
 			'plan_state'      => $trial ? (string)$trial->get('htr_state') : '',
-			'plan_until'      => $trial ? (string)($trial->get('htr_state') === HostedTrial::STATE_GRACE
-				? $trial->get('htr_grace_ends_time') : $trial->get('htr_trial_ends_time')) : '',
+			'plan_line'       => $trial ? profile_sites_plan_line($trial, $provision->local_order_item(), $session) : '',
 		);
 	}
 
@@ -547,6 +550,64 @@ function profile_sites_transfer($provision, $session): ?array {
 		'signup_url'   => strpos($referral, 'https://') === 0 ? $referral : 'https://www.linode.com/',
 		'label'        => InstanceTransfers::label_hint($provision),
 	);
+}
+
+/**
+ * The pages a paid site is managed from, label => url: the subscription and
+ * the card when this site's store bills it, the domain when we registered it,
+ * the connected services when it rents email and backups.
+ */
+function profile_sites_links(CustomerCloudProvision $provision): array {
+	$links = array();
+	$item = $provision->local_order_item();
+	if ($item !== null && $item->get('odi_is_subscription')) {
+		$links['Subscription'] = '/profile/subscriptions';
+		$links['Billing and card'] = '/profile/billing';
+	}
+	if ((string)$provision->get('cvp_domain_source') === 'register') {
+		$links['Domain'] = '/profile/server_manager/domain';
+	}
+	if ((int)$provision->get('cvp_services_order_item_id') > 0) {
+		$links['Email and backups'] = '/profile/server_manager/services';
+	}
+	return $links;
+}
+
+/**
+ * The hosting row of a hosted site, one sentence a buyer reads: where its plan
+ * stands and the date that matters to them. A cancel waiting for the end of
+ * the paid period is said here (the store's line carries it before any signal).
+ */
+function profile_sites_plan_line(HostedTrial $trial, ?OrderItem $item, $session): string {
+	$day = function ($when) use ($session) {
+		$when = trim((string)$when);
+		return $when === '' ? '' : LibraryFunctions::convert_time($when, 'UTC', $session->get_timezone(), 'F j, Y');
+	};
+	$cancelled = $item !== null && trim((string)$item->get('odi_subscription_cancelled_time')) !== '';
+	$period_end = $item !== null ? $day($item->get('odi_subscription_period_end')) : '';
+	switch ((string)$trial->get('htr_state')) {
+		case HostedTrial::STATE_TRIAL:
+			if ($cancelled) {
+				return 'Cancelled: free until ' . $day($trial->get('htr_trial_ends_time')) . ', then it ends';
+			}
+			return 'Free trial until ' . $day($trial->get('htr_trial_ends_time'));
+		case HostedTrial::STATE_SUBSCRIBED:
+			if ($cancelled) {
+				return $period_end !== '' ? 'Cancelled: runs until ' . $period_end . ', then it ends' : 'Cancelled';
+			}
+			$price = $item !== null ? $item->subscription_price_label() : '';
+			return trim('Subscribed' . ($price !== '' ? ', ' . $price : '') . ($period_end !== '' ? ', renews ' . $period_end : ''));
+		case HostedTrial::STATE_GRACE:
+			$until = $day($trial->get('htr_grace_ends_time'));
+			return $cancelled
+				? 'Ended: runs until ' . $until . ', then it is shut down'
+				: 'Payment needed by ' . $until . ', or the site is shut down';
+		case HostedTrial::STATE_SHUTDOWN:
+			return 'Shut down. Backups kept until ' . $day($trial->get('htr_shelf_ends_time'));
+		case HostedTrial::STATE_TRANSFERRED:
+			return 'Moved to your own Linode account';
+	}
+	return '';
 }
 
 /** One line describing a draft: the domain, and what the buyer will pay. */

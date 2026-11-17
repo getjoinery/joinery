@@ -420,7 +420,7 @@ function _stripe_webhook_subscription_ended($order_item, $subscription_id, $revo
  */
 function _stripe_webhook_send_payment_failure_email($user_id, $order_item) {
     // Check for recent payment failure email
-    if (WebhookLog::hasRecentPaymentFailure('stripe', 'invoice.payment_failed')) {
+    if (WebhookLog::hasRecentPaymentFailure('stripe', 'invoice.payment_failed', (string)$order_item->get('odi_stripe_subscription_id'))) {
         error_log("Stripe webhook: skipping payment failure email, recent one exists");
         return;
     }
@@ -432,8 +432,14 @@ function _stripe_webhook_send_payment_failure_email($user_id, $order_item) {
         $user = new User($user_id, TRUE);
         if (!$user->key) return;
 
-        $tier = SubscriptionTier::GetUserTier($user_id);
-        $tier_name = $tier ? $tier->get('sbt_display_name') : 'your current plan';
+        // The line whose charge failed, by the name its buyer knows it by
+        // ('Managed hosting — example.com'); the buyer's tier only when the
+        // line has no product to name.
+        $tier_name = $order_item->buyer_label();
+        if ($tier_name === '') {
+            $tier = SubscriptionTier::GetUserTier($user_id);
+            $tier_name = $tier ? $tier->get('sbt_display_name') : 'your current plan';
+        }
 
         $product = null;
         if ($order_item->get('odi_pro_product_id')) {

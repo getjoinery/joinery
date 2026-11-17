@@ -11,6 +11,13 @@
  * passes the platform captcha (when one is configured), and a per-address
  * daily budget bounds the rest (SupportBudget).
  *
+ * A signed-in member's thread is also theirs (sth_account_user_id): it opens
+ * in any browser they are signed in to, they can hand it to a person, and a
+ * person's reply is emailed to them with a link back to it
+ * (specs/hosting_after_purchase.md H1).
+ *
+ * @version 0.2.0 - a signed-in member's threads are theirs: open anywhere they are signed in, handed to a person
+ *                  (escalate), listed (mine)
  * @version 0.1.0
  */
 class SupportWidget {
@@ -62,6 +69,7 @@ class SupportWidget {
 			}
 			list($thread, $token) = SupportIntake::createThread(SupportThread::SURFACE_WIDGET, array(
 				'ip' => $ip, 'title' => $message, 'visitor' => self::visitor(),
+				'account_user_id' => self::member(),
 			));
 			$held[(int)$thread->key] = $token;
 			$_SESSION[self::SESSION_KEY] = array_slice($held, -20, null, true);
@@ -71,15 +79,111 @@ class SupportWidget {
 		return $out;
 	}
 
-	/** One of this session's threads. @throws SupportRefusal */
+	/** The signed-in member asking, or 0 for a guest. */
+	public static function member(): int {
+		try {
+			return (int)SessionControl::get_instance()->get_user_id();
+		} catch (\Throwable $e) {
+			return 0;
+		}
+	}
+
+	/** One of this session's threads, or the signed-in member's own. @throws SupportRefusal */
 	public static function open(int $thread_id): SupportThread {
 		$held = self::held();
 		$thread = SupportIntake::load($thread_id);
+		$member = self::member();
+		$mine = $thread !== null && $member > 0 && (int)$thread->get('sth_account_user_id') === $member;
 		if ($thread === null || $thread->get('sth_delete_time') || (string)$thread->get('sth_surface') !== SupportThread::SURFACE_WIDGET
-				|| !isset($held[$thread_id]) || !$thread->tokenOpens((string)$held[$thread_id])) {
+				|| (!$mine && (!isset($held[$thread_id]) || !$thread->tokenOpens((string)$held[$thread_id])))) {
 			throw new SupportRefusal('That conversation is not open in this browser.', 'no_thread', 404);
 		}
 		return $thread;
+	}
+
+	/**
+	 * Hand a signed-in member's thread to a person (H1). A guest has no
+	 * address for the reply, so is told where to write instead.
+	 * @throws SupportRefusal
+	 */
+	public static function escalate(int $thread_id): array {
+		if (self::member() <= 0) {
+			throw new SupportRefusal('Sign in to hand this to a person, or write to ' . self::contact_email() . '.', 'sign_in', 403);
+		}
+		$thread = self::open($thread_id);
+		// A question asked before signing in, still held by this browser, is
+		// given to the member who now hands it on (B36).
+		if ((int)$thread->get('sth_account_user_id') === 0) {
+			$member = self::member();
+			SystemBase::rule_checked_write(function () use ($thread, $member) {
+				SupportThread::updateColumns((int)$thread->key, array('sth_account_user_id' => $member));
+			});
+			$thread->set_as_stored('sth_account_user_id', $member);
+		}
+		if ((int)$thread->get('sth_account_user_id') !== self::member()) {
+			throw new SupportRefusal('That conversation is not yours.', 'no_thread', 404);
+		}
+		// Ownership is proven above (open(), then the account check).
+		SystemBase::rule_checked_write(function () use ($thread) {
+			SupportNotify::escalate($thread, 'The member asked for a person.');
+		});
+		return array('thread_id' => (int)$thread->key, 'state' => SupportThread::STATE_WAITING);
+	}
+
+	/**
+	 * The member opened their conversation on the page: a person's reply is
+	 * read (B35).
+	 */
+	public static function mark_read(SupportThread $thread): void {
+		if (!$thread->get('sth_unread_reply') || (int)$thread->get('sth_account_user_id') !== self::member()) {
+			return;
+		}
+		SystemBase::rule_checked_write(function () use ($thread) {
+			SupportThread::updateColumns((int)$thread->key, array('sth_unread_reply' => false));
+		});
+	}
+
+	/** The signed-in member's widget threads, newest first. */
+	public static function mine(int $limit = 10): array {
+		$member = self::member();
+		if ($member <= 0) {
+			return array();
+		}
+		$out = array();
+		foreach (new MultiSupportThread(array('sth_account_user_id' => $member, 'sth_surface' => SupportThread::SURFACE_WIDGET,
+				'deleted' => false), array('sth_last_activity_time' => 'DESC'), $limit) as $t) {
+			$out[] = $t;
+		}
+		return $out;
+	}
+
+	/** Where a person can be written to: the desk's contact address, else the site's own From address. */
+	public static function contact_email(): string {
+		$settings = Globalvars::get_instance();
+		foreach (array('support_desk_contact_email', 'defaultemail') as $name) {
+			$value = trim((string)$settings->get_setting($name, false, true));
+			if ($value !== '') {
+				return $value;
+			}
+		}
+		return '';
+	}
+
+	/** A thread's messages drawn as the core transcript draws them, for the page. */
+	public static function transcriptHtml(SupportThread $thread, string $tz): string {
+		$out = '';
+		foreach (SupportIntake::transcript($thread) as $m) {
+			$time = LibraryFunctions::convert_time((string)($m['time'] ?? ''), 'UTC', $tz, 'M j, g:i A');
+			if (($m['role'] ?? '') === 'user') {
+				$out .= ChatTranscript::userBubble((string)$m['content'], $time, array('message_id' => (int)$m['id']));
+			} elseif (($m['status'] ?? '') === 'failed') {
+				$out .= ChatTranscript::failedBubble((string)($m['error'] ?? ''), (int)$m['id']);
+			} elseif (($m['status'] ?? '') !== 'running') {
+				$out .= ChatTranscript::assistantBubble((string)$m['content'], $time, array('message_id' => (int)$m['id'],
+					'by_person' => ($m['author'] ?? '') === 'person'));
+			}
+		}
+		return $out;
 	}
 
 	/** A turn's state, with the finished answer drawn by the core transcript. */

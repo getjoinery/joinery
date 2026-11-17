@@ -42,6 +42,14 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.43 - cvp_mail_retry_time: Retry email setup gives the settings push a fresh allowance (hosting_after_purchase B19);
+ *                cvp_license_choice and cvp_own_ownership_id: the business licence a site was bought under (WP7)
+ * @version 1.42 - cvp_freeze_token: the freeze a cart line names, apart from the row's update time (hosting_after_purchase B13)
+ * @version 1.41 - order_closed(): a row whose order was cancelled or fully refunded may be dismissed;
+ *                retry_setup() for a paid site failed before its node, retry_mail() from the step after the last
+ *                that left something at the provider (hosting_after_purchase O1, E2)
+ * @version 1.40 - cvp_buyer_notices: what HostingBuyerNotices has told the buyer (hosting_after_purchase WP2)
+ * @version 1.39 - local_order_item(): the paying line only when this site's store sold it (hosting_after_purchase B11)
  * @version 1.38 - cvp_domain_renew_quote: the name's yearly renewal, shown to the buyer
  * @version 1.37 - cvp_plan, cvp_services_order_item_id, cvp_services_wanted and cvp_grant_released_time; own_linode_sites_held() and own_linode_site_limit()
  *                (specs/own_linode_we_install.md)
@@ -145,6 +153,8 @@ class CustomerCloudProvision extends SystemBase {
 		// A shared host is not deleted out from under a site that lives on it.
 		'cvp_mgh_managed_host_id'    => array('action' => 'prevent', 'source_table' => 'mgh_managed_hosts',
 			'message' => 'a hosted site lives in a container on this host - move or remove it first'),
+		// A licence ownership removed (a refund) leaves the site uncovered, not undeletable.
+		'cvp_own_ownership_id'       => array('action' => 'null', 'source_table' => 'own_ownerships'),
 	);
 
 	// Admin origin needs no order item, so spec-generated test rows validate;
@@ -164,6 +174,25 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_sitename'               => array('type'=>'varchar(50)'),
 		'cvp_buyer_email'            => array('type'=>'varchar(255)'),
 		'cvp_buyer_name'             => array('type'=>'varchar(255)'),
+		// What the buyer has been told of this site's state (HostingBuyerNotices),
+		// a JSON list of keys.
+		'cvp_buyer_notices'          => array('type'=>'text'),
+		// The freeze a cart line was made from: a token set each time the
+		// buyer saves the setup (ManagedSiteDraft::save_and_freeze) and cleared
+		// when it is reopened or swept back to draft. Any other save leaves it,
+		// so the bundle recorded on the row at payment does not make the line
+		// look stale (hosting_after_purchase B13).
+		'cvp_freeze_token'           => array('type'=>'varchar(32)'),
+		// When an operator last pressed Retry email setup: the settings push
+		// counts its attempts from here, so a retry after the cause is fixed
+		// gets its full allowance (ProvisionHostedMail::push_attempts, B19).
+		'cvp_mail_retry_time'        => array('type'=>'timestamp(6)'),
+		// Who the site is for, asked at setup (hosting_after_purchase WP7):
+		// '' not asked yet, free, founder, standard, or held:<ownership id>.
+		'cvp_license_choice'         => array('type'=>'varchar(32)'),
+		// The business licence (own_ownerships row) that covers this site, set
+		// at activation. A licence no live site names here is unused.
+		'cvp_own_ownership_id'       => array('type'=>'int8'),
 		'cvp_status'                 => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'pending_connect'),
 		'cvp_cca_customer_cloud_account_id'         => array('type'=>'int8'),
 		// Which account of ours an operator-mode server is in
@@ -670,6 +699,56 @@ class CustomerCloudProvision extends SystemBase {
 	/** What every external thing a test purchase creates is named with, in front. */
 	const TEST_NAME_PREFIX = 'test_';
 
+	/**
+	 * The order line that paid for this site, when the store that sold it is
+	 * THIS site's store; null otherwise. A setup-page purchase (origin buyer)
+	 * is. An order polled from a store (origin order) names that store's line
+	 * id, which is a line here only when the polled store is this site; any
+	 * other local line with the same number is somebody else's, and acting on
+	 * it (its subscription, its period end) would touch the wrong purchase.
+	 */
+	public function local_order_item(): ?OrderItem {
+		$item_id = $this->local_order_item_id();
+		if ($item_id <= 0 || !class_exists('OrderItem')) {
+			return null;
+		}
+		try {
+			$item = new OrderItem($item_id, TRUE);
+			return $item->key ? $item : null;
+		} catch (\Throwable $e) {
+			return null;
+		}
+	}
+
+	/**
+	 * The paying line's id when this site's store sold it, else 0, without
+	 * loading the line: for a reader that only looks the id up in its own
+	 * rows (a domain filed against it).
+	 */
+	public function local_order_item_id(): int {
+		$item_id = (int)$this->get('cvp_external_order_item_id');
+		$origin = (string)$this->get('cvp_origin');
+		if ($item_id <= 0 || ($origin !== 'buyer' && !($origin === 'order' && self::polls_own_store()))) {
+			return 0;
+		}
+		return $item_id;
+	}
+
+	/**
+	 * Whether the store PollHostingOrders reads is this site's own: no store
+	 * named (the plane sells from itself, as the welcome email reads it), or
+	 * one at this site's own address.
+	 */
+	public static function polls_own_store(): bool {
+		$api = trim((string)Globalvars::get_instance()->get_setting('server_manager_getjoinery_api_url', false, true));
+		if ($api === '' || rtrim($api, '/') === ProvisioningSetup::selfApiUrl()) {
+			return true;
+		}
+		$theirs = strtolower((string)parse_url($api, PHP_URL_HOST));
+		$ours = strtolower((string)parse_url(LibraryFunctions::get_absolute_url(''), PHP_URL_HOST));
+		return $theirs !== '' && $theirs === $ours;
+	}
+
 	/** @var ?bool memo of is_test_purchase() for this row */
 	private $test_purchase = null;
 
@@ -687,11 +766,10 @@ class CustomerCloudProvision extends SystemBase {
 			return $this->test_purchase;
 		}
 		$this->test_purchase = false;
-		$item_id = (int)$this->get('cvp_external_order_item_id');
-		if ($item_id > 0 && class_exists('OrderItem')) {
+		$item = $this->local_order_item();
+		if ($item !== null) {
 			try {
-				$item = new OrderItem($item_id, TRUE);
-				$order_id = $item->key ? (int)$item->get('odi_ord_order_id') : 0;
+				$order_id = (int)$item->get('odi_ord_order_id');
 				if ($order_id > 0) {
 					$order = new Order($order_id, TRUE);
 					$this->test_purchase = $order->key && (bool)$order->get('ord_test_mode');
@@ -979,16 +1057,108 @@ class CustomerCloudProvision extends SystemBase {
 		if (in_array((string)$this->get('cvp_install_password'), self::PASSWORD_HELD_STATES, true)) {
 			$blockers[] = 'this plane still holds an install password the machine accepts';
 		}
-		if ((int)$this->get('cvp_external_order_item_id')) {
-			$blockers[] = 'a paid order is waiting on it';
+		if ((int)$this->get('cvp_external_order_item_id') && !$this->order_closed()) {
+			$blockers[] = 'a paid order is waiting on it: refund it, or cancel its subscription, first';
 		}
 
 		return $blockers;
 	}
 
+	/**
+	 * Has the order behind this row been dealt with, so the row may leave the
+	 * board: its subscription cancelled, or what was paid refunded in full.
+	 * Only a line this site's store sold can be read; another store's never is.
+	 */
+	public function order_closed(): bool {
+		$item = $this->local_order_item();
+		if ($item === null) {
+			return false;
+		}
+		if ($item->get('odi_is_subscription')) {
+			return trim((string)$item->get('odi_subscription_cancelled_time')) !== '';
+		}
+		// A line that cost nothing (the free own-Linode install) has nothing
+		// to refund or cancel (hosting_after_purchase B21).
+		$price = (float)$item->get('odi_price');
+		return $price <= 0 || (float)$item->get('odi_refund_amount') >= $price;
+	}
+
 	/** Can this provision be cleared off the board? See dismiss_blockers(). */
 	public function can_dismiss(): bool {
 		return count($this->dismiss_blockers()) === 0;
+	}
+
+	/**
+	 * Why Retry setup is not offered for this row, or '' when it is: a paid
+	 * site that failed before it had a node (the node's own Retry install
+	 * covers one that has). (hosting_after_purchase O1)
+	 */
+	public function retry_setup_refusal(): string {
+		if ((string)$this->get('cvp_status') !== 'failed') {
+			return 'it has not failed';
+		}
+		if ((int)$this->get('cvp_mgn_managed_node_id') > 0) {
+			return 'it has a node: use Retry install on the node';
+		}
+		return '';
+	}
+
+	/**
+	 * Send a failed site back to be built. A server it already has is found
+	 * again rather than made twice (ProvisionCustomerCloud::handle_ready).
+	 * Whatever failed it must be put right first, or it fails the same way.
+	 * Saves.
+	 */
+	public function retry_setup(): void {
+		$why = $this->retry_setup_refusal();
+		if ($why !== '') {
+			throw new CustomerCloudProvisionException('Retry setup is not possible: ' . $why . '.');
+		}
+		// No server yet: it may have failed before its activation finished,
+		// so activation runs again (CustomerCloudFulfillment::rerun_activation).
+		// A server already made means it was activated and failed while
+		// starting: it goes back to be built, and finds that server again.
+		// Only a site bought on the setup page was ever a draft activation can
+		// take; a polled order's row goes straight back to be built (B31).
+		if (trim((string)$this->get('cvp_instance_id')) === '' && (string)$this->get('cvp_origin') === 'buyer'
+				&& $this->local_order_item() !== null) {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
+			try {
+				CustomerCloudFulfillment::rerun_activation($this);
+			} catch (Throwable $e) {
+				throw new CustomerCloudProvisionException('Retry setup ran its activation again and it stopped: ' . $e->getMessage());
+			}
+			$this->load();
+			return;
+		}
+		$this->set('cvp_status', 'ready');
+		$this->set('cvp_error', null);
+		$this->save();
+	}
+
+	/**
+	 * Start a failed email setup again, from the step after the last one that
+	 * left something at the provider, so nothing is made there twice.
+	 * (hosting_after_purchase E2, B7) Saves.
+	 */
+	public function retry_mail(): string {
+		if ((string)$this->get('cvp_mail_state') !== 'failed') {
+			throw new CustomerCloudProvisionException('Its email setup has not failed.');
+		}
+		if (trim((string)$this->get('cvp_smtp2go_subaccount_id')) === '') {
+			$from = 'pending';
+		} elseif (trim((string)$this->get('cvp_smtp2go_domain_id')) === '') {
+			$from = 'subaccount_created';
+		} elseif (trim((string)$this->get('cvp_smtp2go_user_id')) === '') {
+			$from = 'domain_added';
+		} else {
+			$from = 'smtp_user_created';
+		}
+		$this->set('cvp_mail_state', $from);
+		$this->set('cvp_mail_error', null);
+		$this->set('cvp_mail_retry_time', gmdate('Y-m-d H:i:s'));
+		$this->save();
+		return $from;
 	}
 
 	/**
