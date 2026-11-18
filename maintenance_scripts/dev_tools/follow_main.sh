@@ -12,6 +12,9 @@
 #      (someone edited dev), when main is not a fast-forward of HEAD, or while a
 #      publish is building (it reads this tree).
 #   3. Fast-forwards to origin/main.
+#   3a. Holds the site's scheduled-task passes off from before the fast-forward until
+#      update_database has run (the hold a test takes, tests/lib/harness.php): a pass in
+#      between ran the new code against the old schema and read columns not there yet.
 #   4. Runs update_database --upgrade when the commits touched what it applies: a data class,
 #      a migration, or a declaration it seeds (settings.json, admin_menus.json,
 #      permissions.json, a plugin.json).
@@ -26,6 +29,8 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.5 - scheduled-task passes are held off across the fast-forward and update_database;
+#               a pass in that window warned on every new column (cvp_domain_renew_quote, 11-16)
 # @version 1.4 - update_database runs with --upgrade, the way a release's upgrade runs it. Run plain,
 #               it created no declared index and fixed no column type, so dev's schema drifted
 #               from every node that upgrades.
@@ -124,6 +129,26 @@ fi
 if publish_building; then
     exit 0   # a publish is reading this tree; the next minute tries again
 fi
+
+# Hold scheduled-task passes until the schema matches the code. A psql session
+# beside this script takes the hold lock a test takes, then waits (at most 90 s)
+# for a pass already under way to finish; the hold ends when this script exits
+# and the session's input closes. Not getting it only means pulling unheld.
+hold_task_passes() {
+    coproc TASK_HOLD { psql -w -h localhost -U postgres -d "${FOLLOW_MAIN_DB:-joinerytest}" -Atq 2>/dev/null; }
+    printf '%s\n' "SELECT pg_advisory_lock_shared(hashtext('scheduled_tasks'), hashtext('test_hold'));" \
+        "SET lock_timeout = '90s';" \
+        "SELECT pg_advisory_lock(hashtext('scheduled_tasks'), hashtext('pass'));" \
+        "SELECT pg_advisory_unlock(hashtext('scheduled_tasks'), hashtext('pass'));" \
+        "SELECT 'held';" >&"${TASK_HOLD[1]}"
+    local line
+    while read -r -t 100 -u "${TASK_HOLD[0]}" line; do
+        [ "$line" = "held" ] && return 0
+    done
+    say "scheduled-task passes NOT held for this pull"
+    return 1
+}
+hold_task_passes || true
 
 if ! git -c core.fileMode=false merge -q --ff-only "$new" 2>&1; then
     say "fast-forward to $(git rev-parse --short "$new") failed"

@@ -15,6 +15,7 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.11 - the held line also names dev's follow_main.sh, which takes the same hold across a pull
  * @version 2.10 - a task that starts failing, or fails differently, is recorded as an error (and reported where automatic reports are on)
  * @version 2.9 - a pass holds the pass lock for its length and does nothing while a test holds the hold
  *   lock: the box's own cron pass ran one test's fixture tasks and advanced another's fixture site copy
@@ -150,7 +151,8 @@ try {
 }
 
 // A test whose fixtures a scheduled task would act on holds the box's own
-// passes off while it runs (tests/lib/harness.php, harness_hold_task_passes()).
+// passes off while it runs (tests/lib/harness.php, harness_hold_task_passes()),
+// and dev's follow_main.sh holds them across a pull until its schema change ran.
 // Two locks make that exact. Every pass holds the pass lock, shared, for its
 // whole length, so a test can wait out a pass already under way; a test holds
 // the hold lock, shared, so several tests can hold at once. The pass lock is
@@ -173,7 +175,7 @@ if (getenv('JOINERY_TASK_PASS_HOLDER') !== '1') {
 		echo "[$timestamp] Warning: could not ask for the pass lock: " . $e->getMessage() . "\n";
 	}
 	if ($pass_held) {
-		echo "[$timestamp] Held: a test is using scheduled tasks, so this pass does nothing\n";
+		echo "[$timestamp] Held: a test, or a dev pull waiting on its schema change, holds scheduled tasks, so this pass does nothing\n";
 		exit(0);
 	}
 }

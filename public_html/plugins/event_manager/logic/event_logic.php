@@ -187,6 +187,10 @@ function event_logic(array $input): LogicResult {
 	$page_vars['register_urls'] = $register_urls;
 
 	//CHECK FOR SESSIONS
+	// Each branch counts only its own kind; the other counts stay zero.
+	$numsessions = 0;
+	$future_numsessions = 0;
+	$past_numsessions = 0;
 	if($event->get('evt_session_display_type')== Event::DISPLAY_SEPARATE){
 		$searches = array();
 		$searches['event_id'] = $event->key;

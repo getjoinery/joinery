@@ -10,7 +10,6 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	$currency_code = $page_vars['currency_code'];
 	$session = $page_vars['session'];
 	$require_login = $page_vars['require_login'];
-	$prefill_billing_user = $page_vars['prefill_billing_user'];
 
 	$page = new PublicPage(TRUE);
 	$page->public_header(array(
