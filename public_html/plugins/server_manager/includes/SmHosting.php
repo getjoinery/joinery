@@ -15,6 +15,8 @@
  * not count. Every hosting page asks here, so they appear and disappear
  * together; the menus follow the setting.
  *
+ * @version 1.12 - DNS_WAIT_SECONDS is fifteen minutes: a site answers within about five, and a stuck leg held the whole list for thirty
+ * @version 1.11 - support_lines() says each site's state in a buyer's words (re-run: the assistant read raw status codes)
  * @version 1.10 - support_lines(): a buyer's sites as the support desk is told them (walkthrough Q25)
  * @version 1.9 - DNS_WAIT_SECONDS: how long a buyer's DNS list is held for the site's own records (walkthrough Q16)
  * @version 1.8 - registrar_verify_line(): a buyer whose domain we register is told to expect the registrar's one email (walkthrough Q15)
@@ -55,7 +57,7 @@ class SmHosting {
 	 * to say what the domain needs before the DNS list is shown without it
 	 * (ProvisionBuyerDns).
 	 */
-	const DNS_WAIT_SECONDS = 1800;
+	const DNS_WAIT_SECONDS = 900;
 
 	/** How long a built site is waited on to take word of what it comes with before it is shown Ready anyway. */
 	const TOLD_WAIT_SECONDS = 900;
@@ -293,23 +295,47 @@ class SmHosting {
 				continue;
 			}
 			$plan = ManagedSiteDraft::plan_of($site);
-			$parts = array(ManagedSiteDraft::PLANS[$plan]['label'] ?? 'Site');
 			$status = (string)$site->get('cvp_status');
-			$parts[] = $site->is_pre_payment() ? 'not paid for yet' : 'provisioning status "' . $status . '"';
-			$parts[] = (string)$site->get('cvp_domain_source') === 'register' ? 'domain registered through us' : 'the buyer\'s own domain';
-			if (!$site->is_pre_payment() && class_exists('ProvisionBuyerDns') && ProvisionBuyerDns::applies($site)) {
-				$parts[] = ProvisionBuyerDns::listed($site) ? 'its DNS records are listed on their sites page' : 'its DNS records are not listed yet';
+			// What the stored status means to the buyer, in the words Your Sites uses.
+			if ($site->is_pre_payment()) {
+				$state = 'set up but not paid for yet, so nothing is built';
+			} elseif ($status === 'pending_connect') {
+				$state = 'paid; waiting for them to connect their Linode account before anything is built';
+			} elseif (in_array($status, array('ready', 'booting', 'installing'), true)) {
+				$state = 'paid; being built now, which takes ' . self::BUILD_TIME . ' in all';
+			} elseif ($status === 'done') {
+				$state = 'built and running';
+			} elseif (in_array($status, array('failed', 'held'), true)) {
+				$state = 'its build did not finish; a person here needs to look';
+			} else {
+				$state = 'status "' . $status . '"';
+			}
+			$parts = array('plan ' . (ManagedSiteDraft::PLANS[$plan]['label'] ?? 'unknown'), $state);
+			if ((string)$site->get('cvp_domain_source') === 'register') {
+				$parts[] = $site->is_pre_payment()
+					? 'we register the domain for them once they pay, and look after its DNS'
+					: 'we registered the domain and look after its DNS, so there are no DNS records for them to add';
+			} elseif (!$site->is_pre_payment() && class_exists('ProvisionBuyerDns') && ProvisionBuyerDns::applies($site)) {
+				$parts[] = ProvisionBuyerDns::listed($site)
+					? 'the domain is their own: the DNS records to add at their registrar are listed on their Your Sites page (' . ManagedSiteDraft::SITES_URL . ')'
+					: 'the domain is their own: the DNS records to add at their registrar will be listed on their Your Sites page ('
+						. ManagedSiteDraft::SITES_URL . ') a few minutes after the build, all together, and nothing needs adding before then';
+			} else {
+				$parts[] = 'the domain is their own';
 			}
 			$mail = trim((string)$site->get('cvp_mail_state'));
 			if ($mail !== '') {
-				$parts[] = 'email setup "' . $mail . '"';
+				$parts[] = 'email setup state "' . $mail . '"';
 			}
 			$created = trim((string)$site->get('cvp_create_time'));
 			if ($created !== '') {
 				$parts[] = 'ordered ' . substr($created, 0, 10);
 			}
-			$lines[] = $domain . ': ' . implode('; ', $parts)
-				. ($route === self::support_route((int)$site->key) ? ' (THE SITE THEY ASKED FROM)' : '');
+			$lines[] = 'Site ' . $domain . ($route === self::support_route((int)$site->key) ? ' (THE SITE THEY ASKED FROM)' : '')
+				. ': ' . implode('; ', $parts) . '.';
+		}
+		if ($lines) {
+			$lines[] = 'Their admin password for a built site is shown once on their Your Sites page. Speak of each site by its domain name, never by a number.';
 		}
 		return $lines;
 	}

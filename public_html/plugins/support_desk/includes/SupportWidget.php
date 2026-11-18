@@ -53,7 +53,7 @@ class SupportWidget {
 				foreach ((array)$fn($user_id, $route) as $line) {
 					$line = trim(preg_replace('/\s+/', ' ', (string)$line));
 					if ($line !== '') {
-						$lines[] = mb_substr($line, 0, 300);
+						$lines[] = mb_substr($line, 0, 600);
 					}
 				}
 			} catch (\Throwable $e) {

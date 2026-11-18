@@ -9,6 +9,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
+ * @version 1.8 - each shard's capacity is editable in its row
  * @version 1.7 - the Relay section link opens the Server tab
  * @version 1.6 - per-shard Retire: the shard and its managed node leave together
  * @version 1.5 - the shard region defaults to us-east
@@ -81,7 +82,17 @@ if (!empty($fleet_service_on)) {
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_public_ip')) . '</td>';
 			$pin = (string)$shard->get('mfs_identity_fingerprint');
 			echo '<td><code>' . htmlspecialchars(substr($pin, 0, 16)) . ($pin !== '' ? '…' : '') . '</code></td>';
-			echo '<td>' . intval($row['slots']) . ' / ' . intval($shard->get('mfs_capacity')) . '</td>';
+			// Tenants held, and the number it takes: editable, since a full
+			// fleet refuses every new site.
+			echo '<td>' . intval($row['slots']) . ' of ';
+			$cform = $page->getFormWriter('shard_capacity_' . intval($shard->key), array('class' => 'd-inline'));
+			echo $cform->begin_form();
+			$cform->hiddeninput('action', '', array('value' => 'shard_capacity'));
+			$cform->hiddeninput('mfs_mailbox_fleet_shard_id', '', array('value' => intval($shard->key)));
+			$cform->textinput('shard_capacity', '', array('value' => (string)intval($shard->get('mfs_capacity')), 'maxlength' => 4));
+			$cform->submitbutton('btn_shard_capacity_' . intval($shard->key), 'Set', array('class' => 'btn btn-sm btn-outline-secondary'));
+			echo $cform->end_form();
+			echo '</td>';
 			echo '<td>' . ((bool)$shard->get('mfs_is_active') ? 'Yes' : 'No') . '</td>';
 			switch ($standing) {
 				case RelayVersion::CURRENT:

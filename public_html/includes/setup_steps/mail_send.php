@@ -31,6 +31,7 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.12 - the address question takes the name alone (re-run finding 105)
  * @version 3.11 - a hosted site's email is named the email included with your hosting, not SMTP (walkthrough 50)
  * @version 3.10 - email that was set up for the site asks the one address question before the proof: the owner's
  *                 choice becomes the From address and their mailbox
@@ -301,7 +302,8 @@ if ($setup_send_stage === 'prove') {
 		$setup_pick_form->textinput('wizard_from_address', 'Your address', array(
 			'value' => (string)($_POST['wizard_from_address'] ?? $setup_pick),
 			'required' => true,
-			'validation' => array('required' => true, 'email' => true),
+			'helptext' => 'The full address, or just the part before @' . $setup_host . '.',
+			'validation' => array('required' => true),
 		));
 		$setup_pick_form->submitbutton('btn_mail_address', 'Use this address');
 		$setup_pick_form->end_form();

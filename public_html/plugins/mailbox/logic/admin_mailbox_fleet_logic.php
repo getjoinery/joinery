@@ -9,6 +9,7 @@
  * never show it. The console's own functions live here; what it shares with
  * the tenant surfaces (flash, settings writes) stays in includes/relay_admin.php.
  *
+ * @version 1.3 - shard_capacity: change how many tenants a shard takes
  * @version 1.2 - retire_shard: a shard and its managed node leave together
  * @version 1.1 - the console's functions moved here from relay_admin.php
  * @version 1.0
@@ -69,6 +70,26 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 		Access::demand(10, $session);   // queues a paid cloud server
 		$result = admin_mailbox_relay_provision_shard($input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	// How many tenants a shard takes. A full fleet refuses every site that
+	// asks for a slot, so the number has to be changeable without a new shard.
+	if ($action === 'shard_capacity') {
+		$shard = new MailboxFleetShard(intval($input['mfs_mailbox_fleet_shard_id'] ?? 0), TRUE);
+		$capacity = intval($input['shard_capacity'] ?? 0);
+		if (!$shard->key) {
+			admin_mailbox_relay_flash($session, 'There is no such shard.', 'Cannot change capacity');
+		} elseif ($capacity < 1 || $capacity > 1000) {
+			admin_mailbox_relay_flash($session, 'Give a capacity between 1 and 1000.', 'Cannot change capacity');
+		} else {
+			$shard->assert_can_write($session);
+			$shard->set('mfs_capacity', $capacity);
+			$shard->save();
+			$held = $shard->slotCount();
+			admin_mailbox_relay_flash($session, 'Shard ' . (string)$shard->get('mfs_name') . ' now takes ' . $capacity . ' tenant(s); it holds '
+				. $held . '.' . ($capacity < $held ? ' Nobody is moved off: it takes no new tenant until it is under that number.' : ''));
+		}
 		return LogicResult::redirect($self_url);
 	}
 

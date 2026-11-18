@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.33 - plane:site_no_relay_slot: a built site whose plan brings a relay slot and has none
  * @version 1.32 - the support desk is told a signed-in buyer's sites (SupportWidget::registerMemberFacts)
  * @version 1.31 - a buyer who confirms their email lands on Your Sites (Activation::registerLanding)
  * @version 1.30 - two incident sources: a built site whose agent was never let in, and an email to a buyer that failed for good
@@ -71,7 +72,8 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh', 'IncidentSourceTwoLayers',
 	'IncidentSourceSecurityFixPending', 'IncidentSourceOldCodeServing',
 	'IncidentSourceBreakGlassAttention', 'IncidentSourceBreakGlassNoHolder', 'IncidentSourceNeverDo',
-	'IncidentSourceUnsealDaemon', 'IncidentSourceAgentNotAdmitted', 'IncidentSourceBuyerMailFailed') as $incident_source) {
+	'IncidentSourceUnsealDaemon', 'IncidentSourceAgentNotAdmitted', 'IncidentSourceBuyerMailFailed',
+	'IncidentSourceSiteNoRelaySlot') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // A kept root password is sealed to its holder's vault (beta_break_glass_root_access

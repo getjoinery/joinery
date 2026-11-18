@@ -123,7 +123,7 @@ waits for the sending and inbound records, asks the built site what its domain
 needs (the `managed_domain_prepare` primitive), keeps the answer in
 `cvp_site_dns_records` and stamps `cvp_site_dns_time`; until the stamp the
 page says the records are being gathered and lists none. A site that has not
-answered thirty minutes after its install (`SmHosting::DNS_WAIT_SECONDS`) has
+answered fifteen minutes after its install (`SmHosting::DNS_WAIT_SECONDS`) has
 its list shown with what is known, the gap is reported on every pass, and the
 site is asked until it answers. Where the plane set up sending, the site's own
 signing key, SPF and DMARC give way to the provider's. Where the domain's DNS

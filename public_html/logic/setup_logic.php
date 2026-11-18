@@ -24,6 +24,7 @@
  * @version 2.10 - the Calendar step's protection level (action calendar_level)
  * @version 2.9.1
  * @changelog 2.9.1 - services_disconnect releases both services, mail and shelf
+ * @changelog 2.11 - mail_address_save takes the name alone and adds the site's domain
  * @changelog 2.10 - mail_address_save: on a site whose email was set up for it, the owner picks
  *   the address it sends from and receives at (hosting_purchase_walkthrough_test Q7)
  * @changelog 2.9 - services_connect / services_disconnect link this site to a getjoinery
@@ -469,6 +470,10 @@ function setup_logic(array $input): LogicResult {
 		$address = strtolower(trim((string)($input['wizard_from_address'] ?? '')));
 		$current = strtolower(trim((string)$settings->get_setting('defaultemail')));
 		$domain = strrpos($current, '@') !== false ? substr($current, strrpos($current, '@') + 1) : '';
+		// Just the name is enough: the domain is the one already on the page.
+		if ($address !== '' && strpos($address, '@') === false && $domain !== '') {
+			$address .= '@' . $domain;
+		}
 		if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
 			$error = 'That does not look like an email address.';
 		} elseif ($domain !== '' && substr($address, strrpos($address, '@') + 1) !== $domain) {
