@@ -1,5 +1,6 @@
 <?php
 /**
+ * @version 1.3 - open whether or not the site takes sign-ups (register_active gates registering only)
  * @version 1.2 - opened with no act_code, the page shows its form instead of warning on the missing key
  * @version 1.1 - the terms checkbox appears only for terms the person owes (TermsOwed); its links sit above
  *                 it, where they render, instead of inside the label FormWriter escapes
@@ -19,9 +20,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-	if(!$settings->get_setting('register_active')){
-			return LogicResult::error('This feature is turned off');
-	}
 
 	// Opened without a code (a bookmark, a mistyped link): the form shows, and
 	// a submit is refused as expired below.

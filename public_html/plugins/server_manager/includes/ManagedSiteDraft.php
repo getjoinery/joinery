@@ -21,6 +21,13 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.18 - a new setup's registration contact starts from the buyer's last registered domain (walkthrough 97)
+ * @version 1.17 - OWN_LINODE_SERVER: the own-Linode server's size and Linode's price for it, said on the review and Connect pages
+ * @version 1.16 - the own-Linode plan says our management is at no charge, with no mention of a beta (walkthrough Q20)
+ * @version 1.15 - Managed and own-Linode sites are bare metal; Managed has no mail server of its own (walkthrough Q5)
+ * @version 1.14 - in_cart_whole(): a setup whose bundle, licence or domain line was removed from the cart is dropped whole, so
+ *                Continue to payment is offered again instead of a dead Already in your cart
+ * @version 1.13 - a name this site or a managed server already answers at is refused (serves_already), not only a paid order's
  * @version 1.12 - who the site is for: the business licence choice is saved with the freeze, priced in the table
  *                and taken out of the cart with the draft (BusinessLicense, hosting_after_purchase WP7)
  * @version 1.11 - the freeze is cvp_freeze_token, set by save_and_freeze and cleared by unfreeze (hosting_after_purchase B13)
@@ -109,10 +116,16 @@ class ManagedSiteDraft {
 	const OWN_LINODE_REGION = 'us-east';
 	const OWN_LINODE_TYPE = 'g6-nanode-1';
 
+	/** That server in a buyer's words, with what Linode lists it at. Changes with OWN_LINODE_TYPE. */
+	const OWN_LINODE_SERVER = 'A 1 GB Linode. Linode bills you for it: $5 a month at their list price.';
+
 	/**
 	 * The plans a buyer chooses between, cheapest first. Each is one product
 	 * (found by its fulfilment reference) and one landing for the site.
 	 */
+	/** The email and backups add-on's name, the same on every screen that names it (walkthrough Q13). */
+	const BUNDLE_NAME = 'Joinery Managed Bundle';
+
 	/** What the Joinery Managed Bundle brings an own-Linode site: email and backups. */
 	const BUNDLE_FEATURES = array(
 		'2,000 sent emails a month',
@@ -131,10 +144,10 @@ class ManagedSiteDraft {
 			'features' => self::MANAGED_FEATURES),
 		'managed' => array('ref' => self::MANAGED_REF, 'landing' => 'instance', 'label' => 'Managed',
 			'features' => self::MANAGED_FEATURES),
-		// Management is free while in beta; email and backups are the buyer's own, or the bundle.
+		// Management is at no charge; email and backups are the buyer's own, or the bundle.
 		'own_linode' => array('ref' => self::OWN_LINODE_REF, 'landing' => 'instance', 'label' => 'On your own Linode',
 			'features' => array(
-				'Joinery monitors and manages your server (optional), free during the beta',
+				'Joinery monitors and manages your server at no charge (optional)',
 				'You set up your own email provider and backups, or add them as a bundle below',
 			)),
 	);
@@ -244,6 +257,34 @@ class ManagedSiteDraft {
 	// ------------------------------------------------------------------
 
 	/** The site's internal name, from a domain: its second-level label, made safe. */
+	/**
+	 * Whether a site here already answers at this name: this site's own
+	 * address, or a server this fleet manages that no order made (an
+	 * operator's install, a site copy). A paid order's name is refused by
+	 * CustomerCloudProvision::held_by_live(); this covers the rest, so nobody
+	 * sets up a second site on a name that is already somebody's.
+	 */
+	public static function serves_already(string $domain): bool {
+		$domain = strtolower(trim($domain));
+		if ($domain === '') {
+			return false;
+		}
+		$bare = (strpos($domain, 'www.') === 0) ? substr($domain, 4) : $domain;
+		$names = array($bare, 'www.' . $bare);
+		$own = strtolower(trim((string)Globalvars::get_instance()->get_setting('webDir')));
+		if ($own !== '' && in_array($own, $names, true)) {
+			return true;
+		}
+		foreach ($names as $name) {
+			foreach (array('https://' . $name, 'https://' . $name . '/', 'http://' . $name, 'http://' . $name . '/') as $url) {
+				if (count(new MultiManagedNode(array('mgn_site_url' => $url, 'deleted' => false))) > 0) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	public static function default_sitename(string $domain): string {
 		$label = explode('.', strtolower(trim($domain)))[0] ?? '';
 		$label = preg_replace('/[^a-z0-9_]/', '_', $label);
@@ -400,7 +441,7 @@ class ManagedSiteDraft {
 				. self::SLUG_MAX_LENGTH . ' characters with the dots. Choose a shorter one.'), 'row' => null);
 		}
 		$held = CustomerCloudProvision::held_by_live($domain, $slug, $row ? (int)$row->key : 0);
-		if ($held !== null) {
+		if ($held !== null || self::serves_already($domain)) {
 			return array('errors' => array(htmlspecialchars($domain) . ' already has a site with us. If it is yours, '
 				. 'it is on your sites page; otherwise choose another name.'), 'row' => null);
 		}
@@ -433,6 +474,14 @@ class ManagedSiteDraft {
 		// Frozen: the cart line is built from this row and must not move under it.
 		$row->set('cvp_landing', self::PLANS[$plan]['landing']);
 		$row->set('cvp_plan', $plan);
+		// A site with a server to itself is installed straight onto it (bare
+		// metal): one agent, the whole machine's memory, nothing between the
+		// site and its server. Only a Starter site, on a shared host, is a
+		// container. A Managed site is built with no mail server of its own
+		// and receives through our relay fleet; a site on its buyer's own
+		// Linode is not ours to give a relay place, so it keeps its own.
+		$row->set('cvp_docker_mode', $plan === 'starter' ? 'docker' : 'bare-metal');
+		$row->set('cvp_no_mail_server', $plan === 'managed');
 		// The size the buyer was told, pinned: not the shared customer-cloud default an operator may change.
 		$row->set('cvp_instance_type', $plan === 'own_linode' ? self::OWN_LINODE_TYPE : null);
 		// The email and backups bundle rides with an own-Linode site, when ticked and on sale.
@@ -469,6 +518,22 @@ class ManagedSiteDraft {
 		if ($us > 0) {
 			$values['usa_cco_country_code_id'] = (string)$us;
 			$values['phn_cco_country_code_id'] = (string)$us;
+		}
+		// The contact the buyer's last registered domain was registered with
+		// fills the block, so a second domain does not ask for it all again.
+		// The row's own block, when it holds one, is written over it below.
+		try {
+			$earlier = new MultiRegisteredDomain(array('user_id' => (int)$user->key, 'deleted' => false),
+				array('rdm_registered_domain_id' => 'DESC'), 1);
+			foreach ($earlier as $domain) {
+				foreach (ManagedDomainIntake::fieldsFromRegistrant($domain->open_registrant()) as $field => $value) {
+					if ($value !== '') {
+						$values[$field] = $value;
+					}
+				}
+			}
+		} catch (Throwable $e) {
+			// A contact that cannot be read leaves the block as it was.
 		}
 		if ($row === null) {
 			return $values;
@@ -656,7 +721,7 @@ class ManagedSiteDraft {
 
 		$add('Plan: ' . self::PLANS[self::plan_of($row)]['label'], '', $version);
 		if ($bundle !== null && self::plan_of($row) === 'own_linode' && $row->get('cvp_services_wanted')) {
-			$add('Joinery Managed Bundle', '', $bundle['version']);
+			$add(self::BUNDLE_NAME, '', $bundle['version']);
 		}
 		$licence = BusinessLicense::offers()[(string)$row->get('cvp_license_choice')] ?? null;
 		if ($licence !== null) {
@@ -725,6 +790,61 @@ class ManagedSiteDraft {
 	 * Then "finish payment" is the cart, not another add. A line from an
 	 * earlier freeze does not count — the charge would refuse it.
 	 */
+	/**
+	 * Whether this setup is in the cart and whole there: its own line and
+	 * every line it was priced with (the email and backups bundle, a business
+	 * licence to buy, the domain's first year). A buyer can remove one of
+	 * those lines on the cart page; what is left cannot be paid for, and the
+	 * setup page would still say "already in your cart" with no way to put
+	 * the missing line back. So a part-set is dropped whole here, and the
+	 * pages offer Continue to payment again, which adds every line afresh.
+	 */
+	public static function in_cart_whole(CustomerCloudProvision $row): bool {
+		if (!self::in_cart($row)) {
+			return false;
+		}
+		if (self::cart_missing($row) === '') {
+			return true;
+		}
+		self::drop_from_cart($row);
+		return false;
+	}
+
+	/** What a setup that is in the cart lacks there: 'bundle', 'licence', 'domain', or '' when whole. */
+	public static function cart_missing(CustomerCloudProvision $row): string {
+		$draft_id = (int)$row->key;
+		$domain = strtolower(trim((string)$row->get('cvp_domain')));
+		$domain_product_id = ManagedDomainIntake::domainProductId();
+		$has_bundle = false;
+		$has_domain = false;
+		try {
+			foreach (ShoppingCart::current()->items as $item) {
+				$data = (array)($item[2] ?? array());
+				$product_id = isset($item[1]) && is_object($item[1]) ? (int)$item[1]->key : 0;
+				if (JoineryServiceRequirement::draft_id_from($data) === $draft_id) {
+					$has_bundle = true;
+				}
+				if ($domain_product_id > 0 && $product_id === $domain_product_id && $domain !== ''
+						&& strtolower(trim((string)($data['managed_domain']['answer'] ?? ''))) === $domain) {
+					$has_domain = true;
+				}
+			}
+		} catch (Throwable $e) {
+			return '';
+		}
+		if ($row->get('cvp_services_wanted') && !$has_bundle) {
+			return 'bundle';
+		}
+		$choice = (string)$row->get('cvp_license_choice');
+		if (BusinessLicense::buys($choice) && !BusinessLicense::in_cart($draft_id, $choice)) {
+			return 'licence';
+		}
+		if ((string)$row->get('cvp_domain_source') === 'register' && $domain_product_id > 0 && !$has_domain) {
+			return 'domain';
+		}
+		return '';
+	}
+
 	public static function in_cart(CustomerCloudProvision $row): bool {
 		if (!class_exists('ShoppingCart') || !isset($_SESSION)) {
 			return false;

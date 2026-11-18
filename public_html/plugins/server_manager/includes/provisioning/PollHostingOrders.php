@@ -226,8 +226,7 @@ class PollHostingOrders {
 		if (!$to_email) return;
 
 		$settings   = Globalvars::get_instance();
-		$from_email = $settings->get_setting('server_manager_provisioning_welcome_from_email') ?: 'support@getjoinery.com';
-		$from_name  = $settings->get_setting('server_manager_provisioning_welcome_from_name')  ?: 'Get Joinery Support';
+		list($from_email, $from_name) = SmHosting::buyer_mail_sender();
 
 		$connect_url = LibraryFunctions::get_absolute_url('/profile/server_manager/connect_cloud');
 		$name = htmlspecialchars($to_name);

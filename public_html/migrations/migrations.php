@@ -2045,3 +2045,16 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE emt_email_templates SET emt_body = replace(emt_body, '*web_dir*/change-tier', CASE WHEN emt_name = 'subscription_payment_failed' THEN '*web_dir*/profile/billing' ELSE '*web_dir*/profile/subscriptions' END), emt_update_time = now() WHERE emt_name LIKE 'subscription\\_%' AND emt_body LIKE '%*web_dir*/change-tier%';";
 	$migrations[] = $migration;
+
+	// The page shown after an email address is confirmed was seeded with another
+	// site's words ("Check out upcoming retreats and events. We have retreats
+	// happening all around the world..."), on every install. It says what
+	// happened and offers the way on. The words live in the page's content
+	// block (pac_config html). Only a block still holding the seeded sentence
+	// is replaced, so an edited page keeps its edits. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '240';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE pac_page_contents SET pac_config = jsonb_set(pac_config::jsonb, '{html}', to_jsonb('<h2>Your email address is confirmed.</h2><p>Thank you. You can sign in now and carry on where you left off.</p><p><a href=\"/login\">Sign in</a></p>'::text)) WHERE pac_config::text LIKE '%retreats happening all around the world%';";
+	$migrations[] = $migration;

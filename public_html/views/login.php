@@ -65,10 +65,12 @@
         </div>
         <?php endif; ?>
 
+        <?php if ($settings->get_setting('register_active')): ?>
         <div class="auth-footer-text">
             Don't have an account yet?
             <a href="/register<?php if (isset($_GET['m'])) { echo '?m=' . htmlspecialchars($_GET['m']); } ?>">Register for an Account</a>
         </div>
+        <?php endif; ?>
 
     </div>
 </div>

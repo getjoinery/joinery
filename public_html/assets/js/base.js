@@ -408,6 +408,9 @@ document.addEventListener('click', function (e) {
     const typed = el.getAttribute('data-jy-confirm-typed');
     const opts = {};
     if (el.getAttribute('data-jy-confirm-label')) opts.confirmLabel = el.getAttribute('data-jy-confirm-label');
+    // The other button too: on "Cancel this subscription?" a button reading
+    // Cancel does not say which way it goes.
+    if (el.getAttribute('data-jy-cancel-label')) opts.cancelLabel = el.getAttribute('data-jy-cancel-label');
     if (el.getAttribute('data-jy-confirm-style')) opts.confirmStyle = el.getAttribute('data-jy-confirm-style');
     if (typed) {
         JoineryModal.confirmTyped(message || '', typed, go, opts);

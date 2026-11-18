@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 3.52 - site --admin-first-name=, --admin-last-name=, --admin-timezone=: the admin account is born with its
+#               owner's name and timezone when whoever ordered the site knows them.
+#VERSION 3.51 - site --no-manager-backups: a managed site whose management node keeps no backup storage for it says so
+#               (manager_backups = none), and offers its owner where backups go.
+#VERSION 3.50 - --no-mail-server (server, site): a bare-metal server with no mail server of its own. server installs no
+#               Postfix and binds no mail directories; site records local_mail_server = none, which the mail
+#               installer reads, so nothing installs one later. Mail arrives through a relay, as for a container.
 #VERSION 3.49 - colours only on a terminal: captured output carries no escape codes
 #VERSION 3.48 - a multi-tenant host's data root takes the whole givable disk at install (create all), so the
 #               sites' disk allowances, promised out of its size, fit: a 4th Starter site was refused (B4)
@@ -843,11 +850,12 @@ POSTGRES_PASSWORD_RECORDED=0
 # file is mode 600 and removed once the container has read it.
 SITE_INIT_ENV_INPUTS=(
     JOINERY_ADMIN_EMAIL JOINERY_ADMIN_PASSWORD JOINERY_ADMIN_PASSWORD_SHOWN JOINERY_INSTALL_BUNDLE
+    JOINERY_ADMIN_FIRST_NAME JOINERY_ADMIN_LAST_NAME JOINERY_ADMIN_TIMEZONE
     JOINERY_DNS_CREDENTIAL
     JOINERY_MAIL_API_KEY JOINERY_MAIL_PROVIDER JOINERY_MAIL_FROM
     JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
     JOINERY_BACKUP_PROVIDER JOINERY_BACKUP_REGION JOINERY_BACKUP_ENDPOINT
-    JOINERY_OUTBOUND_NOTICE_GB JOINERY_BETA_ROOT_ACCESS
+    JOINERY_OUTBOUND_NOTICE_GB JOINERY_BETA_ROOT_ACCESS JOINERY_NO_MAIL_SERVER JOINERY_NO_MANAGER_BACKUPS
 )
 
 # This script's own version, read from the newest #VERSION header above rather
@@ -925,6 +933,16 @@ OUTBOUND_FIGURE_ARGS=()
 # --outbound-notice-gb=N (site): the monthly notice setting's figure
 # (outbound_monthly_notice_gb), a site setting rather than a limit.
 OUTBOUND_NOTICE_GB=""
+# --no-mail-server (server, site): this bare-metal machine gets no mail server
+# of its own (no Postfix, no rspamd, port 25 never opened). Its site receives
+# through a relay and says so in its config (local_mail_server = none).
+NO_MAIL_SERVER=0
+# --no-manager-backups (site): the management node this site joins keeps no
+# backup storage for it (a site on its buyer's own cloud account, bought
+# without our backups). The site then offers its owner the ordinary choice of
+# where backups go, instead of saying its management node takes them
+# (manager_backups = none).
+NO_MANAGER_BACKUPS=0
 # --beta-root-access (site): a management node that keeps this machine's root
 # password for the beta tells the site to offer its owner the checkbox
 # (beta_root_access_offered). Nothing here keeps or removes a password.
@@ -3694,6 +3712,8 @@ server_data_root() {  # [SIZE|DEVICE]
     esac
     for pair in "${SERVER_DATA_BINDS[@]}"; do
         rel="${pair%% *}"; target="${pair#* }"
+        # No mail server on this machine: nothing keeps a mail queue or rspamd's data.
+        if [ "$NO_MAIL_SERVER" -eq 1 ] && [[ "$rel" == mail/* ]]; then continue; fi
         rc=0; bash "$tool" bind "$rel" "$target" >/dev/null || rc=$?
         case "$rc" in
             0) ;;
@@ -3701,7 +3721,11 @@ server_data_root() {  # [SIZE|DEVICE]
             *) print_error "${target} could not be put on the data root (above)"; return 1 ;;
         esac
     done
-    print_success "Postgres, the mail queue and rspamd keep their data on the data root (/srv/joinery)"
+    if [ "$NO_MAIL_SERVER" -eq 1 ]; then
+        print_success "Postgres keeps its data on the data root (/srv/joinery)"
+    else
+        print_success "Postgres, the mail queue and rspamd keep their data on the data root (/srv/joinery)"
+    fi
 }
 
 do_server_setup() {
@@ -3725,6 +3749,7 @@ do_server_setup() {
             --recovery-public-key=*) RECOVERY_PUBLIC_KEY="${arg#--recovery-public-key=}" ;;
             --no-tpm2) NO_TPM2=1 ;;
             --password-file=*) PASSWORD_FILE="${arg#*=}" ;;
+            --no-mail-server) NO_MAIL_SERVER=1 ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for server: $arg"; exit 1; } ;;
         esac
     done
@@ -4106,6 +4131,8 @@ EOF
     # (specs/multi_tenant_docker_hosts.md WP9).
     if is_docker; then
         print_info "Container image: no mail stack (a container site receives mail through a relay)"
+    elif [ "$NO_MAIL_SERVER" -eq 1 ]; then
+        print_info "No mail stack (--no-mail-server): this machine's site receives mail through a relay"
     else
         print_step "Installing mail stack (Postfix)..."
         apt install -y \
@@ -4520,7 +4547,7 @@ do_site_create() {
     local MANAGEMENT_NODE_URL=""
     local NO_SSL=false
     local THEMES=""
-    local ADMIN_EMAIL=""
+    local ADMIN_EMAIL="" ADMIN_FIRST_NAME="" ADMIN_LAST_NAME="" ADMIN_TIMEZONE=""
     local DORMANT=false
     local RELEASE_TREE_ONLY=false
     local COPY_OF=""
@@ -4649,6 +4676,18 @@ do_site_create() {
                 ADMIN_EMAIL="${1#*=}"
                 shift
                 ;;
+            --admin-first-name=*)
+                ADMIN_FIRST_NAME="${1#*=}"
+                shift
+                ;;
+            --admin-last-name=*)
+                ADMIN_LAST_NAME="${1#*=}"
+                shift
+                ;;
+            --admin-timezone=*)
+                ADMIN_TIMEZONE="${1#*=}"
+                shift
+                ;;
             --outbound-ceiling=*|--outbound-conn-rate=*|--outbound-conn-burst=*|--outbound-open-conns=*|--outbound-set-by=plane)
                 consume_outbound_flag "$1"
                 shift
@@ -4661,6 +4700,14 @@ do_site_create() {
                 ;;
             --beta-root-access)
                 BETA_ROOT_ACCESS=1
+                shift
+                ;;
+            --no-mail-server)
+                NO_MAIL_SERVER=1
+                shift
+                ;;
+            --no-manager-backups)
+                NO_MANAGER_BACKUPS=1
                 shift
                 ;;
             --admin-email)
@@ -4708,6 +4755,8 @@ do_site_create() {
                 echo ""
                 echo "Site Options:"
                 echo "  --admin-email=EMAIL    Address for the admin account (default none: it signs in as admin)"
+                echo "  --admin-first-name=NAME, --admin-last-name=NAME, --admin-timezone=ZONE"
+                echo "                         The admin account's name and timezone (default Admin, UTC)."
                 echo "  --admin-password-stdin The admin account's first password is one line on stdin, shown to"
                 echo "                         its owner elsewhere: the site asks for a new one at first sign-in"
                 echo "  --new-site-only        A new site and nothing else: a site of this name already here is"
@@ -4756,6 +4805,10 @@ do_site_create() {
                 echo "                         A rebuild keeps them; default takes one back."
                 echo "  --outbound-notice-gb=N Tell the admins past N GB sent in a month (1000;"
                 echo "                         0 turns it off). A setting the site can change."
+                echo "  --no-mail-server       Bare metal: no mail server on this machine. The site"
+                echo "                         receives through a relay (local_mail_server = none)."
+                echo "  --no-manager-backups   The management node keeps no backups for this site: the"
+                echo "                         site offers its owner where to store them."
                 echo "  --beta-root-access     The site offers its owner the emergency root access"
                 echo "                         checkbox (a management node that keeps this machine's"
                 echo "                         root password for the beta passes it)."
@@ -5190,11 +5243,22 @@ do_site_create() {
     if [ -n "$ADMIN_EMAIL" ]; then
         export JOINERY_ADMIN_EMAIL="$ADMIN_EMAIL"
     fi
+    # Who the admin account is, when whoever asked for the site already knows
+    # (a buyer's name and timezone): the first sign-in is not greeted as "Admin".
+    if [ -n "${ADMIN_FIRST_NAME:-}" ]; then export JOINERY_ADMIN_FIRST_NAME="$ADMIN_FIRST_NAME"; fi
+    if [ -n "${ADMIN_LAST_NAME:-}" ]; then export JOINERY_ADMIN_LAST_NAME="$ADMIN_LAST_NAME"; fi
+    if [ -n "${ADMIN_TIMEZONE:-}" ]; then export JOINERY_ADMIN_TIMEZONE="$ADMIN_TIMEZONE"; fi
     if [ -n "$OUTBOUND_NOTICE_GB" ]; then
         export JOINERY_OUTBOUND_NOTICE_GB="$OUTBOUND_NOTICE_GB"
     fi
     if [ "$BETA_ROOT_ACCESS" -eq 1 ]; then
         export JOINERY_BETA_ROOT_ACCESS=1
+    fi
+    if [ "$NO_MAIL_SERVER" -eq 1 ]; then
+        export JOINERY_NO_MAIL_SERVER=1
+    fi
+    if [ "$NO_MANAGER_BACKUPS" -eq 1 ]; then
+        export JOINERY_NO_MANAGER_BACKUPS=1
     fi
     export UPGRADE_SERVER
 

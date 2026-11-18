@@ -470,7 +470,7 @@
     },
     {
       "name": "register_active",
-      "default": "1",
+      "default": "0",
       "group": "general",
       "label": "Registration active",
       "type": "select",
@@ -1389,14 +1389,14 @@
     },
     {
       "name": "alternate_homepage",
-      "default": "/login",
+      "default": "/welcome",
       "group": "cms",
       "label": "Page to use as the homepage",
       "type": "select",
       "options_from": "CoreSettingOptions::homepageTargets",
       "options_include": "includes/CoreSettingOptions.php",
       "empty_option": true,
-      "helptext": "Where a visitor who is not signed in lands at the site root. The factory default sends them to the sign-in page. Leave blank only when the active theme ships its own homepage."
+      "helptext": "Where a visitor who is not signed in lands at the site root. The factory default is the welcome page: the site's name, a line saying it is private, and a Sign in button (or the active theme's own homepage, when it ships one)."
     },
     {
       "name": "alternate_loggedin_homepage",
@@ -2635,6 +2635,12 @@
       "default": "1",
       "managed": true,
       "helptext": "While Joinery is in beta, whether the management node that installed this site may keep the machine's root password, locked so only its named operator can read it, as a way back in if an update breaks the server badly enough that its agent cannot reach it. Every read is recorded. On by default; set from the setup wizard's Beta permissions step or the Management Node admin page. Turning it off is permanent: once off, nothing on this site turns it back on, and the management node's operator retires the password. Shown only when the install offered it (beta_root_access_offered). specs/implemented/beta_break_glass_root_access.md."
+    },
+    {
+      "name": "manager_backups",
+      "default": "",
+      "managed": true,
+      "helptext": "none when the management node this site joined keeps no backup storage for it (install.sh site --no-manager-backups): a site on its buyer's own cloud account, bought without backups. Written by the installer only. The Backups step and page then offer the owner where backups go instead of saying the management node takes them."
     },
     {
       "name": "beta_root_access_offered",

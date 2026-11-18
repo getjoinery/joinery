@@ -355,7 +355,7 @@ class StripeHelper {
 	 * back to /cart_charge to carry on, whatever the bank answered: the server
 	 * reads the outcome from Stripe, not from the page.
 	 */
-	public function output_stripe_regular_form($formwriter, $button_class=''){
+	public function output_stripe_regular_form($formwriter, $button_class='', $label='Pay with Stripe'){
 		$pending = $_SESSION[self::CARD_PENDING_KEY] ?? null;
 		$client_secret = (is_array($pending) && !empty($pending['client_secret'])
 			&& (int)($pending['time'] ?? 0) > time() - self::CARD_PENDING_MAX_AGE) ? (string)$pending['client_secret'] : '';
@@ -377,7 +377,7 @@ class StripeHelper {
 					<!-- Used to display form errors. -->
 					<div id="card-errors" role="alert"></div>
 				  </div>
-				<br />'. '<button type="submit" id="payment-submit" class="btn btn-primary '.$button_class.'" disabled>Pay with Stripe</button></form>
+				<br />'. '<button type="submit" id="payment-submit" class="btn btn-primary '.$button_class.'" disabled>'.htmlspecialchars($label, ENT_QUOTES, 'UTF-8').'</button></form>
 				<form action="/cart_charge" method="post" id="card-confirm-form">
 				  <input type="hidden" name="card_payment_confirm" value="1">
 				</form>'
@@ -391,15 +391,16 @@ class StripeHelper {
 	 * the session for the cart as it is then, records it, and sends the buyer
 	 * to Stripe's page (cart_charge_logic). Nothing is made at Stripe until it
 	 * is pressed. $cart_hash is the cart the page showed: a cart changed since
-	 * is shown again rather than paid for.
+	 * is shown again rather than paid for. $label is the button's words
+	 * (the checkout names the amount).
 	 */
-	public function output_stripe_checkout_form($cart_hash){
+	public function output_stripe_checkout_form($cart_hash, $label = 'Pay with Stripe'){
 		$formwriter = new FormWriterV2HTML5('form_hosted_checkout', ['action' => '/cart_charge', 'method' => 'post']);
 		ob_start();
 		$formwriter->begin_form();
 		$formwriter->hiddeninput('start_hosted_checkout', '', ['value' => 1]);
 		$formwriter->hiddeninput('cart_cs', '', ['value' => $cart_hash]);
-		$formwriter->submitbutton('pay_hosted', 'Pay with Stripe');
+		$formwriter->submitbutton('pay_hosted', $label);
 		$formwriter->end_form();
 		return ob_get_clean();
 	}

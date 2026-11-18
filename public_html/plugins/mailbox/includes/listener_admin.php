@@ -210,7 +210,7 @@ function mailbox_listener_actions(array $input, $session, string $self_url): ?Lo
 
 	if (!mailbox_site_has_mail_server()) {
 		admin_mailbox_relay_flash($session,
-			'This site runs in a container and has no mail server of its own to uninstall or reinstall. '
+			'This site has no mail server of its own to uninstall or reinstall. '
 			. 'It receives mail through its relay.', 'Nothing to change');
 		return LogicResult::redirect($self_url);
 	}

@@ -259,9 +259,21 @@ section('Payment: the site in the buyer\'s account, the bundle on the provision'
 
 list($order, $item) = ol_paid_line($buyer, $own, $own_version, $own_data);
 list(, $bundle_item) = ol_paid_line($buyer, $bundle, $bundle_version, $bundle_line ?? array(), $order);
-$services->fulfill($buyer, $bundle, $bundle_item, $order, 1);
-$provider->fulfill($buyer, $own, $item, $order, 0);
+$bundle_said = $services->fulfill($buyer, $bundle, $bundle_item, $order, 1);
+$site_said = $provider->fulfill($buyer, $own, $item, $order, 0);
 $paid = new CustomerCloudProvision((int)$draft->key, TRUE);
+check(stripos((string)($bundle_said['after_purchase_message'] ?? ''), 'nothing to switch on') !== false,
+	'a bundle bought with its site says it is set up for the buyer, not to switch it on', json_encode($bundle_said));
+check(stripos((string)($site_said['after_purchase_message'] ?? ''), 'on a server in your own Linode account') !== false
+	&& stripos((string)$site_said['after_purchase_message'], 'Connect your Linode account') === false,
+	'a site whose buyer is already connected is told it is being built in their account', json_encode($site_said));
+$waiting_row = new CustomerCloudProvision(NULL);
+$waiting_row->set('cvp_status', 'pending_connect');
+$waiting_row->set('cvp_domain', 'ol-waits.example');
+$waiting_said = CustomerCloudFulfillment::after_purchase_message($waiting_row);
+check(stripos($waiting_said, 'connect your Linode account') !== false && stripos($waiting_said, 'being built now') === false
+	&& strpos($waiting_said, CustomerCloudConsumer::CONNECT_URL) !== false,
+	'a site waiting for its Linode connection is told to connect first, with the way there', $waiting_said);
 check((string)$paid->get('cvp_status') === 'ready' && (string)$paid->get('cvp_hosting_mode') === 'customer'
 	&& (int)$paid->get('cvp_cca_customer_cloud_account_id') === (int)$account->key,
 	'activated ready, in the buyer\'s account, on their grant',
@@ -341,6 +353,19 @@ check($leg->forget_grant($g1) === 0 && trim((string)(new CustomerCloudAccount((i
 $g2->set('cvp_status', 'done');
 $g2->set('cvp_grant_released_time', gmdate('Y-m-d H:i:s'));
 $g2->save();
+// The server's agents are not in yet: admitting them asks Linode with this grant.
+$g1->set('cvp_expected_site_key', 'aaaabbbbccccdddd');
+$g1->set('cvp_expected_host_key', '1111222233334444');
+$g1->save();
+check(ProvisionOwnLinode::joins_owed($g1) && $leg->forget_grant($g1) === 0
+	&& trim((string)(new CustomerCloudAccount((int)$gacct->key, TRUE))->get('cca_access_token')) !== '',
+	'the grant is kept while the server\'s agents still wait to be admitted');
+$g1->set('cvp_expected_host_key', null);
+$g1->save();
+check($leg->forget_grant($g1) === 0, 'and while only the site\'s agent still waits');
+$g1->set('cvp_expected_site_key', null);
+$g1->save();
+check(!ProvisionOwnLinode::joins_owed($g1), 'with both admitted, nothing is owed');
 check($leg->forget_grant($g1) === 1, 'once nothing is building, the site lets the grant go');
 $after = new CustomerCloudAccount((int)$gacct->key, TRUE);
 check(trim((string)$after->get('cca_access_token')) === '' && (string)$after->get('cca_status') === CustomerCloudAccount::STATUS_RELEASED
@@ -446,5 +471,42 @@ $fshelf = ServiceTenant::forNode((int)$n2->key, ServiceTenant::SERVICE_SHELF);
 if ($fshelf) { harness_register_row('svt_service_tenants', 'svt_service_tenant_id', $fshelf->key); }
 check($fshelf !== null && ServiceTenant::forNode((int)$n2->key, ServiceTenant::SERVICE_MAIL) === null,
 	'a failed mail leg still gets its backups row, and no mail row');
+
+section('Ready waits until the site has been told what it comes with (walkthrough Q4)');
+$plain = new CustomerCloudProvision(NULL);
+$plain->set('cvp_status', 'done');
+$plain->set('cvp_hosting_mode', 'customer');
+check(SmHosting::site_told($plain), 'an own-Linode site with nothing of ours has nothing to be told');
+$plain->set('cvp_status', 'installing');
+check(!SmHosting::site_told($plain), 'a site still installing is not ready');
+$told_node = $mk_node('told');
+$bundled = new CustomerCloudProvision(NULL);
+$bundled->set('cvp_status', 'done');
+$bundled->set('cvp_hosting_mode', 'customer');
+$bundled->set('cvp_services_order_item_id', 900000000 + random_int(1, 99999999));
+$bundled->set('cvp_mgn_managed_node_id', (int)$told_node->key);
+$mk_job = function (string $type, string $status, int $ago) use ($told_node) {
+	$j = new ManagementJob(NULL);
+	$j->set('mjb_mgn_managed_node_id', (int)$told_node->key);
+	$j->set('mjb_job_type', $type);
+	$j->set('mjb_status', $status);
+	$j->set('mjb_commands', json_encode(array()));
+	$j->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - $ago));
+	$j->save();
+	$j->load();
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+	return $j;
+};
+$install_job = $mk_job('install_node', 'completed', 60);
+check(!SmHosting::site_told($bundled), 'a bundle site built a minute ago, not yet told, is not shown Ready');
+$install_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - SmHosting::TOLD_WAIT_SECONDS - 60));
+$install_job->save();
+check(SmHosting::site_told($bundled), 'but never held for ever: after the wait it is shown Ready anyway');
+$install_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - 60));
+$install_job->save();
+$mk_job('hosted_plan_notice', 'completed', 5);
+check(SmHosting::site_told($bundled), 'once the node has taken the notice, it is Ready');
+$pending = ServiceTenantWatch::node_banner_settings(0);
+check($pending['state'] === '', 'a node with nothing bought is sent silence');
 
 harness_finish();

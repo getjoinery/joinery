@@ -429,7 +429,7 @@ function mailbox_relay_section_render($page, array $v): void {
 				. '</p>';
 		}
 		echo '<p>' . htmlspecialchars(mailbox_needs_relay()
-			? 'This site runs in a container and has no mail server of its own, so it receives mail only through a '
+			? 'This site has no mail server of its own, so it receives mail only through a '
 				. 'relay. None is set up yet; until one is, mail cannot reach it.'
 			: (mailbox_receive_mode() === 'relay'
 			? 'This server is set up to receive through a relay, but none is set up yet. Until one is, mail cannot reach it.'

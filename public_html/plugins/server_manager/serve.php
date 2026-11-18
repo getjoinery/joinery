@@ -20,3 +20,8 @@ $routes = [
 	],
 ];
 
+// ---- Member Dashboard: a buyer's sites, with the way to Your Sites ----
+// Read by the Dashboard and the apps' dashboard summary on every request, so
+// it is registered here, with the routes, as the store's sections are.
+require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));
+ProfileDashboardRegistry::register('your_sites', array('SmHosting', 'dashboard_section'));

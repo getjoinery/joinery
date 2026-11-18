@@ -64,9 +64,9 @@ harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provis
 section('The cancel question says what happens to the site');
 $notice = $item->cancel_notice();
 check(strpos($notice, $prov->get('cvp_domain')) !== false
-	&& strpos($notice, HostedTrialSignals::grace_days() . ' days after') !== false
-	&& strpos($notice, 'shut down') !== false && strpos($notice, 'recovery key') !== false,
-	'a hosting line names the site, the grace, the shutdown and the backups', $notice);
+	&& strpos($notice, 'to the end of that period, then it is shut down') !== false
+	&& strpos($notice, 'days after') === false && strpos($notice, 'recovery key') !== false,
+	'a hosting line names the site, the end of the paid period and the backups, and no days after it', $notice);
 
 section('A cancel at the end of the paid period can be taken back while it lasts');
 check(!$item->can_resume(), 'a live subscription has nothing to take back');

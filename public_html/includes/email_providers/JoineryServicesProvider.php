@@ -19,6 +19,7 @@
  * the same answers. Choosing any other provider on the Email step is the
  * switch-over; proving the new one releases this (setup_logic).
  *
+ * @version 1.2 - named Joinery email service: it is included with hosting and a paid add-on elsewhere
  * @version 1.1 - getSetupUrl(): connecting and enrolling happen on the setup wizard's Email step,
  *                so the email settings page links there instead of offering fields that cannot do it
  * @version 1.0
@@ -30,7 +31,7 @@ class JoineryServicesProvider extends SmtpProvider implements DkimRecordSource, 
 	}
 
 	public static function getLabel(): string {
-		return 'Joinery services (included email)';
+		return 'Joinery email service';
 	}
 
 	/** Where this service is connected and enrolled: the wizard's Email step. */

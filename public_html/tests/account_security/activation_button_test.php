@@ -21,6 +21,10 @@
  *    and leaves the code valid;
  *  - the POST verifies, fires account.email_verified once (method activation)
  *    and pressing it again fires nothing more;
+ *  - the POST also signs the member in when the link was mailed within
+ *    Activation::SIGN_IN_MINUTES, spending the code, and lands them where a
+ *    plugin claims them (Activation::registerLanding); an older link verifies
+ *    and asks for a sign-in;
  *  - a password reset fires it with method password_reset;
  *  - a confirmed address change fires it with method email_change, even for
  *    an account verified before.
@@ -31,6 +35,7 @@
  *
  * Run: php tests/run.php db --filter=activation_button
  *
+ * @version 1.1 - the button signs in for a short while, once, and lands where a plugin says
  * @version 1.0
  */
 
@@ -113,12 +118,55 @@ section('Pressing the button verifies, once');
 $_SESSION = array();
 $res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c1), 'POST');
 check($is_verified($u1), 'the POST verifies the address');
-check($res->redirect === '/page/verify-email-confirm', 'and continues as the link did', var_export($res->redirect, true));
+check($res->redirect === '/profile' && (int)($_SESSION['usr_user_id'] ?? 0) === (int)$u1->key,
+	'and a link mailed a moment ago signs them in, where a sign-in lands', var_export($res->redirect, true));
+check(!Activation::checkTempCode($c1, Activation::EMAIL_VERIFY), 'the sign-in spent the code');
 $got = $queued($m);
 check(count($got) === 1 && ($got[0]['user_id'] ?? 0) === (int)$u1->key && ($got[0]['method'] ?? '') === 'activation'
 	&& ($got[0]['email'] ?? '') === $u1->get('usr_email'), 'account.email_verified fired once, method activation', json_encode($got));
 harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c1), 'POST');
 check(count($queued($m)) === 1, 'pressing it again fires nothing more');
+
+section('The button signs in only for a short while, and once');
+$age = function (string $code) use ($db) {
+	$q = $db->prepare("UPDATE act_activation_codes SET act_create_time = NOW() - INTERVAL '" . (Activation::SIGN_IN_MINUTES + 5) . " minutes' WHERE act_code = ?");
+	$q->execute(array(strtolower($code)));
+};
+list($u5, $c5) = $unverified('ActBtnOld');
+$age($c5);
+$_SESSION = array();
+$res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c5), 'POST');
+check($is_verified($u5) && empty($_SESSION['usr_user_id']) && $res->redirect === '/page/verify-email-confirm',
+	'an older link verifies and signs nobody in', var_export($res->redirect, true));
+check(Activation::checkTempCode($c5, Activation::EMAIL_VERIFY), 'and its code is not spent');
+
+$claimed = 0;
+Activation::registerLanding(function (User $user) use (&$claimed) {
+	return (int)$user->key === $claimed ? '/profile/harness-home' : '';
+});
+list($u6, $c6) = $unverified('ActBtnLand');
+$claimed = (int)$u6->key;
+$_SESSION = array();
+$res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c6), 'POST');
+check($res->redirect === '/profile/harness-home' && (int)($_SESSION['usr_user_id'] ?? 0) === (int)$u6->key,
+	'a member a plugin claims is signed in and lands on its page', var_export($res->redirect, true));
+$_SESSION = array();
+$res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c6), 'POST');
+check(empty($_SESSION['usr_user_id']) && ($res->data['state'] ?? '') === 'invalid', 'pressing the same link again signs nobody in');
+
+list($u7, $c7) = $unverified('ActBtnLandOld');
+$claimed = (int)$u7->key;
+$age($c7);
+$_SESSION = array();
+$res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c7), 'POST');
+check(empty($_SESSION['usr_user_id']) && $res->redirect === '/login?msgtext=email_verified&return=' . rawurlencode('/profile/harness-home'),
+	'an older link sends them to sign in, then to that page', var_export($res->redirect, true));
+
+Activation::registerLanding(function (User $user) { return 'https://elsewhere.example/'; });
+list($u8, $c8) = $unverified('ActBtnUnsafe');
+$claimed = 0;
+check(Activation::landingFor($u8) === '', 'a landing that is not a local path is ignored');
+$_SESSION = array();
 
 section('Registration closed');
 harness_set_setting_mem('register_active', '0');
@@ -126,7 +174,10 @@ list($u4, $c4) = $unverified('ActBtnClosed');
 $_SESSION = array();
 harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c4), 'POST');
 check($is_verified($u4), 'an admin-added member still verifies on a site that takes no sign-ups');
+$res = harness_call_logic('logic/password_set_logic.php', 'password_set_logic', array(), 'GET');
+check(empty($res->error), 'and the page where a member sets a first password opens there too', var_export($res->error ?? null, true));
 harness_set_setting_mem('register_active', '1');
+$_SESSION = array();   // the button signed that member in
 
 section('A password reset proves the address too');
 list($u2, $c2) = $unverified('ActBtnReset');

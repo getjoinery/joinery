@@ -41,6 +41,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.10 - Buyer DNS: a buyer's own-domain DNS list is completed with the site's own records (ProvisionBuyerDns)
  * @version 1.9 - Buyer notices run last: each paid site's buyer is told, once, a state they need to know
  *                (HostingBuyerNotices, specs/hosting_after_purchase.md WP2)
  * @version 1.8 - Own Linode: forget the buyer's grant after the build, and carry a bundle site into its Services rows
@@ -73,6 +74,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Transfers'      => array($base . 'PollInstanceTransfers.php', 'PollInstanceTransfers'),
 			'Hosted mail'    => array($base . 'ProvisionHostedMail.php', 'ProvisionHostedMail'),
 			'Inbound mail'   => array($base . 'ProvisionSiteInboundMail.php', 'ProvisionSiteInboundMail'),
+			'Buyer DNS'      => array($base . 'ProvisionBuyerDns.php', 'ProvisionBuyerDns'),
 			'Own Linode'     => array($base . 'ProvisionOwnLinode.php', 'ProvisionOwnLinode'),
 			'Hosted watch'   => array($base . 'HostedTrialWatch.php', 'HostedTrialWatch'),
 			'Services'       => array($base . 'ServiceTenantWatch.php', 'ServiceTenantWatch'),

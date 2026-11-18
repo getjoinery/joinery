@@ -9,6 +9,7 @@
  * a person's reply is emailed with), and can hand one to a person; a guest
  * is shown the address to write to (specs/hosting_after_purchase.md H1).
  *
+ * @version 0.3.0 - a signed-in member is told the assistant knows their sites; ?from= carries the page they came from
  * @version 0.2.0 - a member's conversations, Talk to a person, and the address to write to
  * @version 0.1.0
  */
@@ -51,13 +52,18 @@ if ($open_thread === null && $member > 0) {
 	}
 }
 $mine = SupportWidget::mine();
+// The page a signed-in member came from (a link that carried it), and whether
+// this node has anything on record about them, which the assistant is told.
+$from = ($member > 0 && SupportTurn::route((string)($_GET['from'] ?? '')) !== '') ? (string)$_GET['from'] : '';
+$knows_member = $member > 0 && count(SupportWidget::memberFacts($member, $from)) > 0;
 ?>
 <div class="jy-ui">
 <section class="jy-content-section">
 	<div class="jy-container" style="max-width:46rem">
 		<div class="jy-page-header"><div class="jy-page-header-bar"><h1>Ask about Joinery</h1></div></div>
 		<p>Ask how to install Joinery, what it does, or how something works. An assistant answers from the documentation and names the page it used.
-			It cannot see any site. Your questions are kept so the documentation can improve; do not include passwords or anything private.</p>
+			<?php if ($knows_member): ?>It knows which sites you have with us and what state each is in, but it cannot look inside them.<?php
+			else: ?>It cannot see any site.<?php endif; ?> Your questions are kept so the documentation can improve; do not include passwords or anything private.</p>
 		<p class="jy-support-contact">
 			<?php if ($member > 0): ?>Want a person? Ask your question here, then press <strong>Talk to a person</strong>; the reply comes back here and by email.<?php
 			else: ?>Want a person? <a href="/login?return=<?php echo urlencode('/support_desk/ask'); ?>">Sign in</a> to hand a question to one<?php endif; ?>
@@ -77,7 +83,7 @@ $mine = SupportWidget::mine();
 		</details>
 		<?php endif; ?>
 		<div class="joai-chat-transcript jy-support-transcript" id="sdk-widget-transcript" aria-live="polite"
-			data-thread-id="<?php echo $open_thread ? (int)$open_thread->key : 0; ?>"><?php
+			data-thread-id="<?php echo $open_thread ? (int)$open_thread->key : 0; ?>" data-route="<?php echo htmlspecialchars($from, ENT_QUOTES, 'UTF-8'); ?>"><?php
 			echo $open_thread ? SupportWidget::transcriptHtml($open_thread, $session->get_timezone()) : ''; ?></div>
 		<div class="jy-support-composer" id="sdk-widget-composer">
 			<textarea class="jy-support-input" id="sdk-widget-input" rows="3" maxlength="8000" placeholder="Ask a question…"></textarea>

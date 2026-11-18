@@ -24,6 +24,7 @@
  *    domain: a half-configured deployment must never take money for hosting
  *    and silently not buy the name.
  *
+ * @version 1.6 - a name with accented or non-Latin letters is refused in those words (walkthrough 19)
  * @version 1.5 - quote() and validateRegistration() carry the yearly renewal price (renew) the buyer will pay
  * @version 1.4 - availabilityScript() returns a data block and assets/js/domain-availability.js (no inline script)
  * @version 1.3 - availabilityScript() may reveal a block (the registrant's details) only once the name is free
@@ -137,6 +138,10 @@ class ManagedDomainIntake {
 		if ($domain === '') {
 			return array('domain' => '', 'error' => 'Enter the domain name you want.');
 		}
+		if (DomainRegistrarRegistry::isInternationalName($domain)) {
+			return array('domain' => $domain, 'error' => 'Names with accented or non-Latin letters are not supported yet. '
+				. 'Use a name written in plain a to z, digits and dashes.');
+		}
 		if (!DomainRegistrarRegistry::isRegistrableName($domain)) {
 			return array('domain' => $domain, 'error' => '"' . htmlspecialchars($domain)
 				. '" is not a domain name we can register. Enter it like smithfamily.com.');
@@ -158,6 +163,10 @@ class ManagedDomainIntake {
 		$domain = DomainRegistrarRegistry::normalizeName($raw);
 		if ($domain === '') {
 			return array('domain' => '', 'error' => 'Enter your domain name.');
+		}
+		if (DomainRegistrarRegistry::isInternationalName($domain)) {
+			return array('domain' => $domain, 'error' => 'Names with accented or non-Latin letters are not supported yet. '
+				. 'Use a name written in plain a to z, digits and dashes.');
 		}
 		if (!DomainRegistrarRegistry::isRegistrableName($domain)) {
 			return array('domain' => $domain, 'error' => '"' . htmlspecialchars($domain)

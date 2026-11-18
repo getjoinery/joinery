@@ -15,6 +15,7 @@
  *                    has no address and learns of it from the Help button's
  *                    mark.
  *
+ * @version 0.3.0 - the waiting-thread email names a member's sites and the page they asked from
  * @version 0.2.0 - a widget thread's reply notice links the conversation on this node's own page
  * @version 0.1.0
  */
@@ -56,8 +57,18 @@ class SupportNotify {
 				}
 			}
 		}
+		// What this node records about a member who asked from the widget:
+		// their sites, and the one they asked from, so nobody has to ask which.
+		$about = '';
+		if ((string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET && class_exists('SupportWidget')) {
+			$route = (string)$thread->get('sth_route');
+			$facts = SupportWidget::memberFacts((int)$thread->get('sth_account_user_id'), $route);
+			if ($route !== '') { $about .= 'Asked from: ' . $route . "\n"; }
+			if ($facts) { $about .= "On record for them:\n  " . implode("\n  ", $facts) . "\n"; }
+		}
 		$body = "A support thread is waiting for a person.\n\n"
 			. 'From: ' . $who . "\n"
+			. $about
 			. ($reason !== '' ? 'Why: ' . $reason . "\n" : '')
 			. "Last message:\n" . mb_substr($last, 0, 1500) . "\n\n"
 			. 'Open it: ' . SupportDesk::baseUrl() . '/plugins/support_desk/admin/admin_support_thread?sth_support_thread_id=' . $id . "\n";

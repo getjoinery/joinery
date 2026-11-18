@@ -106,7 +106,7 @@ function profile_connect_cloud_logic(array $input): LogicResult {
 	$message = '';
 	if (!empty($input['connected'])) {
 		$message = $in_progress
-			? 'Account connected. Your server will be created within about 15 minutes — you will get an email when your site is ready.'
+			? 'Account connected. Your site is built in ' . SmHosting::BUILD_TIME . ', and you will get an email when your site is ready.'
 			: 'Your Linode account is connected.';
 	} elseif (($input['oauth'] ?? '') === 'cancelled') {
 		$message = 'The connection was cancelled. Your site cannot be set up until you connect your account.';

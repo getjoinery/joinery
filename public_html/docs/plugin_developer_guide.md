@@ -128,7 +128,7 @@ after it.
 pulls plugin bootstraps in itself before anyone reads it, so a bootstrap-side
 registration is all a step needs to appear in `/setup`, the header pill, and
 the login gate. A page the login gate must not interrupt, such as a step of a
-purchase, is named the same way: `SetupSteps::quietOn('/exact/path')`. Keep the step's `render_file` partial under the plugin's
+purchase, is named the same way: `SetupSteps::quietOn('/exact/path')`, or `SetupSteps::quietOn('/a/path/*')` for every page under it. Keep the step's `render_file` partial under the plugin's
 `includes/` (not `views/`, which would make it routable), and keep `status()`
 cheap — it runs when the wizard or pill asks, wrapped so a throw reads as
 not-started rather than a fatal. The mailbox plugin's `mail_import` step is

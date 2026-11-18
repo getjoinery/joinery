@@ -13,6 +13,11 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.32 - the support desk is told a signed-in buyer's sites (SupportWidget::registerMemberFacts)
+ * @version 1.31 - a buyer who confirms their email lands on Your Sites (Activation::registerLanding)
+ * @version 1.30 - two incident sources: a built site whose agent was never let in, and an email to a buyer that failed for good
+ * @version 1.29 - Your Sites and the pages under it are quiet for the setup wizard too: a buyer reads the
+ *                password shown once and the DNS records there straight after paying
  * @version 1.28 - the hosting configure page is quiet for the setup wizard (SetupSteps::quietOn): a buyer who
  *                 signed up configures and pays before the wizard starts
  * @version 1.27 - the joinery_services fulfilment provider registers beside customer_cloud (specs/services_phase3_selling_nudge.md §1)
@@ -66,7 +71,7 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh', 'IncidentSourceTwoLayers',
 	'IncidentSourceSecurityFixPending', 'IncidentSourceOldCodeServing',
 	'IncidentSourceBreakGlassAttention', 'IncidentSourceBreakGlassNoHolder', 'IncidentSourceNeverDo',
-	'IncidentSourceUnsealDaemon') as $incident_source) {
+	'IncidentSourceUnsealDaemon', 'IncidentSourceAgentNotAdmitted', 'IncidentSourceBuyerMailFailed') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // A kept root password is sealed to its holder's vault (beta_break_glass_root_access
@@ -93,5 +98,21 @@ if (class_exists('FulfillmentRegistry')) {
 	FulfillmentRegistry::register(new JoineryServicesFulfillment());
 }
 
-// ---- Setup wizard: a hosting purchase under way is not interrupted ----
-SetupSteps::quietOn('/profile/server_manager/configure');
+// ---- Setup wizard: a hosting purchase under way is not interrupted, and nor
+// is the page a buyer reads straight after paying (Your Sites: the password
+// shown once, the DNS records to add, the Linode connection) ----
+SetupSteps::quietOn('/profile/server_manager');
+SetupSteps::quietOn('/profile/server_manager/*');
+
+// ---- A buyer who confirms their email lands on Your Sites: where the site
+// they are setting up, or just bought, is ----
+Activation::registerLanding(function (User $user): string {
+	$sites = new MultiCustomerCloudProvision(array('user_id' => (int)$user->key, 'deleted' => false));
+	return $sites->count() > 0 ? '/profile/server_manager' : '';
+});
+
+// ---- The support desk knows a signed-in buyer's sites: the assistant answers
+// about the right one, and a conversation handed to a person names them ----
+if (class_exists('SupportWidget')) {
+	SupportWidget::registerMemberFacts(array('SmHosting', 'support_lines'));
+}

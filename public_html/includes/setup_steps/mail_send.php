@@ -31,6 +31,10 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.11 - a hosted site's email is named the email included with your hosting, not SMTP (walkthrough 50)
+ * @version 3.10 - email that was set up for the site asks the one address question before the proof: the owner's
+ *                 choice becomes the From address and their mailbox
+ * @version 3.9 - a hosted site whose included email is still being set up is told that and asked for nothing
  * @version 3.8 - its scripts are assets/js/setup/mail_send.js (no inline script)
  * @version 3.7 - a connected site is told getjoinery's email is a paid service for a self-hosted site, and where it is bought
  * @version 3.6
@@ -143,6 +147,21 @@ $setup_send_last = (string)$settings->get_setting('email_test_send_last_success'
 $setup_send_service = EmailSender::activeServiceKey();
 $setup_send_ready = ($setup_send_blocker === null && EmailSender::detectServiceType() !== 'none');
 $setup_send_service_label = EmailSender::getAvailableServices()[$setup_send_service] ?? $setup_send_service;
+// On a site we host the email came with the hosting, set up from the
+// management node: the owner chose no provider, so its wire name ("SMTP")
+// is not what theirs is called.
+if (HostedPlanNotice::hostedHere() && strtolower((string)$setup_send_service) === 'smtp') {
+	$setup_send_service_label = 'the email included with your hosting';
+}
+
+// A hosted site's email comes with its hosting and is set up from the
+// management node. Until it arrives there is nothing to choose: asking the
+// owner for a provider and a key would sell them what they already pay for.
+if (HostedPlanNotice::includedMailPending()) {
+	echo '<div class="jy-alert jy-alert-info">' . HostedPlanNotice::includedMailPendingLine()
+		. ' Come back to this step afterwards to send a test.</div>';
+	return;
+}
 
 $setup_send_notice = $_SESSION['setup_mail_send_result'] ?? null;
 unset($_SESSION['setup_mail_send_result']);
@@ -258,6 +277,37 @@ if ($setup_from_email === '' && $setup_host !== '') {
 // ---- The proof: send a test, confirm it arrived ----
 if ($setup_send_stage === 'prove') {
 ?>
+<?php
+	// Email that was set up for the site (a hosted site's, by its management
+	// node) arrives working but unasked: it sends from a placeholder, and no
+	// mailbox exists for a reply to land in. The one address question is
+	// asked here, before the proof, and its answer is the From address and
+	// the owner's mailbox.
+	if (class_exists('InboundEmailAlias') && !SetupSteps::receivingMailboxes() && $setup_host !== '') {
+		$setup_pick_local = strtolower((string)preg_replace('/[^a-zA-Z0-9]/', '', (string)$viewer->get('usr_first_name')));
+		$setup_pick = ($setup_pick_local !== '' && $setup_pick_local !== 'admin' ? $setup_pick_local : '') . '@' . $setup_host;
+		$setup_pick_form = new FormWriterV2HTML5('setup_mail_address', array('action' => '/setup', 'method' => 'POST'));
+?>
+	<div class="jy-fieldset">
+		<h4>Choose your address</h4>
+		<p>Email is set up for <strong><?php echo htmlspecialchars($setup_host); ?></strong>. Choose the address
+			you want to use there: your site's email goes out from it, and mail sent to it arrives in your mailbox
+			on this site. Right now the site sends from <code><?php echo htmlspecialchars($setup_send_from); ?></code>,
+			which has no mailbox.</p>
+<?php
+		$setup_pick_form->begin_form();
+		$setup_pick_form->hiddeninput('action', '', array('value' => 'mail_address_save'));
+		$setup_pick_form->hiddeninput('step', '', array('value' => 'mail_send'));
+		$setup_pick_form->textinput('wizard_from_address', 'Your address', array(
+			'value' => (string)($_POST['wizard_from_address'] ?? $setup_pick),
+			'required' => true,
+			'validation' => array('required' => true, 'email' => true),
+		));
+		$setup_pick_form->submitbutton('btn_mail_address', 'Use this address');
+		$setup_pick_form->end_form();
+?>
+	</div>
+<?php } ?>
 	<div class="jy-fieldset">
 		<h4>Prove it works</h4>
 <?php if (!empty($_GET['sent'])) { ?>

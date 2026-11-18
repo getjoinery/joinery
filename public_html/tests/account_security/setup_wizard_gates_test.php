@@ -198,8 +198,13 @@ check(!isset($_SESSION[SetupSteps::SESSION_RESUME]), 'no request (the command li
 check(!SetupSteps::interruptExempt('/sw_quiet_test_page'), 'a page no one named is interrupted');
 SetupSteps::quietOn('/sw_quiet_test_page');
 check(SetupSteps::interruptExempt('/sw_quiet_test_page'), 'a page a plugin named quiet is left alone (a purchase under way)');
-check(!SetupSteps::interruptExempt('/sw_quiet_test_page/more'), 'quiet paths are exact, not prefixes');
-foreach (array('/cart', '/checkout', '/profile/server_manager/configure') as $buy_path) {
+check(!SetupSteps::interruptExempt('/sw_quiet_test_page/more'), 'a quiet path is exact, not a prefix');
+SetupSteps::quietOn('/sw_quiet_tree/*');
+check(SetupSteps::interruptExempt('/sw_quiet_tree/a') && SetupSteps::interruptExempt('/sw_quiet_tree/a/b'), 'a quiet path ending in /* names every page under it');
+check(!SetupSteps::interruptExempt('/sw_quiet_tree') && !SetupSteps::interruptExempt('/sw_quiet_tree_other'), 'and neither the page above it nor a neighbour');
+check(SetupSteps::isPageView('GET') && SetupSteps::isPageView('head'), 'a page being opened is a page view');
+check(!SetupSteps::isPageView('POST') && !SetupSteps::isPageView('PUT'), 'a form being sent is not: the wizard never swallows it');
+foreach (array('/cart', '/checkout', '/profile/server_manager/configure', '/profile/server_manager', '/profile/server_manager/connect_cloud') as $buy_path) {
 	if (PluginHelper::isPluginActive('store') && PluginHelper::isPluginActive('server_manager')) {
 		check(SetupSteps::interruptExempt($buy_path), "the purchase page $buy_path is quiet");
 	}

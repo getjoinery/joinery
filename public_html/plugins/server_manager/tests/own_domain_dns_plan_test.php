@@ -4,7 +4,7 @@
  * tier: db
  * env: any
  * needs: []
- * covers: [plugins/server_manager/logic/profile_sites_logic.php, includes/dns/DnsPublishBox.php, includes/oauth/consumers/DnsPublishConsumer.php]
+ * covers: [plugins/server_manager/logic/profile_sites_logic.php, plugins/server_manager/includes/provisioning/ProvisionBuyerDns.php, includes/dns/DnsPublishBox.php, includes/oauth/consumers/DnsPublishConsumer.php]
  */
 /**
  * A hosting buyer who brought their own domain can have its records written
@@ -62,6 +62,109 @@ $provision->load();
 // Registered after the node, so teardown (newest first) removes it before the node it points at.
 harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', (int)$provision->key);
 
+section('The list is held until it is whole');
+DnsResolver::setBackend(new FakeDnsBackend(array()));
+check(ProvisionBuyerDns::applies($provision) && !ProvisionBuyerDns::listed($provision),
+	'a built site on its buyer\'s own domain has a list, not shown yet');
+check(profile_sites_dns_plan($provision) === null && profile_sites_dns_record($provision) === null
+	&& profile_sites_mail_records($provision) === array() && profile_sites_dmarc_record($provision) === null
+	&& profile_sites_aaaa_record($provision) === null,
+	'no record is listed before the site has said its part: one trip to the registrar');
+check(ProvisionBuyerDns::others_settled($provision), 'the sending records are known, so the site can be asked');
+$provision->set('cvp_mail_records', null);
+$provision->set('cvp_mail_state', 'pending');
+check(!ProvisionBuyerDns::others_settled($provision), 'a site whose sending records are still coming is not asked yet');
+$provision->set('cvp_mail_state', 'failed');
+check(ProvisionBuyerDns::others_settled($provision), 'a mail leg that ended does not hold the list');
+$provision->set('cvp_mail_state', null);
+$provision->set('cvp_mail_records', json_encode(array(
+	array('type' => 'CNAME', 'name' => 's77._domainkey.' . $domain, 'value' => 'dkim.smtp2go.net', 'note' => 'DKIM'),
+	array('type' => 'CNAME', 'name' => 'em77.' . $domain, 'value' => 'return.smtp2go.net', 'note' => 'Return path'),
+)));
+
+section('The site is asked what its domain needs, and its answer completes the list');
+/** The leg with the node's answer supplied, so no agent is needed. */
+class OdpBuyerDns extends ProvisionBuyerDns {
+	public $job = null;
+	protected function latest_job(int $node_id, string $domain): ?array { return $this->job; }
+}
+$provision->save();
+$leg = new OdpBuyerDns();
+$leg->job = array('mjb_management_job_id' => 0, 'mjb_status' => 'running', 'mjb_create_time' => gmdate('Y-m-d H:i:s'),
+	'mjb_completed_time' => null, 'mjb_result' => null);
+$leg->run(array('provision_id' => (int)$provision->key));
+$provision->load();
+check(!ProvisionBuyerDns::listed($provision), 'a site that has been asked and not answered keeps the list held');
+$leg->job = array('mjb_management_job_id' => 0, 'mjb_status' => 'completed', 'mjb_create_time' => gmdate('Y-m-d H:i:s'),
+	'mjb_completed_time' => gmdate('Y-m-d H:i:s'), 'mjb_result' => json_encode(array('answered' => true, 'ok' => false,
+		'records' => array(), 'error' => 'not yet')));
+$leg->run(array('provision_id' => (int)$provision->key));
+$provision->load();
+check(!ProvisionBuyerDns::listed($provision), 'a refusal is not an answer');
+$leg->job['mjb_result'] = json_encode(array('answered' => true, 'ok' => true, 'dkim_ready' => false, 'records' => array(
+	array('type' => 'SRV', 'name' => '_joinery._tcp.' . $domain, 'value' => '0 5 443 ' . $domain, 'priority' => null, 'note' => 'Direct'))));
+$ran = $leg->run(array('provision_id' => (int)$provision->key));
+$provision->load();
+check(ProvisionBuyerDns::listed($provision) && count((array)ProvisionBuyerDns::site_records($provision)) === 1
+	&& $ran['status'] === 'success', 'the answer is kept on the row and the list is shown', json_encode($ran));
+$ran = $leg->run(array('provision_id' => (int)$provision->key));
+check($ran['status'] === 'skipped', 'a completed list is not asked about again', json_encode($ran));
+$provision->set('cvp_domain_source', 'register');
+check(ProvisionBuyerDns::applies($provision), 'what decides it is the registration row, not what the buyer chose');
+$provision->set('cvp_domain_source', 'own');
+$provision->set('cvp_hosting_mode', 'customer');
+check(!ProvisionBuyerDns::applies($provision) && ProvisionBuyerDns::listed($provision),
+	'a site we did not build has no list of ours to hold');
+$provision->set('cvp_hosting_mode', 'operator');
+
+section('The site\'s own records join the list, Joinery Direct among them');
+$direct_key = 'v=joinery1; k=k1; p=AAAA';
+$provision->set('cvp_site_dns_records', json_encode(array(
+	array('type' => 'A', 'name' => $domain, 'value' => '198.51.100.9', 'priority' => null, 'note' => ''),
+	array('type' => 'TXT', 'name' => $domain, 'value' => 'v=spf1 mx ~all', 'priority' => null, 'note' => ''),
+	array('type' => 'TXT', 'name' => 'mail._domainkey.' . $domain, 'value' => 'v=DKIM1; p=x', 'priority' => null, 'note' => ''),
+	array('type' => 'TXT', 'name' => '_dmarc.' . $domain, 'value' => 'v=DMARC1; p=quarantine', 'priority' => null, 'note' => ''),
+	array('type' => 'CNAME', 'name' => 'em77.' . $domain, 'value' => 'elsewhere.example', 'priority' => null, 'note' => ''),
+	array('type' => 'SRV', 'name' => '_joinery._tcp.' . $domain, 'value' => '0 5 443 ' . $domain, 'priority' => null, 'note' => 'Direct'),
+	array('type' => 'TXT', 'name' => '_joinery-key.' . $domain, 'value' => $direct_key, 'priority' => null, 'note' => 'Direct key'),
+)));
+$provision->set('cvp_site_dns_time', gmdate('Y-m-d H:i:s'));
+check(ProvisionBuyerDns::listed($provision), 'the list is shown once the site has answered');
+$site_names = array();
+foreach (ProvisionBuyerDns::site_records_for_buyer($provision, profile_sites_plane_mail_records($provision)) as $r) {
+	$site_names[] = $r['type'] . ' ' . $r['name'];
+}
+check($site_names === array('SRV _joinery._tcp.' . $domain, 'TXT _joinery-key.' . $domain),
+	'the site\'s address, signing key, SPF and DMARC give way to ours where we set up sending; a name we list is ours',
+	json_encode($site_names));
+$listed = array();
+foreach (profile_sites_mail_records($provision) as $r) {
+	$listed[] = $r['type'] . ' ' . $r['name'];
+}
+check(in_array('SRV _joinery._tcp.' . $domain, $listed, true) && in_array('TXT _joinery-key.' . $domain, $listed, true)
+	&& in_array('CNAME em77.' . $domain, $listed, true), 'the buyer sees the sending and the Direct records together',
+	json_encode($listed));
+DnsResolver::setBackend(new FakeDnsBackend(array(
+	'_joinery._tcp.' . $domain . '|' . DNS_SRV => array(array('target' => $domain, 'port' => 443, 'pri' => 0, 'weight' => 5)),
+	'_joinery-key.' . $domain . '|' . DNS_TXT => array(array('txt' => $direct_key)),
+)));
+$listed = array();
+foreach (profile_sites_mail_records($provision) as $r) {
+	$listed[] = $r['type'];
+}
+check($listed === array('CNAME', 'CNAME'), 'a Direct record that answers in DNS is no longer listed', json_encode($listed));
+$provision->set('cvp_mail_records', null);
+$own = array();
+foreach (ProvisionBuyerDns::site_records_for_buyer($provision, array()) as $r) {
+	$own[] = $r['type'] . ' ' . $r['name'];
+}
+check(count($own) === 6 && !in_array('A ' . $domain, $own, true),
+	'a site that sends its own mail keeps every record it named but its address', json_encode($own));
+$provision->set('cvp_mail_records', json_encode(array(
+	array('type' => 'CNAME', 'name' => 's77._domainkey.' . $domain, 'value' => 'dkim.smtp2go.net', 'note' => 'DKIM'),
+	array('type' => 'CNAME', 'name' => 'em77.' . $domain, 'value' => 'return.smtp2go.net', 'note' => 'Return path'),
+)));
+
 section('The plan is every record the site asks for');
 DnsResolver::setBackend(new FakeDnsBackend(array()));
 $plan = profile_sites_dns_plan($provision);
@@ -75,10 +178,12 @@ $want = array(
 	'AAAA ' . $domain . ' ' . $v6,
 	'CNAME em77.' . $domain . ' return.smtp2go.net',
 	'CNAME s77._domainkey.' . $domain . ' dkim.smtp2go.net',
+	'SRV _joinery._tcp.' . $domain . ' 0 5 443 ' . $domain,
+	'TXT _joinery-key.' . $domain . ' ' . $direct_key,
 	'TXT _dmarc.' . $domain . ' v=DMARC1; p=none',
 );
 sort($want);
-check($got === $want, 'A and AAAA from the server, both email records, and DMARC while there is none', json_encode($got));
+check($got === $want, 'A and AAAA from the server, both email records, the Direct records, and DMARC while there is none', json_encode($got));
 
 section('DMARC already published is left alone');
 DnsResolver::setBackend(new FakeDnsBackend(array(
@@ -89,7 +194,11 @@ $types = array();
 foreach ($plan ? $plan->getRecords() : array() as $r) {
 	$types[] = $r->type;
 }
-check(!in_array('TXT', $types, true) && count($types) === 4, 'no DMARC record in the plan', json_encode($types));
+$names = array();
+foreach ($plan ? $plan->getRecords() : array() as $r) {
+	$names[] = $r->name;
+}
+check(!in_array('_dmarc.' . $domain, $names, true) && count($types) === 6, 'no DMARC record in the plan', json_encode($names));
 
 section('The optional IPv6 line shows while the name lacks it');
 DnsResolver::setBackend(new FakeDnsBackend(array()));

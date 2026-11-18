@@ -16,6 +16,8 @@
  * the configure page, which both handlers do by reading the session's return
  * slot that this page sets.
  *
+ * @version 1.3 - a sign-in refused for an unconfirmed email or too many attempts says so, instead of calling a right
+ *               password incorrect (specs/hosting_purchase_walkthrough_test.md, finding 59)
  * @version 1.2 - a remembered sign-in waiting on its second factor proves it, coming back to the configure page,
  *               instead of being asked for a password (reviewer2 F1-1)
  * @version 1.1 - the lead names every plan on sale (plans_sentence), not Managed alone
@@ -88,6 +90,17 @@ function start_logic(array $input): LogicResult {
 function start_logic_login_refusal(string $redirect): string {
 	$query = array();
 	parse_str((string)parse_url($redirect, PHP_URL_QUERY), $query);
+	// The right password can still be refused: say why, never "incorrect".
+	$reason = (string)($query['msgtext'] ?? '');
+	if ($reason === 'activation_sent') {
+		$to = htmlspecialchars((string)($query['e'] ?? ''));
+		return 'Your password is right, but this email address has not been confirmed yet. We have just sent a new confirmation link to '
+			. ($to !== '' ? $to : 'your address') . '. Open it, then sign in here again; your site setup is saved.';
+	}
+	if ($reason === 'too_many_attempts') {
+		return 'Too many failed sign-in attempts. Please try again in 15 minutes, or '
+			. '<a href="/password-reset-1">reset your password</a>.';
+	}
 	if (!empty($query['ip_blocked'])) {
 		$ip = htmlspecialchars((string)($query['ip'] ?? 'unknown'));
 		return 'Login from your IP address (' . $ip . ') is not permitted for this account. '

@@ -11,6 +11,7 @@
  * passkey path closes. Rate-limited; the completion path notifies like every
  * reset.
  *
+ * @version 1.2 - open whether or not the site takes sign-ups (register_active gates registering only)
  * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -26,9 +27,6 @@ function password_reset_totp_logic(array $input): LogicResult {
 	$page_vars['error'] = null;
 	$page_vars['email'] = isset($input['email']) ? trim((string)$input['email']) : '';
 
-	if (!$page_vars['settings']->get_setting('register_active')) {
-		return LogicResult::error('This feature is turned off');
-	}
 
 	if (empty($_POST)) {
 		return LogicResult::render($page_vars);

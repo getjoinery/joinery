@@ -14,7 +14,11 @@ A hosted site lands in one of two places, and this is the buyer's choice of
 **plan**, made on the configure page:
 
 - **Managed** — an instance of its own on this operator's account
-  (fulfillment reference 1).
+  (fulfillment reference 1). The site is installed straight onto the server
+  (bare metal, one agent), with no mail server of its own
+  (`cvp_no_mail_server`, `install.sh --no-mail-server`): it receives through
+  the relay fleet, which grants a place to a sold site on our account that has
+  no mail server (`FleetService::site_plan_grants_slot`).
 - **Starter** — a container on one of this operator's shared starter hosts
   (fulfillment reference 2; `cvp_landing` `container`). Its row never holds
   an instance id, and it lands only on a host whose tier is `starter`.
@@ -27,10 +31,14 @@ The configure page offers a third plan beside them that is not hosted:
   (`CustomerCloudAccount::live_for_build`, an hour left) waits at
   `pending_connect`, and Your Sites offers Connect. The server (1 GB, us-east,
   the customer-cloud defaults) is created in their account with their grant and
-  built the same way Managed is. The grant is asked for `linodes:read_write`
+  built bare metal as Managed is, but with its own mail server: it is not
+  ours to give a relay place. The grant is asked for `linodes:read_write`
   only, whenever the buyer has an own-Linode site to build, and is let go once
   per site after the build, when none of the buyer's sites is still being
-  built or retried, and only when it is that build-only grant: the account
+  built or retried, when the server's agents have been admitted (admitting
+  them asks Linode, with this grant, whether the server runs at the address
+  that asked; `ProvisionOwnLinode::joins_owed`), and only when it is that
+  build-only grant: the account
   then reads `released` and the pages ask to connect again
   (`ProvisionOwnLinode`, `cvp_grant_released_time`). The server's size is
   pinned on the draft (`g6-nanode-1`), so it is what the buyer was told. An account may hold
@@ -94,13 +102,32 @@ expires after `server_manager_draft_days`. Payment activates it (see
 - **A suspended site or a disputed payment holds the next order too.** While any site of the account, or any site paid with the same card, is suspended or has a disputed payment, a paid hosted order is held the same way, with the reason on its row (`HostedSuspensions::buyer_flag`). A site removed after a dispute still counts.
 
 A few minutes after paying their site is live at that domain, with email that
-sends and backups that run. The welcome email carries the address — and, for a
-domain they brought themselves, the address record to add and word that the
-email records follow on the sites page — and a link to
+sends and backups that run. Their sites page says **Ready**, and offers the
+password, only once the site has been told what it comes with
+(`SmHosting::site_told`): a hosted site's banner has landed, or a bundle
+site's node has taken its services notice, which is sent as soon as the node
+works and names email and backups as being set up. Until then, for a minute or
+two, the page reads *Finishing setup*; a site not told within fifteen minutes
+of its install is shown Ready anyway. The site's own setup pages then say what
+is included and still on its way, and never ask for a mail provider or backup
+storage the buyer already paid for (`HostedPlanNotice::includedMailPending`). The welcome email carries the address — and, for a
+domain they brought themselves, word that their DNS records are listed on the
+sites page — and a link to
 **their sites page** (`/profile/server_manager`). For a domain they brought
-themselves, that page lists every record still to add (the address record,
-the email records, DMARC while there is none, and the optional IPv6 record),
-and where the domain's DNS host has a driver it offers to add them all at once
+themselves, that page lists every record still to add in one step: the address
+record, the email records, the site's own records (its Joinery Direct endpoint
+and signing key among them), DMARC while there is none, and the optional IPv6
+record. The list is held until it is whole, so the buyer makes one trip to
+their registrar: **Buyer DNS** (`ProvisionBuyerDns`, a phase of the umbrella)
+waits for the sending and inbound records, asks the built site what its domain
+needs (the `managed_domain_prepare` primitive), keeps the answer in
+`cvp_site_dns_records` and stamps `cvp_site_dns_time`; until the stamp the
+page says the records are being gathered and lists none. A site that has not
+answered thirty minutes after its install (`SmHosting::DNS_WAIT_SECONDS`) has
+its list shown with what is known, the gap is reported on every pass, and the
+site is asked until it answers. Where the plane set up sending, the site's own
+signing key, SPF and DMARC give way to the provider's. Where the domain's DNS
+host has a driver the page offers to add every record at once
 (the DNS publish box, docs/dns_management.md). There
 the admin password their account was born with is shown **once** — reading it
 erases it, and the site asks them to choose their own at first sign-in. The

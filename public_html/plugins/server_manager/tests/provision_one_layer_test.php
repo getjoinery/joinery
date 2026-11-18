@@ -400,6 +400,24 @@ $metal = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker
 check(preg_match('/install\.sh -y -q server[^;]*' . preg_quote($flags, '/') . ';/', $metal) === 1, 'bare metal: on install.sh server', $metal);
 check(preg_match('/install\.sh -y -q site[^\n]*--encrypted-data-root/', $metal) === 0, 'and not on the site install');
 
+// A bare-metal site with no mail server of its own (a Managed site): both
+// installer steps are told, and a site that keeps its own is told nothing.
+$no_mail = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal', 'no_mail_server' => true)));
+check(preg_match('/install\.sh -y -q server[^;]*--no-mail-server;/', $no_mail) === 1, 'no mail server: install.sh server installs none', $no_mail);
+check(preg_match('/install\.sh -y -q site --bare-metal[^\n]*--no-mail-server/', $no_mail) === 1, 'and the site records it');
+$own_mail = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal')));
+check(strpos($own_mail, '--no-mail-server') === false, 'a bare-metal site that keeps its own mail server is installed as before');
+$no_backups = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal', 'no_manager_backups' => true)));
+check(preg_match('/install\.sh -y -q site --bare-metal[^\n]*--no-manager-backups/', $no_backups) === 1,
+	'a site this node keeps no backups for is told so at install');
+check(strpos($own_mail, '--no-manager-backups') === false, 'and any other site is not');
+$named = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal',
+	'admin_email' => 'owner@example.com', 'admin_first_name' => "Wanda O'Brien", 'admin_last_name' => 'Kestrel', 'admin_timezone' => 'America/New_York')));
+check(strpos($named, "--admin-first-name='Wanda O'\\''Brien'") !== false && strpos($named, "--admin-last-name='Kestrel'") !== false
+	&& strpos($named, "--admin-timezone='America/New_York'") !== false,
+	'the owner\'s name and timezone ride with the admin address, quoted for the shell', $named);
+check(strpos($own_mail, '--admin-first-name') === false, 'an install told no name passes none');
+
 $docker = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'docker',
 	'encrypted_data_root' => true, 'recovery_public_key' => $sample_key)));
 check(preg_match('/install\.sh -y -q docker [^\n]*' . preg_quote($flags, '/') . '\n/', $docker) === 1, 'Docker: on install.sh docker', $docker);

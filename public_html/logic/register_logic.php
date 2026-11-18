@@ -119,6 +119,19 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			return LogicResult::error("The following required fields were left blank: " . implode(', ', $error_fields) . '.  Please try again.', $page_vars);
 		}
 
+		// Said here, on the form, before anything is made: the model refuses a
+		// short password by throwing, which a visitor meets as an error page.
+		if (strlen($fixed_fields['password']) < 8) {
+			return LogicResult::error('Choose a password of at least 8 characters.', $page_vars);
+		}
+
+		// The shared sign-up form asks for agreement to the privacy policy
+		// (register_logic_form marks that it asked). An account is not made,
+		// and no agreement recorded, for a box left unticked.
+		if (!empty($input['privacy_asked']) && empty($input['privacy'])) {
+			return LogicResult::error('Please tick the box to agree to the privacy policy.', $page_vars);
+		}
+
 		/*
 		$zip_data = SingleRowFetch('zips.zip_codes', 'zip_code_id',
 			$fixed_fields['usa_zip_code_id'], PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
@@ -231,17 +244,23 @@ function _register_email_is_platform_hosted(string $email): bool {
  * definition (GET /api/v1/form/register). Web-only bot defences (antispam,
  * honeypot, captcha) stay in the web view, not here.
  */
-function register_logic_form($formwriter, $user = null, $input = []) {
+function register_logic_form($formwriter, $user = null, $input = [], string $submit_label = 'Register Now') {
 	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	$settings = Globalvars::get_instance();
 
+	// A form shown again after a refusal keeps what was typed (never the password).
+	$kept = function (string $name) use ($input): string {
+		return is_string($input[$name] ?? null) ? trim($input[$name]) : '';
+	};
 	$formwriter->textinput('usr_first_name', 'First Name:', [
 		'maxlength' => 32,
 		'required' => true,
+		'value' => $kept('usr_first_name'),
 	]);
 	$formwriter->textinput('usr_last_name', 'Last Name:', [
 		'maxlength' => 32,
 		'required' => true,
+		'value' => $kept('usr_last_name'),
 	]);
 
 	$nickname_display = $settings->get_setting('nickname_display_as');
@@ -255,11 +274,17 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 		'type' => 'email',
 		'maxlength' => 64,
 		'required' => true,
+		'value' => $kept('usr_email'),
 	]);
 
 	$formwriter->passwordinput('password', 'Choose Password:', [
 		'maxlength' => 255,
 		'required' => true,
+		'validation' => [
+			'required' => true,
+			'minlength' => 8,
+			'messages' => ['minlength' => 'Choose at least 8 characters'],
+		],
 	]);
 
 	// A form shown again keeps the zone the visitor chose.
@@ -275,14 +300,23 @@ function register_logic_form($formwriter, $user = null, $input = []) {
 	// policy's address rides in the help text, where it is also plain.
 	$privacy_url = trim((string)$settings->get_setting('privacy_url'));
 	$formwriter->checkboxinput('privacy', 'I have read and agree to the privacy policy'
-		. ($privacy_url !== '' ? ' (' . $privacy_url . ')' : ''), ['value' => 'yes']);
+		. ($privacy_url !== '' ? ' (' . $privacy_url . ')' : ''), [
+			'value' => 'yes',
+			'checked' => !empty($input['privacy']),
+			'validation' => [
+				'required' => true,
+				'messages' => ['required' => 'Please tick this box to continue'],
+			],
+		]);
+	// Tells the handler this form asked, so it can refuse an unticked box.
+	$formwriter->hiddeninput('privacy_asked', '', ['value' => '1']);
 	SignupFieldRegistry::render($formwriter, SignupFieldRegistry::CONTEXT_REGISTER, $input);
 	$formwriter->checkboxinput('setcookie', 'Keep me logged in', [
 		'value' => 'yes',
 		'checked' => true,
 	]);
 
-	$formwriter->submitbutton('btn_submit', 'Register Now');
+	$formwriter->submitbutton('btn_submit', $submit_label);
 }
 
 function register_logic_descriptor(): array {

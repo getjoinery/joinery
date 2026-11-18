@@ -19,6 +19,7 @@
  *
  * The whole docs are deliberately not loaded: retrieval keeps a turn at cents.
  *
+ * @version 0.2.0 - a signed-in member's widget thread carries what this node records about them (SupportWidget::memberFacts)
  * @version 0.1.2 - a log read names the errors that stopped a request first
  * @version 0.1.1 - the tool rules keep every answer to Joinery and decline the rest
  */
@@ -88,7 +89,17 @@ class SupportPrompt {
 		$lines = array('## This conversation', '');
 		$lines[] = 'Date: ' . gmdate('l, F j, Y') . ' (UTC).';
 		if ($widget) {
-			$lines[] = 'A visitor to the public pages; you cannot see any site of theirs. You are reading the documentation of release ' . $release . ', the newest here.';
+			$facts = class_exists('SupportWidget')
+				? SupportWidget::memberFacts((int)$thread->get('sth_account_user_id'), (string)$thread->get('sth_route')) : array();
+			if ($facts) {
+				$lines[] = 'A signed-in member of this site, asking from its pages. You cannot read inside any site of theirs; '
+					. 'what follows is what this management node records about them, as of now. Use it to answer about the right '
+					. 'site, and say when an answer needs a person to look. You are reading the documentation of release '
+					. $release . ', the newest here.';
+				$lines[] = UntrustedEnvelope::wrapBlock(implode("\n", $facts), $nonce);
+			} else {
+				$lines[] = 'A visitor to the public pages; you cannot see any site of theirs. You are reading the documentation of release ' . $release . ', the newest here.';
+			}
 		} else {
 			$version = (string)$thread->get('sth_version');
 			$lines[] = 'The person runs release ' . $version . ($exact

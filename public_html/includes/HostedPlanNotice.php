@@ -34,6 +34,9 @@
  * nothing: with no hosted_plan_state there is no notice, which is what keeps a
  * self-hosted install silent.
  *
+ * @version 1.9 - a services site told its email is pending (a pending allowance row) counts as included and being set up
+ * @version 1.8 - includedMailPending() and includedMailPendingLine(): a hosted site whose included email is still being
+ *                set up says that, wherever it would otherwise ask for a mail provider
  * @version 1.7 - HOSTED_STATES and hostedHere(): a site the operator hosts, which may not leave its management node
  * @version 1.6 - a site with a disk allowance shows its own figure in the disk row, read here and now
  *               (DiskAllowance), not the management node's copy from its last status check; a site whose
@@ -113,6 +116,50 @@ class HostedPlanNotice {
 	 */
 	public static function hostedHere(): bool {
 		return in_array(self::state(), self::HOSTED_STATES, true);
+	}
+
+	/**
+	 * Is this a hosted site whose included email is not working yet? Hosting
+	 * brings the email with it, set up from the management node, and for a
+	 * domain the owner brought it waits on records only they can add. Until
+	 * it arrives the site has no provider, and every page that would ask for
+	 * one says this instead: the owner has nothing to choose.
+	 */
+	public static function includedMailPending(): bool {
+		if (!self::hostedHere() && !self::servicePending('mail')) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		return EmailSender::transactionalSendBlocker() !== null || EmailSender::detectServiceType() === 'none';
+	}
+
+	/**
+	 * Is a service this site rents (email and backups bought with it) paid
+	 * for and still being set up? The management node says so with a pending
+	 * row, before the service's own rows exist.
+	 */
+	public static function servicePending(string $service): bool {
+		if (self::state() !== 'services') {
+			return false;
+		}
+		foreach (self::allowances() as $row) {
+			if (!empty($row['pending']) && (string)$row['service'] === $service) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** What an owner is told while includedMailPending(): HTML, with the sites page linked when known. */
+	public static function includedMailPendingLine(): string {
+		$url = trim((string)Globalvars::get_instance()->get_setting('hosted_plan_manage_url', false, true));
+		$page = $url !== ''
+			? '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">your sites page</a>'
+			: 'your sites page';
+		$with = self::hostedHere() ? 'included with your hosting' : 'part of the email and backups you bought';
+		return 'Email is ' . $with . ' and is being set up for you; there is no provider to choose. '
+			. 'If you brought your own domain, it starts working once the email records listed on ' . $page
+			. ' are added where your domain is registered. If we registered the domain, there is nothing to do.';
 	}
 
 	/** Does this deployment have hosting somebody else runs? */
@@ -223,6 +270,8 @@ class HostedPlanNotice {
 				'due'          => !empty($entry['due']),
 				'urgent'       => !empty($entry['urgent']),
 				'service'      => (string)($entry['service'] ?? ''),
+				// Paid for and still being set up by the management node.
+				'pending'      => !empty($entry['pending']),
 				'action_label' => (string)($entry['action_label'] ?? ''),
 				'action_url'   => (string)($entry['action_url'] ?? ''),
 				'second_label' => (string)($entry['second_label'] ?? ''),

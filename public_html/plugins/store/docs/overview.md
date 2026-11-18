@@ -20,7 +20,7 @@ The plugin is a **commercial extension** (`license: Joinery-Commercial`, `requir
 |-------|------|
 | `includes/ShoppingCart.php` | Cart state. Session storage is plain array data only (`ShoppingCart::current()` rehydrates; mutators persist) — never a serialized object |
 | `includes/TierBilling.php` | The billing half of subscription tiers: purchase-driven tier grants, upgrade options, renewal/expiry. Tiers themselves are core — see [Subscription Tiers](../../../docs/subscription_tiers.md) |
-| `includes/FulfillmentRegistry.php` | Post-purchase fulfillment providers. A product carries `pro_fulfillment_provider` + `pro_fulfillment_ref`; checkout resolves the provider at charge time. event_manager registers `event_registration` here |
+| `includes/FulfillmentRegistry.php` | Post-purchase fulfillment providers. A product carries `pro_fulfillment_provider` + `pro_fulfillment_ref`; checkout resolves the provider at charge time. event_manager registers `event_registration` here. A provider's `fulfill()` may return `after_purchase_message` (HTML): what the buyer is told about that line on the confirmation page and in its receipt, in place of the product's fixed message, for a purchase that needs something next (a hosting site waiting for its Linode connection says to connect first) |
 | `includes/StripeHelper.php` / `PaypalHelper.php` | Payment provider clients |
 | `includes/requirements/` | Product requirements (data collected from buyers at checkout) — see [Product Requirements](product_requirements.md) |
 | `data/stripe_customers_class.php` | User ↔ Stripe customer mapping (`StripeCustomer::GetForUser()`) |

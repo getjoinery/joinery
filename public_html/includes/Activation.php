@@ -24,6 +24,54 @@ class Activation {
 	const EMAIL_CHANGE = 4;
 	const RECOVERY_VERIFY = 5;
 
+	/** Minutes after an activation link is mailed during which pressing its button also signs the person in. */
+	const SIGN_IN_MINUTES = 60;
+
+	/** @var callable[] Where a member belongs once their address is proved (registerLanding). */
+	private static $landings = array();
+
+	/**
+	 * A plugin names where a member it knows belongs once their address is
+	 * proved: fn(User): string, a local path, or '' when the member is not
+	 * its own. Registered from the plugin's bootstrap.
+	 */
+	static function registerLanding(callable $fn): void {
+		self::$landings[] = $fn;
+	}
+
+	/** The first registered landing that claims this member: a safe local path, or '' when none does. */
+	static function landingFor(User $user): string {
+		PluginBootstraps::load();
+		foreach (self::$landings as $fn) {
+			try {
+				$path = (string)$fn($user);
+			} catch (Throwable $e) {
+				error_log('Activation::landingFor: ' . $e->getMessage());
+				continue;
+			}
+			if (SessionControl::is_safe_return($path)) {
+				return $path;
+			}
+		}
+		return '';
+	}
+
+	/**
+	 * Whether a live EMAIL_VERIFY code is young enough to sign its account in
+	 * (SIGN_IN_MINUTES since it was mailed). An older code still verifies.
+	 */
+	static function codeSignsIn($act_code): bool {
+		$statement = DbConnector::GetPreparedStatement(
+			"SELECT 1 FROM act_activation_codes WHERE act_delete_time IS NULL AND act_code = :code
+			 AND act_expires_time > NOW() AND act_purpose = :purpose
+			 AND act_create_time > NOW() - (:minutes * INTERVAL '1 minute')");
+		$statement->bindValue(':code', strtolower((string)$act_code), PDO::PARAM_STR);
+		$statement->bindValue(':purpose', self::EMAIL_VERIFY, PDO::PARAM_INT);
+		$statement->bindValue(':minutes', self::SIGN_IN_MINUTES, PDO::PARAM_INT);
+		$statement->execute();
+		return $statement->fetch() !== FALSE;
+	}
+
 	/**
 	 * Verify the address an EMAIL_VERIFY code was mailed for (the code is not spent here).
 	 * $method is how the person proved it (activation: the Verify button;

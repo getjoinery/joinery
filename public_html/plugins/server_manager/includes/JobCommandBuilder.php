@@ -6511,6 +6511,17 @@ class JobCommandBuilder {
 		// A copy takes its accounts from its source's database, so it creates none.
 		$admin_flags = ($admin_email !== '' && $mode !== 'bare' && $mode !== 'copy')
 			? ' --admin-email=' . escapeshellarg($admin_email) : '';
+		// The owner's name and timezone, when the order knew them: the new
+		// site's first screen does not greet its owner as "Admin" in UTC.
+		if ($admin_flags !== '') {
+			foreach (array('admin_first_name' => '--admin-first-name=', 'admin_last_name' => '--admin-last-name=',
+					'admin_timezone' => '--admin-timezone=') as $param => $flag) {
+				$value = trim((string)preg_replace('/[\x00-\x1f]/', '', (string)($params[$param] ?? '')));
+				if ($value !== '') {
+					$admin_flags .= ' ' . $flag . escapeshellarg(mb_substr($value, 0, 32));
+				}
+			}
+		}
 		$admin_password_stdin = !empty($params['admin_password_stdin']) && $mode !== 'bare' && $mode !== 'copy';
 
 		// An encrypted data root (specs/hosted_data_promise_disk_encryption.md
@@ -6669,6 +6680,12 @@ class JobCommandBuilder {
 			// /root/.joinery_postgres_password. A machine this plane creates
 			// is bare, so the prerequisites branch only ever runs the server
 			// setup; the other arm is a refusal, not a harvest.
+			// A bare-metal site with no mail server of its own (a Managed site,
+			// which receives through the relay fleet): the server step installs
+			// no Postfix, and the site records it so nothing installs one later.
+			$no_mail_flag = !empty($params['no_mail_server']) ? ' --no-mail-server' : '';
+			// This node keeps no backups for the site (bought without them): the site says so.
+			$no_backups_flag = !empty($params['no_manager_backups']) ? ' --no-manager-backups' : '';
 			$lines[] = 'if command -v apache2 >/dev/null && command -v psql >/dev/null && command -v php >/dev/null; then'
 			         . " echo 'PREREQS_ALREADY_INSTALLED — skipping install.sh server';"
 			         . " test -s /root/.joinery_postgres_password || { echo 'FATAL: prerequisites are installed but /root/.joinery_postgres_password is missing — a machine this plane creates is bare; create the file with the postgres role password.'; exit 1; };"
@@ -6677,10 +6694,10 @@ class JobCommandBuilder {
 			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
 			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
 			         . ' export POSTGRES_PASSWORD;'
-			         . ' ./install.sh -y -q server' . self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . ';'
+			         . ' ./install.sh -y -q server' . self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . $no_mail_flag . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}{$no_mail_flag}{$no_backups_flag}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 

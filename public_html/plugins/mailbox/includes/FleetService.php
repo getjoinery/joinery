@@ -105,7 +105,11 @@ class FleetService {
 		if (!$provision->is_sold() || !$provision->is_operator_hosted()) {
 			return false;
 		}
-		return $provision->is_container() || (string)($provision->get('cvp_docker_mode') ?: 'docker') === 'docker';
+		// A site with no mail server of its own: a container, or a bare-metal
+		// site built without one (cvp_no_mail_server). A bare-metal site with
+		// its own Postfix receives for itself and takes no place.
+		return $provision->is_container() || (string)($provision->get('cvp_docker_mode') ?: 'docker') === 'docker'
+			|| (bool)$provision->get('cvp_no_mail_server');
 	}
 
 	/**

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.26 - JOINERY_ADMIN_FIRST_NAME / _LAST_NAME / _TIMEZONE name the admin account for its owner
+# VERSION: 3.25 - JOINERY_NO_MANAGER_BACKUPS=1 (install.sh site --no-manager-backups) writes manager_backups = none
+# VERSION: 3.24 - JOINERY_NO_MAIL_SERVER=1 (install.sh site --no-mail-server) writes local_mail_server = none in a
+#                bare-metal site's config: no mail server here, mail arrives through a relay
 # VERSION: 3.23 - The site gets its own database role (site_db_role.sh): the website connects as joinery_{site},
 #                 which owns the database and nothing else; the postgres pair goes to the root-only
 #                 config/db_admin.php (mail_access_hardening WP4)
@@ -375,6 +379,12 @@ create_config_file() {
     log "Configuring site..."
     # Record the deployment environment — single source of truth (spec deployment_environment_flag)
     if [ "$DOCKER_MODE" = true ]; then DEPLOY_ENV=docker; else DEPLOY_ENV=baremetal; fi
+    # A bare-metal site installed with no mail server of its own (install.sh
+    # site --no-mail-server, JOINERY_NO_MAIL_SERVER=1) says so in its config:
+    # the mail installer reads it there and installs nothing, and the site
+    # receives through a relay, as a container does.
+    LOCAL_MAIL_SERVER=""
+    if [ "$DOCKER_MODE" != true ] && [ "${JOINERY_NO_MAIL_SERVER:-0}" = "1" ]; then LOCAL_MAIL_SERVER=none; fi
     # Generate a per-environment SecretBox key (32 random bytes, base64) for
     # secrets at rest. The generator is shared with the root moments, which mint
     # the same key on a site installed before it existed, so the two cannot
@@ -388,6 +398,7 @@ create_config_file() {
           JOINERY_CFG_SITENAME="$SITENAME" \
           JOINERY_CFG_DOMAIN="$DOMAIN" \
           JOINERY_CFG_DEPLOY_ENV="$DEPLOY_ENV" \
+          JOINERY_CFG_LOCAL_MAIL_SERVER="$LOCAL_MAIL_SERVER" \
           JOINERY_CFG_PASSWORD="$PASSWORD" \
           JOINERY_CFG_SECRET_BOX_KEY="$SECRET_BOX_KEY" \
           php "${SCRIPT_DIR}/_write_site_config.php" "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"); then
@@ -618,6 +629,28 @@ if [ "$DB_EXISTS" = false ]; then
 
         if [ "$RESET_OK" = true ]; then
             log "Per-site admin password applied"
+
+            # The owner's name and timezone, when the install was told them
+            # (install.sh site --admin-first-name= ...): the account is not
+            # born "Admin" in UTC and asked for what its owner already gave.
+            # Values arrive from a form somebody typed into, so they reach SQL
+            # as psql variables, never as text in the statement, and a
+            # timezone that is not a zone name is ignored.
+            OWNER_FIRST="$(printf '%s' "${JOINERY_ADMIN_FIRST_NAME:-}" | tr -d '\000-\037' | cut -c1-32)"
+            OWNER_LAST="$(printf '%s' "${JOINERY_ADMIN_LAST_NAME:-}" | tr -d '\000-\037' | cut -c1-32)"
+            OWNER_ZONE="${JOINERY_ADMIN_TIMEZONE:-}"
+            [[ "$OWNER_ZONE" =~ ^[A-Za-z][A-Za-z0-9_+/-]{1,31}$ ]] || OWNER_ZONE=""
+            if [ -n "$OWNER_FIRST" ]; then
+                psql -U postgres -d "$SITENAME" -q -v fn="$OWNER_FIRST" -v ln="$OWNER_LAST" 2>/dev/null <<'SQL' || true
+UPDATE usr_users SET usr_first_name = :'fn', usr_last_name = :'ln' WHERE usr_user_id = 1;
+SQL
+                log "Admin account named for its owner"
+            fi
+            if [ -n "$OWNER_ZONE" ]; then
+                psql -U postgres -d "$SITENAME" -q -v tz="$OWNER_ZONE" 2>/dev/null <<'SQL' || true
+UPDATE usr_users SET usr_timezone = :'tz' WHERE usr_user_id = 1 AND EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = :'tz');
+SQL
+            fi
             if [ -n "$ADMIN_EMAIL" ]; then
                 log "Admin account address set to $ADMIN_EMAIL"
             fi
@@ -718,6 +751,21 @@ if [ "${JOINERY_BETA_ROOT_ACCESS:-}" = "1" ]; then
          WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'beta_root_access_offered');" \
         2>/dev/null || true
     log "Emergency root access is offered to the owner in the setup wizard"
+fi
+
+# The management node this site joins keeps no backup storage for it
+# (install.sh site --no-manager-backups): the site's Backups pages offer the
+# owner where backups go instead of saying the management node takes them.
+if [ "${JOINERY_NO_MANAGER_BACKUPS:-}" = "1" ]; then
+    psql -U postgres -d "$SITENAME" -q -c \
+        "UPDATE stg_settings SET stg_value = 'none' WHERE stg_name = 'manager_backups';" \
+        2>/dev/null || true
+    psql -U postgres -d "$SITENAME" -q -c \
+        "INSERT INTO stg_settings (stg_name, stg_value)
+         SELECT 'manager_backups', 'none'
+         WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'manager_backups');" \
+        2>/dev/null || true
+    log "The management node keeps no backups for this site: its owner chooses where they go"
 fi
 
 # =============================================================================

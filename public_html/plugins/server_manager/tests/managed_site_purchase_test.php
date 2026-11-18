@@ -299,6 +299,14 @@ check($r['row'] === null && stripos(implode(' ', $r['errors']), 'already has a s
 	'a name a live provision holds is refused at Continue', implode(' | ', $r['errors']));
 check(CustomerCloudProvision::held_by_live('msp-register-test.com', 'msp-register-test-com') === null,
 	'and a name held only by drafts is not held');
+$own_host = strtolower(trim((string)Globalvars::get_instance()->get_setting('webDir')));
+if ($own_host !== '') {
+	check(ManagedSiteDraft::serves_already($own_host), 'the selling site\'s own address already serves a site');
+	$r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_domain' => $own_host, 'cvp_domain_source' => 'own')), $buyer);
+	check($r['row'] === null && stripos(implode(' ', $r['errors']), 'already has a site') !== false,
+		'and is refused as a buyer\'s own domain', implode(' | ', $r['errors']));
+}
+check(!ManagedSiteDraft::serves_already('msp-nobody-serves-this.com'), 'a name nothing here answers at is free');
 
 // ---------------------------------------------------------------------------
 section('The origin rule: a buyer row leaves the pre-payment states only with an order item');
@@ -755,5 +763,83 @@ check(SmActionLevels::level('index', 'approve_held_provision') === 10 && SmActio
 	'approving and refusing a held order is a superadmin decision');
 $_SESSION['permission'] = 0;
 $_SESSION['usr_user_id'] = (int)$buyer->key;
+
+section('A site with a server to itself is bare metal; Managed has no mail server of its own');
+$r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_domain' => 'msp-bare-' . bin2hex(random_bytes(3)) . '.com')), $buyer);
+if ($r['row']) {
+	harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $r['row']->key);
+}
+check($r['row'] && (string)$r['row']->get('cvp_docker_mode') === 'bare-metal' && (bool)$r['row']->get('cvp_no_mail_server'),
+	'a Managed setup is bare metal with no mail server: it receives through the relay fleet', implode(' | ', $r['errors']));
+
+section('The Dashboard shows a buyer their sites (walkthrough Q8)');
+require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));
+harness_set_setting_mem('server_manager_offer_hosting', '1');
+$panel = SmHosting::dashboard_section($buyer);
+check($panel !== null && $panel->title === 'Your sites' && $panel->view_all_url === ManagedSiteDraft::SITES_URL
+	&& count($panel->items) >= 1 && $panel->stat && $panel->stat->count >= 1,
+	'a buyer with a site setup gets a Your sites panel that leads to Your Sites');
+$states = array();
+foreach ($panel ? $panel->items : array() as $it) { $states[] = (string)$it->subtitle; }
+check($states && !array_diff($states, array_values(SmHosting::DASHBOARD_STATES)), 'each site says where it stands, in words',
+	implode(' | ', $states));
+$nobody = new User(NULL);
+$nobody->key = 999999998;
+check(SmHosting::dashboard_section($nobody) === null, 'an account with no site gets no panel');
+
+section('A buyer who has not confirmed their email is told before they are locked out (walkthrough Q6)');
+$fresh = new User(NULL);
+$fresh->set('usr_email', 'msp-unconfirmed@example.com');
+$fresh->key = 999999999;
+$fresh->set('usr_is_activated', false);
+harness_set_setting_mem('activation_required_login', '1');
+check(SmHosting::email_unconfirmed($fresh), 'where sign-in needs a confirmed address, an unconfirmed buyer is told');
+check(strpos(SmHosting::email_unconfirmed_line($fresh), 'msp-unconfirmed@example.com') !== false, 'with the address the link went to');
+$fresh->set('usr_is_activated', true);
+check(!SmHosting::email_unconfirmed($fresh), 'a confirmed buyer is told nothing');
+$fresh->set('usr_is_activated', false);
+harness_set_setting_mem('activation_required_login', '0');
+check(!SmHosting::email_unconfirmed($fresh), 'nor anyone where sign-in does not need it');
+$pending_row = new CustomerCloudProvision(NULL);
+$pending_row->set('cvp_status', 'ready');
+harness_set_setting_mem('activation_required_login', '1');
+check(strpos(CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null), 'Confirm your email address') !== false,
+	'the confirmation page says it under the line');
+$fresh->set('usr_is_activated', true);
+$pending_row->set('cvp_domain_source', 'register');
+$reg_said = CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null);
+check(stripos($reg_said, 'registrar') !== false && strpos($reg_said, 'within 15 days') !== false,
+	'a buyer whose domain we register is told to expect the registrar\'s email', $reg_said);
+check(stripos($reg_said, 'no DNS records for you to add') !== false && stripos($reg_said, 'lists the DNS records') === false,
+	'and that there is no DNS to add, with nothing about the other case', $reg_said);
+$pending_row->set('cvp_domain_source', 'own');
+$pending_row->set('cvp_domain', 'msp-own.example');
+$own_said = CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null);
+check(stripos($own_said, 'registrar') === false && strpos($own_said, 'DNS records to add where msp-own.example is registered') !== false
+	&& strpos($own_said, 'msp-own.example is being built now') !== false,
+	'a buyer who brought their own domain is told their one step, and nothing about a registrar', $own_said);
+check(stripos($own_said, 'licence') === false, 'no licence is mentioned where none was bought');
+$pending_row->set('cvp_license_choice', array_key_first(BusinessLicense::KINDS));
+$lic_said = CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null);
+check(strpos($lic_said, 'Your licence:') !== false, 'a licence bought with the site is named on the confirmation', $lic_said);
+$pending_row->set('cvp_license_choice', 'free');
+check(stripos(CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null), 'Your licence:') === false,
+	'a free licence is not');
+$fresh->set('usr_is_activated', false);
+
+section('The hosting emails are sent from an address this site can send from');
+$gv = Globalvars::get_instance();
+list($sender_email, $sender_name) = SmHosting::buyer_mail_sender();
+$welcome_set = trim((string)$gv->get_setting('server_manager_provisioning_welcome_from_email'));
+$site_default = trim((string)$gv->get_setting('defaultemail'));
+if ($welcome_set !== '') {
+	check($sender_email === $welcome_set, 'the welcome address, when one is set');
+} elseif ($site_default !== '') {
+	check($sender_email === $site_default, 'with no welcome address set, the site\'s own default sender, never a fixed address of ours',
+		$sender_email);
+} else {
+	check($sender_email !== '', 'a sender is always named');
+}
+check($sender_name !== '', 'and a sender name');
 
 harness_finish();

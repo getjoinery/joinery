@@ -6,6 +6,7 @@
  * here; their provisions and setup progress are shown below. The Connect
  * button is a single-button action form (no user-entered fields).
  *
+ * @version 1.5 - says the server's size and Linode's price, and what access is asked (walkthrough 65, 72)
  * @version 1.4 - buttons and colours follow the theme: the page sits in the jy-ui kit, buttons are btn btn-primary / btn-secondary, colours are theme tokens
  * @version 1.3 - the reload is data-jy-reload-after
  * @version 1.2 - not found where this site does not sell hosting (SmHosting)
@@ -25,7 +26,7 @@ extract($page_vars);
 
 $status_labels = array(
 	'pending_connect' => 'Waiting for your account connection',
-	'ready'           => 'Queued — your server will be created shortly',
+	'ready'           => 'Queued. The whole build takes ' . SmHosting::BUILD_TIME,
 	'booting'         => 'Your server is starting',
 	'installing'      => 'Installing your site',
 	'done'            => 'Ready',
@@ -65,6 +66,22 @@ echo '<div class="jy-ui">';
 <?php else: ?>
 	<h2>Connect your Linode account</h2>
 	<p>Your site runs on a server in your own Linode account — billed directly to you by Linode, with no markup from us. Connect your account and everything else is automatic.</p>
+	<ul class="smcc-facts">
+		<li><strong>The server:</strong> <?php echo htmlspecialchars(ManagedSiteDraft::OWN_LINODE_SERVER); ?></li>
+		<?php
+		// What the Connect button asks for (profile_connect_cloud_logic): server
+		// access alone for a site waiting to be built, more for moving an address.
+		$smcc_build_only = false;
+		foreach ($provisions as $smcc_p) {
+			if ((string)$smcc_p->get('cvp_status') === 'pending_connect' && ManagedSiteDraft::plan_of($smcc_p) === 'own_linode') { $smcc_build_only = true; }
+		}
+		?>
+		<li><strong>What we ask Linode for:</strong>
+			<?php if ($smcc_build_only): ?>permission to create and manage servers in your account, and nothing else.
+			<?php else: ?>permission to create and manage servers and their IP addresses, and to read your firewalls.
+			<?php endif; ?>
+			We do not see your billing details. The permission ends on its own after two hours.</li>
+	</ul>
 	<?php if ($provider_configured): ?>
 	<form method="post" action="/profile/server_manager/connect_cloud">
 		<input type="hidden" name="action" value="connect">
@@ -100,6 +117,8 @@ echo '<div class="jy-ui">';
 .smcc-message { padding: 12px 16px; background: var(--jy-color-info-bg); border-radius: 4px; }
 .smcc-connect { margin: 1.5em 0; }
 .smcc-connected { color: var(--jy-color-success); font-weight: bold; }
+.smcc-facts { margin: 1em 0; padding-left: 1.2em; }
+.smcc-facts li { margin: .35em 0; }
 .smcc-signup { color: var(--jy-color-text-muted); margin-top: 1em; }
 .smcc-reconnect-btn { background: none; border: 0; color: var(--jy-color-link); cursor: pointer; padding: 0; text-decoration: underline; font-size: .9em; }
 .smcc-table { border-collapse: collapse; width: 100%; }

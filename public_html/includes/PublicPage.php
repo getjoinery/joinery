@@ -121,13 +121,15 @@ class PublicPage extends PublicPageBase {
 <?php if ($this->show_site_chrome()): ?>
 <header class="jy-site-header header-light" style="border-bottom: 1px solid var(--jy-color-border);">
     <div class="jy-header-inner" style="justify-content: center; position: relative;">
-        <a href="/" class="jy-logo" style="position: absolute; left: 1.5rem;" data-jy-confirm="Leave checkout? Your cart will be saved.">
+        <a href="/" class="jy-logo" style="position: absolute; left: 1.5rem;"<?php if (($options['noheader_label'] ?? null) !== ''): ?> data-jy-confirm="Leave checkout? Your cart will be saved."<?php endif; ?>>
             <?php $this->get_logo(); ?>
         </a>
+<?php if (($options['noheader_label'] ?? null) !== ''): ?>
         <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600; font-size: 1.0625rem;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             Secure Checkout
         </div>
+<?php endif; ?>
     </div>
 </header>
 <?php endif; ?>

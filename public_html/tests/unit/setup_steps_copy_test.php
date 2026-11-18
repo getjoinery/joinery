@@ -52,8 +52,23 @@ check(is_int(SetupSteps::steps()[0]['order']), 'and steps() hands back the resol
 // exists, so there the key step comes right after the secure connection.
 $backups = SetupSteps::get('backups');
 check(is_callable($backups['order'] ?? null), 'the Backups step decides its place from whether the site is managed');
-check(call_user_func($backups['order']) === (ManagementNodeStatus::is_managed() ? 6 : 80),
+check(call_user_func($backups['order']) === (ManagementNodeStatus::backs_up_this_site() ? 6 : 80),
 	'early (6, after the secure connection at 5) on a managed site, near the end (80) otherwise');
 check(SetupSteps::get('https')['order'] === 5, 'the secure connection the in-browser key needs still comes first');
+
+section('A managed site is backed up by its management node only when that node keeps backups for it');
+harness_set_setting_mem('agent_join_state', json_encode(array('status' => 'connected', 'manager_url' => 'https://plane.example')));
+harness_set_setting_mem('hosted_plan_allowances', '');
+harness_set_setting_mem('manager_backups', '');
+check(ManagementNodeStatus::is_managed() && ManagementNodeStatus::backs_up_this_site(), 'a managed site, by default, is');
+harness_set_setting_mem('manager_backups', 'none');
+require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+if (BackupHistory::manager_coverage() === null) {
+	check(!ManagementNodeStatus::backs_up_this_site(), 'one installed with manager_backups none is not: its owner chooses where backups go');
+	harness_set_setting_mem('hosted_plan_allowances', json_encode(array(array('label' => 'Backups', 'used' => '1 GB', 'service' => 'shelf'))));
+	check(ManagementNodeStatus::backs_up_this_site(), 'until it rents backup storage after all');
+}
+harness_set_setting_mem('agent_join_state', '');
+check(!ManagementNodeStatus::backs_up_this_site(), 'a site no management node manages never is');
 
 harness_finish();

@@ -13,6 +13,8 @@
  * Store-owned registry. Fail soft: a product with no fulfillment provider simply
  * has nothing to fulfill.
  *
+ * @version 1.6.0 - fulfill() may return 'after_purchase_message', the provider's own word for the line on the
+ *                  confirmation page and receipt
  * @version 1.5.0 - FulfillmentCancelNotice: a provider may say what cancelling a line does to what it pays for
  * @version 1.4.0 - register(), get() and all() load the plugin bootstraps first, where providers register, so
  *                  a command-line run knows them too
@@ -64,8 +66,11 @@ interface FulfillmentProvider {
      * ['ref_id' => ?int, 'label' => ?string, 'labels' => ?array] for the
      * order line summary, plus optionally 'outcome' (bundle, event,
      * subscription, digital, plain) naming how the receipt describes the line;
-     * without it, labels mean bundle and a ref_id means event. The provider
-     * owns any of its own notifications/signals.
+     * without it, labels mean bundle and a ref_id means event. Optionally
+     * 'after_purchase_message' (HTML): what the buyer is told about this line
+     * on the confirmation page and in its receipt, in place of the product's
+     * fixed message, for a provider that knows what this purchase needs next.
+     * The provider owns any of its own notifications/signals.
      */
     public function fulfill(User $user, Product $product, OrderItem $order_item, Order $order, int $ref): array;
     /** Admin HTML label/link describing a reference. */

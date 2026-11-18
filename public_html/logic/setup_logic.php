@@ -24,6 +24,8 @@
  * @version 2.10 - the Calendar step's protection level (action calendar_level)
  * @version 2.9.1
  * @changelog 2.9.1 - services_disconnect releases both services, mail and shelf
+ * @changelog 2.10 - mail_address_save: on a site whose email was set up for it, the owner picks
+ *   the address it sends from and receives at (hosting_purchase_walkthrough_test Q7)
  * @changelog 2.9 - services_connect / services_disconnect link this site to a getjoinery
  *   account; "It arrived" releases a getjoinery mail service the site no longer sends
  *   through (specs/services_phase2_platform.md §4, §9, E8)
@@ -454,6 +456,38 @@ function setup_logic(array $input): LogicResult {
 			}
 			SetupSteps::invalidateSessionCache();
 			return LogicResult::redirect('/setup?step=mail_send');
+		}
+	}
+
+	// A site whose email was set up for it (a hosted site, by its management
+	// node) was never asked the wizard's one address question: it sends from a
+	// placeholder nobody chose and has no mailbox for replies to land in. The
+	// owner picks their address here; it becomes the From address and their
+	// mailbox. The domain stays the one email was set up for.
+	if ($action === 'mail_address_save' && Access::decide(10, $session)) {
+		require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
+		$address = strtolower(trim((string)($input['wizard_from_address'] ?? '')));
+		$current = strtolower(trim((string)$settings->get_setting('defaultemail')));
+		$domain = strrpos($current, '@') !== false ? substr($current, strrpos($current, '@') + 1) : '';
+		if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
+			$error = 'That does not look like an email address.';
+		} elseif ($domain !== '' && substr($address, strrpos($address, '@') + 1) !== $domain) {
+			$error = 'Use an address at ' . $domain . ': that is the domain this site\'s email is set up for.';
+		} else {
+			$fields = array('defaultemail' => $address);
+			$owner_name = trim(trim((string)$viewer->get('usr_first_name')) . ' ' . trim((string)$viewer->get('usr_last_name')));
+			if ($owner_name !== '') {
+				$fields['defaultemailname'] = $owner_name;
+			}
+			$write = SettingsWriter::write($fields, array('page' => 'setup', 'source' => 'core', 'names' => array_keys($fields)));
+			if (!empty($write['errors'])) {
+				$first = reset($write['errors']);
+				$error = is_array($first) ? (string)reset($first) : (string)$first;
+			} else {
+				_setup_ensure_receiving_mailbox($viewer);
+				SetupSteps::invalidateSessionCache();
+				return LogicResult::redirect('/setup?step=mail_send');
+			}
 		}
 	}
 

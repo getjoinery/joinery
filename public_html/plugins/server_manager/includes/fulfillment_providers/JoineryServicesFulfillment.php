@@ -32,6 +32,7 @@
  *
  * A Managed site never buys this: its hosting is the entitlement.
  *
+ * @version 1.4 - a bundle bought with its site says it is set up for the buyer (after_purchase_message)
  * @version 1.3 - the buy button is the theme's primary button
  * @version 1.2 - a line bought with an own-Linode site names its draft: checked against the site's install line in
  *                the same cart, recorded on the provision at payment; bundle_offer() (own_linode_we_install W4)
@@ -331,8 +332,14 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 			return array('ref_id' => null, 'label' => 'getjoinery services need attention', 'labels' => null,
 				'outcome' => $outcome);
 		}
-		return array('ref_id' => null, 'label' => 'Email and backups for ' . $provision->get('cvp_domain'),
-			'labels' => null, 'outcome' => $outcome);
+		return array('ref_id' => null, 'label' => ManagedSiteDraft::BUNDLE_NAME . ' for ' . $provision->get('cvp_domain'),
+			'labels' => null, 'outcome' => $outcome,
+			// Bought with the site: we set it up when the site is built, so the
+			// product's own message (switch it on in your site's setup) is wrong here.
+			'after_purchase_message' => '<p>Thank you. The ' . ManagedSiteDraft::BUNDLE_NAME . ' for '
+				. htmlspecialchars((string)$provision->get('cvp_domain'), ENT_QUOTES, 'UTF-8')
+				. ' is paid for, and we set its email and backups up for you when the site is built: there is nothing to switch on. '
+				. 'Its paid-through date is on <a href="/profile/server_manager/services">your connected sites</a>.</p>');
 	}
 
 	/**

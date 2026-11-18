@@ -2,6 +2,7 @@
 /**
  * /change-password-required: an account flagged to choose its own password does so here.
  *
+ * @version 1.2 - a hosted site whose included email is still being set up says that instead of pointing at a provider
  * @version 1.1 - the email setup line shows only while no mail provider is configured; the unused
  *               XMLHttpRequest branch is gone (the page is a plain form post)
  */
@@ -69,6 +70,10 @@ function change_password_required_logic(array $input): LogicResult{
 	// its owner first signs in, and telling them to set it up is untrue.
 	$page_vars['show_email_setup_hint'] = Access::permits(10, $session)
 		&& !change_password_required_mail_ready();
+	// A hosted site's email is included and on its way: say that, never
+	// "set up a mail provider".
+	$page_vars['email_included_line'] = ($page_vars['show_email_setup_hint'] && HostedPlanNotice::includedMailPending())
+		? HostedPlanNotice::includedMailPendingLine() : '';
 
 	return LogicResult::render($page_vars);
 }

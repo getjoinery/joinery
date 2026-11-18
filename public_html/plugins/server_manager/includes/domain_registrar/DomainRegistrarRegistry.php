@@ -8,6 +8,7 @@
  * getKey(). Nothing anywhere names a registrar in a list, so adding a second
  * one is a class in this directory and no edits elsewhere.
  *
+ * @version 1.2 - normalizeName() drops a leading www.; isInternationalName() (walkthrough 18, 19)
  * @version 1.1 - configured() offers only the pretend registrar while the site's config file turns it on
  * @version 1.0
  */
@@ -104,12 +105,24 @@ class DomainRegistrarRegistry {
 	/** A registrable name: at least two ASCII labels, no leading/trailing dash. */
 	const DOMAIN_REGEX = '/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,}$/';
 
-	/** Lowercase a typed name and strip a pasted scheme, path or trailing dot. */
+	/**
+	 * Lowercase a typed name and strip a pasted scheme, path, trailing dot or
+	 * leading www.: a site answers on its name and on www. of it, so the name
+	 * itself is the one without.
+	 */
 	public static function normalizeName(string $raw): string {
-		$name = strtolower(trim($raw));
+		$name = mb_strtolower(trim($raw));
 		$name = preg_replace('#^https?://#', '', $name);
-		$name = explode('/', $name)[0];
-		return rtrim($name, '.');
+		$name = rtrim(explode('/', $name)[0], '.');
+		if (strpos($name, 'www.') === 0 && strpos(substr($name, 4), '.') !== false) {
+			$name = substr($name, 4);
+		}
+		return $name;
+	}
+
+	/** A name typed with accented or non-Latin letters: a real kind of name, and one not taken here yet. */
+	public static function isInternationalName(string $domain): bool {
+		return $domain !== '' && preg_match('/[^\x00-\x7f]/', $domain) === 1;
 	}
 
 	public static function isRegistrableName(string $domain): bool {

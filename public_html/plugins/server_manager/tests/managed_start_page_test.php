@@ -140,4 +140,13 @@ check($res->redirect === null && ($res->data['mode'] ?? '') === 'form', 'a membe
 check(strpos((string)($res->data['steps_html'] ?? ''), 'aria-current="step"><span class="sms-step-n">2</span>') !== false,
 	'and the strip says step 2');
 
+section('A right password refused for another reason says the reason');
+require_once(PathHelper::getIncludePath('plugins/server_manager/logic/start_logic.php'));
+$unconfirmed = start_logic_login_refusal('/login?msgtext=activation_sent&e=' . rawurlencode('buyer@example.com'));
+check(strpos($unconfirmed, 'not been confirmed') !== false && strpos($unconfirmed, 'buyer@example.com') !== false,
+	'an unconfirmed email is named as that, with the address the link went to');
+check(stripos($unconfirmed, 'incorrect') === false, 'and never as a wrong password');
+check(stripos(start_logic_login_refusal('/login?msgtext=too_many_attempts'), 'Too many') === 0, 'too many attempts says so');
+check(stripos(start_logic_login_refusal('/login?retry=1'), 'incorrect') !== false, 'a wrong password still reads as incorrect');
+
 harness_finish();

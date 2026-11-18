@@ -218,7 +218,7 @@ A handler that returns `true` and writes nothing is answered with a 500 and a `R
 ## Common Patterns
 
 ### The site root
-`/` is a custom route driven by two settings. `alternate_homepage` (factory `/login`) is where a visitor who is not signed in lands; `alternate_loggedin_homepage` (factory `/profile`) is where a member lands, and falls back to the public one when blank. A value of `/blog` or `/page/{slug}` renders that content at the root; any other path is a 302 to it. Both blank renders the built-in `views/index.php` through the theme chain, which is the right state only for a theme that ships its own homepage. A signed-in member who reaches `/login` is sent to the signed-in homepage.
+`/` is a custom route driven by two settings. `alternate_homepage` (factory `/welcome`) is where a visitor who is not signed in lands; `alternate_loggedin_homepage` (factory `/profile`) is where a member lands, and falls back to the public one when blank. A value of `/welcome` renders the welcome page at the root: `views/index.php` through the theme chain, so the built-in front door (the site's name, a line saying it is private, a Sign in button, and a register link only where `register_active` is on) or the active theme's own homepage. `/blog` or `/page/{slug}` renders that content at the root; any other path is a 302 to it. Both blank renders `views/index.php` too. A signed-in member who reaches `/login` is sent to the signed-in homepage.
 
 ### Simple public page
 ```

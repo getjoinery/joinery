@@ -1227,7 +1227,7 @@ class InboundEmailSetupCheck {
 		// mail comes from instead.
 		if (!$this->hasMailServer()) {
 			$label = 'How mail reaches this site';
-			$why = 'This site runs in a container and has no mail server of its own. It receives mail only '
+			$why = 'This site has no mail server of its own. It receives mail only '
 				. 'through a relay, which takes the mail in and checks it before this site collects it.';
 			$t = $this->topology();
 			if ($this->fronted() && !$this->relayNeeded() && !$t['enabled']) {
@@ -1252,7 +1252,7 @@ class InboundEmailSetupCheck {
 			if ($local !== '') {
 				$out[] = $this->r('host.outbound_local', '', 'host', 'Where sent mail goes', self::REQUIRED, self::FAIL,
 					'Sent mail is set to go through ' . $local . ', and this site has none.',
-					'This site runs in a container and has no mail server of its own, so mail sent that way '
+					'This site has no mail server of its own, so mail sent that way '
 					. 'never leaves.',
 					array('text' => 'Choose an email provider, or an outside SMTP server, in the email settings.'));
 			}
@@ -2120,7 +2120,7 @@ class InboundEmailSetupCheck {
 		if ($this->relayNeeded()) {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::FAIL,
 				'No relay is set up, so there is nothing for ' . $domain . '\'s MX record to point at.',
-				'This site runs in a container and receives mail only through a relay.',
+				'This site has no mail server of its own and receives mail only through a relay.',
 				array('text' => 'Set up a relay in the Relay section. The MX record to publish then shows here.'));
 		} elseif ($fronted && $mx_prescribed === '') {
 			$out[] = $this->r('domain.mx', $domain, 'domain', 'MX record', self::REQUIRED, self::UNKNOWN,
@@ -3523,7 +3523,7 @@ class InboundEmailSetupCheck {
 			if ($this->publicIp !== '' && $this->spfAuthorizes($spf, $domain) === 'pass') {
 				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,
 					'SPF authorizes this server (' . $this->publicIp . '), which sends no mail itself.',
-					'This site runs in a container, and other sites may share this address. Record: ' . $spf, $fix);
+					'Its mail goes out through a provider, so naming this address only lets whatever else is at it pass as this domain. Record: ' . $spf, $fix);
 			}
 			if ($plan['mechanism'] !== '' && !$this->spfCoversMechanism($spf, $plan['mechanism'])) {
 				return $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::WARN,

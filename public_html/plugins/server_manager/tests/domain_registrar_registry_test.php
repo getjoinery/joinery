@@ -58,7 +58,9 @@ $configured = DomainRegistrarRegistry::configured();
 $namecheap_ready = NamecheapRegistrar::isConfigured();
 check($namecheap_ready === isset($configured['namecheap']),
 	'configured() reflects isConfigured(), not mere presence');
-if (!$namecheap_ready) {
+// Any registrar may be the configured one here (the pretend registrar on a
+// test site), so the question is whether one is, not whether Namecheap is.
+if (!$configured) {
 	check(DomainRegistrarRegistry::firstConfigured() === null,
 		'firstConfigured() is null with no credentials — the checkout gate closes');
 } else {
@@ -75,6 +77,9 @@ $cases = array(
 	'http://smithfamily.com'   => 'smithfamily.com',
 	'smithfamily.com.'         => 'smithfamily.com',
 	'smithfamily.com/about'    => 'smithfamily.com',
+	'www.SmithFamily.com'      => 'smithfamily.com',
+	'https://www.smith.co.uk/' => 'smith.co.uk',
+	'www.com'                  => 'www.com',
 );
 foreach ($cases as $raw => $expected) {
 	check(DomainRegistrarRegistry::normalizeName($raw) === $expected,

@@ -820,6 +820,17 @@ installs and starts nothing there: it says the site receives mail through a
 relay and exits 0. Where the site runs comes from `deployment_environment` in
 the site config, which the installer writes.
 
+**A bare-metal server can be installed without one too.** `install.sh server
+--no-mail-server` installs no Postfix and binds no mail directories, and
+`install.sh site --no-mail-server` writes `local_mail_server = none` in the
+site's config. `install_email.sh` reads that and installs nothing, at install
+and at every later converge, upgrade and "Run setup again", so port 25 is
+never opened. `mailbox_site_has_mail_server()` reads the same line, so such a
+site is treated exactly as a container is everywhere below: only a relay can
+take its mail in, and it enrols itself with the hosted relay where its
+operator seeded the fleet settings. A Managed site sold through Server Manager
+is built this way.
+
 So mail that arrives by SMTP reaches a container site only through a relay
 (`mailbox_needs_relay()`). The relay takes the mail in, checks it (SPF, DKIM,
 DMARC and spam), and the site collects it from the relay's spool. A webhook

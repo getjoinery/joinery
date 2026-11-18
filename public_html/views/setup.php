@@ -102,8 +102,16 @@
 <?php } ?>
 
 <?php if ($current_key === 'done') { ?>
-			<h1>You're set up</h1>
-			<p class="setup-copy">Here is where everything stands. Each item links to its permanent home — that is where these controls live from now on.</p>
+<?php
+	// "You're set up" is true only when every step is: a wizard skipped
+	// through ends by saying what is still to do.
+	$setup_unfinished = 0;
+	foreach ($steps as $s) {
+		if ($statuses[$s['key']] !== SetupSteps::STATUS_GREEN) { $setup_unfinished++; }
+	}
+?>
+			<h1><?php echo $setup_unfinished === 0 ? "You're set up" : 'You can finish the rest later'; ?></h1>
+			<p class="setup-copy"><?php if ($setup_unfinished > 0) { echo $setup_unfinished === 1 ? 'One thing is not set up yet. ' : $setup_unfinished . ' things are not set up yet. '; } ?>Here is where everything stands. Each item links to its permanent home — that is where these controls live from now on.</p>
 <?php if (!empty($page_vars['heartbeat_warning'])) { ?>
 			<div class="jy-alert jy-alert-error"><?php echo htmlspecialchars($page_vars['heartbeat_warning']); ?></div>
 <?php } ?>

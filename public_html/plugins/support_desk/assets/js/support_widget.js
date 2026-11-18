@@ -45,7 +45,11 @@
 		send.disabled = true;
 		showError('');
 		var body = { message: text, thread_id: threadId };
-		if (!threadId) captchaAnswer(body);
+		if (!threadId) {
+			captchaAnswer(body);
+			var route = transcript.getAttribute('data-route');
+			if (route) body.route = route;
+		}
 		window.joineryApi.post('support_desk/widget_ask', body).then(function (r) {
 			threadId = r.thread_id;
 			if (person) person.hidden = false;

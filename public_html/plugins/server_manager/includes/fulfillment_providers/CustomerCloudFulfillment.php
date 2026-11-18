@@ -49,6 +49,12 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.22 - the cancel question publishes the end of the paid period only, as Your Sites does (walkthrough 91)
+ * @version 1.21 - the confirmation page says this order's own case (server, domain, licence), never the product's
+ *                fixed text for every case (walkthrough 27, 64)
+ * @version 1.20 - the confirmation page of a site whose domain we register says to expect the registrar's email (walkthrough Q15)
+ * @version 1.19 - the confirmation page of a site waiting for its Linode connection says to connect first (fulfill()'s
+ *                after_purchase_message), not that the site is being built
  * @version 1.18 - a business licence chosen with the site must be in the cart, or held and free, before the charge;
  *                a held one is named on the site at activation (BusinessLicense, hosting_after_purchase WP7)
  * @version 1.17 - rerun_activation(): Retry setup for a paid site that never got a server runs its activation again
@@ -263,8 +269,10 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 			if ($provision->local_order_item() === null || !$provision->is_operator_hosted()) {
 				return '';
 			}
-			return 'Your site ' . $provision->get('cvp_domain') . ' keeps running to the end of that period and for '
-				. HostedTrialSignals::grace_days() . ' days after, then it is shut down. Its backups are kept for '
+			// Only the end of the paid period is published: the days a site
+			// runs past it are ours to give, not a term (walkthrough 91).
+			return 'Your site ' . $provision->get('cvp_domain') . ' keeps running to the end of that period, then it is '
+				. 'shut down. Its backups are kept for '
 				. HostedTrialSignals::shelf_days() . ' days from the end of the period and can be restored with your recovery key.';
 		}
 		return '';
@@ -289,7 +297,61 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 		// outcome a ref_id makes it an event registration.
 		return array('ref_id' => (int)$provision->key,
 			'label' => 'Server for ' . $provision->get('cvp_domain'), 'labels' => null,
-			'outcome' => 'subscription');
+			'outcome' => 'subscription',
+			'after_purchase_message' => self::after_purchase_message($provision, $user, $product));
+	}
+
+	/**
+	 * What the buyer is told on the confirmation page about this site, from
+	 * what this order is: whose server it is on, whether its domain is one we
+	 * register or one of theirs, whether a licence was bought with it, and
+	 * whether it waits for a Linode connection before anything is built. The
+	 * product's fixed message cannot know any of that, so it is not used.
+	 */
+	public static function after_purchase_message(CustomerCloudProvision $provision, ?User $buyer = null, ?Product $product = null): string {
+		$domain = htmlspecialchars((string)$provision->get('cvp_domain'), ENT_QUOTES, 'UTF-8');
+		$sites = '<a href="' . ManagedSiteDraft::SITES_URL . '">your sites page</a>';
+		$own_server = ManagedSiteDraft::plan_of($provision) === 'own_linode';
+		$password = '<p>Your admin password is shown on your sites page once, when the site is ready. We do not send it '
+			. 'by email, and we do not keep a copy after you have seen it.</p>';
+
+		if ((string)$provision->get('cvp_status') === 'pending_connect') {
+			$out = '<p><strong>One step is left before ' . $domain . ' is built: connect your Linode account.</strong></p>'
+				. '<p><a class="btn btn-primary" href="' . CustomerCloudConsumer::CONNECT_URL . '">Connect your Linode account</a></p>'
+				. '<p>We ask Linode for permission to create servers, and nothing else. As soon as you connect, we create the '
+				. 'server in your account and build the site on it, which takes ' . SmHosting::BUILD_TIME . '; we email you when it is '
+				. 'ready. Linode bills you for the server. Nothing is built until you connect, and you can do it later from '
+				. $sites . '.</p>';
+		} else {
+			$out = '<p>Thank you. ' . ($domain !== '' ? $domain : 'Your site') . ' is being built now'
+				. ($own_server ? ', on a server in your own Linode account' : '') . '.</p>'
+				. '<p>It takes ' . SmHosting::BUILD_TIME . '; we email you when it is ready, and you can watch the progress on '
+				. $sites . '.</p>';
+		}
+
+		// The domain: one we register brings the registrar's own email, said
+		// here so it is not taken for spam; one of the buyer's needs its DNS.
+		if ((string)$provision->get('cvp_domain_source') === 'register') {
+			$out .= '<p><strong>About your domain:</strong> ' . SmHosting::registrar_verify_line()
+				. ' There are no DNS records for you to add.</p>';
+		} elseif ($domain !== '') {
+			$out .= '<p><strong>About your domain:</strong> there is one thing for you to do. Once the site is built, your '
+				. 'sites page lists the DNS records to add where ' . $domain . ' is registered, all together.</p>';
+		}
+		$out .= $password;
+
+		// A licence bought with the site is its own line on the order; what it is for is said here.
+		$choice = (string)$provision->get('cvp_license_choice');
+		if (BusinessLicense::buys($choice)) {
+			$out .= '<p><strong>Your licence:</strong> the ' . htmlspecialchars(BusinessLicense::label($choice), ENT_QUOTES, 'UTF-8')
+				. ' bought with this site covers it. Its key is on your sites page.</p>';
+		}
+
+		// A buyer who has not confirmed their email cannot sign in again once they leave.
+		if ($buyer !== null && SmHosting::email_unconfirmed($buyer)) {
+			$out .= '<p><strong>One more thing:</strong> ' . SmHosting::email_unconfirmed_line($buyer) . '</p>';
+		}
+		return $out;
 	}
 
 	/**

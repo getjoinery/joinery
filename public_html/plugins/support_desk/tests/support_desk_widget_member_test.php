@@ -45,6 +45,27 @@ check((int)SupportWidget::open((int)$thread->key)->key === (int)$thread->key, 'i
 $listed = array_map(function ($t) { return (int)$t->key; }, SupportWidget::mine());
 check(in_array((int)$thread->key, $listed, true), 'and is listed among their conversations');
 
+section('What this node records about the member reaches the assistant');
+$known = (int)$member->key;
+SupportWidget::registerMemberFacts(function (int $user_id, string $route) use ($known) {
+	return $user_id === $known
+		? array('widget-member.example: Managed; provisioning status "done"' . ($route === '/profile/server_manager/site/7' ? ' (THE SITE THEY ASKED FROM)' : ''))
+		: array();
+});
+check(SupportWidget::memberFacts(0) === array(), 'a guest has nothing on record');
+check(count(array_filter(SupportWidget::memberFacts((int)$other->key), function ($l) { return strpos($l, 'widget-member.example') !== false; })) === 0,
+	'another member is not told this member\'s sites');
+$facts_text = SupportPrompt::threadFacts($thread, '0.0.0', true, array());
+check(strpos($facts_text, 'widget-member.example: Managed') !== false && strpos($facts_text, 'A signed-in member') !== false
+	&& strpos($facts_text, 'you cannot see any site of theirs') === false,
+	'the assistant is told the member\'s sites, inside the untrusted envelope', $facts_text);
+SupportThread::updateColumns((int)$thread->key, array('sth_route' => '/profile/server_manager/site/7'));
+$routed = new SupportThread((int)$thread->key, TRUE);
+check(strpos(SupportPrompt::threadFacts($routed, '0.0.0', true, array()), 'THE SITE THEY ASKED FROM') !== false,
+	'and which site they asked from');
+check(SupportTurn::route('/profile/server_manager/site/7') !== '' && SupportTurn::route('javascript:alert(1)') === '',
+	'only a plain local path is taken as the page asked from');
+
 section('They can hand it to a person');
 $out = SupportWidget::escalate((int)$thread->key);
 $fresh = new SupportThread((int)$thread->key, TRUE);

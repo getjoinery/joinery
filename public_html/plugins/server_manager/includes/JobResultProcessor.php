@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.139 - the ready email of a site on its buyer's own domain names one DNS step, on the sites page (walkthrough Q16)
+ * @version 1.138 - the ready email of a site whose domain we registered says to expect the registrar's email (walkthrough Q15)
+ * @version 1.137 - the ready email is sent from the site's own default sender when no welcome address is set (a fixed
+ *                getjoinery address was refused by dev's provider: every ready email there failed for good)
  * @version 1.136 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.135 - the hosted welcome email for a bring-your-own domain names both things left to add: the
  *                  address record, and the email records the sites page lists
@@ -1974,8 +1978,8 @@ class JobResultProcessor {
 		$api_url    = $settings->get_setting('server_manager_getjoinery_api_url');
 		$pub_key    = $settings->get_setting('server_manager_getjoinery_api_public_key');
 		$sec_key    = ProvisioningSetup::readApiSecret();
-		$from_email = $settings->get_setting('server_manager_provisioning_welcome_from_email') ?: 'support@getjoinery.com';
-		$from_name  = $settings->get_setting('server_manager_provisioning_welcome_from_name')  ?: 'Get Joinery Support';
+		// From the site's own sender when no welcome address is set (SmHosting).
+		list($from_email, $from_name) = SmHosting::buyer_mail_sender();
 
 		// The store this plane sells through may be this same site (getjoinery
 		// is both): its own mail queue then takes the email, and no API key is
@@ -2032,7 +2036,9 @@ class JobResultProcessor {
 			'equ_body'      => $hosted
 				? self::build_hosted_welcome_email_body($domain, $user_name, $sites_url,
 					$provision->admin_password_state() === 'sealed', $needs_dns ? $host_ip : '')
-				: self::build_welcome_email_body($domain, $host_ip, $user_name),
+				: self::build_welcome_email_body($domain, $host_ip, $user_name,
+					($provision !== null && ProvisionBuyerDns::applies($provision)) ? ($sites_url !== '' ? $sites_url
+						: 'https://' . trim((string)$settings->get_setting('webDir')) . ManagedSiteDraft::SITES_URL) : ''),
 			'equ_status'    => QueuedEmail::READY_TO_SEND,
 		];
 		if ($is_self) {
@@ -2109,11 +2115,37 @@ class JobResultProcessor {
 		return false;
 	}
 
-	private static function build_welcome_email_body($domain, $host_ip, $user_name) {
+	/**
+	 * $dns_list_url: where the buyer's whole DNS list is shown, for a site we
+	 * built on its buyer's own domain; the email then names that one step and
+	 * no record of its own.
+	 */
+	private static function build_welcome_email_body($domain, $host_ip, $user_name, $dns_list_url = '') {
 		$name      = htmlspecialchars($user_name);
 		$dom       = htmlspecialchars($domain);
 		$ip        = htmlspecialchars($host_ip);
 		$dns_block = self::dns_instruction_html($dom, $ip, self::dns_record_type((string)$host_ip), false);
+		$login_url = htmlspecialchars('https://' . $domain . '/admin');
+		if ($dns_list_url !== '') {
+			$list = htmlspecialchars($dns_list_url);
+			return <<<HTML
+<html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
+<h2 style="color:#1a1a1a">Your site is ready!</h2>
+<p>Hi {$name},</p>
+<p>Your Joinery site for <strong>{$dom}</strong> has been installed successfully.</p>
+
+<h3>Next step: add your DNS records</h3>
+<p><a href="{$list}">Your sites page</a> lists every record, all together, within a few minutes of this email: the one that points your domain at your site, and the ones for its email. Add them where your domain is registered. DNS changes typically take a few minutes to a few hours, and HTTPS is provisioned automatically once your domain points at the site.</p>
+
+<h3>Log in</h3>
+<p>After DNS resolves, your admin panel is at:<br>
+<a href="{$login_url}">{$login_url}</a></p>
+
+<p style="color:#666;font-size:.9em">Questions? Reply to this email or contact support@getjoinery.com.</p>
+<p>— The Get Joinery Team</p>
+</body></html>
+HTML;
+		}
 		$login_url = htmlspecialchars('https://' . $domain . '/admin');
 
 		return <<<HTML
@@ -2148,8 +2180,6 @@ HTML;
 		$dom       = htmlspecialchars($domain);
 		$login_url = htmlspecialchars('https://' . $domain . '/admin');
 		$sites     = htmlspecialchars($sites_url);
-		$ip        = htmlspecialchars($dns_ip);
-		$dns_block = self::dns_instruction_html($dom, $ip, self::dns_record_type((string)$dns_ip), true);
 
 		$password_block = $has_password && $sites_url !== ''
 			? "<h3>Your password</h3>\n<p>For safety it is not in this email. Sign in to your account "
@@ -2163,18 +2193,16 @@ HTML;
 		// this plane registered needs nothing.
 		$intro = $dns_ip !== ''
 			? "<p>Your site for <strong>{$dom}</strong> is built, and its server and offsite backups are "
-				. "running. Two things are left, and they are yours to do, where your domain is registered.</p>\n"
-				. "<h3>1. Point your domain at it</h3>\n"
-				. $dns_block
-				. "<p>DNS changes typically take a few minutes to a few hours. Once your domain resolves to that "
-				. "address, HTTPS is provisioned automatically.</p>\n"
-				. "<h3>2. Add your email records</h3>\n"
+				. "running. One thing is left, and it is yours to do, where your domain is registered: add its "
+				. "DNS records.</p>\n"
+				. "<h3>Add your DNS records</h3>\n"
 				. "<p>" . ($sites !== '' ? "<a href=\"{$sites}\">Your sites page</a>" : "Your sites page")
-				. " lists them within a few minutes of this email. Until they are in place, email your site sends "
-				. "is more likely to land in spam.</p>"
+				. " lists every record, all together, within a few minutes of this email: the one that points your "
+				. "domain at your site, and the ones for its email. Until they are in place your site has no address "
+				. "and no security certificate. DNS changes typically take a few minutes to a few hours.</p>"
 			: "<p>Your site is live at <strong><a href=\"https://{$dom}\">https://{$dom}</a></strong>. The server, its\n"
 				. "email and its offsite backups are all set up and running — there is no DNS record to add and nothing\n"
-				. "to install.</p>";
+				. "to install.</p>\n<p><strong>About your domain:</strong> " . SmHosting::registrar_verify_line() . "</p>";
 
 		return <<<HTML
 <html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">

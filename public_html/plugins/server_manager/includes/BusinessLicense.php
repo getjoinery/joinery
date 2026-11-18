@@ -26,6 +26,7 @@
  * records no ownership per site, or refuses a business its second site.
  * Where neither is on sale, a business can only use a licence it already holds.
  *
+ * @version 1.2 - site_line(): a held licence chosen for a site not yet paid for is named, not called no longer held
  * @version 1.1 - only a licence product's line or ownership counts (B40); one held licence per cart (B41);
  *                a revoked licence reads as no longer held (B42); an unpaid draft uses no licence (B44)
  * @version 1.0 - specs/hosting_after_purchase.md WP7
@@ -261,6 +262,17 @@ class BusinessLicense {
 			$line = self::label(self::kind_of_tag((string)$own->get('own_tag')));
 			$key = trim((string)$own->get('own_license_key'));
 			return $key !== '' ? $line . ', key ' . $key : $line;
+		}
+		// A licence the buyer already holds, chosen for a site not paid for
+		// yet: it is tied to the site at payment, so nothing is recorded now.
+		// While it is still theirs and free, the summary names it.
+		$held_id = self::held_id($choice);
+		if ($own === null && $held_id > 0 && $site->is_pre_payment()) {
+			foreach (self::unused_by((int)$site->get('cvp_usr_user_id'), (int)$site->key) as $free) {
+				if ((int)$free->key === $held_id) {
+					return self::label(self::kind_of_tag((string)$free->get('own_tag'))) . ', one you already own';
+				}
+			}
 		}
 		if ($own !== null || !self::buys($choice)) {
 			// Revoked (a refund), deleted, or a held licence gone (B42).

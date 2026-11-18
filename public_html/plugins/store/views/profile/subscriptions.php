@@ -1,4 +1,5 @@
 <?php
+	// @version 1.6 - the cancel and undo questions name both buttons (Cancel subscription / Keep it)
 	// @version 1.5 - Undo cancel for a cancel waiting for the period end; the cancel question adds the provider's own
 	//                words on what happens to what the line pays for (hosting_after_purchase S2, S4)
 	// @version 1.4 - the line's name is OrderItem::buyer_label(), shared with the payment-failed email
@@ -76,7 +77,8 @@
                             if ($subscription->can_resume()) {
                                 // Taken back before the end of the paid period: billing carries on.
                                 $action = '<form method="post" action="/profile/orders_recurring_action" class="jy-inline"'
-                                    . ' data-jy-confirm="' . htmlspecialchars('Undo the cancel? The subscription carries on and renews as before.', ENT_QUOTES) . '">'
+                                    . ' data-jy-confirm="' . htmlspecialchars('Undo the cancel? The subscription carries on and renews as before.', ENT_QUOTES) . '"'
+                                    . ' data-jy-confirm-label="Keep my subscription" data-jy-confirm-style="primary" data-jy-cancel-label="Leave it cancelled">'
                                     . '<input type="hidden" name="order_item_id" value="' . (int)$subscription->key . '">'
                                     . '<input type="hidden" name="action" value="resume">'
                                     . '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars((string)$cancel_token) . '">'
@@ -102,7 +104,8 @@
                                     $confirm .= ' ' . $notice;
                                 }
                                 $action = '<form method="post" action="/profile/orders_recurring_action" class="jy-inline"'
-                                    . ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '">'
+                                    . ' data-jy-confirm="' . htmlspecialchars($confirm, ENT_QUOTES) . '"'
+                                    . ' data-jy-confirm-label="Cancel subscription" data-jy-cancel-label="Keep it">'
                                     . '<input type="hidden" name="order_item_id" value="' . (int)$subscription->key . '">'
                                     . '<input type="hidden" name="_csrf_token" value="' . htmlspecialchars((string)$cancel_token) . '">'
                                     . '<button type="submit" class="btn btn-ghost btn-sm jy-subs-cancel">Cancel</button>'

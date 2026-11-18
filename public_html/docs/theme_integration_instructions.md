@@ -2262,3 +2262,11 @@ This guide should enable successful theme integration following the proven Phill
 - Component Preview Utility (spec `component_preview_utility`) - Test components with placeholder data
 - [Component System Documentation](/docs/component_system.md) - Full component system reference
 - [Plugin Developer Guide](/docs/plugin_developer_guide.md) - Themes, plugins, and routing details
+
+## Bare layouts
+
+A page asks for less chrome through two `public_header()` options, and every theme's `PublicPage` honours both in its header and its footer:
+
+- `header_only`: the theme prints the document head and nothing else. The page draws its own card and logo (sign-in, email verification, the start of a purchase).
+- `noheader`: the logo and no navigation, for a purchase under way (site setup, cart, checkout, confirmation). The default theme adds a Secure Checkout badge and asks before the logo leaves the page; `noheader_label => ''` drops both, for a page where no cart is open.
+

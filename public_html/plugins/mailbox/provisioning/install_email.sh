@@ -278,6 +278,16 @@ if [[ "$(read_site_setting deployment_environment)" == "docker" ]]; then
     exit 0
 fi
 
+# A bare-metal site installed with no mail server of its own (install.sh
+# --no-mail-server) says so in its config. This script runs again at every
+# converge, upgrade and "Run setup again", and each of those would otherwise
+# put Postfix and rspamd in and open port 25 on a machine built to have none.
+if [[ "$(read_site_setting local_mail_server)" == "none" ]]; then
+    echo "This site was installed with no mail server of its own (local_mail_server = none): it receives"
+    echo "mail through a relay, which checks it. Nothing to install or start here."
+    exit 0
+fi
+
 DBNAME="$(read_site_setting dbname)"
 if [[ -z "${DBNAME}" ]]; then
     echo "ERROR: could not read dbname from ${CONFIG_FILE}" >&2

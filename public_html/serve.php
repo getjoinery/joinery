@@ -311,10 +311,11 @@ $routes = [
         // The alternate_loggedin_homepage / alternate_homepage settings can hold:
         //   - "/blog"          -> render blog view here
         //   - "/page/{slug}"   -> render that page's contents here
+        //   - "/welcome"       -> the welcome page (views/index.php, or the theme's own) here
         //   - any other URL    -> 302 redirect to it (so the front controller routes it normally)
-        // Factory defaults are /login and /profile: most installs exist for
-        // mail and members, so the built-in welcome page is reached only when
-        // both settings are blank (a theme that ships its own views/index.php).
+        // Factory defaults are /welcome and /profile: a visitor sees a plain
+        // front door for a private site, a member their account. Both blank
+        // renders views/index.php too.
         '/' => function($params, $settings, $session, $template_directory) {
             $alternate_page = '';
             if($session->is_logged_in()){
@@ -345,6 +346,8 @@ $routes = [
                         $template_file = $template_directory.'/views/page.php';
                         $base_file = PathHelper::getIncludePath('views/page.php');
                     }
+                } else if($alternate_page === '/welcome'){
+                    // The welcome page renders here: the fallback below.
                 } else if($alternate_page !== '/' && $alternate_page[0] === '/'){
                     header('Location: '.$alternate_page, true, 302);
                     return true;

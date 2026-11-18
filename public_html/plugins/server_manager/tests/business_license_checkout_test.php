@@ -235,6 +235,42 @@ check($provider->checkAvailability($managed, 1, 1, $data) === null, 'and passes 
 ManagedSiteDraft::drop_from_cart($site);
 check(count(ShoppingCart::current()->items) === 0, 'Edit takes the licence line out with the site');
 
+// The buyer removes only the licence line on the cart page: the site's own
+// line is left, which cannot be paid for. It is not "already in your cart".
+$cart = ShoppingCart::current();
+$cart->items = array(
+	array(1, $managed, $data + array('product_version' => (int)$managed_version->key), 12.99, 0, $managed_version),
+	array(1, $founder, $lines[0]['form_data'] + array('product_version' => (int)$founder_version->key), 499.00, 0, $founder_version),
+);
+$cart->persist();
+check(ManagedSiteDraft::in_cart($site) && ManagedSiteDraft::cart_missing($site) === ''
+	&& ManagedSiteDraft::in_cart_whole($site), 'the site and its licence line together are in the cart, whole');
+$cart = ShoppingCart::current();
+unset($cart->items[1]);
+$cart->items = array_values($cart->items);
+$cart->persist();
+check(ManagedSiteDraft::cart_missing($site) === 'licence', 'with the licence line removed, the cart lacks the licence');
+check(!ManagedSiteDraft::in_cart_whole($site) && count(ShoppingCart::current()->items) === 0,
+	'and the part-set is dropped whole, so Continue to payment is offered again');
+
+// The other way round: the buyer removes the SITE's line. Its licence line
+// came with it and goes with it; a licence the buyer added on its own stays.
+$cart = ShoppingCart::current();
+$cart->items = array(
+	array(1, $managed, $data + array('product_version' => (int)$managed_version->key), 12.99, 0, $managed_version),
+	array(1, $founder, $lines[0]['form_data'] + array('product_version' => (int)$founder_version->key), 499.00, 0, $founder_version),
+	array(1, $founder, array('product_version' => (int)$founder_version->key), 499.00, 0, $founder_version),
+);
+$cart->persist();
+check($cart->remove_item_with_companions(0) === TRUE, 'the site line is removed');
+$left = array_values(ShoppingCart::current()->items);
+check(count($left) === 1 && (int)$left[0][1]->key === (int)$founder->key
+	&& BusinessLicense::draft_id_from_line((array)$left[0][2]) === 0,
+	'its licence line goes with it, and a licence bought on its own stays', count($left) . ' line(s) left');
+$cart = ShoppingCart::current();
+$cart->items = array();
+$cart->persist();
+
 // ---------------------------------------------------------------------------
 section('Paid: the licence the store records covers that site');
 
@@ -291,6 +327,9 @@ harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provis
 check($held_site && (string)$held_site->get('cvp_license_choice') === $held_choice, 'the buyer chooses it', implode(' | ', $r['errors']));
 $t = ManagedSiteDraft::price_table($held_site, $managed, null);
 check($t['lines'][1]['label'] === 'Business licence' && $t['today'] === '$12.99', 'it costs nothing more');
+check(BusinessLicense::site_line($held_site) === BusinessLicense::label(BusinessLicense::kind_of_tag((string)$spare->get('own_tag'))) . ', one you already own'
+	&& stripos(BusinessLicense::site_line($held_site), 'no longer held') === false,
+	'and the summary names it, before payment ties it to the site', BusinessLicense::site_line($held_site));
 $req_h = new ManagedSiteRequirement();
 $req_h->validate(array('managed_site' => (int)$held_site->key), $managed);
 list($data_h) = $req_h->process(array('managed_site' => (int)$held_site->key), $managed, null, null);

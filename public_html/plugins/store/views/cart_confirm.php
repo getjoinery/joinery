@@ -20,6 +20,10 @@ $page = new PublicPage();
 $page->public_header([
     'is_valid_page' => true,
     'title'         => 'Checkout confirmation',
+    // The bare purchase layout, as on the cart and checkout, without their
+    // Secure Checkout badge: the payment is done.
+    'noheader'       => true,
+    'noheader_label' => '',
 ]);
 ?>
 <div class="jy-ui">

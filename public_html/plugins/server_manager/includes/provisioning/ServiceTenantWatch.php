@@ -383,6 +383,26 @@ class ServiceTenantWatch {
 			}
 		}
 		if (!$rows) {
+			// Bought with the site and still being set up: the rows are made
+			// once its email is built, which waits on the owner's own DNS
+			// records. The site is told now, so its setup pages say "included,
+			// being set up" instead of asking for a provider and storage.
+			$pending = CustomerCloudProvision::latest_for_node($node_id);
+			if ($pending && (string)$pending->get('cvp_status') === 'done' && !$pending->is_operator_hosted()
+					&& (int)$pending->get('cvp_services_order_item_id') > 0) {
+				return array(
+					'state'      => 'services',
+					'until_time' => '',
+					'notice'     => '',
+					'allowances' => json_encode(array(
+						array('label' => 'Email', 'used' => 'Being set up', 'allowance' => '', 'percent' => 0,
+							'service' => 'mail', 'pending' => true),
+						array('label' => 'Backups', 'used' => 'Being set up', 'allowance' => '', 'percent' => 0,
+							'service' => 'shelf', 'pending' => true),
+					)),
+					'manage_url' => JoineryServices::manageUrl(),
+				);
+			}
 			return array('state' => '', 'until_time' => '', 'notice' => '', 'allowances' => '', 'manage_url' => '');
 		}
 		return array(

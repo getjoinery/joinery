@@ -39,7 +39,9 @@ $setup_bk_recovery = BackupRecoveryKey::setup_state();
 // A site whose backups a management node runs owes no bucket here — the same
 // fact the Backups admin page states — so the target section says who runs
 // them and the step is the recovery key alone.
-$setup_bk_managed = class_exists('ManagementNodeStatus') && ManagementNodeStatus::is_managed();
+// Managed for backups: the management node keeps backups for this site. A
+// managed site whose node keeps none is offered the ordinary choice below.
+$setup_bk_managed = class_exists('ManagementNodeStatus') && ManagementNodeStatus::backs_up_this_site();
 $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_url() : '';
 // getjoinery's backup storage: a site linked to a getjoinery account stores
 // its backups there with one button; one not linked yet connects first.

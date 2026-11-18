@@ -27,6 +27,9 @@ Contact Area
 
 <div class="space">
         <div class="container">
+<?php // Removing a line or a coupon is a POST: one empty form, and each Remove is a button that sends through it (no nested forms). ?>
+<form id="jy-cart-act" method="post" action="/cart"></form>
+
             <div class="row gy-4 flex-row-reverse">
                 <div class="col-lg-6 col-xl-7">
 					<div class="contact-item-wrap">
@@ -53,7 +56,7 @@ Contact Area
                             <div class="media-body">
                                 <span class="contact-item_title"><?php echo $product->get('pro_name').' '. $product_version->get('prv_version_name');?></span>
 								<span class="contact-item_text"><?php echo $product->get_readable_price($product_version->key). $coupon_discount_words; ?></span>
-                                <span class="contact-item_text"><a href="/cart?r=<?php echo $key; ?>">Remove</a></span>
+                                <span class="contact-item_text"><button type="submit" form="jy-cart-act" name="r" value="<?php echo (int)$key; ?>" class="btn btn-link p-0 align-baseline">Remove</button></span>
 								<p class=""><?php echo $product->get('pro_short_description'); ?></p>
                             </div>
                         </div>
@@ -73,7 +76,7 @@ Contact Area
                             <div class="media-body">
                                 <span class="contact-item_text">Discount <?php echo $currency_symbol.number_format($total_discount, 2, '.', ','); ?></span>
 								<span class="contact-item_text"><?php echo $currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words; ?></span>
-                                <span class="contact-item_title"><a href="/cart?r=<?php echo $key; ?>">Remove item</a></span>
+                                <span class="contact-item_title"><button type="submit" form="jy-cart-act" name="r" value="<?php echo (int)$key; ?>" class="btn btn-link p-0 align-baseline">Remove item</button></span>
                             </div>
                         </div>
 						<?php 
@@ -138,7 +141,7 @@ Contact Area
 							$coupon_code_obj = CouponCode::GetByColumn('ccd_code', $coupon_code);
 						?>
 						<div class="media-body">
-							<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <a href="/cart?rc='.$coupon_code.'">remove</a>'; ?></span>
+							<span class="contact-item_text">Coupon applied: <?php echo $coupon_code . ' ('.$coupon_code_obj->get_readable_discount(). ' discount ) <button type="submit" form="jy-cart-act" name="rc" value="'.htmlspecialchars($coupon_code, ENT_QUOTES).'" class="btn btn-link p-0 align-baseline">remove</button>'; ?></span>
 						</div>
 						<?php
 						}

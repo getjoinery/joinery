@@ -8,6 +8,7 @@
  * step decides whether a vault holder additionally needs an independent second
  * factor before the reset is authorized.
  *
+ * @version 1.2 - open whether or not the site takes sign-ups (register_active gates registering only)
  * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -20,9 +21,6 @@ function password_reset_passkey_options_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('passkeys_enabled')) {
 		return LogicResult::error('Passkey sign-in is not enabled.');
-	}
-	if (!$settings->get_setting('register_active')) {
-		return LogicResult::error('This feature is turned off');
 	}
 
 	if (!RequestLogger::check_attempt_limit('password_reset', 10, 900, false)) {

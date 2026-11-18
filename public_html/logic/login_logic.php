@@ -253,7 +253,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 	$login_messages = array(
-		'email_verified'=>'Your email is now verified.  Please log in to improve your profile.',
+		'email_verified'=>'Your email is confirmed. Sign in to continue.',
 		'email_not_verified'=>'Your email address was unable to be verified because of an incorrect or expired verification code.  Please log in to resend your verification code',
 		'login_to_email_verify'=>'Please log in to verify your email address.',
 		'activation_sent'=>'This site requires email activation before you can log in. An activation email has been sent to ' . ($email !== '' ? $email : 'your address') . ' — click the link inside to activate, then log in again.',

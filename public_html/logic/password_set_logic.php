@@ -1,5 +1,6 @@
 <?php
 /**
+ * @version 1.2 - open whether or not the site takes sign-ups (register_active gates registering only)
  * @version 1.1 - the terms checkbox appears only for terms the person owes (TermsOwed)
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -16,9 +17,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-	if(!$settings->get_setting('register_active')){
-		return LogicResult::error('This feature is turned off');
-	}
 
 	// Determine whether the consent checkbox should be shown.
 	$page_vars['owed'] = null;

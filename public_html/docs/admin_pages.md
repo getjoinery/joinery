@@ -974,8 +974,11 @@ paths it leaves alone: the wizard, logout, the API, the security page (where
 the encryption step sends a user to add a passkey that can derive a key),
 the step-up ceremony, and every page a plugin names with `SetupSteps::quietOn()`
 from its bootstrap: a purchase under way (the store's cart and checkout pages,
-the hosting configure page), so someone who signs up to buy pays before the
-wizard starts. When the redirect fires on a page view it remembers the page
+the hosting configure page, a buyer's Your Sites pages), so someone who signs up
+to buy pays, and reads what they bought, before the wizard starts. A quiet path
+is exact; one ending in `/*` names every page under it. The interrupt takes
+only a page view (GET or HEAD): a form being sent always goes through, so what
+someone just did is never thrown away by the redirect. When the redirect fires on a page view it remembers the page
 asked for (`SetupSteps::rememberDestination()`), and both ways out of the
 wizard go back there (`SetupSteps::takeDestination()`). The wizard applies the forced-password-change and terms
 gates itself, in `check_permission()`'s order, since it never calls that

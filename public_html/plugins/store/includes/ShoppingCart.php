@@ -700,6 +700,63 @@ class ShoppingCart {
 		return FALSE;
 	}
 
+	/**
+	 * Remove a line and the companion lines it brought with it.
+	 *
+	 * A product's requirements may add lines of their own to the cart, priced
+	 * from the buyer's answers (a registered domain's first year, a licence
+	 * bought with a site). They exist only because of the line that brought
+	 * them: left behind when it is removed, they are a charge for something
+	 * the buyer just took out. They are found the way an edit finds them, by
+	 * asking the requirements again what this line's answers contribute
+	 * (extra_cart_lines() is deterministic) and matching product and data, so
+	 * another line's identical companion is never touched. Removing a
+	 * companion line on its own stays an ordinary removal.
+	 */
+	public function remove_item_with_companions($item_id) {
+		if (!isset($this->items[$item_id])) {
+			return FALSE;
+		}
+		$item = $this->items[$item_id];
+		$product = $item[1];
+		$data = (array)$item[2];
+		$companions = array();
+		try {
+			foreach ($product->get_product_requirements() as $requirement) {
+				foreach ($requirement->extra_cart_lines($data, $product) as $line) {
+					if ((int)($line['product_id'] ?? 0) > 0) {
+						$companions[] = $line;
+					}
+				}
+			}
+		} catch (Throwable $e) {
+			// The line itself still goes; what it brought is said in the log.
+			error_log('ShoppingCart: companion lines of cart item ' . $item_id . ' could not be read: ' . $e->getMessage());
+			$companions = array();
+		}
+		unset($this->items[$item_id]);
+		foreach ($companions as $line) {
+			foreach ($this->items as $key => $cart_item) {
+				if ((int)$cart_item[1]->key !== (int)$line['product_id']) {
+					continue;
+				}
+				$matches = true;
+				foreach ((array)($line['form_data'] ?? array()) as $name => $value) {
+					if (!array_key_exists($name, (array)$cart_item[2]) || $cart_item[2][$name] != $value) {
+						$matches = false;
+						break;
+					}
+				}
+				if ($matches) {
+					unset($this->items[$key]);
+					break;
+				}
+			}
+		}
+		$this->persist();
+		return TRUE;
+	}
+
 	public function update_item($item_index, $form_data) {
 		if (!isset($this->items[$item_index])) {
 			return FALSE;

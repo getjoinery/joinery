@@ -28,14 +28,18 @@ function checkout_logic(array $input): LogicResult{
 	$cart = ShoppingCart::current();
 
 	// Handle item removal
-	if (isset($_REQUEST['r']) && is_numeric($_REQUEST['r'])) {
-		$cart->remove_item(intval($_REQUEST['r']));
+	// A POST, never a link: a link is a GET any site can send this browser to,
+	// and it would take a line out of the cart.
+	$cart_is_post = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) === 'POST';
+	if ($cart_is_post && isset($_POST['r']) && is_numeric($_POST['r'])) {
+		// With the lines it brought with it, as on the cart page.
+		$cart->remove_item_with_companions(intval($_POST['r']));
 		return LogicResult::redirect('/checkout');
 	}
 
-	// Handle coupon removal via query param
-	if (isset($_REQUEST['rc'])) {
-		$cart->remove_coupon($_REQUEST['rc']);
+	// Handle coupon removal
+	if ($cart_is_post && isset($_POST['rc'])) {
+		$cart->remove_coupon((string)$_POST['rc']);
 		return LogicResult::redirect('/checkout');
 	}
 

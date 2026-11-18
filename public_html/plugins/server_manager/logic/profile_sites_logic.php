@@ -32,6 +32,11 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.22 - a buyer's own-domain records are listed once, whole, with the site's own (Joinery Direct among them);
+ *                dns_pending while the list is held (ProvisionBuyerDns, walkthrough Q16)
+ * @version 1.21 - a built site reads Finishing setup, with no password to show, until it has been told what it comes with
+ *                (SmHosting::site_told; walkthrough Q4)
+ * @version 1.20 - a setup only partly in the cart is dropped and offered for payment again (ManagedSiteDraft::in_cart_whole)
  * @version 1.19 - each site's licence line (BusinessLicense::site_line, hosting_after_purchase WP7)
  * @version 1.18 - each paid site links where it is managed (subscription, billing, domain, email and backups) and
  *                its hosting row names the price (hosting_after_purchase N2, S1)
@@ -82,6 +87,27 @@ function profile_sites_logic(array $input): LogicResult {
 
 	$is_post = (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) === 'POST');
 	$action = $is_post ? (string)($input['action'] ?? '') : '';
+
+	// ---- Send the email confirmation link again (walkthrough Q6) -----------
+	if ($action === 'resend_confirmation') {
+		$me = new User($user_id, TRUE);
+		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+		if (!SmHosting::email_unconfirmed($me)) {
+			$text = 'Your email address is already confirmed.';
+			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
+		} elseif (!RequestLogger::check_attempt_limit('resend_confirmation', 3, 900, NULL)) {
+			$text = 'We have sent that link a few times already. Check your spam folder, or try again in a few minutes.';
+			$kind = DisplayMessage::MESSAGE_WARNING;
+		} else {
+			RequestLogger::log('resend_confirmation', 'resend_confirmation', TRUE);
+			Activation::email_activate_send($me, TRUE);
+			$text = 'We sent the link again to ' . htmlspecialchars((string)$me->get('usr_email')) . '.';
+			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
+		}
+		$session->save_message(new DisplayMessage($text, 'Confirm your email', $self_regex, $kind,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($self_url);
+	}
 
 	// ---- Draft actions: a POST, never a link ------------------------------
 	if ($action === 'edit_draft' || $action === 'delete_draft') {
@@ -158,7 +184,7 @@ function profile_sites_logic(array $input): LogicResult {
 		}
 		if ($target === null) {
 			$error = 'That site is not one of yours.';
-		} elseif ((string)$target->get('cvp_status') !== 'done') {
+		} elseif ((string)$target->get('cvp_status') !== 'done' || !SmHosting::site_told($target)) {
 			// Sealed but not yet applied. Revealing here spends the one copy on
 			// a password the machine may never receive: an install that fails
 			// and is retried installs WITHOUT one (holds_admin_password is false
@@ -195,7 +221,13 @@ function profile_sites_logic(array $input): LogicResult {
 	foreach ($provisions as $provision) {
 		$hosted = $provision->is_operator_hosted();
 		$status = (string)$provision->get('cvp_status');
-		if (in_array($status, array('ready', 'booting', 'installing'), true)) {
+		// Built, but not yet told what it comes with: its own pages would
+		// ask for a mail provider it already has. Shown as finishing, with no
+		// password to read yet, for the minute or two that takes (SmHosting).
+		if ($status === 'done' && !SmHosting::site_told($provision)) {
+			$status = 'finishing';
+		}
+		if (in_array($status, array('ready', 'booting', 'installing', 'finishing'), true)) {
 			$in_progress = true;
 		}
 		if (!$hosted && $status === 'pending_connect') {
@@ -232,6 +264,10 @@ function profile_sites_logic(array $input): LogicResult {
 		}
 
 		$sites[] = array(
+			// The buyer's own-domain records are held until every one is known,
+			// so there is one trip to the registrar (ProvisionBuyerDns).
+			'dns_pending'     => in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
+				&& !ProvisionBuyerDns::listed($provision),
 			'dns_record'      => $dns_record,
 			'mail_records'    => $mail_records,
 			'dmarc_record'    => $dmarc_record,
@@ -245,9 +281,10 @@ function profile_sites_logic(array $input): LogicResult {
 			'pre_payment'     => $provision->is_pre_payment(),
 			'summary'         => $provision->is_pre_payment()
 				? profile_sites_draft_summary($provision, ManagedSiteDraft::product_for_row($provision)) : '',
-			'payment_form'    => ($status === 'pending_payment' && !ManagedSiteDraft::in_cart($provision))
+			// Whole in the cart, or not in it: a part-set is dropped (in_cart_whole).
+			'payment_form'    => ($status === 'pending_payment' && !($whole = ManagedSiteDraft::in_cart_whole($provision)))
 				? ManagedSiteDraft::payment_form($provision, ManagedSiteDraft::product_for_row($provision), 'Finish payment') : '',
-			'in_cart'         => $status === 'pending_payment' && ManagedSiteDraft::in_cart($provision),
+			'in_cart'         => $status === 'pending_payment' && !empty($whole),
 			'taken'           => $taken,
 			// Where the buyer manages what this site is paid by and holds
 			// (hosting_after_purchase N2): its subscription, its card, the
@@ -260,6 +297,11 @@ function profile_sites_logic(array $input): LogicResult {
 				? $provision->admin_password_state() : 'pending',
 			'transfer'        => $provision->is_pre_payment() ? null : profile_sites_transfer($provision, $session),
 			'mail_state'      => (string)$provision->get('cvp_mail_state'),
+			// Waiting for the buyer's Linode connection, and whether a
+			// connection was tried and the provider refused it: the card says
+			// so, with the way to connect again.
+			'needs_connect'   => !$hosted && $status === 'pending_connect',
+			'connect_refused' => !$hosted && $status === 'pending_connect' && trim((string)$provision->get('cvp_error')) !== '',
 			// On its buyer's own Linode: the card says whose server it is, and
 			// whether our email and backups came with it.
 			'own_linode'      => !$provision->is_pre_payment() && ManagedSiteDraft::plan_of($provision) === 'own_linode',
@@ -282,6 +324,8 @@ function profile_sites_logic(array $input): LogicResult {
 		'revealed_domain'   => $revealed_domain,
 		'error'             => $error,
 		'needs_connect'     => $needs_connect,
+		'email_unconfirmed' => ($viewer = new User($user_id, TRUE)) && SmHosting::email_unconfirmed($viewer)
+			? SmHosting::email_unconfirmed_line($viewer) : '',
 		'in_progress'       => $in_progress,
 		'account_connected' => $account !== null && $account->get('cca_status') === 'active',
 		'managed_on_sale'   => count(ManagedSiteDraft::offered_plans()) > 0,
@@ -301,7 +345,7 @@ function profile_sites_logic(array $input): LogicResult {
 function profile_sites_dns_record($provision): ?array {
 	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
-			|| JobResultProcessor::plane_registered_domain($provision)) {
+			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionBuyerDns::listed($provision)) {
 		return null;
 	}
 	$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
@@ -351,7 +395,7 @@ function profile_sites_we_built($provision): bool {
 function profile_sites_aaaa_record($provision): ?array {
 	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
-			|| JobResultProcessor::plane_registered_domain($provision)) {
+			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionBuyerDns::listed($provision)) {
 		return null;
 	}
 	$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
@@ -387,7 +431,7 @@ function profile_sites_aaaa_record($provision): ?array {
 function profile_sites_dns_plan($provision): ?DnsRecordPlan {
 	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
 			|| !in_array((string)$provision->get('cvp_status'), array('installing', 'done'), true)
-			|| JobResultProcessor::plane_registered_domain($provision)) {
+			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionBuyerDns::listed($provision)) {
 		return null;
 	}
 	$domain = strtolower(trim((string)$provision->get('cvp_domain')));
@@ -398,10 +442,8 @@ function profile_sites_dns_plan($provision): ?DnsRecordPlan {
 	$plan = new DnsRecordPlan($domain, 'server_manager');
 	NodeDnsPlan::addAddressRecords($plan, $domain, NodeDnsPlan::publicAddresses(new ManagedNode($node_id, TRUE)),
 		'Points ' . $domain . ' at your site\'s server.');
-	$mail = ProvisionHostedMail::records_of($provision);
-	if (class_exists('FleetService') && (string)$provision->get('cvp_inbound_dns_state') === 'buyer') {
-		$mail = array_merge(FleetService::site_inbound_records($provision), $mail);
-	}
+	$plane_mail = profile_sites_plane_mail_records($provision);
+	$mail = array_merge($plane_mail, ProvisionBuyerDns::site_records_for_buyer($provision, $plane_mail));
 	foreach ($mail as $record) {
 		$type = strtoupper((string)($record['type'] ?? ''));
 		$name = rtrim((string)($record['name'] ?? ''), '.');
@@ -412,7 +454,7 @@ function profile_sites_dns_plan($provision): ?DnsRecordPlan {
 		$plan->addRecord($type, $name, $value, null,
 			isset($record['priority']) ? (int)$record['priority'] : null, (string)($record['note'] ?? ''));
 	}
-	if ($mail && !ProvisionHostedMail::has_dmarc($domain)) {
+	if ($plane_mail && !ProvisionHostedMail::has_dmarc($domain)) {
 		$dmarc = ProvisionHostedMail::dmarc_record($domain);
 		$plan->addRecord($dmarc['type'], $dmarc['name'], $dmarc['value'], null, null, $dmarc['note']);
 	}
@@ -432,14 +474,11 @@ function profile_sites_dns_plan($provision): ?DnsRecordPlan {
  */
 function profile_sites_mail_records($provision): array {
 	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
-			|| JobResultProcessor::plane_registered_domain($provision)) {
+			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionBuyerDns::listed($provision)) {
 		return array();
 	}
 	$missing = profile_sites_inbound_records($provision);
 	$records = ProvisionHostedMail::records_of($provision);
-	if (!$records) {
-		return $missing;
-	}
 	$verified = in_array((string)$provision->get('cvp_mail_state'), array('domain_verified', 'smtp_user_created', 'done'), true)
 		&& trim((string)$provision->get('cvp_mail_error')) === '';
 	foreach ($records as $record) {
@@ -464,7 +503,68 @@ function profile_sites_mail_records($provision): array {
 		$missing[] = array('type' => $type, 'name' => $name, 'value' => $value,
 			'note' => (string)($record['note'] ?? ''));
 	}
+	// What only the built site knows, Joinery Direct among it: listed until
+	// the name answers with it.
+	foreach (ProvisionBuyerDns::site_records_for_buyer($provision, profile_sites_plane_mail_records($provision)) as $record) {
+		if (profile_sites_record_in_place($record)) {
+			continue;
+		}
+		$missing[] = array('type' => $record['type'], 'name' => $record['name'],
+			'value' => ($record['type'] === 'MX' ? (int)($record['priority'] ?? 10) . ' ' : '') . $record['value'],
+			'note' => $record['note']);
+	}
 	return $missing;
+}
+
+/** The sending and inbound records this plane lists for a site, placed or not. */
+function profile_sites_plane_mail_records($provision): array {
+	$mail = ProvisionHostedMail::records_of($provision);
+	if (class_exists('FleetService') && (string)$provision->get('cvp_inbound_dns_state') === 'buyer') {
+		$mail = array_merge(FleetService::site_inbound_records($provision), $mail);
+	}
+	return $mail;
+}
+
+/**
+ * Whether a record (type, name, value) already answers in public DNS. An SRV
+ * value is its four fields, 'priority weight port target'; the target and port
+ * are what is compared. A lookup that fails is read as not in place: the
+ * record is harmless to repeat.
+ */
+function profile_sites_record_in_place(array $record): bool {
+	$type = strtoupper((string)$record['type']);
+	$name = (string)$record['name'];
+	$value = rtrim((string)$record['value'], '.');
+	try {
+		if ($type === 'CNAME') {
+			$found = DnsResolver::getCname($name);
+			return $found !== null && strcasecmp(rtrim($found, '.'), $value) === 0;
+		}
+		if ($type === 'TXT') {
+			return in_array($value, DnsResolver::getTxt($name), true);
+		}
+		if ($type === 'MX') {
+			foreach (DnsResolver::getMx($name) as $mx) {
+				if (strcasecmp(rtrim((string)$mx['host'], '.'), $value) === 0) {
+					return true;
+				}
+			}
+			return false;
+		}
+		if ($type === 'SRV') {
+			$fields = preg_split('/\s+/', trim($value));
+			$target = strtolower((string)end($fields));
+			$port = count($fields) >= 4 ? (int)$fields[count($fields) - 2] : 0;
+			foreach (DnsResolver::getSrv($name) as $srv) {
+				if (strtolower((string)$srv['host']) === $target && ($port === 0 || (int)$srv['port'] === $port)) {
+					return true;
+				}
+			}
+		}
+	} catch (DnsLookupException $e) {
+		// Unknown is shown.
+	}
+	return false;
 }
 
 /**
@@ -475,7 +575,8 @@ function profile_sites_mail_records($provision): array {
  */
 function profile_sites_dmarc_record($provision): ?array {
 	if (!profile_sites_we_built($provision) || $provision->is_pre_payment()
-			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionHostedMail::records_of($provision)) {
+			|| JobResultProcessor::plane_registered_domain($provision) || !ProvisionHostedMail::records_of($provision)
+			|| !ProvisionBuyerDns::listed($provision)) {
 		return null;
 	}
 	$domain = (string)$provision->get('cvp_domain');
@@ -570,7 +671,7 @@ function profile_sites_links(CustomerCloudProvision $provision): array {
 		$links['Domain'] = '/profile/server_manager/domain';
 	}
 	if ((int)$provision->get('cvp_services_order_item_id') > 0) {
-		$links['Email and backups'] = '/profile/server_manager/services';
+		$links[ManagedSiteDraft::BUNDLE_NAME] = '/profile/server_manager/services';
 	}
 	return $links;
 }

@@ -113,6 +113,10 @@ if [[ "$(read_site_setting deployment_environment)" == "docker" ]]; then
     echo "remove_email: ${SITE_NAME} runs in a container, which has no mail server of its own: nothing to take off."
     exit 0
 fi
+if [[ "$(read_site_setting local_mail_server)" == "none" ]]; then
+    echo "remove_email: ${SITE_NAME} was installed with no mail server of its own: nothing to take off."
+    exit 0
+fi
 
 DBNAME="$(read_site_setting dbname)"
 DBUSER="$(read_site_setting dbusername)"

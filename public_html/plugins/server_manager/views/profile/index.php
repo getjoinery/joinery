@@ -7,6 +7,14 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.23 - Ask us tells the support desk which page, and which site, the buyer came from
+ * @version 2.22 - Move to your own Linode account is one closed line on a card until a move is asked for
+ * @version 2.21 - a buyer's own-domain records appear once, all together, with a line saying so while they are gathered (walkthrough Q16)
+ * @version 2.20 - Finishing setup: built, not yet told what it comes with (walkthrough Q4)
+ * @version 2.19 - a site waiting for its Linode connection says so on its own card, with the button, and says when
+ *                Linode refused the last connection (findings 71, 76, 77)
+ * @version 2.18 - a saved setup that is not in the cart reads Ready to pay, not In your cart; email waiting on the buyer's own
+ *                records says so (specs/hosting_purchase_walkthrough_test.md, findings 21 and 48)
  * @version 2.17 - each site names its licence: free, the business licence covering it and its key (WP7)
  * @version 2.16 - Manage: links to the site's subscription, billing, domain, email and backups (hosting_after_purchase N2)
  * @version 2.15 - every setup state has words (held, failed with where to write); the hosting row is one sentence
@@ -47,9 +55,10 @@ $status_labels = array(
 	'draft'           => 'Not finished',
 	'pending_payment' => 'In your cart',
 	'pending_connect' => 'Waiting for your account connection',
-	'ready'           => 'Queued — your server will be created shortly',
-	'booting'         => 'Your server is starting',
-	'installing'      => 'Installing your site',
+	'ready'           => 'Queued. The whole build takes ' . SmHosting::BUILD_TIME,
+	'booting'         => 'Your server is starting. The whole build takes ' . SmHosting::BUILD_TIME,
+	'installing'      => 'Installing your site. The whole build takes ' . SmHosting::BUILD_TIME,
+	'finishing'       => 'Finishing setup. A minute or two more',
 	'done'            => 'Ready',
 	'failed'          => 'Something went wrong. We have been told, and we email you when it is sorted out',
 	'held'            => 'Being checked by a person. We email you within one working day',
@@ -65,6 +74,16 @@ $mail_labels = array(
 	'failed'             => 'Needs attention',
 );
 $support_email = SmHosting::support_email();
+// How a DNS host's form usually wants a record's name written: @ for the
+// domain itself, the first part for a name under it. Which it is depends on
+// where the zone starts, which we cannot see, so both are offered as "often".
+$sms_short_name = function (string $domain): string {
+	$parts = explode('.', $domain);
+	if (count($parts) <= 2) {
+		return 'often written as <code>@</code>';
+	}
+	return 'often written as <code>' . htmlspecialchars($parts[0]) . '</code>, or <code>@</code> if this is the whole domain';
+};
 
 $page = new PublicPage();
 $hoptions = array(
@@ -74,7 +93,19 @@ $hoptions = array(
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Your Sites', $hoptions);
 echo '<div class="jy-ui">';
+// What an action on this page just said (a DNS publish, a refused credential):
+// shown here, where it happened, not on whichever page next shows messages.
+echo $page->render_messages();
 ?>
+<?php if (!empty($email_unconfirmed)): // said while they are still signed in (walkthrough Q6) ?>
+<section class="sms-taken">
+	<p><?php echo $email_unconfirmed; ?></p>
+	<?php echo PublicPage::action_button('Send the link again', '/profile/server_manager', array(
+		'hidden' => array('action' => 'resend_confirmation'),
+		'class'  => 'btn btn-secondary',
+	)); ?>
+</section>
+<?php endif; ?>
 
 <?php if ($error): ?>
 	<p class="sms-error"><?php echo htmlspecialchars($error); ?></p>
@@ -101,7 +132,12 @@ echo '<div class="jy-ui">';
 		<?php if ($site['pre_payment']): ?>
 		<dl class="sms-facts">
 			<dt>Setup</dt>
-			<dd><?php echo htmlspecialchars($status_labels[$site['status']] ?? $site['status']); ?></dd>
+			<dd><?php
+				// Saved and priced is not "in your cart" until it is: the cart may be empty.
+				$setup_label = ($site['status'] === 'pending_payment' && !$site['in_cart'])
+					? 'Ready to pay. Nothing has been charged'
+					: ($status_labels[$site['status']] ?? $site['status']);
+				echo htmlspecialchars($setup_label); ?></dd>
 			<dt>Site</dt>
 			<dd><?php echo htmlspecialchars($site['summary']); ?></dd>
 		</dl>
@@ -118,7 +154,7 @@ echo '<div class="jy-ui">';
 			<?php endif; ?>
 			<?php echo PublicPage::action_button('Edit', '/profile/server_manager', array(
 				'hidden'  => array('action' => 'edit_draft', 'cvp_customer_cloud_provision_id' => (int)$site['id']),
-				'confirm' => ($site['status'] === 'pending_payment')
+				'confirm' => $site['in_cart']
 					? 'This removes the site from your cart; you will continue to payment again when you are done.'
 					: 'Continue editing this site setup?',
 				'class'   => 'btn btn-secondary',
@@ -141,13 +177,18 @@ echo '<div class="jy-ui">';
 			<?php if ($site['own_linode']): ?>
 			<dt>Server</dt>
 			<dd>In your own Linode account. Linode bills you for it.</dd>
-			<dt>Email and backups</dt>
-			<dd><?php echo $site['with_services'] ? 'Through us, with your subscription.'
-				: 'Not included. Your site\'s setup offers ours, or set up your own mail provider.'; ?></dd>
+			<dt><?php echo htmlspecialchars(ManagedSiteDraft::BUNDLE_NAME); ?></dt>
+			<dd><?php echo $site['with_services'] ? 'Included: email and backups through us, with your subscription.'
+				: 'Not included. Your site\'s setup offers our email and backups, or set up your own.'; ?></dd>
 			<?php endif; ?>
-			<?php if ($site['show_mail'] && $site['mail_state'] !== ''): ?>
+			<?php if ($site['show_mail'] && $site['mail_state'] !== '' && !$site['needs_connect']): ?>
 			<dt>Email</dt>
-			<dd><?php echo htmlspecialchars($mail_labels[$site['mail_state']] ?? $site['mail_state']); ?></dd>
+			<dd><?php
+				// Waiting on records only the buyer can add is said as that, not as work we are doing.
+				$mail_label = ($site['mail_state'] === 'records_published' && !empty($site['mail_records']))
+					? 'Waiting for the email records below'
+					: ($mail_labels[$site['mail_state']] ?? $site['mail_state']);
+				echo htmlspecialchars($mail_label); ?></dd>
 			<?php endif; ?>
 			<?php if ($site['suspended'] !== null): ?>
 			<dt>Suspended</dt>
@@ -162,6 +203,20 @@ echo '<div class="jy-ui">';
 			<dd><?php echo htmlspecialchars($site['licence_line']); ?></dd>
 			<?php endif; ?>
 		</dl>
+
+		<?php if ($site['needs_connect']): // the one thing this site waits on, said on its own card ?>
+		<section class="sms-connect">
+			<?php if ($site['connect_refused']): ?>
+			<p class="sms-error">Linode did not accept the last connection, so nothing was created in your account.
+				Connect again to continue.</p>
+			<?php endif; ?>
+			<p><strong>This site is not being built yet.</strong> It runs on a server in your own Linode account,
+				billed to you by Linode with no markup from us, and we cannot create that server until you connect
+				the account. We ask only for permission to create servers. The site is ready <?php echo SmHosting::BUILD_TIME; ?>
+				after you connect.</p>
+			<p><a href="/profile/server_manager/connect_cloud" class="btn btn-primary">Connect your Linode account</a></p>
+		</section>
+		<?php endif; ?>
 
 		<?php
 		// Where the domain's DNS host has a driver, the records below can be
@@ -178,6 +233,14 @@ echo '<div class="jy-ui">';
 		}
 		?>
 
+		<?php if ($site['dns_pending']): ?>
+		<section class="sms-dns">
+			<h3>Your domain's DNS records</h3>
+			<p>Your site needs a few records added where your domain is registered. We list every one here, all at
+				once, a few minutes after your site is built, and nothing needs adding before then.</p>
+		</section>
+		<?php endif; ?>
+
 		<?php if ($site['dns_record'] !== null): ?>
 		<section class="sms-dns">
 			<h3>Point your domain at your site</h3>
@@ -185,7 +248,7 @@ echo '<div class="jy-ui">';
 				is registered:</p>
 			<dl class="sms-facts">
 				<dt>Type</dt><dd><?php echo htmlspecialchars($site['dns_record']['type']); ?></dd>
-				<dt>Name</dt><dd><code><?php echo htmlspecialchars($site['domain']); ?></code> (often written as <code>@</code>)</dd>
+				<dt>Name</dt><dd><code><?php echo htmlspecialchars($site['domain']); ?></code> (<?php echo $sms_short_name($site['domain']); ?>)</dd>
 				<dt>Value</dt><dd><code><?php echo htmlspecialchars($site['dns_record']['value']); ?></code></dd>
 			</dl>
 			<p class="sms-note">It usually takes effect within a few minutes to a few hours. The certificate follows
@@ -195,10 +258,11 @@ echo '<div class="jy-ui">';
 
 		<?php if ($site['mail_records']): ?>
 		<section class="sms-dns">
-			<h3>Add your email records</h3>
+			<h3>Add your email and messaging records</h3>
 			<p>Add <?php echo count($site['mail_records']) === 1 ? 'this record' : 'these records'; ?> where your domain
-				is registered. Until they are in place, email your site sends is more likely to land in spam, and
-				email sent to your domain may not reach your site.</p>
+				is registered, in the same visit. Until they are in place, email your site sends is more likely to land
+				in spam, email sent to your domain may not reach your site, and other Joinery sites cannot reach
+				yours directly.</p>
 			<?php foreach ($site['mail_records'] as $record): ?>
 			<dl class="sms-facts">
 				<dt>Type</dt><dd><?php echo htmlspecialchars($record['type']); ?></dd>
@@ -234,7 +298,7 @@ echo '<div class="jy-ui">';
 				reach your site directly.</p>
 			<dl class="sms-facts">
 				<dt>Type</dt><dd><?php echo htmlspecialchars($v6['type']); ?></dd>
-				<dt>Name</dt><dd><code><?php echo htmlspecialchars($site['domain']); ?></code> (often written as <code>@</code>)</dd>
+				<dt>Name</dt><dd><code><?php echo htmlspecialchars($site['domain']); ?></code> (<?php echo $sms_short_name($site['domain']); ?>)</dd>
 				<dt>Value</dt><dd><code><?php echo htmlspecialchars($v6['value']); ?></code></dd>
 			</dl>
 		</section>
@@ -284,15 +348,21 @@ echo '<div class="jy-ui">';
 		<?php endif; ?>
 
 		<?php if ($site['transfer'] !== null): $t = $site['transfer']; ?>
-		<section class="sms-move" data-provision="<?php echo (int)$site['id']; ?>">
-			<h3>Move to your own Linode account</h3>
+		<section class="sms-move<?php echo $t['state'] === '' ? ' sms-move-quiet' : ''; ?>" data-provision="<?php echo (int)$site['id']; ?>">
 			<?php if ($t['state'] === ''): ?>
+				<details class="sms-move-offer">
+				<summary>Move this site to your own Linode account</summary>
 				<p>Your site runs on its own server in our Linode account. It can move into a Linode account of your
 					own — running, with the same address, nothing copied or rebuilt. Linode then bills you for the
 					server, and we stop billing you for hosting. Your outgoing email and backups keep working through us.
 					Email sent to your domain stops reaching your site when the move finishes: set up receiving of your
 					own before then.</p>
 				<button type="button" class="btn btn-secondary" data-do="request">Move to my own Linode account</button>
+				</details>
+			<?php else: ?>
+			<h3>Move to your own Linode account</h3>
+			<?php endif; ?>
+			<?php if ($t['state'] === ''): ?>
 			<?php elseif ($t['state'] === 'requested'): ?>
 				<p><strong><?php echo htmlspecialchars($t['state_label']); ?>.</strong> We check your server first and
 					email you the next step.</p>
@@ -361,18 +431,11 @@ echo '<div class="jy-ui">';
 $chat_on = class_exists('SupportWidget') && SupportWidget::enabled();
 if ($chat_on || $support_email !== ''): ?>
 	<p class="sms-note">Questions?
-		<?php if ($chat_on): ?><a href="/support_desk/ask">Ask us</a><?php echo $support_email !== '' ? ', or write to ' : ''; else: ?>Write to <?php endif; ?>
+		<?php if ($chat_on): ?><a href="/support_desk/ask?from=<?php echo urlencode(count($sites) === 1 ? SmHosting::support_route((int)array_values($sites)[0]['id']) : '/profile/server_manager'); ?>">Ask us</a><?php echo $support_email !== '' ? ', or write to ' : ''; else: ?>Write to <?php endif; ?>
 		<?php if ($support_email !== ''): ?><a href="mailto:<?php echo htmlspecialchars($support_email); ?>"><?php echo htmlspecialchars($support_email); ?></a><?php endif; ?>.</p>
 <?php endif; ?>
 
-<?php if ($needs_connect): ?>
-<section class="sms-connect">
-	<h2>Connect your cloud account</h2>
-	<p>One of your sites runs on a server in your own cloud account, billed directly to you with no
-		markup from us. It cannot be created until you connect that account.</p>
-	<p><a href="/profile/server_manager/connect_cloud" class="btn btn-primary">Connect your account</a></p>
-</section>
-<?php elseif ($account_connected): ?>
+<?php if (!$needs_connect && $account_connected): ?>
 	<p class="sms-note">Your cloud account is connected.
 		<a href="/profile/server_manager/connect_cloud">Manage the connection</a></p>
 <?php endif; ?>
@@ -380,7 +443,7 @@ if ($chat_on || $support_email !== ''): ?>
 <style>
 .sms-error { padding: 12px 16px; background: var(--jy-color-danger-bg); border-radius: 4px; }
 .sms-reveal { padding: 16px; margin: 1em 0 1.5em; background: var(--jy-color-warning-bg); border: 1px solid var(--jy-color-warning); border-radius: 6px; }
-.sms-password code { font-size: 1.4em; letter-spacing: .05em; background: var(--jy-color-bg); padding: 8px 14px;
+.sms-password code { max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; font-size: 1.4em; letter-spacing: .05em; background: var(--jy-color-bg); padding: 8px 14px;
 	border: 1px solid var(--jy-color-border); border-radius: 4px; display: inline-block; }
 .sms-site { padding: 16px 0; border-bottom: 1px solid var(--jy-color-border); }
 .sms-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: .5em 0 1em; }
@@ -388,10 +451,13 @@ if ($chat_on || $support_email !== ''): ?>
 .sms-facts dd { margin: 0; }
 .sms-links { font-size: .95em; }
 .sms-note { color: var(--jy-color-text-muted); font-size: .9em; }
-.sms-connect { margin-top: 2em; }
+.sms-connect { padding: 12px 16px; margin: 1em 0; background: var(--jy-color-warning-bg); border: 1px solid var(--jy-color-warning); border-radius: 6px; }
 .sms-actions form, .sms-pay { display: inline-block; margin-right: .5em; }
 .sms-actions .btn { margin-right: .5em; }
 .sms-move { padding: 12px 16px; margin: 1em 0; background: var(--jy-color-surface); border: 1px solid var(--jy-color-border); border-radius: 6px; }
+.sms-move-quiet { padding: 0; background: none; border: 0; }
+.sms-move-offer summary { cursor: pointer; color: var(--jy-color-text-muted, inherit); font-size: .95em; }
+.sms-move-offer[open] summary { margin-bottom: .5em; }
 .sms-move h3 { margin: 0 0 .5em; font-size: 1.05em; }
 .sms-steps { margin: .5em 0 1em; padding-left: 1.4em; }
 .sms-code code { font-size: 1.1em; background: var(--jy-color-bg); padding: 6px 10px; border: 1px solid var(--jy-color-border);

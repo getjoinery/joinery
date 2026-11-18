@@ -36,6 +36,17 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.31 - Backups is done once the recovery key exists on a site its management node backs up (walkthrough 43, 52, 57)
+ * @version 1.30
+ * @changelog 1.30 - the Backups step treats a site as backed up by its management node only when that node keeps
+ *   backups for it (ManagementNodeStatus::backs_up_this_site)
+ * @version 1.29
+ * @changelog 1.29 - the Email step on a hosted site whose included email is still being set up asks for no
+ *   provider (HostedPlanNotice::includedMailPending; finding 46)
+ * @version 1.28
+ * @changelog 1.28 - the interrupt takes only a page view (GET or HEAD): a form being sent goes through, so a
+ *   buyer's "Continue to payment" is never swallowed with nothing in the cart; a quiet path ending in /* names
+ *   every page under it (specs/hosting_purchase_walkthrough_test.md, finding 20)
  * @version 1.27
  * @changelog 1.27 - interruptExempt() loads plugin bootstraps before reading quiet pages: on a real request
  *                  nothing had loaded them yet, so a purchase page was still interrupted
@@ -122,6 +133,8 @@ class SetupSteps {
 
 	/** @var array<string, true> paths the login interrupt leaves alone (quietOn) */
 	private static $quiet_paths = array();
+	/** Quiet path prefixes, each ending in a slash: named with a trailing /* (quietOn). */
+	private static $quiet_prefixes = array();
 	const PILL_TTL = 300;
 
 	/** @var array<string,array> keyed by step key */
@@ -327,9 +340,14 @@ class SetupSteps {
 	 * A plugin names a page the login interrupt leaves alone: a purchase under
 	 * way (the cart, the checkout, the hosting configure page). Someone who
 	 * signed up to buy something pays first; the wizard waits for the next page
-	 * that is not one of these. Called from a plugin bootstrap; exact paths.
+	 * that is not one of these. Called from a plugin bootstrap. A path is exact;
+	 * one ending in /* names every page under it (and not the page above it).
 	 */
 	public static function quietOn(string $path): void {
+		if (substr($path, -2) === '/*') {
+			self::$quiet_prefixes[substr($path, 0, -1)] = true;
+			return;
+		}
 		self::$quiet_paths[$path] = true;
 	}
 
@@ -341,6 +359,11 @@ class SetupSteps {
 		self::ensurePluginSteps();
 		if (isset(self::$quiet_paths[$path])) {
 			return true;
+		}
+		foreach (self::$quiet_prefixes as $prefix => $on) {
+			if (strpos($path, $prefix) === 0) {
+				return true;
+			}
 		}
 		if ($path === '/setup' || $path === '/logout' || $path === '/profile/security' || $path === '/profile/verify-stepup') {
 			return true;
@@ -405,8 +428,21 @@ class SetupSteps {
 		$user->set('usr_setup_seen_steps', json_encode(array_map(function ($s) { return $s['key']; }, self::steps())));
 	}
 
+	/** Whether this request is a page being opened (GET or HEAD), not a form being sent. */
+	public static function isPageView(?string $method = null): bool {
+		$method = strtoupper((string)($method ?? ($_SERVER['REQUEST_METHOD'] ?? 'GET')));
+		return $method === 'GET' || $method === 'HEAD';
+	}
+
 	public static function shouldInterrupt(): bool {
 		if (PHP_SAPI === 'cli') {
+			return false;
+		}
+		// Only a page view is taken to the wizard. A form being sent goes
+		// through: redirecting it would throw away what the person just did
+		// (a site put in the cart, a setting saved), and the wizard still
+		// meets them on the next page they open.
+		if (!self::isPageView()) {
 			return false;
 		}
 		if (!empty($_SESSION[self::SESSION_CLEAR])) {
@@ -823,6 +859,11 @@ class SetupSteps {
 			// only owes the delivery proof — it must not ask for keys it has.
 			'copy'  => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+				// A hosted site's email comes with the hosting: while it is
+				// still being set up the panel says so, and asks for nothing.
+				if (HostedPlanNotice::includedMailPending()) {
+					return '';
+				}
 				if (EmailSender::transactionalSendBlocker() !== null || EmailSender::detectServiceType() === 'none') {
 					$line = "Your site needs a way to send mail. We recommend SMTP2GO, because the free plan sends 1,000 messages a month.";
 					if (class_exists('InboundEmailAlias')) {
@@ -905,7 +946,7 @@ class SetupSteps {
 			// there the key comes early rather than near the end: right after the
 			// secure connection (5), which the in-browser key generation needs.
 			'order' => function (): int {
-				return ManagementNodeStatus::is_managed() ? 6 : 80;
+				return ManagementNodeStatus::backs_up_this_site() ? 6 : 80;
 			},
 			// A site backed up by its management node owes nothing here — the
 			// proof is the manager-profile history rows every fleet run writes
@@ -915,7 +956,7 @@ class SetupSteps {
 				if (BackupHistory::manager_coverage() !== null) {
 					return 'This site is already backed up: the management node that manages this server takes regular archives, sealed to the recovery key you hold. Nothing here needs your attention unless you also want backups this site runs itself.';
 				}
-				if (ManagementNodeStatus::is_managed()) {
+				if (ManagementNodeStatus::backs_up_this_site()) {
 					return 'The management node that manages this server stores this site\'s backups, and none can run until you create the recovery key that encrypts them. Only you hold it: not even the management node can open them without it.';
 				}
 				return 'Everything here should survive this server dying. Store backups with getjoinery, or in a storage bucket of your own, and create the recovery key that encrypts them to turn on nightly backups.';
@@ -940,6 +981,13 @@ class SetupSteps {
 				// history rows the fleet run writes, not from any message.
 				require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 				if (BackupHistory::manager_coverage() !== null) {
+					return SetupSteps::STATUS_GREEN;
+				}
+				// Where the management node stores the backups, the recovery
+				// key is the owner's whole part: the step is done when it
+				// exists, not when the first nightly run has landed. A run
+				// that then fails is the backups page's and an incident's to say.
+				if ($key_ok && ManagementNodeStatus::backs_up_this_site()) {
 					return SetupSteps::STATUS_GREEN;
 				}
 				return ($target_ok || $key_ok || $task_ok) ? SetupSteps::STATUS_AMBER : SetupSteps::STATUS_NONE;

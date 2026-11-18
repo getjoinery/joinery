@@ -4,6 +4,9 @@ require_once(PathHelper::getIncludePath('includes/Pager.php'));
 
 class PublicPage extends PublicPageBase {
 
+    /** @var string '' for the full layout, else the bare one this page asked for (header_only, noheader). */
+    protected $_bare = '';
+
     protected function getTableClasses() {
         return [
             'wrapper' => 'table-wrapper',
@@ -98,6 +101,20 @@ class PublicPage extends PublicPageBase {
 </head>
 <body>
 
+<?php
+    // Two bare layouts, as in the default theme. header_only: the page draws
+    // everything itself (sign-in, the start of a purchase). noheader: a
+    // purchase under way (site setup, cart, checkout, confirmation) shows the
+    // logo and nothing to wander off to.
+    $this->_bare = !empty($options['header_only']) ? 'header_only' : (!empty($options['noheader']) ? 'noheader' : '');
+    if ($this->_bare === 'header_only') { return; }
+    if ($this->_bare === 'noheader') {
+        if ($this->show_site_chrome()) {
+            echo '<nav class="site-nav site-nav--bare"><div class="container"><a href="/" class="nav-logo">Joinery</a></div></nav>';
+        }
+        return;
+    }
+?>
 <?php if ($this->show_site_chrome()): ?>
 <?php
     // Member/account chrome, all sourced from get_menu_data() so the member
@@ -230,7 +247,7 @@ class PublicPage extends PublicPageBase {
         ];
     ?>
 
-<?php if ($this->show_site_chrome()): ?>
+<?php if ($this->show_site_chrome() && $this->_bare === ''): ?>
 <footer class="site-footer">
     <div class="container">
         <div class="footer-links">

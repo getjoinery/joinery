@@ -21,6 +21,9 @@
  * Idempotent: a row the node already has is left alone, and the backup space
  * is opened only when the node has none.
  *
+ * @version 1.3 - a bundle site is told its email and backups are being set up as soon as its node works (walkthrough Q4)
+ * @version 1.2 - the grant is kept until the server's agents have been admitted (joins_owed): admitting them asks Linode
+ *                with it, and a grant let go at 'done' left every own-Linode site unmanaged, its bundle never set up
  * @version 1.1 - reviewer2: the grant is let go once per site, only the build-only one, and not while a failed
  *                build may retry (B1); a failed mail leg still links the backups row and is reported (B3); the
  *                rows' date asks whether the bundle line still pays (B4); the mail row is left to verify (B5)
@@ -85,6 +88,16 @@ class ProvisionOwnLinode {
 		}
 		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
 		$account = $account_id > 0 ? new CustomerCloudAccount($account_id, TRUE) : null;
+		// The build is not over at 'done': the server's agents still have to
+		// be admitted, and admitting them asks Linode, with this grant, whether
+		// the server is really running at the address that asked
+		// (JoinAutoApproval check 4). Let go before that and the agents wait
+		// for ever: no management, and no email or backups for a site that
+		// paid for them. A grant already dead is not worth waiting on.
+		if (self::joins_owed($provision) && $account !== null && $account->key
+				&& trim((string)$account->get('cca_access_token')) !== '' && !CustomerCloudAccount::grant_expired($account)) {
+			return 0;
+		}
 		if ($account !== null && $account->key && trim((string)$account->get('cca_access_token')) !== ''
 				&& $account->is_build_only_grant()) {
 			$account->clear_grant();
@@ -92,6 +105,18 @@ class ProvisionOwnLinode {
 		$provision->set('cvp_grant_released_time', gmdate('Y-m-d H:i:s'));
 		$provision->save();
 		return 1;
+	}
+
+	/**
+	 * Whether this site's install showed agents' keys whose joins have not
+	 * been approved yet. The install records the keys it printed
+	 * (cvp_expected_site_key, cvp_expected_host_key) and an approval spends
+	 * each one, so a key still on the row is an agent still waiting to be let
+	 * in. A site whose install recorded none is not waited on.
+	 */
+	public static function joins_owed(CustomerCloudProvision $provision): bool {
+		return trim((string)$provision->get('cvp_expected_site_key')) !== ''
+			|| trim((string)$provision->get('cvp_expected_host_key')) !== '';
 	}
 
 	/**
@@ -117,7 +142,9 @@ class ProvisionOwnLinode {
 		// pass until a person sees to it.
 		$mail_state = (string)$provision->get('cvp_mail_state');
 		if (!in_array($mail_state, array('done', 'failed'), true)) {
-			return 0;
+			// Still being set up: the site is told so now (a no-op once it
+			// has been), and Your Sites holds Ready until it has.
+			return ServiceTenantWatch::push_node_banner($node) === 'filed' ? 1 : 0;
 		}
 		$link_mail = $mail_state === 'done';
 		if (!$link_mail) {

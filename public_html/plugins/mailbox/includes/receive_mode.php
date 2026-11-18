@@ -105,13 +105,21 @@ function mailbox_receiving_domain_exists(): bool {
 
 /**
  * Whether this site has a mail server of its own (Postfix, rspamd, port 25).
- * A bare-metal server does; a site container does not: its mail arrives
+ * A bare-metal server does unless it was installed without one
+ * (local_mail_server = none); a site container does not: its mail arrives
  * through a relay, which checks it, and every sending provider is an API or
  * an outside server. Read from the installer's record of where the site runs
  * (deployment_environment), the one place that says so.
  */
 function mailbox_site_has_mail_server(): bool {
-	return Globalvars::get_instance()->get_setting('deployment_environment', true, true) !== 'docker';
+	$settings = Globalvars::get_instance();
+	if ($settings->get_setting('deployment_environment', true, true) === 'docker') {
+		return false;
+	}
+	// A bare-metal server installed with none (install.sh --no-mail-server):
+	// the installer records it in the site's config, the one place the mail
+	// installer also reads, so nothing puts a mail server in later.
+	return (string)$settings->get_setting('local_mail_server', true, true) !== 'none';
 }
 
 /**

@@ -589,6 +589,8 @@ An incident **needs you** when it is new, or snoozed and its time has come (`Inc
 | `plane:backup_unverified` | a backup was taken but is not proven whole (suspiciously small, incomplete in storage, verification failed, stale or never done) | warning |
 | `plane:customer_backups` | this node only: a customer of backup storage has had no run finish here for two nights, or no run it reported verified for eight days (`IncidentSourceCustomerBackups`, the rule a site's Backups page applies to itself); one incident names every such customer | warning |
 | `plane:unseal_daemon` | the node's unseal daemon is not holding its vault keys as it should, from the one-word `unseal_daemon` field the agent reports on every poll (agent 1.112.0+, `mgn_agent_unseal_daemon`, `IncidentSourceUnsealDaemon`): `held` (the sentinel's hold is on and no Private vault opens there) is critical; `down` (not running, with no start or stop in the last minute or three crashes in the last ten), `previous` (running the previous build because this release's did not stay up) and `unlocked` (running without locked memory) are warnings. `absent` (the installer has not reached the node; its vault keeps keys in the pool), `running` and `restarting` hold nothing open | warning; critical when held |
+| `plane:agent_not_admitted` | a site this plane built whose agent was never let in: its install ended fifteen minutes ago and no agent has paired. The buyer's page says Ready, but nothing reaches the site (`IncidentSourceAgentNotAdmitted`) | when the site's agent pairs |
+| `plane:buyer_mail_failed` | the newest queued email to a site's buyer that names the site (the ready email) failed for good, within fourteen days (`IncidentSourceBuyerMailFailed`) | when a later one to them is sent |
 | `plane:failed_units` | the latest host report names failed systemd units | warning |
 | `plane:mail_gateway` | a site on the node has mail apps on and the latest host report's `mail_gateway` shows the gateway not running, not greeting on 993 or 465 for that site, restarted three or more times and up under an hour, or a site's certificate under 14 days; a gateway unit systemd has given up on is `plane:failed_units`' alone | critical when mail programs cannot connect or a certificate is under seven days; warning otherwise |
 | `plane:site_code_unverified` | the latest host report shows a site whose `code_check` failed: its code is not what was shipped (each package named in plain words: a file changed, added or missing, not built by Joinery, signed by a key the host does not trust, not in the public log, or a release manifest of another release than the code — `wrong_release`, which a container recreated from an image built on an older release shows, and which an upgrade realigns); or, on a host whose `host_restrictions` refuse unsigned code (or cannot be read), a running site whose check is missing, unreadable or more than two days old. One incident per node, naming every site. It reports only: nothing is turned off (specs/host_restrictions.md D8) | critical for a failed check; warning for a site whose only failure is `wrong_release`, and for a site not checked |
@@ -1084,7 +1086,17 @@ second-factor divert, the bot defences) holds there — shows a refusal in
 place, and lets every success land on the configure page through the
 session's return slot. Every page on the path carries the step strip
 (`ManagedSiteDraft::steps_html()`: 1 Your account, 2 Your site, 3 Payment;
-the summary, whose one button is Continue to payment, is step 3). The
+the summary, whose one button is Continue to payment, is step 3). A buyer
+who confirms their email from the activation link lands on Your Sites, signed
+in when the link is recent (the plugin bootstrap claims anyone with a site or
+a draft through `Activation::registerLanding()`; see
+[Account Security](../../../docs/account_security.md)). The setup page uses
+the bare purchase layout (`noheader`), as the cart, checkout and confirmation
+do. On the confirmation page the site's line says its own case
+(`CustomerCloudFulfillment::after_purchase_message()`): whose server it is
+built on, a registered domain or one of the buyer's with its one DNS step, a
+licence bought with it, a Linode connection still owed, an unconfirmed email.
+The product's fixed message is not used for it. The
 configure page asks for: the domain
 — their own, or one this plane registers for them, with the live availability
 check and price and the registrant contact block — the site's internal name,
@@ -1395,9 +1407,10 @@ Provisions have three origins (`cvp_origin`):
 - **buyer** — created by the buyer on the configure page before paying, and
   activated by the paid order (see **The buyer configures first** above).
   Installs fresh + Docker, and sends the buyer welcome email on completion
-  (the order-item linkage drives it). The welcome email carries the A-record
-  instruction when the buyer brought their own domain (no registration row on
-  the order), and says there is nothing to add when this plane registered it.
+  (the order-item linkage drives it). The welcome email points to the sites page's
+  one DNS list when the buyer brought their own domain (no registration row on
+  the order; see hosted_tier.md, *Buyer DNS*), and says there is nothing to add
+  when this plane registered it.
 - **order** — created by the Orders poll from a shared-store order. Starts at
   `pending_connect`, installs fresh + Docker, and sends the buyer welcome
   email on completion.

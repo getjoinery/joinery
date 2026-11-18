@@ -668,7 +668,7 @@ function admin_mailbox_relay_check_rows(): array {
 			return array(
 				'receiving' => $row('relay.receiving', 'Relay', InboundEmailSetupCheck::FAIL,
 					'No relay is enabled, so no mail reaches this site.',
-					'This site runs in a container and has no mail server of its own. A relay takes its mail '
+					'This site has no mail server of its own. A relay takes its mail '
 					. 'in on a separate server and checks it, and this site collects it from there.', $setup_link),
 			);
 		}

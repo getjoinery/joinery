@@ -30,6 +30,37 @@ class ManagementNodeStatus {
 		return is_array($state) && (($state['status'] ?? '') === 'connected');
 	}
 
+	/**
+	 * Does this site's management node take its backups? A managed site's
+	 * usually does. One installed with manager_backups = none has no backup
+	 * storage there (a site on its buyer's own cloud account, bought without
+	 * backups), so its pages offer the owner the ordinary choice of where
+	 * backups go. The installer's word is overtaken by evidence: a manager
+	 * run that has landed here, or a backups service the site now rents.
+	 */
+	public static function backs_up_this_site(): bool {
+		if (!self::is_managed()) {
+			return false;
+		}
+		if ((string)Globalvars::get_instance()->get_setting('manager_backups', false, true) !== 'none') {
+			return true;
+		}
+		try {
+			require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+			if (BackupHistory::manager_coverage() !== null) {
+				return true;
+			}
+		} catch (\Throwable $e) {
+			// No history to read is no evidence.
+		}
+		foreach (HostedPlanNotice::allowances() as $row) {
+			if ((string)($row['service'] ?? '') === 'shelf') {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/** The managing node's URL, or '' when this machine is not managed. */
 	public static function manager_url(): string {
 		$state = self::join_state();

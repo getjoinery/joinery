@@ -85,6 +85,15 @@ try {
 
 	section('a site container has no mail server of its own');
 
+	// A bare-metal server has one, unless it was installed without (install.sh --no-mail-server).
+	harness_set_setting_mem('deployment_environment', 'baremetal');
+	harness_set_setting_mem('local_mail_server', '');
+	check(mailbox_site_has_mail_server() === true, 'bare metal => its own mail server');
+	harness_set_setting_mem('local_mail_server', 'none');
+	check(mailbox_site_has_mail_server() === false, 'bare metal installed with none (local_mail_server none) => no mail server');
+	check(mailbox_needs_relay() === mailbox_receives_by_smtp(), 'and only a relay can take its mail in, as for a container');
+	harness_set_setting_mem('local_mail_server', '');
+
 	harness_set_setting_mem('deployment_environment', 'docker');
 	check(mailbox_site_has_mail_server() === false, 'deployment_environment docker => no mail server');
 	check(mailbox_receive_mode() === 'relay', 'the live receive mode is relay');
@@ -224,8 +233,8 @@ try {
 	foreach (array('listener_decommission', 'listener_restore') as $action) {
 		$res = mailbox_listener_actions(array('action' => $action), null, '/admin/x');
 		check($res instanceof LogicResult, $action . ' answers with a redirect');
-		check(strpos((string)($_SESSION['mailbox_relay_notice']['message'] ?? ''), 'container') !== false,
-			$action . ' says the container has no mail server');
+		check(strpos((string)($_SESSION['mailbox_relay_notice']['message'] ?? ''), 'no mail server of its own') !== false,
+			$action . ' says the site has no mail server of its own');
 	}
 
 	section('the provisioning check asks for a relay, not port 25');

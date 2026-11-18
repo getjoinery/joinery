@@ -523,6 +523,8 @@ structurally cannot open the vault. Every reset is a **credential event**: on
 completion it ends every open window everywhere (`lockAll()`) and alerts the
 account — so even a hostile reset lands the attacker in a re-locked vault.
 
+**Sign-ups are their own switch.** `register_active` (factory off) decides one thing: whether a stranger may register. Resetting a password, by any of its routes, and setting a first password on an account an admin made work either way, so a site that takes no sign-ups still lets its members back in. The register link on the welcome and sign-in pages follows the switch.
+
 **Activation is a button.** Opening the activation link verifies nothing:
 `/login?act_code=` (the link the activation email carries) and
 `/profile?act_code=` send the code to `/verify-email`, which shows a "Verify my
@@ -531,6 +533,16 @@ email" button. The button's POST verifies the address and fires
 incoming mail, so a link that verified on a page view would verify, and confirm
 whatever verifying confirms, without the person. Pinned by
 `tests/account_security/activation_button_test.php`.
+
+**The button signs in, for a short while and once.** A signed-out member who
+presses the button on a link mailed within `Activation::SIGN_IN_MINUTES` is
+signed in by it. The code is spent as it does so, so the email is a sign-in
+once; the account's IP restriction applies, and an account that holds a second
+factor on the `every_login` cadence goes to `/verify-totp` first. A link older
+than that verifies and asks for a sign-in. Either way the member lands where
+they belong: a plugin claims its own members with
+`Activation::registerLanding(fn(User): string)` from its bootstrap (a local
+path, or `''`), and a member nobody claims lands where a sign-in does.
 
 **A code is spent once, everywhere.** An activation or reset code is a bearer
 token: for as long as it resolves, it *is* the account. Consuming one

@@ -2,6 +2,8 @@
 /**
  * _write_site_config.php - Fill default_Globalvars_site.php for one site.
  *
+ * VERSION: 1.1 - JOINERY_CFG_LOCAL_MAIL_SERVER fills local_mail_server ('' or none): a server installed with no
+ *                mail server of its own says so in its config, where the mail installer reads it
  * VERSION: 1.0
  *
  * Usage (internal, called by _site_init.sh):
@@ -59,6 +61,13 @@ $domain     = $env('JOINERY_CFG_DOMAIN');
 $deploy_env = $env('JOINERY_CFG_DEPLOY_ENV');
 $password   = $env('JOINERY_CFG_PASSWORD');
 $secret_key = $env('JOINERY_CFG_SECRET_BOX_KEY');
+// Optional, and one of two words: '' (a bare-metal server has its own mail
+// server) or 'none' (install.sh --no-mail-server).
+$local_mail = $env('JOINERY_CFG_LOCAL_MAIL_SERVER');
+if ($local_mail !== '' && $local_mail !== 'none') {
+    fwrite(STDERR, "JOINERY_CFG_LOCAL_MAIL_SERVER is '{$local_mail}': empty or none\n");
+    exit(1);
+}
 
 foreach (['JOINERY_CFG_SITENAME' => $sitename, 'JOINERY_CFG_DOMAIN' => $domain,
           'JOINERY_CFG_DEPLOY_ENV' => $deploy_env, 'JOINERY_CFG_PASSWORD' => $password,
@@ -97,8 +106,8 @@ if (strpos($src, "'{{SECRET_BOX_KEY}}'") === false) {
 }
 
 $out = str_replace(
-    ['{{SITE_NAME}}', '{{DOMAIN_NAME}}', '{{DEPLOYMENT_ENVIRONMENT}}', "'{{SECRET_BOX_KEY}}'", $password_line],
-    [$sitename, $domain, $deploy_env, var_export($secret_key, true),
+    ['{{SITE_NAME}}', '{{DOMAIN_NAME}}', '{{DEPLOYMENT_ENVIRONMENT}}', '{{LOCAL_MAIL_SERVER}}', "'{{SECRET_BOX_KEY}}'", $password_line],
+    [$sitename, $domain, $deploy_env, $local_mail, var_export($secret_key, true),
      "\$this->settings['dbpassword'] = " . var_export($password, true) . ';'],
     $src
 );

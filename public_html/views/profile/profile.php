@@ -25,8 +25,11 @@ function dashboard_relative_time($utc_time_string, $session) {
 	if (!$utc_time_string) return '';
 	$local_time = LibraryFunctions::convert_time($utc_time_string, 'UTC', $session->get_timezone(), 'Y-m-d H:i:s');
 	$ts = strtotime($local_time);
+	// How long ago is measured between two instants. The local wall-clock
+	// reading is for showing a date; subtracting it from now is off by the
+	// viewer's distance from UTC ("5h ago" for a minute-old notice).
 	$now = time();
-	$diff = $now - $ts;
+	$diff = max(0, $now - strtotime($utc_time_string . ' UTC'));
 	if ($diff < 60) return 'Just now';
 	if ($diff < 3600) return floor($diff / 60) . 'm ago';
 	if ($diff < 86400) return floor($diff / 3600) . 'h ago';

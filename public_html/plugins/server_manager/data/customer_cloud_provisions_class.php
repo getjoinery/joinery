@@ -42,6 +42,8 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.45 - cvp_site_dns_records, cvp_site_dns_time: the buyer's DNS list is held until it is whole (walkthrough Q16)
+ * @version 1.44 - cvp_no_mail_server: a bare-metal site built with no mail server, receiving through the relay fleet
  * @version 1.43 - cvp_mail_retry_time: Retry email setup gives the settings push a fresh allowance (hosting_after_purchase B19);
  *                cvp_license_choice and cvp_own_ownership_id: the business licence a site was bought under (WP7)
  * @version 1.42 - cvp_freeze_token: the freeze a cart line names, apart from the row's update time (hosting_after_purchase B13)
@@ -132,7 +134,7 @@ class CustomerCloudProvision extends SystemBase {
 	public static $access_class = 'config';
 	public static $pkey_column = 'cvp_customer_cloud_provision_id';
 
-	public static $json_vars = array('cvp_mail_records');
+	public static $json_vars = array('cvp_mail_records', 'cvp_site_dns_records');
 
 	// A kept install password (beta_break_glass_root_access 3.3), sealed to the
 	// holder's vault. Nothing reads provisions field by field through
@@ -230,6 +232,10 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_starter_host'           => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'cvp_docker_mode'            => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'docker', 'allowed_values'=>array('docker', 'bare-metal')),
 		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy', 'adopted')),
+		// A bare-metal site built with no mail server of its own (install.sh
+		// --no-mail-server): it receives through the relay fleet, as a
+		// container site does. Decided when the site is bought (Managed).
+		'cvp_no_mail_server'         => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'cvp_source_node_id'         => array('type'=>'int8'),
 		// A copy's install: the release it is installed at, its source's exact
 		// release (vendor/ never travels in a backup). Empty for every other mode.
@@ -324,6 +330,11 @@ class CustomerCloudProvision extends SystemBase {
 		// instead of pretending the domain is set up.
 		'cvp_mail_records'           => array('type'=>'jsonb'),
 		'cvp_mail_error'             => array('type'=>'text'),
+		// What the built site said its buyer's own domain needs (Joinery Direct
+		// among it), and when the buyer's whole DNS list could first be shown
+		// (ProvisionBuyerDns). Null on a name we registered: we publish those.
+		'cvp_site_dns_records'       => array('type'=>'jsonb'),
+		'cvp_site_dns_time'          => array('type'=>'timestamp(6)'),
 		// The buyer-origin draft (specs/managed_hosting_phase1_purchase.md §5.1).
 		// own: the buyer brings a name they hold; the welcome email carries the
 		// A-record instruction. register: this plane buys the name for them

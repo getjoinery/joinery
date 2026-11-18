@@ -150,7 +150,21 @@ person, at most one an hour for a thread.
 `/support_desk/ask`, when `support_desk_widget_enabled` is on. A visitor's
 conversation lives in their browser session; the first question passes the
 platform captcha when one is configured. It reads the newest indexed release
-and the public pages, has no handoff and no reads, and cannot be replied to.
+and the public pages and reads no site. A guest's conversation has no handoff
+and cannot be replied to.
+
+A signed-in member's conversation is theirs: it opens wherever they are signed
+in, they can hand it to a person (**Talk to a person**), and the reply comes
+back there and by email. The assistant and the waiting-thread email are told
+what this node records about that member. A plugin supplies it from its
+bootstrap with `SupportWidget::registerMemberFacts(fn(int $user_id, string
+$route): string[])`, one plain line each; the hosting plugin lists the
+member's sites and each one's state (`SmHosting::support_lines()`). The lines
+reach the model inside the untrusted envelope, and are recorded facts only:
+nothing is read from a site. A link to the page may carry where the member
+came from (`/support_desk/ask?from=/local/path`); a new conversation keeps it
+as `sth_route`, the provider can mark the matching site, and the admin thread
+page shows it as **Asked from**.
 
 ## Keeping threads
 

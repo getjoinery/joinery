@@ -190,7 +190,10 @@ public function get_requirement_info($output='text') {
 
 	function get_requirement_instances($deleted=false){
 		if (!$this->key) {
-			return new MultiProductRequirementInstance([], NULL, NULL, NULL);
+			// A product not saved yet has none. An unfiltered collection is
+			// every product's instances, which ticked them all on a new
+			// product's form; product 0 matches nothing.
+			return new MultiProductRequirementInstance(array('product_id' => 0), NULL, NULL, NULL);
 		}
 		if(!$deleted){
 			$pri_lists = new MultiProductRequirementInstance(

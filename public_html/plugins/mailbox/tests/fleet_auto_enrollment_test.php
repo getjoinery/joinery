@@ -296,6 +296,12 @@ check(!FleetService::site_plan_grants_slot($managed), 'nor once it moved to its 
 $managed->set('cvp_hosting_mode', 'operator');
 $managed->set('cvp_docker_mode', 'bare-metal');
 check(!FleetService::site_plan_grants_slot($managed), 'nor a site installed on the machine itself, which runs its own mail server');
+$managed->set('cvp_no_mail_server', true);
+check(FleetService::site_plan_grants_slot($managed), 'a site installed on the machine itself with no mail server of its own is granted one: the relay is how it receives');
+$managed->set('cvp_hosting_mode', 'customer');
+check(!FleetService::site_plan_grants_slot($managed), 'but not on its buyer\'s own cloud account');
+$managed->set('cvp_hosting_mode', 'operator');
+$managed->set('cvp_no_mail_server', false);
 $managed->set('cvp_docker_mode', 'docker');
 $managed->set('cvp_install_mode', 'bare');
 check(!FleetService::site_plan_grants_slot($managed), 'nor a bare instance with no site');

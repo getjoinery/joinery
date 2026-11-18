@@ -517,6 +517,70 @@ check(strpos($ud->cleared_text($node), 'restarting') !== false, 'The clear says 
 $set(array('mgn_agent_unseal_daemon' => null, 'mgn_agent_public_key' => null));
 
 // ---------------------------------------------------------------------------
+section('A built site whose agent was never let in; an email to its buyer that failed for good');
+
+$na = new IncidentSourceAgentNotAdmitted();
+$bm = new IncidentSourceBuyerMailFailed();
+$set(array('mgn_agent_public_key' => null));
+check($na->evaluate($node) === null && $bm->evaluate($node) === null, 'A node no order built: nothing from either');
+$ia_run = bin2hex(random_bytes(4));
+$ia_row = new CustomerCloudProvision(NULL);
+$ia_row->set('cvp_origin', 'admin');
+$ia_row->set('cvp_usr_user_id', (int)make_user('IaBuyer' . $ia_run)->key);
+$ia_row->set('cvp_domain', 'ia-' . $ia_run . '.example');
+$ia_row->set('cvp_slug', 'ia-' . $ia_run . '-example');
+$ia_row->set('cvp_status', 'done');
+$ia_row->set('cvp_buyer_email', 'ia-' . $ia_run . '@example.com');
+$ia_row->set('cvp_mgn_managed_node_id', (int)$node->key);
+$ia_row->save();
+$ia_row->load();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $ia_row->key);
+$ia_job = new ManagementJob(NULL);
+$ia_job->set('mjb_mgn_managed_node_id', (int)$node->key);
+$ia_job->set('mjb_job_type', 'install_node');
+$ia_job->set('mjb_status', 'completed');
+$ia_job->set('mjb_commands', json_encode(array()));
+$ia_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - 60));
+$ia_job->save();
+$ia_job->load();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $ia_job->key);
+check($na->evaluate($node) === null, 'Built a minute ago: its agent is still given time');
+$ia_job->set('mjb_completed_time', gmdate('Y-m-d H:i:s', time() - IncidentSourceAgentNotAdmitted::WAIT_SECONDS - 60));
+$ia_job->save();
+$v = $na->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && ($v['detail']['Site'] ?? '') === 'ia-' . $ia_run . '.example',
+	'Built long ago with no agent paired: critical, naming the site', json_encode($v));
+$set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32))));
+check($na->evaluate($node) === null && strpos($na->cleared_text($node), 'let in') !== false, 'Once its agent is in: nothing');
+$set(array('mgn_agent_public_key' => null));
+
+$ia_mail = function (int $status) use ($ia_run) {
+	$m = new QueuedEmail(NULL);
+	$m->set('equ_status', $status);
+	$m->set('equ_to', 'ia-' . $ia_run . '@example.com');
+	$m->set('equ_from', 'support@elsewhere.example');
+	$m->set('equ_from_name', 'Elsewhere');
+	$m->set('equ_to_name', 'Buyer');
+	$m->set('equ_subject', 'Your site is ready: ia-' . $ia_run . '.example');
+	$m->set('equ_body', 'x');
+	$m->set('equ_timestamp', gmdate('Y-m-d H:i:s'));
+	$m->save();
+	$m->load();
+	harness_register_row('equ_queued_emails', 'equ_queued_email_id', $m->key);
+	return $m;
+};
+$ia_mail(QueuedEmail::PERMANENT_FAILURE);
+$v = $bm->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && strpos((string)($v['detail']['Email'] ?? ''), 'Your site is ready') !== false
+	&& ($v['detail']['From'] ?? '') === 'support@elsewhere.example',
+	'The ready email failed for good: a warning naming the email and the From address it used', json_encode($v));
+$ia_mail(QueuedEmail::SENT);
+check($bm->evaluate($node) === null, 'A later one that was sent closes it');
+// The node goes back to being one no order built, for the sections below.
+$ia_row->set('cvp_mgn_managed_node_id', null);
+$ia_row->save();
+
+// ---------------------------------------------------------------------------
 section('Support bundle refused');
 
 $bundle = new IncidentSourceAgentBundleRefused();

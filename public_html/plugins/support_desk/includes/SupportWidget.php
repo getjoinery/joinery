@@ -16,6 +16,8 @@
  * person's reply is emailed to them with a link back to it
  * (specs/hosting_after_purchase.md H1).
  *
+ * @version 0.3.0 - what this node records about a signed-in member reaches the assistant and the hand-off
+ *                  (registerMemberFacts), with the page they asked from
  * @version 0.2.0 - a signed-in member's threads are theirs: open anywhere they are signed in, handed to a person
  *                  (escalate), listed (mine)
  * @version 0.1.0
@@ -23,6 +25,43 @@
 class SupportWidget {
 
 	const SESSION_KEY = 'support_desk_widget';
+
+	/** @var callable[] What this node records about a member (registerMemberFacts). */
+	private static $member_facts = array();
+
+	/**
+	 * A plugin says what this node records about a signed-in member, for the
+	 * assistant and for whoever a thread is handed to: fn(int $user_id,
+	 * string $route): string[], one plain line each (a hosting plugin: their
+	 * sites and each one's state). $route is the page the member asked from,
+	 * so the provider can mark what they were looking at. Registered from the
+	 * plugin's bootstrap.
+	 */
+	public static function registerMemberFacts(callable $fn): void {
+		self::$member_facts[] = $fn;
+	}
+
+	/** Every registered provider's lines about this member; none for a guest. */
+	public static function memberFacts(int $user_id, string $route = ''): array {
+		if ($user_id <= 0) {
+			return array();
+		}
+		PluginBootstraps::load();
+		$lines = array();
+		foreach (self::$member_facts as $fn) {
+			try {
+				foreach ((array)$fn($user_id, $route) as $line) {
+					$line = trim(preg_replace('/\s+/', ' ', (string)$line));
+					if ($line !== '') {
+						$lines[] = mb_substr($line, 0, 300);
+					}
+				}
+			} catch (\Throwable $e) {
+				error_log('[support_desk] a member-facts provider failed: ' . $e->getMessage());
+			}
+		}
+		return array_slice($lines, 0, 30);
+	}
 
 	public static function enabled(): bool {
 		return (string)Globalvars::get_instance()->get_setting('support_desk_widget_enabled', true, true) === '1';
@@ -71,6 +110,15 @@ class SupportWidget {
 				'ip' => $ip, 'title' => $message, 'visitor' => self::visitor(),
 				'account_user_id' => self::member(),
 			));
+			// The page a signed-in member asked from (a link that carried it).
+			// Only a path in the form the engine reads is kept.
+			$route = trim((string)($input['route'] ?? ''));
+			if (self::member() > 0 && $route !== '' && SupportTurn::route($route) !== '') {
+				SystemBase::rule_checked_write(function () use ($thread, $route) {
+					SupportThread::updateColumns((int)$thread->key, array('sth_route' => $route));
+				});
+				$thread->set_as_stored('sth_route', $route);
+			}
 			$held[(int)$thread->key] = $token;
 			$_SESSION[self::SESSION_KEY] = array_slice($held, -20, null, true);
 		}

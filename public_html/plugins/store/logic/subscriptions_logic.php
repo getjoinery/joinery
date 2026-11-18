@@ -65,6 +65,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// rather than silently returning every row.
 	$search_criteria = array();
 	$search_criteria['user_id'] = $session->get_user_id();
+	// Orders that were paid. A declined card leaves an attempt on record for
+	// the store's own pages; to the buyer it is not an order they made.
+	$search_criteria['ord_status'] = Order::STATUS_PAID;
 
 	$orders = new MultiOrder(
 		$search_criteria,

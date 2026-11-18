@@ -80,6 +80,11 @@
                     </div>
                 <?php endif; ?>
 
+                <!-- Short description: the one line that says what this is -->
+                <?php if (trim((string)$product->get('pro_short_description')) !== ''): ?>
+                <p class="jy-product-short"><?php echo htmlspecialchars((string)$product->get('pro_short_description'), ENT_QUOTES, 'UTF-8'); ?></p>
+                <?php endif; ?>
+
                 <!-- Description -->
                 <?php if ($product->get('pro_description')): ?>
                 <div class="jy-product-block">

@@ -22,6 +22,7 @@
  * that session is discarded here and replaced with a scoped, expiring reset
  * ticket in $_SESSION. Authorization always completes on /password-reset-2.
  *
+ * @version 1.2 - open whether or not the site takes sign-ups (register_active gates registering only)
  * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -35,9 +36,6 @@ function password_reset_passkey_verify_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 	if (!$settings->get_setting('passkeys_enabled')) {
 		return LogicResult::error('Passkey sign-in is not enabled.');
-	}
-	if (!$settings->get_setting('register_active')) {
-		return LogicResult::error('This feature is turned off');
 	}
 
 	if (!RequestLogger::check_attempt_limit('password_reset', 10, 900, false)) {

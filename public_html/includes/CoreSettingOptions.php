@@ -137,10 +137,10 @@ class CoreSettingOptions {
 		$pages = new MultiPage(array('deleted' => false, 'published' => true), NULL, NULL, NULL);
 		$pages->load();
 
-		// The sign-in page leads: it is the factory homepage, and a select
+		// The welcome page leads: it is the factory homepage, and a select
 		// whose stored value is not among its options renders unselected and
 		// saves as blank the next time the settings page is submitted.
-		$options = array('/login' => 'Sign-in page');
+		$options = array('/welcome' => 'Welcome page', '/login' => 'Sign-in page');
 		foreach ($pages->get_dropdown_array_link() as $url => $label) {
 			$options[$url] = 'Page - ' . $label;
 		}

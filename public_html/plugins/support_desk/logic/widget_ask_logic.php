@@ -5,8 +5,9 @@
  * token stays in the session. The first question of a session passes the
  * captcha. Off unless support_desk_widget_enabled.
  *
- * POST { message, thread_id?, h-captcha-response? | g-recaptcha-response? }
+ * POST { message, thread_id?, route?, h-captcha-response? | g-recaptcha-response? }
  *
+ * @version 0.2.0 - route: the page a signed-in member asked from
  * @version 0.1.0
  */
 function widget_ask_logic(array $input): LogicResult {
@@ -28,6 +29,7 @@ function widget_ask_logic_descriptor(): array {
 		'input'            => array(
 			'message'   => array('type' => 'text', 'required' => true, 'max_length' => 8000, 'label' => 'Question'),
 			'thread_id' => array('type' => 'int', 'required' => false, 'label' => 'Conversation'),
+			'route'     => array('type' => 'text', 'required' => false, 'max_length' => 200, 'label' => 'Page asked from (a new conversation, signed in)'),
 		),
 		'auth'             => array('min_user_permission' => 0, 'allow_guest' => true, 'session_write' => true, 'requires_browser_session' => true),
 	);

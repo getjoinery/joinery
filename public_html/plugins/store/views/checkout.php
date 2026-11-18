@@ -30,6 +30,9 @@
 <?php endif; ?>
 
 <section class="jy-checkout-wrap">
+<?php // Removing a line or a coupon is a POST: one empty form, and each Remove is a button that sends through it (no nested forms). ?>
+<form id="jy-cart-act" method="post" action="/checkout"></form>
+
     <div class="jy-container">
 
     <?php
@@ -291,9 +294,11 @@
                                 $formwriter = $page->getFormWriter('form_stripe');
                                 if ($settings->get_setting('checkout_type') == 'stripe_checkout') {
                                     echo '<h5 class="jy-checkout-payhead">Review & Pay</h5>';
-                                    echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash());
+                                    echo $page_vars['stripe_helper']->output_stripe_checkout_form($cart->get_hash(),
+                                        'Pay ' . $currency_symbol . number_format($cart->get_total(), 2, '.', ','));
                                 } else {
-                                    echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, '');
+                                    echo $page_vars['stripe_helper']->output_stripe_regular_form($formwriter, '',
+                                        'Pay ' . $currency_symbol . number_format($cart->get_total(), 2, '.', ','));
                                 }
                                 ?>
                             </div>
@@ -316,6 +321,21 @@
                                 PayPal is not available for carts containing a mix of subscriptions and other items. You can pay with Stripe, or check out subscriptions separately.
                             </div>
                             <?php endif; ?>
+                            <?php endif; ?>
+
+                            <?php
+                            // What the buyer agrees to by paying, where they pay.
+                            $co_terms = trim((string)$settings->get_setting('terms_url'));
+                            $co_privacy = trim((string)$settings->get_setting('privacy_url'));
+                            $co_links = array();
+                            if ($co_terms !== '') { $co_links[] = '<a href="' . htmlspecialchars($co_terms, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Terms</a>'; }
+                            if ($co_privacy !== '') { $co_links[] = '<a href="' . htmlspecialchars($co_privacy, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener">Privacy Policy</a>'; }
+                            $co_recurring = $cart->get_num_recurring() > 0;
+                            if ($co_links || $co_recurring): ?>
+                            <p class="jy-muted jy-checkout-agree"><small>
+                                <?php if ($co_links): ?>By paying you agree to our <?php echo implode(' and ', $co_links); ?>.<?php endif; ?>
+                                <?php if ($co_recurring): ?>A subscription renews until you cancel it, which you can do at any time from your account.<?php endif; ?>
+                            </small></p>
                             <?php endif; ?>
 
                             <div class="jy-checkout-secure">
@@ -356,6 +376,17 @@
                                     <?php echo htmlspecialchars($data['full_name_first'] . ' ' . $data['full_name_last'], ENT_QUOTES, 'UTF-8'); ?>
                                 </small>
                                 <?php endif; ?>
+                                <?php
+                                // What a requirement recorded about this line (a domain, a
+                                // configured site), as the cart shows it; 'internal' answers are the admin's.
+                                foreach ($data as $co_val):
+                                    if (!is_array($co_val) || !isset($co_val['question'], $co_val['answer'])
+                                            || !empty($co_val['internal']) || (string)$co_val['answer'] === '') { continue; }
+                                ?>
+                                <small class="jy-muted" style="display:block;">
+                                    <?php echo htmlspecialchars($co_val['question'] . ': ' . $co_val['answer'], ENT_QUOTES, 'UTF-8'); ?>
+                                </small>
+                                <?php endforeach; ?>
                             </div>
                             <div class="jy-checkout-lineitem-pricewrap">
                                 <div class="jy-checkout-price">
@@ -369,7 +400,7 @@
                         <!-- Per-item actions -->
                         <div class="jy-checkout-itemactions">
                             <a href="<?php echo $product->get_url(); ?>?edit_item=<?php echo $key; ?>" class="jy-checkout-link">Edit</a>
-                            <a href="/checkout?r=<?php echo $key; ?>" class="jy-checkout-link-danger">Remove</a>
+                            <button type="submit" form="jy-cart-act" name="r" value="<?php echo (int)$key; ?>" class="jy-checkout-link-danger" style="background:none;border:0;padding:0;font:inherit;cursor:pointer">Remove</button>
                         </div>
                     </div>
                     <?php endforeach; ?>

@@ -15,9 +15,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
-	if(!$settings->get_setting('register_active')){
-			return LogicResult::error('This feature is turned off');
-	}
 
 	// Sending the reset is the form's button (POST). A link carrying ?email= is
 	// a GET any site can make a browser follow, mailing someone a reset unasked;

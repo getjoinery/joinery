@@ -104,7 +104,7 @@ $page->public_header(array(
 					$fw_reg->honeypot_hidden_input();
 					$fw_reg->captcha_hidden_input();
 					// The one shared definition of the sign-up form.
-					register_logic_form($fw_reg, null, ($form === 'register') ? $values : array());
+					register_logic_form($fw_reg, null, ($form === 'register') ? $values : array(), 'Create account and continue');
 					$fw_reg->end_form();
 					?>
 				<?php endif; ?>
@@ -113,7 +113,7 @@ $page->public_header(array(
 		</div>
 		<?php // The advanced install is here for whoever looks for it, and promoted nowhere (own_linode_we_install W7). ?>
 		<p class="sms-start-advanced">Prefer to install it yourself on a server of your own? See the
-			<a href="/page/install">advanced install</a>.<?php
+			<a href="/page/advanced-install">advanced install</a>.<?php
 			$sms_licences = BusinessLicense::offers();
 			if ($sms_licences) {
 				$sms_links = array();

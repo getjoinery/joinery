@@ -97,7 +97,7 @@ class InboundEmailHealth {
         if (mailbox_needs_relay()) {
             if (self::activeRelay() === null && mailbox_receiving_domain_exists()) {
                 throw new ProvisioningCheckFailed(
-                    'No relay is enabled, so no mail reaches this site: it runs in a container and has no '
+                    'No relay is enabled, so no mail reaches this site: it has no '
                     . 'mail server of its own. Set up or enable a relay on the Server tab.');
             }
             return;

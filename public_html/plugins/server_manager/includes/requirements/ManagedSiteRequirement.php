@@ -281,7 +281,7 @@ class ManagedSiteRequirement extends AbstractProductRequirement {
 		}
 		if ($draft->get('cvp_services_wanted') && ManagedSiteDraft::plan_of($draft) === 'own_linode') {
 			// The email and backups line rides with this one (extra_cart_lines).
-			$data[self::SERVICES_FIELD] = array('question' => 'Email and backups for',
+			$data[self::SERVICES_FIELD] = array('question' => ManagedSiteDraft::BUNDLE_NAME . ' for',
 				'answer' => (string)$draft->get('cvp_domain'), 'internal' => true);
 		}
 		if (BusinessLicense::buys((string)$draft->get('cvp_license_choice'))) {

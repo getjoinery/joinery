@@ -20,6 +20,8 @@
 <section class="jy-cart-section">
 <div class="jy-container jy-cart-wrap">
 
+<?php // Removing a line or a coupon is a POST: one empty form, and each Remove is a button that sends through it (no nested forms). ?>
+<form id="jy-cart-act" method="post" action="/cart"></form>
 <?php foreach ($page_vars['purchase_path_headings'] as $heading) { echo $heading; } ?>
 <h1 class="jy-cart-title">Your Cart</h1>
 
@@ -122,8 +124,8 @@ foreach ($cart->items as $cart_item) {
     <div class="jy-cart-item-actions">
         <a href="<?php echo $product->get_url(); ?>?edit_item=<?php echo $key; ?>"
            class="jy-cart-action-edit">Edit</a>
-        <a href="/cart?r=<?php echo $key; ?>"
-           class="jy-cart-action-remove">Remove</a>
+        <button type="submit" form="jy-cart-act" name="r" value="<?php echo (int)$key; ?>"
+           class="jy-cart-action-remove" style="background:none;border:0;padding:0;font:inherit;cursor:pointer">Remove</button>
     </div>
 
 </div>
@@ -140,9 +142,9 @@ foreach ($cart->items as $cart_item) {
         <?php foreach ($cart->coupon_codes as $coupon_code): ?>
         <span class="jy-cart-coupon-tag">
             <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>
-            <a href="/cart?rc=<?php echo urlencode($coupon_code); ?>"
-               class="jy-cart-coupon-remove"
-               aria-label="Remove coupon <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>">&times;</a>
+            <button type="submit" form="jy-cart-act" name="rc" value="<?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>"
+               class="jy-cart-coupon-remove" style="background:none;border:0;padding:0;font:inherit;cursor:pointer"
+               aria-label="Remove coupon <?php echo htmlspecialchars($coupon_code, ENT_QUOTES, 'UTF-8'); ?>">&times;</button>
         </span>
         <?php endforeach; ?>
     </div>

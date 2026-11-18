@@ -21,6 +21,7 @@
  * before the buyer confirms. Delete removes a draft; a paid site is never
  * deletable here.
  *
+ * @version 1.8 - a setup only partly in the cart is dropped and offered for payment again (ManagedSiteDraft::in_cart_whole)
  * @version 1.7 - who the site is for: the licences on sale and the unused ones the buyer holds, and the summary's licence
  * @version 1.6 - an own-Linode summary offers payment straight away; the Linode connection comes after payment
  * @version 1.5 - the summary gets price_table (lines with totals)
@@ -160,7 +161,7 @@ function profile_configure_logic(array $input): LogicResult {
 		'own_linode'       => $own_linode,
 		'bundle_price'     => $bundle !== null ? (string)$bundle['price'] : '',
 		'price_table'      => ($row && $mode === 'summary') ? ManagedSiteDraft::price_table($row, $product, $bundle) : null,
-		'in_cart'          => ($row && $mode === 'summary') ? ManagedSiteDraft::in_cart($row) : false,
+		'in_cart'          => ($row && $mode === 'summary') ? ManagedSiteDraft::in_cart_whole($row) : false,
 		'availability_html'  => ManagedDomainIntake::availabilityScript('cvp_domain', 'managed_domain_status',
 			'cvp_domain_source', 'register', 'md_registrant'),
 		// The form is step 2; the summary, whose one button is Continue to

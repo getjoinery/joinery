@@ -11,6 +11,7 @@
  * The site's agent reports the answer on every poll; the management node's
  * operator who holds the password retires it.
  *
+ * @version 1.2 - emergency root access is not offered on a site we host: the server is ours (walkthrough 40)
  * @version 1.1 - connected(): whether a management node manages this site, for the step's log-access line
  * @version 1.0
  */
@@ -24,9 +25,14 @@ class BetaPermissions {
 		return in_array(strtolower(trim($value)), array('1', 'true', 'yes', 'on'), true);
 	}
 
-	/** Did the install offer the owner emergency root access (install.sh site --beta-root-access)? */
+	/**
+	 * Is emergency root access the owner's to decide? The install offered it
+	 * (install.sh site --beta-root-access), and the server is theirs: on a
+	 * site we host the machine is ours, so there is nothing to permit.
+	 */
 	public static function root_access_offered(): bool {
-		return (string)Globalvars::get_instance()->get_setting('beta_root_access_offered', true, true) === '1';
+		return (string)Globalvars::get_instance()->get_setting('beta_root_access_offered', true, true) === '1'
+			&& !HostedPlanNotice::hostedHere();
 	}
 
 	/** Is emergency root access still allowed? On until the owner turns it off. */

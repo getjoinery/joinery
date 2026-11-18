@@ -42,7 +42,9 @@ require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 if (session_id() === '') @session_start();
 
 harness_set_setting_mem('email_dry_run', '1');
-harness_set_setting_mem('register_active', '1');
+// Sign-ups are closed for the whole suite: resetting a password is not
+// registering, and a site that takes no sign-ups still lets its members reset.
+harness_set_setting_mem('register_active', '0');
 
 // Reset flows are rate limited per IP; pin a documentation address so the suite
 // never consumes a real client's budget.

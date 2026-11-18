@@ -9,12 +9,19 @@
  * can act on it, with the row's own words. Information, never a gate: the
  * site works without the daemon. Silent while the row is verified.
  *
+ * @version 1.1 - silent on a site the operator hosts: its owner cannot act on it, the management node is told
  * @version 1.0
  */
 class UnsealDaemonNotice {
 
 	public static function render(): string {
 		if (!Access::permits(10)) {
+			return '';
+		}
+		// On a site the operator hosts, the server is the operator's to fix:
+		// its owner can do nothing with this, and the management node is told
+		// of the same finding (plane:unseal_daemon).
+		if (HostedPlanNotice::hostedHere()) {
 			return '';
 		}
 		return self::forRow(VaultHealth::checkUnsealDaemon(UnsealDaemon::facts(true, 0.3)));

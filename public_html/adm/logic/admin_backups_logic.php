@@ -150,7 +150,7 @@ function admin_backups_logic($input = array()) {
 		'plan_problem'  => $plan_problem,
 		'default_slug'  => basename(PathHelper::getSiteRoot()),
 		'task'          => _admin_backups_task_state(),
-		'is_managed'    => ManagementNodeStatus::is_managed(),
+		'is_managed'    => ManagementNodeStatus::backs_up_this_site(),
 		'manager_url'   => ManagementNodeStatus::manager_url(),
 		// Every act an agent is holding open, waiting for a person here to
 		// authorize it (a restore by this machine's agent, a removal by the

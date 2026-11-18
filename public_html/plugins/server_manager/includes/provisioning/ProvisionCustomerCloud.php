@@ -587,13 +587,28 @@ class ProvisionCustomerCloud {
 			$provision->save();
 		}
 
+		$buyer_id = (int)$provision->get('cvp_usr_user_id');
+		$buyer = null;
+		if ($buyer_id > 0 && (string)$provision->get('cvp_origin') === 'buyer') {
+			$buyer = new User($buyer_id, TRUE);
+			if (!$buyer->key) { $buyer = null; }
+		}
 		$job_params = [
 			'mode'        => $install_mode,
 			'sitename'    => $sitename,
 			'domain'      => $domain,
 			'docker_mode' => $docker_mode,
+			// Bare metal with no mail server: the site receives through the relay fleet.
+			'no_mail_server' => $docker_mode === 'bare-metal' && (bool)$provision->get('cvp_no_mail_server'),
+			// On its buyer's own cloud account with no backups bought: this node
+			// keeps none for it, and the site is told so it offers its owner where they go.
+			'no_manager_backups' => self::own_linode_without_bundle($provision),
 			'admin_email' => $admin_email,
 			'user_name'   => $provision->get('cvp_buyer_name'),
+			// The buyer's own name and timezone, for the site's admin account.
+			'admin_first_name' => $buyer ? (string)$buyer->get('usr_first_name') : '',
+			'admin_last_name'  => $buyer ? (string)$buyer->get('usr_last_name') : '',
+			'admin_timezone'   => $buyer ? (string)$buyer->get('usr_timezone') : '',
 			// A flag, never the password: the executor looks it up. See
 			// JobCommandBuilder::build_install_node.
 			'admin_password_stdin' => $wants_admin_password,

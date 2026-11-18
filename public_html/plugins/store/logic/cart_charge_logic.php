@@ -1287,7 +1287,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		foreach ($line_summaries as $summary) {
 			$r3_product = $summary['product'];
 			if (isset($seen_product_ids[$r3_product->key])) continue;
-			$has_msg = (bool)$r3_product->get('pro_after_purchase_message');
+			$r3_message = (string)($summary['after_purchase_message'] ?? $r3_product->get('pro_after_purchase_message'));
+			$has_msg = trim($r3_message) !== '';
 			$has_override = (bool)$r3_product->get('pro_emt_email_template_id');
 			if (!$has_msg && !$has_override) continue;
 			$seen_product_ids[$r3_product->key] = true;
@@ -1296,7 +1297,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$product_fill = array(
 				'recipient' => $billing_user->export_as_array(),
 				'product_name' => $summary['product_name'],
-				'after_purchase_message' => (string)$r3_product->get('pro_after_purchase_message'),
+				'after_purchase_message' => $r3_message,
 				'order_item' => $summary['order_item']->export_as_array(),
 				'order' => $order->export_as_array(),
 			);
@@ -1477,7 +1478,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$line_email_canon = strtolower(trim($user->get('usr_email')));
 			$is_gift = ($line_email_canon !== $billing_email_canon);
 
+			// What the buyer is told about this line. The product carries one
+			// fixed message; a fulfilment provider that knows more about this
+			// particular purchase (what the buyer must do next, what was set
+			// up for them) says its own in fulfill()'s 'after_purchase_message'.
+			$line_after_purchase_message = (is_array($fulfillment_result) && isset($fulfillment_result['after_purchase_message'])
+					&& trim((string)$fulfillment_result['after_purchase_message']) !== '')
+				? (string)$fulfillment_result['after_purchase_message']
+				: (string)$product->get('pro_after_purchase_message');
+
 			$line_summaries[$key] = array(
+				'after_purchase_message' => $line_after_purchase_message,
 				'order_item' => $order_item,
 				'product' => $product,
 				'product_version' => $product_version,
@@ -1508,7 +1519,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$receipts[$key+1]['pname'] = $product_name . $trial;
 			$receipts[$key+1]['name'] = trim(($data['full_name_first'] ?? '') . ' ' . ($data['full_name_last'] ?? ''));
 			$receipts[$key+1]['price'] = $price - $discount;
-			$receipts[$key+1]['after_purchase_message'] = $product->get('pro_after_purchase_message');
+			$receipts[$key+1]['after_purchase_message'] = $line_after_purchase_message;
 			if($product->get('pro_digital_link')){
 				$receipts[$key+1]['link'] = $product->get('pro_digital_link');
 			}

@@ -7,7 +7,9 @@
  * actually reach for.
  * Included by views/setup.php with $page, $settings, $next_key in scope.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - on a server that cannot run a model (hosted, or under 4 GB) with nothing set up, neither choice is
+ *                  pre-selected, and own-machine says it means another machine (walkthrough Q26)
  * @changelog 1.4 - the key fields toggle alone; a stored key is a locked field with Reset, not a field plus a Clear box
  * @changelog 1.3 - the choice radio and provider select are FormWriter fields
  *                  driving visibility_rules, and the declared settings render
@@ -28,6 +30,17 @@ $setup_ai_has_fireworks = (string)$settings->get_setting('joinery_ai_fireworks_a
 $setup_ai_provider = $setup_ai_has_anthropic ? 'anthropic' : 'fireworks';
 $setup_ai_choice = ($setup_ai_local_model === '' && ($setup_ai_has_anthropic || $setup_ai_has_fireworks))
 	? 'cloud' : 'local';
+
+// Where a model cannot run on this server (a site we host, or one with under
+// 4 GB of memory) and nothing is set up yet, neither choice is picked: an
+// own-machine choice already selected, with this server's own address in it,
+// reads as something that is there.
+$setup_ai_mem_kb = (preg_match('/^MemTotal:\s+(\d+)/m', (string)@file_get_contents('/proc/meminfo'), $setup_ai_m)) ? (int)$setup_ai_m[1] : 0;
+$setup_ai_small = HostedPlanNotice::hostedHere() || ($setup_ai_mem_kb > 0 && $setup_ai_mem_kb < 4 * 1024 * 1024);
+$setup_ai_nothing_set = $setup_ai_local_model === '' && !$setup_ai_has_anthropic && !$setup_ai_has_fireworks;
+if ($setup_ai_small && $setup_ai_nothing_set) {
+	$setup_ai_choice = '';
+}
 ?>
 
 <?php if (!empty($_GET['saved'])) { ?>
@@ -51,7 +64,9 @@ echo $setup_ai_form->radioinput('ai_choice', '', array(
 		'cloud' => 'Cloud provider',
 	),
 	'descriptions' => array(
-		'local' => 'An OpenAI-compatible server you run (Ollama, LM Studio, …)',
+		'local' => $setup_ai_small
+			? 'An OpenAI-compatible server you run on another machine (Ollama, LM Studio, …). This server is too small to run a model itself.'
+			: 'An OpenAI-compatible server you run (Ollama, LM Studio, …)',
 		'cloud' => 'Bring an API key',
 	),
 	'value' => $setup_ai_choice,

@@ -36,6 +36,11 @@
             'required'     => true,
             'minlength'    => 8,
             'autocomplete' => 'new-password',
+            'validation'   => [
+                'required'  => true,
+                'minlength' => 8,
+                'messages'  => ['minlength' => 'Choose at least 8 characters'],
+            ],
         ]);
         echo $formwriter->passwordinput('confirm_password', 'Confirm Password', [
             'required'     => true,
@@ -53,7 +58,12 @@
 
         <?php $formwriter->end_form(); ?>
 
-        <?php if (!empty($page_vars['show_email_setup_hint'])) { ?>
+        <?php if (!empty($page_vars['email_included_line'])) { ?>
+        <div class="jy-auth-note">
+            <p class="jy-auth-subhead"><?php echo $page_vars['email_included_line']; ?>
+                Password reset is how you get back into this account, and it works once email does.</p>
+        </div>
+        <?php } elseif (!empty($page_vars['show_email_setup_hint'])) { ?>
         <div class="jy-auth-note">
             <p class="jy-auth-subhead">
                 Once you are in, set up email at

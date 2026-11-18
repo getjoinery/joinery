@@ -10,6 +10,10 @@
  * Every question about the site lives here. Adding one later is a column on
  * the provision row and a field on this form — never a change to the store.
  *
+ * @version 1.19 - the own-Linode review names the server and what Linode charges for it (walkthrough 65)
+ * @version 1.18 - the bare purchase layout: the logo and the step strip, no menus (walkthrough Q21)
+ * @version 1.17 - the sign-in email has one name on the form and the review (walkthrough 13, 23)
+ * @version 1.16 - the licences stay hidden until A business is chosen (nothing chosen hid nothing); the summary fits a phone
  * @version 1.15 - Who is this site for?: personal use is free, a business picks a licence (or one it owns); the
  *                summary names it (hosting_after_purchase WP7)
  * @version 1.14 - payment comes first for every plan; an own-Linode buyer is told the Linode connection follows it
@@ -48,6 +52,9 @@ $page = new PublicPage();
 $hoptions = array(
 	'title' => 'Set up your site',
 	'breadcrumbs' => array('Your Sites' => '/profile/server_manager', 'Set up your site' => ''),
+	// The bare purchase layout, as on the cart and checkout that follow.
+	'noheader'       => true,
+	'noheader_label' => '',
 );
 $page->public_header($hoptions, NULL);
 echo PublicPage::BeginPage('Set up your site', $hoptions);
@@ -65,14 +72,16 @@ echo $steps_html;
 		<dt>Domain</dt>
 		<dd><?php echo (string)$row->get('cvp_domain_source') === 'register' ? 'We register it for you' : 'Your own'; ?></dd>
 		<?php if ($own_linode): ?>
-		<dt>Joinery Managed Bundle</dt>
+		<dt>Server</dt>
+		<dd><?php echo htmlspecialchars(ManagedSiteDraft::OWN_LINODE_SERVER); ?></dd>
+		<dt><?php echo htmlspecialchars(ManagedSiteDraft::BUNDLE_NAME); ?></dt>
 		<dd><?php echo $row->get('cvp_services_wanted') ? 'Included' : 'Not included'; ?></dd>
 		<?php endif; ?>
 		<?php if ($licence_line !== ''): ?>
 		<dt>Licence</dt>
 		<dd><?php echo htmlspecialchars($licence_line); ?></dd>
 		<?php endif; ?>
-		<dt>Admin sign-in</dt>
+		<dt>Sign-in email</dt>
 		<dd><?php echo htmlspecialchars($row->get('cvp_buyer_email')); ?></dd>
 	</dl>
 
@@ -250,8 +259,8 @@ echo '</section>';
 
 // ── Email and backups (On your own Linode only; unticked, Q7) ──
 if (isset($plans['own_linode']) && $bundle_price !== '') {
-	echo '<section class="smc-card" id="smc_services"><h3 class="smc-title">Joinery Managed Bundle</h3>';
-	$formwriter->checkboxinput('with_services', 'Add the Joinery Managed Bundle — ' . $bundle_price, array(
+	echo '<section class="smc-card" id="smc_services"><h3 class="smc-title">' . htmlspecialchars(ManagedSiteDraft::BUNDLE_NAME) . '</h3>';
+	$formwriter->checkboxinput('with_services', 'Add the ' . ManagedSiteDraft::BUNDLE_NAME . ' — ' . $bundle_price, array(
 		'checked' => $values['with_services'] !== '',
 	));
 	echo '<ul class="smc-features">';
@@ -273,6 +282,8 @@ $formwriter->radioinput('licence_use', '', array(
 	'visibility_rules' => array(
 		'free'     => array('hide' => array('smc_licences')),
 		'business' => array('show' => array('smc_licences')),
+		// Nothing chosen yet: the licences are for a business, so they wait.
+		'default'  => array('hide' => array('smc_licences')),
 	),
 ));
 echo '<p class="smc-indent">A business running Joinery for its operations needs one lifetime licence per site. '
@@ -304,11 +315,11 @@ echo '</div>';
 echo '</section>';
 
 // ── Sign-in ──
-echo '<section class="smc-card"><h3 class="smc-title">Your sign-in and backup email</h3>';
-$formwriter->textinput('cvp_buyer_email', 'Existing email', array(
+echo '<section class="smc-card"><h3 class="smc-title">Your sign-in email</h3>';
+$formwriter->textinput('cvp_buyer_email', 'The email you will sign in to your new site with', array(
 	'value'      => $values['cvp_buyer_email'],
 	'maxlength'  => 255,
-	'helptext'   => 'This must be a currently working email.',
+	'helptext'   => 'Use an address that already works today.',
 	'validation' => array('required' => true),
 ));
 echo '</section>';
@@ -358,9 +369,15 @@ echo $formwriter->end_form();
 /* The licences side by side, as on the pricing page; stacked on a phone. */
 .smc-licences > div:has(.form-check) { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .6rem; }
 .smc-licences .form-check { margin: 0; }
-.smc-facts { display: grid; grid-template-columns: max-content 1fr; gap: .6rem 2rem; margin: 0 0 1.5rem; }
+.smc-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .6rem 2rem; margin: 0 0 1.5rem; }
 .smc-facts dt { color: var(--jy-color-text-muted); font-weight: 500; }
-.smc-facts dd { margin: 0; color: var(--jy-color-text); }
+.smc-facts dd { margin: 0; color: var(--jy-color-text); min-width: 0; overflow-wrap: anywhere; }
+/* A phone: a long email address must not push the page sideways. */
+@media (max-width: 600px) {
+	.smc-facts { grid-template-columns: minmax(0, 1fr); gap: .1rem 0; }
+	.smc-facts dd { margin-bottom: .6rem; }
+	.jy-ui table.smc-prices td { padding-left: .75rem; }
+}
 /* A receipt, not a data grid: the kit's table bands and capitals are left off. */
 .jy-ui table.smc-prices { width: 100%; border-collapse: collapse; margin: 0 0 1.5rem; font-size: 1em;
 	font-variant-numeric: tabular-nums; }
@@ -370,7 +387,7 @@ echo $formwriter->end_form();
 .jy-ui table.smc-prices tbody tr td, .jy-ui table.smc-prices tbody tr:hover td { background: none; }
 .jy-ui table.smc-prices td { text-align: right; padding-left: 1.5rem; white-space: nowrap; }
 .jy-ui table.smc-prices thead th { font-size: .85em; font-weight: 500; color: var(--jy-color-text-muted);
-	text-align: right; padding-top: 0; white-space: nowrap; }
+	text-align: right; padding-top: 0; padding-left: .75rem; white-space: nowrap; }
 .jy-ui table.smc-prices thead th:first-child { text-align: left; }
 .jy-ui table.smc-prices tbody th { font-weight: 500; }
 .jy-ui table.smc-prices tbody th span { display: block; font-weight: 400; font-size: .88em;
