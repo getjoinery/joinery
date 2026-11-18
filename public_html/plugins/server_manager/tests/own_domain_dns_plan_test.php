@@ -109,6 +109,33 @@ check(ProvisionBuyerDns::listed($provision) && count((array)ProvisionBuyerDns::s
 	&& $ran['status'] === 'success', 'the answer is kept on the row and the list is shown', json_encode($ran));
 $ran = $leg->run(array('provision_id' => (int)$provision->key));
 check($ran['status'] === 'skipped', 'a completed list is not asked about again', json_encode($ran));
+
+// A site without the mailbox plugin can never answer: its refusal is the answer.
+$kept = $provision->get('cvp_site_dns_records');
+$provision->set('cvp_site_dns_records', null);
+$provision->set('cvp_site_dns_time', null);
+$provision->save();
+$leg->job = array('mjb_management_job_id' => 0, 'mjb_status' => 'failed', 'mjb_create_time' => gmdate('Y-m-d H:i:s'),
+	'mjb_completed_time' => gmdate('Y-m-d H:i:s'), 'mjb_result' => json_encode(array('answered' => false)),
+	'mjb_error_message' => 'Refused by the node: primitive "managed_domain_prepare" refused: no script from '
+		. 'public_html/plugins/mailbox can be verified before running as root: it ships no signed release manifest');
+$ran = $leg->run(array('provision_id' => (int)$provision->key));
+$provision->load();
+check(ProvisionBuyerDns::listed($provision) && ProvisionBuyerDns::site_records($provision) === array(),
+	'a site with no mailbox plugin is listed with no records of its own', json_encode($ran));
+$ran = $leg->run(array('provision_id' => (int)$provision->key));
+check($ran['status'] === 'skipped', 'and is not asked again', json_encode($ran));
+$leg->job['mjb_error_message'] = 'Refused by the node: some other refusal';
+$provision->set('cvp_site_dns_records', null);
+$provision->set('cvp_site_dns_time', null);
+$provision->save();
+$leg->run(array('provision_id' => (int)$provision->key));
+$provision->load();
+check(!ProvisionBuyerDns::listed($provision) || ProvisionBuyerDns::site_records($provision) === null,
+	'any other failure is not an answer');
+$provision->set('cvp_site_dns_records', $kept);
+$provision->set('cvp_site_dns_time', gmdate('Y-m-d H:i:s'));
+$provision->save();
 $provision->set('cvp_domain_source', 'register');
 check(ProvisionBuyerDns::applies($provision), 'what decides it is the registration row, not what the buyer chose');
 $provision->set('cvp_domain_source', 'own');

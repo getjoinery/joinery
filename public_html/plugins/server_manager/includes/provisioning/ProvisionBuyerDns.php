@@ -21,11 +21,20 @@
  * after its install ended is stamped with what is known, reported, and asked
  * again until it answers.
  *
+ * A site without the mailbox plugin, which carries the script that answers,
+ * can never answer. Its refusal is taken as the answer "nothing to add", so
+ * the buyer is shown the plane's records and the site is not asked again
+ * every few minutes for ever.
+ *
+ * @version 1.1 - a site without the mailbox plugin is answered for, not re-asked for ever (Joinerydemo, 2026-11-18)
  * @version 1.0
  */
 class ProvisionBuyerDns {
 
 	const JOB_TYPE = 'managed_domain_prepare';
+
+	/** The artifact that carries the script managed_domain_prepare runs on the site. */
+	const ANSWERING_ARTIFACT = 'public_html/plugins/mailbox';
 
 	/** Minutes between two questions to a site that did not give a usable answer. */
 	const RETRY_GAP_MINUTES = 5;
@@ -151,6 +160,17 @@ class ProvisionBuyerDns {
 				return 1;
 			}
 		}
+		if ($job && (string)$job['mjb_status'] === 'failed'
+				&& NodeMonitorHealth::unverifiable_artifact((string)($job['mjb_error_message'] ?? '')) === self::ANSWERING_ARTIFACT) {
+			$provision->set('cvp_site_dns_records', json_encode(array()));
+			if (trim((string)$provision->get('cvp_site_dns_time')) === '') {
+				$provision->set('cvp_site_dns_time', gmdate('Y-m-d H:i:s'));
+			}
+			$provision->save();
+			$this->errors[] = $domain . ': its site cannot say what its domain needs (it has no mailbox plugin with a '
+				. 'signed release), so its buyer\'s DNS list shows only the records this plane knows';
+			return 1;
+		}
 		if ($job) {
 			$since = strtotime((string)($job['mjb_completed_time'] ?: $job['mjb_create_time']) . ' UTC');
 			if ($since && (time() - $since) < self::RETRY_GAP_MINUTES * 60) {
@@ -212,7 +232,7 @@ class ProvisionBuyerDns {
 	protected function latest_job(int $node_id, string $domain): ?array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT mjb_management_job_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_result
+			"SELECT mjb_management_job_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_result, mjb_error_message
 			 FROM mjb_management_jobs
 			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
 			   AND mjb_parameters->>'domain' = ?

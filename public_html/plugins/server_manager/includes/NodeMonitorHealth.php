@@ -13,6 +13,8 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.30 - a plugin or theme that cannot have its scripts verified is not the node's whole tree: classify_script_trust()
+ *   leaves it to the job that asked, and unverifiable_artifact() names it (Joinerydemo, 2026-11-18)
  * @version 1.29 - local() writes UTC when no one signed in is looking: the incident pass keeps the text, and the
  *                 incident page shows it in its reader's zone
  * @version 1.28 - fleet_backup_health() names its no-recovery-key verdict with reason NO_RECOVERY_KEY, so the
@@ -416,6 +418,16 @@ class NodeMonitorHealth {
 			return 'untrusted_file';
 		}
 
+		// One plugin's or theme's scripts, not the node's. Each ships its own
+		// manifest, so one that has none — or is not installed at all, which
+		// the agent words the same way — leaves core and every other artifact
+		// verifying. Calling that "refuses every script primitive" raised a
+		// critical incident on a node that could still upgrade and back up.
+		// The job that asked reports its own failure.
+		if (self::unverifiable_artifact($reason) !== '') {
+			return null;
+		}
+
 		// The manifest itself could not be used. Both the "no manifest at all"
 		// and the "signature does not verify" wordings carry this phrase.
 		if (stripos($reason, 'can be verified before running as root') !== false) {
@@ -478,6 +490,19 @@ class NodeMonitorHealth {
 	 * this code will hand to git: a relative path of ordinary characters, with
 	 * no '..' segment.
 	 */
+	/**
+	 * The plugin or theme a refusal says none of whose scripts can be verified
+	 * (public_html/plugins/NAME or public_html/theme/NAME), or '' when the
+	 * refusal is about something else. The agent says this both when the
+	 * artifact ships no manifest and when it is not on the node at all.
+	 */
+	public static function unverifiable_artifact(string $reason): string {
+		if (!preg_match('#no script from (public_html/(?:plugins|theme)/[A-Za-z0-9._-]+) can be verified before running as root#', $reason, $m)) {
+			return '';
+		}
+		return self::is_tree_path($m[1]) ? $m[1] : '';
+	}
+
 	public static function refused_path(string $reason): string {
 		if (!preg_match('/(?:has been modified since release|is not in the signed release manifest):\s*(\S+)/', $reason, $m)) {
 			return '';

@@ -125,6 +125,22 @@ check(NodeMonitorHealth::classify_script_trust(
 	'Refused by the node: primitive "recovery_key_report" cannot run here: this machine has no site, '
 	. 'and its support bundle does not carry maintenance_scripts/sysadmin_tools/set_recovery_key.php') === null,
 	'a siteless machine refusing a script its bundle does not carry is not a trust event');
+// One plugin with no manifest — or not installed, worded the same — leaves
+// core and every other artifact verifying. It is the asking job's failure, not
+// a node that refuses every script (Joinerydemo, 2026-11-18).
+$PLUGIN_NONE = 'Refused by the node: primitive "managed_domain_prepare" refused: no script from '
+	. 'public_html/plugins/mailbox can be verified before running as root: it ships no signed release manifest';
+check(NodeMonitorHealth::classify_script_trust($PLUGIN_NONE) === null,
+	'a plugin with no manifest of its own is not the node being unable to verify its scripts');
+check(NodeMonitorHealth::unverifiable_artifact($PLUGIN_NONE) === 'public_html/plugins/mailbox',
+	'and the plugin is named');
+check(NodeMonitorHealth::classify_script_trust(str_replace('it ships no signed release manifest', 'it is not installed on this node', $PLUGIN_NONE)) === null,
+	'nor is a plugin the node does not have (the agent says so in its own words)');
+check(NodeMonitorHealth::unverifiable_artifact($MANIFEST_BAD_KEY) === '' && NodeMonitorHealth::unverifiable_artifact($MANIFEST_NONE) === '',
+	'the core release is never read as one plugin');
+check(NodeMonitorHealth::classify_script_trust('Refused by the node: primitive "managed_domain_prepare" refused: '
+	. 'file does not match its signed hash — it has been modified since release: public_html/plugins/mailbox/utils/managed_domain_prepare.php') === 'untrusted_file',
+	'a modified plugin file is still a file problem');
 check(NodeMonitorHealth::classify_script_trust(
 	'Refused by the node: policy forbids destructive operations on this machine') === null,
 	'a policy refusal is not a trust event');
