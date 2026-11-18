@@ -43,6 +43,7 @@
  * Either one hardens its holders (userHasHardenedDomain): short unlock-window
  * caps.
  *
+ * @version 1.18 - ied_ai_processing_enabled defaults on, and means something on Fortress too
  * @version 1.17 - send_protection_setup_url(): where finishing send protection starts
  * @version 1.16 - save() keeps the domain's Direct signing key in the custody its level calls for
  * @version 1.15 - permanent_delete(): the last row for a domain takes its Direct signing identities with it
@@ -189,15 +190,18 @@ class InboundEmailDomain extends SystemBase {
 		// restores them.
 		'ied_relay_seals_to_owner' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'ied_send_lock_requested'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		// Consent for AI features to read this domain's mail
-		// (specs/in_window_deferred_work.md § Turning it on has to be a
-		// deliberate choice). Only consequential on a sealed level: at
-		// 'standard' the server already reads the mail, so there is nothing to
-		// consent to and the control is not shown. On 'private' this
-		// is the difference between "the server cannot read my mail unless I am
-		// here" and "the server reads my mail while I am here, and sends it to
-		// the configured model host" — which must never become true silently.
-		'ied_ai_processing_enabled' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// The domain's permission for AI features to read its mail. Only
+		// consequential on a sealed level: at 'standard' the server already
+		// reads the mail, so there is nothing to permit and the control is not
+		// shown. On 'private' it lets the server read the mail during the
+		// owner's unlock window and send it to the configured model host; on
+		// 'fortress' it lets the owner's own browser send it to the model they
+		// registered (the server still never reads it). On by default: the
+		// operator's switch only makes AI available, and nothing reads any
+		// mail until each member turns a recipe on for their own mailbox in
+		// the AI panel. How far the mail may travel stays a separate, strict
+		// consent (ied_ai_processing_consent, 'local' by default).
+		'ied_ai_processing_enabled' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
 		// Second, narrower consent: how far this domain's decrypted mail may
 		// travel. ied_ai_processing_enabled says the AI may read it at all;
 		// this says where it may be read. Separate because they are different

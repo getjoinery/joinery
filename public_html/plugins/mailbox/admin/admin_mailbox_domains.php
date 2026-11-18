@@ -13,6 +13,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 4.15 - the AI switch starts on for a new domain and shows on Fortress
  * @version 4.14 - its Setup links come from InboundEmailDomain::send_protection_setup_url()
  * @version 4.13 - the Protected sending identity box states who owns the key and links to Setup, where it is chosen
  * @version 4.12 - no inline script: the Fortress gate, receipt title, unseal loop and ceremony gating are assets/admin_domains.js
@@ -271,16 +272,18 @@ if ($show_form) {
 		'notes'   => [InboundEmailDomain::LEVEL_FORTRESS => $fortress_notes],
 		// The AI READ switch only means something once mail is encrypted at
 		// rest: on Standard the server already reads it, so there is nothing to
-		// consent to (specs/in_window_deferred_work.md). The TRAVEL consent
-		// below it shows at every level — where mail may be sent to be read is
-		// a decision for a Standard domain too. The picker shows its add-on
-		// block only on Private: Standard has nothing sealed for them to guard.
+		// permit. On Private it lets the server read during an unlock window;
+		// on Fortress it lets each member's own browser hand the mail to the
+		// model they registered — the server still never reads it. The TRAVEL
+		// consent below it shows at every level — where mail may be sent to be
+		// read is a decision for a Standard domain too. The picker shows its
+		// add-on block only on Private: Standard has nothing sealed for them to
+		// guard.
 		'visibility_rules' => [
 			InboundEmailDomain::LEVEL_STANDARD => ['show' => ['ied_ai_processing_consent'],
 				'hide' => ['ied_ai_processing_enabled']],
 			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
-			// No server-side AI reads Fortress mail (R7): nothing to consent to.
-			InboundEmailDomain::LEVEL_FORTRESS => ['hide' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
+			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
 		],
 		// Either add-on shortens the unlock window (§ Add-ons rule 5).
 		'addons_note' => 'Either one keeps your unlock window short (2 hours idle, 24 hours at most).',
@@ -297,7 +300,8 @@ if ($show_form) {
 	// — keep whichever boxes they ticked ticked, so the operator does not have
 	// to remember what they were doing, and the graver of the two consents is
 	// not silently dropped by the lost POST.
-	$ai_value = (bool)$form_domain->get('ied_ai_processing_enabled');
+	// A domain being created starts with AI available, like the column.
+	$ai_value = $form_domain->key ? (bool)$form_domain->get('ied_ai_processing_enabled') : true;
 	if (!empty($_GET['target_ai'])) {
 		$ai_value = true;
 	}
@@ -329,10 +333,12 @@ if ($show_form) {
 	$formwriter->checkboxinput('ied_ai_processing_enabled',
 		"Let Joinery AI read this domain's mail while your vault is unlocked", [
 			'value' => $ai_value,
-			'helptext' => 'Off by default. Turning this on lets the AI email features (triage, '
-				. 'security scan, calendar) read this domain\'s mail during an unlock window '
-				. 'and send it to the configured model host. They cannot run at all while it '
-				. 'is off, because encrypted mail is unreadable without you.',
+			'helptext' => 'On by default. This makes the AI email features (triage, security scan, '
+				. 'calendar) available for this domain\'s mailboxes; nothing is read until each person '
+				. 'turns a feature on for their own mailbox in the AI panel. On Private, the server '
+				. 'reads the mail during their unlock window and sends it to the model host. On '
+				. 'Fortress, their own browser sends it to the model they set up; the server still '
+				. 'never reads it. Turn this off and no AI feature can run on this domain\'s mail.',
 		]);
 
 	// The travel consent: not whether the AI may read this mail, but how far

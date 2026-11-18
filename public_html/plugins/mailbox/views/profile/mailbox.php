@@ -5,6 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
+ * @version 1.18.0 - no AI button or panel when there is no model to run against
  * @version 1.17.0 - the gear links Download a mailbox
  * @version 1.16.0 - the gear lists Contacts
  * @version 1.15.0 - the panel section no longer offers the site's own model (Email settings does)
@@ -75,8 +76,11 @@ $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown mbx-gear
 // the gear opening the recipes drawer for the mailbox open in the rail. Only
 // this member mount carries it — the admin oversight reader spans mailboxes
 // the viewer holds no grant on, so it deliberately does not. With the plugin
-// inactive the button simply doesn't exist.
-$ai_panel_active = PluginHelper::isPluginActive('joinery_ai');
+// inactive the button simply doesn't exist, and so it does with no model to
+// run against: neither one this site can reach nor one the member registered
+// for their Fortress mail (Email settings is where either is set up).
+$ai_panel_active = PluginHelper::isPluginActive('joinery_ai')
+	&& (!empty($device_ai_origin) || AiEndpointRegistry::anyAvailable());
 if ($ai_panel_active) {
 	$hoptions['header_action'] = '<span id="mbx-ai-panel-anchor"></span>' . $hoptions['header_action'];
 }

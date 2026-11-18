@@ -1,4 +1,5 @@
 <?php
+// @version 1.10 - the AI switch is kept on Fortress, where the member's own model reads the mail
 // @version 1.9 - switching the sending lock on lands in the send-protection ceremony when the key exists
 // @version 1.8 - switching the sending lock on makes the key before a raise's receipt landing
 // @version 1.7 - a catch-all forwarding address is asked to confirm, and the editor can resend
@@ -418,8 +419,11 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// than giving it.
 		$old_ai = $domain->key ? (bool)$domain->get('ied_ai_processing_enabled') : false;
 		$new_ai = isset($input['ied_ai_processing_enabled']);
-		if ($new_ai && (!$new_seals || $new_level === InboundEmailDomain::LEVEL_FORTRESS)) {
-			$new_ai = false;   // meaningless at Standard, and no server AI reads Fortress mail (R7)
+		// Meaningless at Standard. On Fortress it is what lets the member's own
+		// browser send their mail to the model they registered; the server
+		// itself still never reads Fortress mail (specs/fortress_mail_device_ai.md).
+		if ($new_ai && !$new_seals) {
+			$new_ai = false;
 		}
 
 		// The travel consent: how far may the mail go to be read? On a sealed

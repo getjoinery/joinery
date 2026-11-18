@@ -181,6 +181,22 @@ class AiEndpointRegistry {
         return count(self::modelsFor($key)) > 0;
     }
 
+    /**
+     * Can this install reach any model at all? What a page asks before it
+     * shows AI controls: with none, nothing the server runs could answer.
+     * An unreadable catalog answers no.
+     */
+    public static function anyAvailable(): bool {
+        try {
+            foreach (array_keys(self::endpoints()) as $key) {
+                if (self::isAvailable((string)$key)) return true;
+            }
+        } catch (AiCatalogException $e) {
+            return false;
+        }
+        return false;
+    }
+
     /** The base URL for an endpoint: a literal, or whatever setting it names. */
     public static function baseUrl(string $key): string {
         $e = self::endpoint($key);

@@ -538,6 +538,11 @@ the authorization, there is no permission gate):
   wording, other-mailbox count, last-run line; a dashboard link for
   permission-10 viewers), plus one template card per shipped declaration the
   caller has no instance of — so on a stock install the panel is never empty.
+  When nothing in the area can be turned on for the context (a job's
+  `contextNotice()`: the mailbox's domain has AI switched off) it answers no
+  cards and a `notice` {text, link_url, link_text} — the domain named, and for
+  a `config:write` viewer a link to the domain form — which the panel shows in
+  place of the rows.
 - **`joinery_ai/ai_panel_toggle`** (write) — binds or unbinds the context on
   the caller's recipe under a row lock (the stored list is re-read inside the
   toggle's own transaction, so a dashboard save racing a panel toggle can

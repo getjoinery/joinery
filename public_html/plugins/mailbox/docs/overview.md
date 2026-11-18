@@ -2534,13 +2534,23 @@ the acting admin to claim ownership.
 
 The AI email features (triage, security scan, calendar extraction) cannot read
 mail that is encrypted at rest unless the owner is signed in with their vault
-open — and even then, only if the domain has been set to allow it.
+open — and only while the domain allows it.
 
-`ied_ai_processing_enabled` is that switch. It is off by default, appears on the
-domain form only for Private domains (at Standard the server
-already reads the mail, so there is nothing to consent to), and turning it on
-requires a recent identity confirmation. Turning it off never does — withdrawing
-consent must not be harder than giving it.
+`ied_ai_processing_enabled` is the domain's switch. It is on by default and
+makes the features available; nothing reads any mail until a member turns a
+feature on for their own mailbox in the AI panel. It appears on the domain form
+for Private and Fortress domains (at Standard the server already reads the
+mail, so there is nothing to permit). On Private it lets the server read during
+the owner's unlock window; on Fortress it lets the member's own browser send
+the mail to the model they registered, and the server still never reads it.
+Turning it back on for an existing domain requires a recent identity
+confirmation; turning it off never does — withdrawing permission must not be
+harder than giving it.
+
+With the switch off, the AI panel on a mailbox of that domain shows one line
+naming the domain in place of the features, with a **Turn it on** link to the
+domain form for an operator who can change it (`config:write`); anyone else is
+told their administrator can.
 
 A second, separate answer — `ied_ai_processing_consent` — says how far the
 domain's mail may travel to be read by a model: `local` (hardware the operator
@@ -2552,13 +2562,14 @@ It starts at `local`, loosening it needs the same identity confirmation, and a
 recipe that would need more than the domain allows is refused with a message
 naming this page.
 
-With it off, saving a recipe pointed at a mailbox on that domain is refused, and
+With the switch off, saving a recipe pointed at a mailbox on that domain is refused, and
 the message names the domain and the setting. The refusal happens at save time
 rather than at run time, so the failure mode is an explanation rather than a
 recipe that silently does nothing.
 
-What it buys, stated plainly: with it on, the server reads that domain's mail
-during an unlock window and sends it to the configured model host. Overnight
+What it buys, stated plainly: with it on and a feature turned on, the server
+reads a Private domain's mail during an unlock window and sends it to the
+configured model host. Overnight
 processing remains impossible on a sealed domain — summaries appear shortly
 after the owner opens their mail, never before they arrive.
 
@@ -3854,7 +3865,10 @@ that have the column there is no button — the panel is already on the page. Th
 reads — `window.MailboxReader.currentAddress()` plus a
 `joineryareacontextchange` event on every rail switch. The admin mount
 deliberately does not carry the button: its all-access view spans mailboxes
-the viewer holds no grant on, and admins manage recipes on the dashboard. See
+the viewer holds no grant on, and admins manage recipes on the dashboard. Nor
+does a member mount with no model to run against — none this site can reach
+(`AiEndpointRegistry::anyAvailable()`) and no model the member registered for
+Fortress mail: there is no panel or button until one is set up. See
 `plugins/joinery_ai/docs/overview.md` § The area AI panel.
 
 ### Phone layout

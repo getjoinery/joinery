@@ -17,6 +17,7 @@
  * read a mailbox at all (specs/in_window_deferred_work.md): whether the mail is
  * sealed at rest, and whether the domain has consented to AI reading it.
  *
+ * @version 1.6 - aiOffDomain(): the domain keeping AI off an address, for the AI panel to name
  * @version 1.5 - Fortress: securityLevelForAddress() answers 'fortress' for a domain
  *   set there, and a legacy unconverted value still reads as Private
  * @version 1.4 - sealed at rest means Private (two levels)
@@ -197,8 +198,8 @@ class MailboxAliasConfig {
 	 *
 	 * On a standard domain the server already reads the mail in the clear, so
 	 * there is no separate consent and this is always true. On a sealed domain
-	 * it is the domain's explicit opt-in (ied_ai_processing_enabled), which is
-	 * off until someone deliberately turns it on.
+	 * it is the domain's switch (ied_ai_processing_enabled), on unless an
+	 * operator turned it off.
 	 */
 	public static function aiProcessingAllowed(string $address): bool {
 		$row = self::domainPostureForAddress($address);
@@ -210,6 +211,23 @@ class MailboxAliasConfig {
 			return true;
 		}
 		return (bool)$row['ied_ai_processing_enabled'];
+	}
+
+	/**
+	 * The domain whose switch keeps AI off this address's mail, or null when
+	 * AI may read it (aiProcessingAllowed()) or the address is unknown — what
+	 * the AI panel names, and links an operator to, in place of features that
+	 * cannot be turned on.
+	 *
+	 * @return ?array{domain_id:int, domain:string}
+	 */
+	public static function aiOffDomain(string $address): ?array {
+		$row = self::domainPostureForAddress($address);
+		if ($row === null || self::aiProcessingAllowed($address)) {
+			return null;
+		}
+		return array('domain_id' => (int)$row['ied_inbound_email_domain_id'],
+			'domain' => (string)$row['ied_domain']);
 	}
 
 	/**
@@ -260,7 +278,8 @@ class MailboxAliasConfig {
 
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT d.ied_security_level, d.ied_level_set_time, d.ied_ai_processing_enabled, d.ied_ai_processing_consent
+			"SELECT d.ied_inbound_email_domain_id, d.ied_domain, d.ied_security_level, d.ied_level_set_time,
+			        d.ied_ai_processing_enabled, d.ied_ai_processing_consent
 			   FROM iea_inbound_email_aliases a
 			   JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
 			  WHERE a.iea_delete_time IS NULL

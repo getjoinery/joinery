@@ -53,7 +53,9 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.12.0 - one line per recipe
+ * Vanilla JS, jy-ui styling, no framework. @version 2.13.0 - a context where nothing can be
+ * turned on shows the server's notice (and its link) in place of the rows
+ * @version 2.12.0 - one line per recipe
  * (name, switch, pencil) with its progress under it; the Working now list is gone,
  * a run of a recipe not listed here gets a line of its own
  * @version 2.11.0 - Waiting for you has a
@@ -339,7 +341,11 @@
 				.then(function (data) {
 					recipesBox.classList.remove('aip-stale');
 					var cards = data && data.cards ? data.cards : [];
-					showCards(cards.length ? { cards: cards } : { message: 'No AI features for this page yet.' });
+					if (data && data.notice) {
+						showCards({ notice: data.notice });
+					} else {
+						showCards(cards.length ? { cards: cards } : { message: 'No AI features for this page yet.' });
+					}
 				})
 				.catch(function (err) {
 					recipesBox.classList.remove('aip-stale');
@@ -387,6 +393,17 @@
 						reasons.push(card.blocked_text);
 					}
 				});
+			} else if (cardsView.notice) {
+				// Nothing here can be turned on (the mailbox's domain has AI off):
+				// the reason, and for whoever can change it, the way there.
+				var note = el('p', 'aip-recipe-blocked', cardsView.notice.text || '');
+				if (cardsView.notice.link_url) {
+					note.appendChild(document.createTextNode(' '));
+					var fix = el('a', null, cardsView.notice.link_text || 'Change this');
+					fix.href = cardsView.notice.link_url;
+					note.appendChild(fix);
+				}
+				recipesBox.appendChild(note);
 			} else {
 				recipesBox.appendChild(el('p', 'aip-quiet', cardsView.message));
 			}

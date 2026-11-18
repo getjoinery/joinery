@@ -545,6 +545,44 @@ $r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_toggle_logic.php',
 check($r->error === null && ($r->data['card']['covered'] ?? null) === true,
 	'ai_panel_toggle round-trips through the logic wrapper', var_export($r->error, true));
 
+// A mailbox whose domain has AI switched off: one line naming the domain in
+// place of the cards, with the way to the switch only for whoever can change it.
+$sealed_off = aip_domain(InboundEmailDomain::LEVEL_PRIVATE, false);
+aip_alias(intval($sealed_off->key), 'off', $member_id);
+$addr_off = 'off@' . $sealed_off->get('ied_domain');
+MailboxAliasConfig::clearPostureCache();
+$r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_state_logic.php',
+	'ai_panel_state_logic', array('area' => 'mailbox', 'mailbox' => $addr_off));
+$notice = $r->data['notice'] ?? null;
+check($r->error === null && ($r->data['cards'] ?? null) === array() && is_array($notice)
+	&& strpos((string)$notice['text'], (string)$sealed_off->get('ied_domain')) !== false,
+	'a domain with AI off answers no cards and a notice naming the domain', var_export($r->data ?? $r->error, true));
+check(is_array($notice) && $notice['link_url'] === null
+	&& strpos((string)$notice['text'], 'administrator') !== false,
+	'a member is told who can turn it on, with no link', var_export($notice, true));
+$op_notice = AiPanelService::notice(8, 'mailbox', array('mailbox' => $addr_off));
+check(is_array($op_notice) && $op_notice['link_url']
+	=== '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . intval($sealed_off->key),
+	'an operator gets a link to the domain\'s switch', var_export($op_notice, true));
+check(AiPanelService::notice(8, 'mailbox', array('mailbox' => $addr1)) === null,
+	'a domain AI may read gets no notice');
+$r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_state_logic.php',
+	'ai_panel_state_logic', array('area' => 'mailbox', 'mailbox' => $addr1));
+check(array_key_exists('notice', $r->data ?? array()) && $r->data['notice'] === null,
+	'and its state answer carries notice null beside its cards', var_export($r->data ?? $r->error, true));
+
+// A new domain allows AI unless someone turns it off: the operator's switch
+// only makes the features available, each member still turns them on.
+$fresh = new InboundEmailDomain(NULL);
+$fresh->set('ied_domain', 'aip-fresh-' . bin2hex(random_bytes(4)) . '.example');
+$fresh->set('ied_is_enabled', true);
+$fresh->set('ied_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+$fresh->save();
+$fresh->load();
+harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', intval($fresh->key));
+check((bool)$fresh->get('ied_ai_processing_enabled') === true,
+	'a new domain starts with AI allowed', var_export($fresh->get('ied_ai_processing_enabled'), true));
+
 // One call feeds both of the panel's counts, so they can never disagree.
 $r = harness_call_logic('plugins/joinery_ai/logic/ai_status_logic.php',
 	'ai_status_logic', array());

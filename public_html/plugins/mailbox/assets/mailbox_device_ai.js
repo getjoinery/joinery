@@ -55,6 +55,7 @@
  * computer with nothing saved yet for that address, the form starts filled
  * with it.
  *
+ * @version 1.13 - the consent refusal shows only for a recipe on here; the panel names an AI-off domain itself
  * @version 1.12 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
  * Vanilla JS, jy-ui classes, no framework. @version 1.11 - no check on page load: the
  *   model is called only when the drain has a message to judge
@@ -385,7 +386,9 @@
 		} else if (drain.attention) {
 			problem(drain.status + ' ', [checkAgainLink(), settingsLink('Email settings')]);
 		}
-		if (info && info.consent_refusal) problem(info.consent_refusal, []);
+		// Only for a recipe that is on here: with none, the panel's own line
+		// above the rows already says why nothing can be turned on.
+		if (info && info.consent_refusal && info.recipes.length) problem(info.consent_refusal, []);
 		if (info && st.usable) {
 			var warn = floorWarning(st.usable.model, info.model_reference, info.recipes);
 			if (warn) problem(warn + ' ', [settingsLink('Email settings')]);
