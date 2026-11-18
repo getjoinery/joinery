@@ -545,8 +545,8 @@ $r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_toggle_logic.php',
 check($r->error === null && ($r->data['card']['covered'] ?? null) === true,
 	'ai_panel_toggle round-trips through the logic wrapper', var_export($r->error, true));
 
-// A mailbox whose domain has AI switched off: one line naming the domain in
-// place of the cards, with the way to the switch only for whoever can change it.
+// A mailbox whose domain has AI switched off: no cards, and the reason the
+// panel shows on hover over its greyed heading.
 $sealed_off = aip_domain(InboundEmailDomain::LEVEL_PRIVATE, false);
 aip_alias(intval($sealed_off->key), 'off', $member_id);
 $addr_off = 'off@' . $sealed_off->get('ied_domain');
@@ -557,13 +557,11 @@ $notice = $r->data['notice'] ?? null;
 check($r->error === null && ($r->data['cards'] ?? null) === array() && is_array($notice)
 	&& strpos((string)$notice['text'], (string)$sealed_off->get('ied_domain')) !== false,
 	'a domain with AI off answers no cards and a notice naming the domain', var_export($r->data ?? $r->error, true));
-check(is_array($notice) && $notice['link_url'] === null
-	&& strpos((string)$notice['text'], 'administrator') !== false,
-	'a member is told who can turn it on, with no link', var_export($notice, true));
+check(is_array($notice) && strpos((string)$notice['text'], 'your administrator') !== false,
+	'a member is told their administrator turned it off', var_export($notice, true));
 $op_notice = AiPanelService::notice(8, 'mailbox', array('mailbox' => $addr_off));
-check(is_array($op_notice) && $op_notice['link_url']
-	=== '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . intval($sealed_off->key),
-	'an operator gets a link to the domain\'s switch', var_export($op_notice, true));
+check(is_array($op_notice) && strpos((string)$op_notice['text'], 'domain\'s mail settings') !== false,
+	'an operator is told where to turn it on', var_export($op_notice, true));
 check(AiPanelService::notice(8, 'mailbox', array('mailbox' => $addr1)) === null,
 	'a domain AI may read gets no notice');
 $r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_state_logic.php',

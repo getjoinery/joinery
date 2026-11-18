@@ -1,7 +1,9 @@
 /**
  * Area AI panel (ai_panel.js) — the same panel docked in a host's sidebar or
  * carried by the slide-over, so both are styled from one place. jy-ui
- * vocabulary, vanilla CSS, no framework. @version 2.8.0 - a recipe is one line: name,
+ * vocabulary, vanilla CSS, no framework. @version 2.9.0 - .aip-disabled: the greyed heading
+ *   and button when the open mailbox's domain has AI off
+ * @version 2.8.0 - a recipe is one line: name,
  *   switch, pencil; its progress under it while it has work
  * @version 2.7.0 - action cards: neutral with a
  *   blue edge, padded when docked, labelled fields, the Current / Past switch
@@ -549,3 +551,9 @@
 }
 .aip-panel .aip-link:hover { text-decoration: underline; }
 .aip-panel .aip-link[disabled] { color: var(--jy-color-text-muted, #667085); cursor: default; }
+
+/* The open mailbox's domain has AI turned off: the heading and the button
+   are greyed, and their hover (a title) says why. */
+.aip-panel.aip-disabled .aip-head { cursor: help; }
+.aip-panel.aip-disabled .aip-title,
+.aip-open-btn.aip-disabled { opacity: 0.45; }

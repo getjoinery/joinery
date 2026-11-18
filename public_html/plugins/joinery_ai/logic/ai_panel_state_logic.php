@@ -8,12 +8,13 @@
  * area ('mailbox'), plus the area's own context fields (mailbox = the address
  * currently open in the reader's rail). Returns { cards: [...], notice } — the
  * user's own area recipes plus one template card per shipped declaration they
- * have no instance of; or no cards and a notice {text, link_url, link_text}
- * when nothing can be turned on for that context (its domain has AI off). Card facts are server-rendered; the client never interprets
+ * have no instance of; or no cards and a notice {text} when the panel is off
+ * for that context (its domain has AI off) — the panel greys its heading and
+ * shows the text on hover. Card facts are server-rendered; the client never interprets
  * recipe config itself. Ownership scoping is the authorization: everyone sees
  * exactly their own recipes, so there is no permission gate.
  *
- * @version 1.1 - notice in place of cards when the context's domain has AI off
+ * @version 1.1 - a notice, and no cards, when the context's domain has AI off
  * @version 1.0
  */
 
@@ -29,7 +30,7 @@ function ai_panel_state_logic(array $input): LogicResult {
 	$area = (string)($input['area'] ?? '');
 	$context = ['mailbox' => strtolower(trim((string)($input['mailbox'] ?? '')))];
 
-	// A context where nothing can be turned on gets the reason, not the cards.
+	// A context where the panel is off gets the reason, not the cards.
 	$notice = AiPanelService::notice((int)$session->get_permission(), $area, $context);
 	if ($notice !== null) {
 		return LogicResult::render(['cards' => [], 'notice' => $notice]);

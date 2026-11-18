@@ -2547,10 +2547,10 @@ Turning it back on for an existing domain requires a recent identity
 confirmation; turning it off never does — withdrawing permission must not be
 harder than giving it.
 
-With the switch off, the AI panel on a mailbox of that domain shows one line
-naming the domain in place of the features, with a **Turn it on** link to the
-domain form for an operator who can change it (`config:write`); anyone else is
-told their administrator can.
+With the switch off, the AI panel on a mailbox of that domain shows only its
+heading, greyed; hovering it names the domain and says the administrator
+turned AI off (an operator who can change it, `config:write`, is told it is in
+the domain's mail settings).
 
 A second, separate answer — `ied_ai_processing_consent` — says how far the
 domain's mail may travel to be read by a model: `local` (hardware the operator

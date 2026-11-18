@@ -20,7 +20,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
- * @version 1.8 - contextNotice(): the panel names a domain with AI off, with a link for an operator
+ * @version 1.8 - contextNotice(): why the panel is greyed out on a domain with AI off
  * @version 1.7 - runsOnDeviceFor(): a device job on a Fortress mailbox runs in the browser
  * @version 1.6 - includesAttachmentDigest(), public, for a browser run
  * @version 1.5 - deviceCapable(), off for the family
@@ -210,27 +210,20 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
     }
 
     /**
-     * What the AI panel says in place of this area's features when none of
-     * them can be turned on for the mailbox in $context: its domain has AI
-     * switched off. Names the domain, and gives an operator who can change the
-     * switch a link to it; anyone else is told who can. Null when the features
-     * can be offered.
+     * Why the AI panel is switched off for the mailbox in $context — its
+     * domain has AI turned off — or null when its features can be offered.
+     * The panel greys its heading and shows this on hover; an operator who
+     * can change the switch is told where it is.
      *
-     * @return ?array{text:string, link_url:?string, link_text:?string}
+     * @return ?array{text:string}
      */
     public function contextNotice(array $context, int $permission): ?array {
         $address = strtolower(trim((string)($context['mailbox'] ?? '')));
         $off = $address !== '' ? MailboxAliasConfig::aiOffDomain($address) : null;
         if ($off === null) return null;
-        $can_fix = Access::allows('config:write', $permission);
-        return [
-            'text'      => 'AI is turned off for mail on ' . $off['domain'] . '.'
-                . ($can_fix ? '' : ' Your site\'s administrator can turn it on.'),
-            'link_url'  => $can_fix
-                ? '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . $off['domain_id']
-                : null,
-            'link_text' => $can_fix ? 'Turn it on' : null,
-        ];
+        return ['text' => Access::allows('config:write', $permission)
+            ? 'AI is turned off for mail on ' . $off['domain'] . '. Turn it on in that domain\'s mail settings.'
+            : 'AI has been turned off by your administrator for mail on ' . $off['domain'] . '.'];
     }
 
     /** Off for the family; the triage and the security scan turn it on. */

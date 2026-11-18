@@ -53,8 +53,8 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.13.0 - a context where nothing can be
- * turned on shows the server's notice (and its link) in place of the rows
+ * Vanilla JS, jy-ui styling, no framework. @version 2.13.0 - a context whose domain has AI
+ * off greys the heading and button, says why on hover, and shows nothing under them
  * @version 2.12.0 - one line per recipe
  * (name, switch, pencil) with its progress under it; the Working now list is gone,
  * a run of a recipe not listed here gets a line of its own
@@ -179,6 +179,31 @@
 			}
 		}
 
+		// ---- switched off for this context ----
+		// The open mailbox's domain has AI turned off: nothing under the
+		// heading could be turned on, so there is nothing under it at all —
+		// a greyed heading (and button) whose hover says why.
+		var disabledText = null;
+		function setDisabled(text) {
+			disabledText = text || null;
+			var off = !!disabledText;
+			panel.classList.toggle('aip-disabled', off);
+			if (off) head.title = disabledText; else head.removeAttribute('title');
+			headCounts.hidden = off;
+			if (btn) {
+				btn.classList.toggle('aip-disabled', off);
+				btn.title = off ? disabledText : 'AI';
+			}
+			if (isDocked()) {
+				headToggle.hidden = off;
+				applyCollapsed();
+			} else {
+				body.hidden = off;
+				footer.hidden = off;
+				announce();
+			}
+		}
+
 		// ---- where the panel lives ----
 		// Dock first, then look: the host's column may be empty-and-hidden until
 		// this panel is in it, so asking whether the slot is on screen BEFORE
@@ -198,8 +223,8 @@
 		}
 		function applyCollapsed() {
 			var shut = isDocked() && collapsed();
-			body.hidden = shut;
-			footer.hidden = shut;
+			body.hidden = shut || !!disabledText;
+			footer.hidden = shut || !!disabledText;
 			panel.setAttribute('data-collapsed', shut ? 'true' : 'false');
 			headToggle.textContent = shut ? '\u25b8' : '\u25be';
 			headToggle.title = shut ? 'Show AI' : 'Hide AI';
@@ -219,7 +244,7 @@
 					container.appendChild(panel);
 					panel.classList.add('aip-panel-docked');
 					closeBtn.hidden = true;
-					headToggle.hidden = false;
+					headToggle.hidden = !!disabledText;
 					applyCollapsed();
 				}
 				if (panel.offsetParent !== null) {
@@ -245,8 +270,8 @@
 			panel.removeAttribute('data-collapsed');
 			closeBtn.hidden = false;
 			headToggle.hidden = true;
-			body.hidden = false;
-			footer.hidden = false;
+			body.hidden = !!disabledText;
+			footer.hidden = !!disabledText;
 		}
 
 		function open() {
@@ -278,7 +303,8 @@
 			if (ev.key === 'Escape' && !overlay.hidden) close();
 		});
 		document.addEventListener('joineryareacontextchange', function () {
-			if (isVisible()) refresh();
+			// A greyed button still learns when the next mailbox allows AI.
+			if (isVisible() || disabledText) refresh();
 		});
 		window.addEventListener('resize', function () { place(); });
 
@@ -324,6 +350,7 @@
 		function refreshCards() {
 			var ctx = getContext() || {};
 			if (area === 'mailbox' && !ctx.mailbox) {
+				setDisabled(null);
 				recipesBox.classList.remove('aip-stale');
 				showCards({ message: 'Select a mailbox to manage AI for it.' });
 				return Promise.resolve();
@@ -341,13 +368,11 @@
 				.then(function (data) {
 					recipesBox.classList.remove('aip-stale');
 					var cards = data && data.cards ? data.cards : [];
-					if (data && data.notice) {
-						showCards({ notice: data.notice });
-					} else {
-						showCards(cards.length ? { cards: cards } : { message: 'No AI features for this page yet.' });
-					}
+					setDisabled(data && data.notice ? data.notice.text : null);
+					showCards(cards.length ? { cards: cards } : { message: 'No AI features for this page yet.' });
 				})
 				.catch(function (err) {
+					setDisabled(null);
 					recipesBox.classList.remove('aip-stale');
 					showCards({ message: err && err.message ? err.message : 'Could not load.' });
 				});
@@ -393,17 +418,6 @@
 						reasons.push(card.blocked_text);
 					}
 				});
-			} else if (cardsView.notice) {
-				// Nothing here can be turned on (the mailbox's domain has AI off):
-				// the reason, and for whoever can change it, the way there.
-				var note = el('p', 'aip-recipe-blocked', cardsView.notice.text || '');
-				if (cardsView.notice.link_url) {
-					note.appendChild(document.createTextNode(' '));
-					var fix = el('a', null, cardsView.notice.link_text || 'Change this');
-					fix.href = cardsView.notice.link_url;
-					note.appendChild(fix);
-				}
-				recipesBox.appendChild(note);
 			} else {
 				recipesBox.appendChild(el('p', 'aip-quiet', cardsView.message));
 			}

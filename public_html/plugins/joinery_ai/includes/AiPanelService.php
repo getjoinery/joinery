@@ -27,7 +27,7 @@ class AiPanelConfirmRequired extends Exception {}
  * arrives after one toggle, with no dashboard visit. Turning OFF only unbinds:
  * the recipe may still cover other mailboxes.
  *
- * @version 1.8 - notice(): one line naming a domain with AI off, in place of cards that cannot turn on
+ * @version 1.8 - notice(): why the panel is greyed out for a context (its domain has AI off)
  * @version 1.7 - each in-flight job names its recipe_id, so its progress shows on that recipe's row
  * @version 1.6 - a device recipe's card says when it last judged on the owner's device, and its
  *   queue joins the Working now list and the job count
@@ -89,13 +89,13 @@ class AiPanelService {
     }
 
     /**
-     * The one line the panel shows in place of every card when nothing in
-     * this area can be turned on for $context (the mailbox's domain has AI
-     * switched off): three disabled switches repeating one refusal say less
-     * than the reason and where to change it. The first job that answers
-     * speaks for the area — the reason is the context's, not any one job's.
+     * Why the whole panel is off for $context (the mailbox's domain has AI
+     * switched off), or null. The panel then shows only its greyed heading
+     * with this on hover: nothing under it could be turned on. The first job
+     * that answers speaks for the area — the reason is the context's, not
+     * any one job's.
      *
-     * @return ?array{text:string, link_url:?string, link_text:?string}
+     * @return ?array{text:string}
      */
     public static function notice(int $permission, string $area, array $context): ?array {
         foreach (self::areaJobs($area) as $job) {
