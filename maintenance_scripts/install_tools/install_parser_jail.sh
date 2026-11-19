@@ -3,6 +3,11 @@
 # install_parser_jail.sh - install or converge the parser jail's launcher on
 # this machine (specs/parser_jail.md, docs/document_text.md).
 #
+# Version: 2.2 - the read probe opens the file (head -c 0) instead of test -r, which on Ubuntu
+#              26.04 ignores ACLs: a granted 770 tree read as ungranted and the launcher was
+#              never installed; acl is installed for the plugin users' grant too
+# Version: 2.1 - the plugin uid mark and the gone records live on the site's state volume in a
+#              container, so a container rebuild keeps them
 # Version: 2.0 - the allowlist fence (specs/sandboxed_php_plugins.md WP1): no util-linux
 #              prlimit (the launcher sets the address-space cap itself); one Unix user per
 #              sandboxed PHP plugin, jpx-NAME, created with the next uid above a root-owned
@@ -90,8 +95,14 @@ fi
 # user cannot already read it — a container's tree is world-readable and needs
 # nothing; a node's 770 tree needs the grant, re-checked at every root moment
 # because an upgrade swaps a fresh public_html into place.
+# An open, not test -r: Ubuntu 26.04's test (the Rust coreutils) answers -r
+# from the mode bits and ignores the ACL this script grants, so a granted
+# tree read as ungranted and the launcher was never installed.
+user_can_read() {
+    runuser -u "$1" -- /usr/bin/head -c 0 -- "$2" >/dev/null 2>&1
+}
 can_read() {
-    runuser -u "${JAIL_USER}" -- /usr/bin/test -r "$1" 2>/dev/null
+    user_can_read "${JAIL_USER}" "$1"
 }
 
 PUBLIC_HTML="${SITE_ROOT}/public_html"
@@ -211,7 +222,17 @@ fi
 # the next plugin, and useradd hands out a freed uid. The next uid is the one
 # above a high-water mark kept by root outside every site tree.
 JPX_GROUP="joinery-jpx"
-JPX_STATE_DIR="/var/lib/joinery-jail"
+# The mark must outlive the machine's /etc/passwd. In a site container that
+# file is in the writable layer a rebuild replaces, and so is /var/lib; the
+# site's state volume (/var/lib/joinery/sites, root's own, mounted) is kept.
+# The users are made again at the next start, above the kept mark: they own
+# nothing, so a new uid costs nothing, and no uid is ever handed out twice.
+JPX_LEGACY_STATE_DIR="/var/lib/joinery-jail"
+if [[ -d /var/lib/joinery/sites && ! -L /var/lib/joinery/sites ]] && mountpoint -q /var/lib/joinery/sites 2>/dev/null; then
+    JPX_STATE_DIR="/var/lib/joinery/sites/.joinery-jail"
+else
+    JPX_STATE_DIR="${JPX_LEGACY_STATE_DIR}"
+fi
 JPX_MARK="${JPX_STATE_DIR}/jpx_uid_mark"
 JPX_UID_BASE=50000
 JPX_UID_MAX=59999
@@ -262,13 +283,24 @@ converge_plugin_users() {
     fi
     install -d -o root -g root -m 0700 "${JPX_STATE_DIR}" "${JPX_GONE_DIR}"
 
-    local mark uid
+    local mark uid legacy
     mark="$(cat "${JPX_MARK}" 2>/dev/null || true)"
     [[ "${mark}" =~ ^[0-9]+$ ]] || mark=$((JPX_UID_BASE - 1))
+    # A mark kept before the state volume was used carries over.
+    if [[ "${JPX_STATE_DIR}" != "${JPX_LEGACY_STATE_DIR}" ]]; then
+        legacy="$(cat "${JPX_LEGACY_STATE_DIR}/jpx_uid_mark" 2>/dev/null || true)"
+        [[ "${legacy}" =~ ^[0-9]+$ ]] && (( legacy > mark )) && mark="${legacy}"
+    fi
     # Never below a plugin user that exists already (a mark lost with its disk).
     while IFS=: read -r _ _ uid _; do
         [[ "${uid}" =~ ^[0-9]+$ ]] && (( uid > mark )) && mark="${uid}"
     done < <(getent passwd | awk -F: '$1 ~ /^jpx-/')
+    # Kept every run, not only when a user is made: a mark that moved, or
+    # fell behind the users that exist, must be on disk before the next
+    # rebuild takes /etc/passwd and the old location with it.
+    if [[ "$(cat "${JPX_MARK}" 2>/dev/null || true)" != "${mark}" ]] && (( mark >= JPX_UID_BASE )); then
+        printf '%s\n' "${mark}" > "${JPX_MARK}.tmp" && mv -f "${JPX_MARK}.tmp" "${JPX_MARK}"
+    fi
 
     local u next made=0 total
     total="$(getent passwd | grep -c '^jpx-' || true)"
@@ -323,7 +355,11 @@ converge_plugin_users() {
     # world-readable (a node's 770 tree): the same grant the jail user has.
     local probe_user=""
     for u in "${!want[@]}"; do id -u "$u" >/dev/null 2>&1 && { probe_user="$u"; break; }; done
-    if [[ -n "${probe_user}" ]] && ! runuser -u "${probe_user}" -- /usr/bin/test -r "${PROBE_CODE}" 2>/dev/null; then
+    if [[ -n "${probe_user}" ]] && ! user_can_read "${probe_user}" "${PROBE_CODE}"; then
+        if ! command -v setfacl >/dev/null 2>&1; then
+            echo "parser jail: installing acl for setfacl (plugin users)"
+            (apt-get update -qq >/dev/null 2>&1 || true; apt-get install -y acl >/dev/null 2>&1) || true
+        fi
         if command -v setfacl >/dev/null 2>&1; then
             # A recursive walk as root is safe here, as it is for the jail
             # user's grant above, only because public_html is the executable
