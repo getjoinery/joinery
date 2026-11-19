@@ -58,7 +58,60 @@ chk "cannot fork (a shell running two commands)" \
 chk "cannot open a socket" \
     "$("$LAUNCHER" -- /usr/bin/php -r 'exit(@stream_socket_client("udp://127.0.0.1:9", $e, $s, 1) ? 1 : 0);' && echo refused || echo opened)" "refused"
 chk "cannot change user" \
-    "$("$LAUNCHER" -- /usr/bin/php -r 'exit(@posix_setuid(0) ? 1 : 0);' && echo refused || echo changed)" "refused"
+    "$("$LAUNCHER" -- /usr/bin/php -n -d extension=posix -r 'exit(function_exists("posix_setuid") && !@posix_setuid(0) ? 0 : 1);' && echo refused || echo changed)" "refused"
+
+if grep -aq 'JOINERY_JAIL_INTERFACE=2' "$LAUNCHER"; then
+    # The allowlist fence (specs/sandboxed_php_plugins.md design 2). Every row
+    # of the design's tables also runs from inside, as real PHP making raw
+    # system calls, in the launcher's own Go tests (joinery_jail/jail_fence_test.go);
+    # these are the ones that need the installed, setuid binary.
+    echo "== the allowlist fence =="
+    CONFIG="$(cd "$ROOT/.." && pwd)/config/Globalvars_site.php"
+    chk "cannot read the site config, even by an open" \
+        "$("$LAUNCHER" -- /bin/cat "$CONFIG" >/dev/null 2>&1 && echo read || echo refused)" "refused"
+    chk "cannot read /etc/passwd" \
+        "$("$LAUNCHER" -- /bin/cat /etc/passwd >/dev/null 2>&1 && echo read || echo refused)" "refused"
+    chk "cannot write /dev/shm without a run folder" \
+        "$("$LAUNCHER" -- /usr/bin/php -n -r 'exit(@file_put_contents("/dev/shm/jj_gate_" . getmypid(), "x") === false ? 0 : 1);' && echo refused || echo wrote)" "refused"
+    run_folder="$("$LAUNCHER" --scratch=1048576 -- /usr/bin/php -n -r '$t = getenv("TMPDIR"); echo file_put_contents("$t/a", "x") === 1 ? $t : "no";')"
+    chk "a run folder of its own is writable" "${run_folder:0:26}" "/dev/shm/joinery-jail-run."
+    chk "and is gone when the run ends" "$(test -e "$run_folder" && echo left || echo gone)" "gone"
+    chk "a run folder over its cap is killed, and says why" \
+        "$("$LAUNCHER" --scratch=1048576 -- /usr/bin/php -n -r '$t = getenv("TMPDIR"); for ($i = 0; $i < 8; $i++) { file_put_contents("$t/f$i", str_repeat("x", 1000000)); } usleep(400000); echo "lived";' 2>&1 | grep -c 'passed its cap')" "1"
+    # reviewer2 D1: bytes the folder's sum cannot see. An open file unlinked
+    # and written on, or an O_TMPFILE file, would hold memory past the cap.
+    chk "a run cannot unlink a file in its folder" \
+        "$("$LAUNCHER" --scratch=1048576 -- /usr/bin/php -n -r '$p = getenv("TMPDIR") . "/a"; file_put_contents($p, "x"); echo @unlink($p) ? "unlinked" : "refused";')" "refused"
+    chk "a run cannot make an unnamed O_TMPFILE file" \
+        "$("$LAUNCHER" --scratch=1048576 -- /usr/bin/python3 -I -c 'import os; os.open(os.environ["TMPDIR"], os.O_TMPFILE | os.O_RDWR)' >/dev/null 2>&1 && echo made || echo refused)" "refused"
+    # reviewer2 D2: setting the stage marker yourself skips the supervisor,
+    # its deadline and its cap, and named any live run's folder.
+    chk "stage 2 cannot be entered from outside" \
+        "$(JOINERY_JAIL_STAGE=2 JOINERY_JAIL_SCRATCH=/dev/shm/joinery-jail-run.x "$LAUNCHER" --scratch=1024 -- /usr/bin/id -u 2>&1 | grep -c 'started by the launcher itself')" "1"
+    # reviewer2 D3: root opens the command; nothing about a root-only file
+    # leaks, and a FIFO cannot hang the root child.
+    chk "a root-only file named as the command says only 'not runnable'" \
+        "$("$LAUNCHER" -- /etc/shadow 2>&1)" "joinery-jail: not a runnable program: /etc/shadow"
+    chk "a missing root-only path says the same" \
+        "$("$LAUNCHER" -- /root/nonexistent 2>&1)" "joinery-jail: not a runnable program: /root/nonexistent"
+    fifo="/tmp/jj_gate_fifo_$$"; mkfifo "$fifo"
+    # A launcher with the bug blocks a ROOT child in open(), which no timeout
+    # here may kill; opening the far end releases it, so the gate never hangs.
+    ( sleep 6; : > "$fifo" ) 2>/dev/null &
+    chk "a FIFO as the command is refused at once" \
+        "$(timeout 5 "$LAUNCHER" --timeout=2 -- "$fifo" >/dev/null 2>&1; echo $?)" "125"
+    rm -f "$fifo"
+    chk "--user refuses a name that is not a plugin user" \
+        "$("$LAUNCHER" --user=root -- /usr/bin/id -u >/dev/null 2>&1; echo $?)" "125"
+    chk "--user refuses a plugin with no user yet" \
+        "$("$LAUNCHER" --user=jpx-nosuchplugin -- /usr/bin/id -u 2>&1 | grep -c 'being set up')" "1"
+    chk "a plugin run gets no scratch folder" \
+        "$("$LAUNCHER" --user=jpx-nosuchplugin --scratch=1024 -- /usr/bin/id -u >/dev/null 2>&1; echo $?)" "125"
+    chk "a grant through a link is refused" \
+        "$(ln -sfn "$(dirname "$CONFIG")" "/tmp/jj_gate_link_$$"; "$LAUNCHER" --read="/tmp/jj_gate_link_$$" -- /usr/bin/id -u >/dev/null 2>&1; echo $?; rm -f "/tmp/jj_gate_link_$$")" "125"
+else
+    echo "  NOTE: the installed launcher is the deny-list one; the allowlist rows run once install_parser_jail.sh installs the new binary"
+fi
 
 echo "== limits the kernel enforces =="
 start=$(date +%s)

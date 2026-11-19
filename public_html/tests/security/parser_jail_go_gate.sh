@@ -52,9 +52,14 @@ if (cd "${SRC}" && go vet ./... >"${WORK}/vet" 2>&1); then
 else
     bad "go vet reported problems"; sed 's/^/    /' "${WORK}/vet" | tail -20
 fi
+if (cd "${SRC}" && GOARCH=arm64 go vet ./... >"${WORK}/vet64" 2>&1); then
+    ok "go vet is clean for arm64 (its own call table)"
+else
+    bad "go vet reported problems for arm64"; sed 's/^/    /' "${WORK}/vet64" | tail -20
+fi
 
 if (cd "${SRC}" && go test -count=1 ./... >"${WORK}/test" 2>&1); then
-    ok "the unit tests pass (arguments, deny list, inherited descriptors kept from the child without closing the runtime's)"
+    ok "the unit tests pass (arguments, the allowlist on all 64 bits, inherited descriptors, the fence applied to PHP)"
 else
     bad "the unit tests failed"; sed 's/^/    /' "${WORK}/test" | tail -30
 fi

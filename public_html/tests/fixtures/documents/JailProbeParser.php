@@ -8,6 +8,9 @@
  *
  * Every probe is attempted and its outcome reported; nothing here asserts.
  *
+ * @version 1.1 - stages where the extractor does (the fenced run's own folder when
+ *   there is one), reads the config file rather than asking access(2), which
+ *   Landlock does not answer, and reports /etc/passwd and /dev/shm itself
  * @version 1.0
  */
 class JailProbeParser implements SandboxParserInterface {
@@ -38,18 +41,30 @@ class JailProbeParser implements SandboxParserInterface {
 		$wrote = @file_put_contents($probe, 'x') !== false;
 		if ($wrote) @unlink($probe);
 
-		$staged = '/dev/shm/joinery_doctext_probe_' . getmypid();
+		// Where DocumentText::stage() puts a container: the fenced run's own
+		// folder (TMPDIR) under the allowlist fence, /dev/shm otherwise.
+		$tmp = getenv('TMPDIR');
+		$dir = (is_string($tmp) && strpos($tmp, DocumentText::JAIL_RUN_FOLDER_PREFIX) === 0) ? $tmp : '/dev/shm';
+		$staged = $dir . '/joinery_doctext_probe_' . getmypid();
 		$staged_mode = null;
 		if (@file_put_contents($staged, 'x') !== false) {
 			$staged_mode = sprintf('%04o', @fileperms($staged) & 0777);
 			@unlink($staged);
 		}
+		$shm = '/dev/shm/joinery_probe_direct_' . getmypid();
+		$shm_writable = @file_put_contents($shm, 'x') !== false;
+		if ($shm_writable) @unlink($shm);
 
 		return json_encode(array(
 			'uid'            => function_exists('posix_geteuid') ? posix_geteuid() : null,
 			'user'           => function_exists('posix_getpwuid') && function_exists('posix_geteuid')
 				? ((posix_getpwuid(posix_geteuid())['name'] ?? '')) : '',
-			'config_readable'=> @is_readable($site . '/config/Globalvars_site.php'),
+			// An open, not is_readable(): access(2) answers by file mode only,
+			// and Landlock refuses the open, not the question.
+			'config_readable'=> @file_get_contents($site . '/config/Globalvars_site.php', false, null, 0, 1) !== false,
+			'passwd_readable'=> @file_get_contents('/etc/passwd', false, null, 0, 1) !== false,
+			'shm_writable'   => $shm_writable,
+			'staged_in_run_folder' => $dir !== '/dev/shm',
 			'socket'         => $socket,
 			'fork'           => $fork,
 			'wrote_tree'     => $wrote,

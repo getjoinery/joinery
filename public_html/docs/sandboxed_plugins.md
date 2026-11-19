@@ -315,6 +315,16 @@ false` in its `.json`).
 
 **Its settings and pages (door 4)**, below.
 
+**Its Unix user.** Every sandboxed plugin folder on the machine has a user of
+its own, `jpx-NAME`, kept by the parser jail's installer
+(`install_parser_jail.sh`) at each root moment: no shell, no home, no file
+anywhere, primary group `joinery-jpx`, a uid above a high-water mark in
+`/var/lib/joinery-jail/jpx_uid_mark` so no uid is ever handed out twice, and
+removed a week after no site on the machine has the plugin's folder. At most
+20 are made per run and 200 exist at once. The launcher runs a plugin
+as that user (`joinery-jail --user=jpx-NAME`) inside the allowlist fence
+described in `docs/document_text.md` § The parser jail, with no scratch folder.
+
 ## Pages and settings
 
 The plugin's pages are drawn by the platform from its manifest; nothing the

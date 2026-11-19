@@ -36,6 +36,14 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.5.1 - inside the fence a staged container is emptied, not unlinked (the run
+ *   has no unlink: reviewer2 D1); stage(), stagedIsOpen() and unstage() are public, the one
+ *   staging door for a SandboxParserInterface class
+ * @version 1.5.0 - the parser runs on the allowlist fence (specs/sandboxed_php_plugins.md
+ *   WP1): `php -n` with named extensions, read grants for the tree's .php files, the
+ *   vendor directory and the class map, and a capped per-run staging folder the
+ *   launcher owns; a launcher from before the fence keeps the old call until the
+ *   root step replaces it
  * @version 1.4.0 - clip(): UTF-8-safe truncation for byte-limited columns
  * @version 1.3.0
  * @changelog 1.3.0 - the parser jail: the subprocess runs under joinery-jail
@@ -96,6 +104,28 @@ class DocumentText {
 	 * for it. The interpreter alone maps ~140 MB before reading a byte.
 	 */
 	const JAIL_ADDRESS_SPACE_BYTES = 671088640;
+	/**
+	 * The per-run folder the launcher gives the parser for staging a
+	 * container (stage()), summed by the launcher every 50 ms and killed over
+	 * this. Also the per-file limit inside it.
+	 */
+	const JAIL_SCRATCH_BYTES = 67108864;
+	/**
+	 * The launcher's usage line carries this from the allowlist fence on
+	 * (joinery_jail/main.go interfaceMark). A launcher without it is the
+	 * deny-list one, which refuses the fence's options; until the root step
+	 * replaces it, that launcher is called the old way.
+	 */
+	const JAIL_INTERFACE_MARK = 'JOINERY_JAIL_INTERFACE=2';
+	/**
+	 * Shared extensions the parser and its handler classes use, loaded by name
+	 * under `php -n`: the fence grants no ini file. One compiled into PHP needs
+	 * no line and gets none. Never ffi.
+	 */
+	const PARSER_EXTENSIONS = array('ctype', 'dom', 'fileinfo', 'iconv', 'mbstring', 'posix',
+		'simplexml', 'tokenizer', 'xml', 'xmlreader', 'xmlwriter', 'zip');
+	/** Where the launcher puts a run's own folder (joinery_jail/main.go scratchPrefix). */
+	const JAIL_RUN_FOLDER_PREFIX = '/dev/shm/joinery-jail-run.';
 	/** Cap on returned text, in characters. */
 	const DEFAULT_MAX_CHARS = 50000;
 
@@ -402,6 +432,70 @@ class DocumentText {
 	}
 
 	/**
+	 * True when the installed launcher is the allowlist fence (it names
+	 * JAIL_INTERFACE_MARK). Read from the binary itself, once per binary.
+	 */
+	public static function jailFenced(): bool {
+		static $known = array();
+		$st = @stat(self::JAIL_LAUNCHER);
+		if ($st === false) return false;
+		$key = $st['ino'] . ':' . $st['size'] . ':' . $st['mtime'];
+		if (isset($known[$key])) return $known[$key];
+		$apcu = 'joinery_jail_fenced_' . $key;
+		if (function_exists('apcu_fetch')) {
+			$hit = apcu_fetch($apcu, $ok);
+			if ($ok) return $known[$key] = (bool)$hit;
+		}
+		$bin = @file_get_contents(self::JAIL_LAUNCHER);
+		$fenced = is_string($bin) && strpos($bin, self::JAIL_INTERFACE_MARK) !== false;
+		if (function_exists('apcu_store')) apcu_store($apcu, $fenced, 86400);
+		return $known[$key] = $fenced;
+	}
+
+	/**
+	 * What the fenced parser may read, as launcher options: the extractor
+	 * script, the .php files of core's includes/ and data/ (it resolves core
+	 * classes only, ClassAutoloader::restrictToCore()), the one handler file a
+	 * `parser` call names, the vendor directory whole (libraries read data
+	 * files beside their code), and the class map. Real paths: the launcher
+	 * refuses a grant through a link.
+	 *
+	 * @return string[]
+	 */
+	private static function jailGrants(string $script, array $args): array {
+		$grants = array();
+		$tree = realpath(PathHelper::getRootDir());
+		if ($tree !== false) {
+			$grants[] = '--read-php=' . $tree . '/includes';
+			$grants[] = '--read-php=' . $tree . '/data';
+		}
+		$real = realpath($script);
+		if ($real !== false) $grants[] = '--read=' . $real;
+		if (($args[0] ?? '') === 'parser' && isset($args[1])) {
+			$handler = realpath((string)$args[1]);
+			if ($handler !== false && is_file($handler)) $grants[] = '--read=' . $handler;
+		}
+		$vendor = realpath(PathHelper::getComposerVendorPath());
+		if ($vendor !== false) $grants[] = '--read=' . $vendor;
+		$map = realpath(PathHelper::getSiteRoot() . '/cache/class_map.json');
+		if ($map !== false && is_file($map)) $grants[] = '--read=' . $map;
+		return $grants;
+	}
+
+	/** `-d extension=` for each shared extension the parser needs that this PHP has. */
+	private static function extensionArgs(): array {
+		$dir = (string)ini_get('extension_dir');
+		$args = array();
+		foreach (self::PARSER_EXTENSIONS as $ext) {
+			if ($dir !== '' && is_file($dir . '/' . $ext . '.so')) {
+				$args[] = '-d';
+				$args[] = 'extension=' . $ext;
+			}
+		}
+		return $args;
+	}
+
+	/**
 	 * The command line for one subprocess: the launcher's fence where the
 	 * jail is installed, `timeout` where it is not. The PHP half is the same
 	 * either way. display_errors is pinned to stderr: interpret() requires
@@ -421,7 +515,18 @@ class DocumentText {
 			PathHelper::getComposerVendorPath(),
 		), array_map('strval', $args));
 
+		if (self::jailAvailable() && self::jailFenced()) {
+			// No ini file inside the fence: -n, and the extensions by name.
+			$fenced = array_merge(array(self::phpBinary(), '-n'), self::extensionArgs(), array_slice($php, 1));
+			return array_merge(array(
+				self::JAIL_LAUNCHER,
+				'--timeout=' . (int)self::TIMEOUT_SECONDS,
+				'--rlimit-as=' . (int)self::JAIL_ADDRESS_SPACE_BYTES,
+				'--scratch=' . (int)self::JAIL_SCRATCH_BYTES,
+			), self::jailGrants($script, $args), array('--'), $fenced);
+		}
 		if (self::jailAvailable()) {
+			// The deny-list launcher, until the root step installs the fence.
 			return array_merge(array(
 				self::JAIL_LAUNCHER,
 				'--timeout=' . (int)self::TIMEOUT_SECONDS,
@@ -494,6 +599,9 @@ class DocumentText {
 	 * outlive the extraction that staged them.
 	 */
 	public static function sweepStaleStaged(): void {
+		// Under the fence the run's folder is the launcher's, removed by it;
+		// /dev/shm itself is not even listable from here.
+		if (self::runFolder() !== null) return;
 		$stale = time() - (self::TIMEOUT_SECONDS + 10);
 		foreach ((array)@glob('/dev/shm/joinery_doctext_*') as $f) {
 			$mtime = @filemtime($f);
@@ -661,7 +769,7 @@ class DocumentText {
 			if ($category !== null) $detected = $mimeHint;
 		}
 		if ($category === null) {
-			if ($staged !== null) @unlink($staged);
+			if ($staged !== null) self::unstage($staged);
 			throw new DocumentTextException('unsupported type: ' . $detected, self::SKIPPED);
 		}
 
@@ -673,7 +781,7 @@ class DocumentText {
 			if ($e->category === null) $e->category = $category;
 			throw $e;
 		} finally {
-			if ($staged !== null) @unlink($staged);
+			if ($staged !== null) self::unstage($staged);
 		}
 
 		return self::result(self::OK, $category, self::finish($text, $maxChars), null);
@@ -769,16 +877,51 @@ class DocumentText {
 	 * to the system temp dir would put sealed content on disk, so a missing or
 	 * unwritable /dev/shm is a refusal, not a downgrade.
 	 */
-	private static function stage(string $bytes): string {
-		if (!is_dir('/dev/shm') || !is_writable('/dev/shm')) {
+	public static function stage(string $bytes): string {
+		$dir = self::runFolder() ?? '/dev/shm';
+		if (!is_dir($dir) || !is_writable($dir)) {
 			throw new DocumentTextException('no memory-backed temp available for container staging');
 		}
-		$path = '/dev/shm/joinery_doctext_' . getmypid() . '_' . bin2hex(random_bytes(6));
+		$path = $dir . '/joinery_doctext_' . getmypid() . '_' . bin2hex(random_bytes(6));
 		if (@file_put_contents($path, $bytes) === false) {
 			throw new DocumentTextException('could not stage container bytes');
 		}
 		@chmod($path, 0600);
 		return $path;
+	}
+
+	/**
+	 * A staged file is open in the parser: outside the fence its name goes
+	 * now, and the open handle keeps reading; inside, it stays until
+	 * unstage() (the run has no unlink).
+	 */
+	public static function stagedIsOpen(string $path): void {
+		if (self::runFolder() === null) @unlink($path);
+	}
+
+	/**
+	 * Done with a staged container: unlinked outside the fence, emptied inside
+	 * it (the run has no unlink; truncation is granted, and the launcher
+	 * removes the emptied file with its folder).
+	 */
+	public static function unstage(string $path): void {
+		if (self::runFolder() === null) {
+			@unlink($path);
+			return;
+		}
+		// An open with O_TRUNC, not ftruncate(2): the fence's call list has
+		// no ftruncate, and the open's truncation is Landlock's to grant.
+		$h = @fopen($path, 'w');
+		if ($h !== false) fclose($h);
+	}
+
+	/**
+	 * The fenced run's own staging folder, which the launcher hands over as
+	 * TMPDIR, or null outside the fence.
+	 */
+	private static function runFolder(): ?string {
+		$t = getenv('TMPDIR');
+		return (is_string($t) && strpos($t, self::JAIL_RUN_FOLDER_PREFIX) === 0 && strpos($t, '/', strlen('/dev/shm/')) === false) ? $t : null;
 	}
 
 	// ---- parsers: PDF ------------------------------------------------------
@@ -1279,11 +1422,15 @@ class DocumentText {
 				throw new DocumentTextException('not a readable zip container');
 			}
 		}
-		// The staged file's directory entry goes away here; the open handle
-		// keeps reading. From this point a timeout or OOM kill cannot leave
-		// decrypted container bytes behind in /dev/shm — and parsing, below,
-		// is exactly where those kills happen.
-		@unlink($path);
+		// Outside the fence the staged file's directory entry goes away here;
+		// the open handle keeps reading, so from this point a timeout or OOM
+		// kill cannot leave decrypted container bytes behind in /dev/shm — and
+		// parsing, below, is exactly where those kills happen. Inside the fence
+		// the run cannot unlink (an unlinked file would grow where the
+		// launcher's sum of the run folder cannot see it); the file stays
+		// named, and the launcher removes the folder when the run ends, killed
+		// or not.
+		self::stagedIsOpen($path);
 		$total = 0;
 		$names = array();
 		for ($i = 0; $i < $zip->numFiles; $i++) {

@@ -27,6 +27,8 @@
  *
  * Runs only in the extraction subprocess; the pool never calls it directly.
  *
+ * @version 1.1 - stages a zip through DocumentText::stage(), which works inside the
+ *   allowlist fence (its own run folder, no unlink)
  * @version 1.0 - the parse half of DeliverabilityReportIngest 1.0, moved behind the jail
  */
 
@@ -108,20 +110,21 @@ class DeliverabilityReportParser implements SandboxParserInterface {
 
 	/**
 	 * First entry of a zip archive, read through a stream with an output cap.
-	 * ZipArchive opens files, so the bytes are staged in memory-backed tmpfs
-	 * (0600 under the jail's umask) and unlinked as soon as the archive is
-	 * open — the handle keeps reading.
+	 * ZipArchive opens files, so the bytes are staged through DocumentText's
+	 * one staging door, which knows where a fenced run may write (its own run
+	 * folder) and that it may not unlink.
 	 */
 	private static function extractZip(string $bytes): ?string {
 		if (!class_exists('ZipArchive')) { return null; }
-		if (!is_dir('/dev/shm') || !is_writable('/dev/shm')) { return null; }
-		$tmp = '/dev/shm/joinery_doctext_' . getmypid() . '_' . bin2hex(random_bytes(6));
-		if (@file_put_contents($tmp, $bytes) === false) { return null; }
-		@chmod($tmp, 0600);
+		try {
+			$tmp = DocumentText::stage($bytes);
+		} catch (DocumentTextException $e) {
+			return null;
+		}
 		try {
 			$zip = new ZipArchive();
 			if ($zip->open($tmp) !== true) { return null; }
-			@unlink($tmp);
+			DocumentText::stagedIsOpen($tmp);
 			try {
 				if ($zip->numFiles < 1) { return null; }
 				$stream = $zip->getStream((string)$zip->getNameIndex(0));
@@ -139,7 +142,7 @@ class DeliverabilityReportParser implements SandboxParserInterface {
 				$zip->close();
 			}
 		} finally {
-			@unlink($tmp);
+			DocumentText::unstage($tmp);
 		}
 	}
 

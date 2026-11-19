@@ -28,6 +28,8 @@
  *
  * Run: php tests/unit/document_text_test.php
  *
+ * @version 1.3.0 - under the allowlist fence: no /etc/passwd, no /dev/shm, staging in
+ *   the run's own folder
  * @version 1.2.0 - the jail: parseWith()/parseWithMany() contract, and the
  *   fence proven from inside where the launcher is installed
  * @version 1.1.0
@@ -337,7 +339,15 @@ $here = function_exists('posix_geteuid') ? posix_geteuid() : null;
 if (DocumentText::jailAvailable()) {
 	$jail = function_exists('posix_getpwnam') ? posix_getpwnam('joinery-jail') : false;
 	check(is_array($jail) && (int)$probe['uid'] === (int)$jail['uid'], 'the subprocess is the joinery-jail user', json_encode($probe['uid'] ?? null));
-	check(($probe['user'] ?? '') === 'joinery-jail', 'by name as well as number');
+	if (DocumentText::jailFenced()) {
+		// The allowlist fence grants no /etc/passwd, so the name is not
+		// knowable from inside; the number above is the check.
+		check(($probe['passwd_readable'] ?? true) === false, 'it cannot read /etc/passwd (the allowlist fence)');
+		check(($probe['shm_writable'] ?? true) === false, 'it cannot write /dev/shm itself, only its own run folder');
+		check(($probe['staged_in_run_folder'] ?? false) === true, 'and stages in that run folder');
+	} else {
+		check(($probe['user'] ?? '') === 'joinery-jail', 'by name as well as number');
+	}
 	check($probe['socket'] === false, 'it cannot open a socket');
 	check($probe['fork'] === false, 'it cannot start a process');
 	// Hard on every box, the developer's included: there is no world-writable
@@ -347,7 +357,7 @@ if (DocumentText::jailAvailable()) {
 	check(($probe['config_readable'] ?? true) === false,
 		'and cannot read the site config',
 		'config/Globalvars_site.php is root:www-data 0640; a parser that can read it can read the database password');
-	check($probe['staged_mode'] === '0600', 'what it stages in /dev/shm is 0600, its own', (string)$probe['staged_mode']);
+	check($probe['staged_mode'] === '0600', 'what it stages is 0600, its own', (string)$probe['staged_mode']);
 	check(VaultHealth::checkParserJail()['state'] === 'verified', 'VaultHealth reports the jail verified');
 } else {
 	check($here === null || (int)$probe['uid'] === (int)$here, 'without the launcher the subprocess is this user (the advisory fallback)');

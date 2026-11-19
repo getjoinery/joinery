@@ -3,6 +3,10 @@
 # install_parser_jail.sh - install or converge the parser jail's launcher on
 # this machine (specs/parser_jail.md, docs/document_text.md).
 #
+# Version: 2.0 - the allowlist fence (specs/sandboxed_php_plugins.md WP1): no util-linux
+#              prlimit (the launcher sets the address-space cap itself); one Unix user per
+#              sandboxed PHP plugin, jpx-NAME, created with the next uid above a root-owned
+#              high-water mark and removed when no site on this machine has the plugin
 # Version: 1.3 - the grant on cache/ is the directory and its default ACL alone, no recursive walk of the
 #                web user's tree as root (specs/shell_command_audit.md D3)
 # Version: 1.2 - the grant on public_html and vendor states group r-x, mask and defaults, so it can
@@ -69,11 +73,6 @@ if ! head -c 4 "${SRC}" | grep -q 'ELF'; then
     exit 0
 fi
 
-if ! command -v prlimit >/dev/null 2>&1; then
-    echo "parser jail: WARNING - prlimit (util-linux) not found; the launcher needs it - not installed" >&2
-    exit 0
-fi
-
 # --- 1. the user -------------------------------------------------------------
 if ! id -u "${JAIL_USER}" >/dev/null 2>&1; then
     if useradd --system --no-create-home --home-dir /nonexistent \
@@ -104,8 +103,11 @@ PUBLIC_HTML="${SITE_ROOT}/public_html"
 # entry, and a tree that was 770 when the grant landed came out group-writable
 # (775), the state read_only_tree exists to refuse. cache is data, the web
 # user's 0770, and keeps the ordinary grant.
+# An optional second argument names who the grant is for (default the jail
+# user): "g:joinery-jpx" for the plugin users' shared group.
 jail_acl() {
-    local acl="u:${JAIL_USER}:rX,d:u:${JAIL_USER}:rX"
+    local who="${2:-u:${JAIL_USER}}"
+    local acl="${who}:rX,d:${who}:rX"
     [[ "$1" == "cache" ]] || acl="${acl},g::rX,m::rX,d:g::rX,d:m::rX,d:o::rX"
     printf '%s' "${acl}"
 }
@@ -196,5 +198,147 @@ if [[ "${got}" == "${want}" ]]; then
 else
     echo "parser jail: WARNING - a jailed command reported uid '${got}', expected ${want}" >&2
 fi
+
+# --- 5. one user per sandboxed PHP plugin ------------------------------------
+# specs/sandboxed_php_plugins.md design 2. A plugin runs as jpx-NAME, which
+# owns no file anywhere: the Unix permission is the only guard for what
+# Landlock does not cover (a mode or a time on a file the user owns), and
+# only an owner of nothing keeps that set empty. The users share one primary
+# group, joinery-jpx, which owns nothing either and is what the tree's read
+# grant names on a box whose tree is not world-readable.
+#
+# A uid is never reused: a removed user's IPC objects or files would belong to
+# the next plugin, and useradd hands out a freed uid. The next uid is the one
+# above a high-water mark kept by root outside every site tree.
+JPX_GROUP="joinery-jpx"
+JPX_STATE_DIR="/var/lib/joinery-jail"
+JPX_MARK="${JPX_STATE_DIR}/jpx_uid_mark"
+JPX_UID_BASE=50000
+JPX_UID_MAX=59999
+# Folders are the web user's to make, and the mark only rises, so a web user
+# making and removing folders could spend the range for good (reviewer2 D9).
+# New users are rationed per run and in total, and a user outlives its folder
+# by a week, so a folder that comes back gets its old uid.
+JPX_GONE_DIR="${JPX_STATE_DIR}/gone"
+JPX_MAX_NEW_PER_RUN=20
+JPX_MAX_USERS=200
+JPX_KEEP_GONE_SECONDS=$((7 * 24 * 3600))
+
+# The folder name is the manifest name pattern (SandboxManifest::NAME_PATTERN)
+# and the folder holds exactly manifest.json (a file) and src/ (a directory),
+# neither a link (SandboxPlugins::namesAreSandboxed). Checked here, as root,
+# because the tree is the web user's.
+jpx_plugin_dir() {
+    local d="$1" name
+    name="$(basename "$d")"
+    [[ ${#name} -ge 2 && ${#name} -le 20 && "${name}" =~ ^[a-z][a-z0-9]*(_[a-z0-9]+)*$ ]] || return 1
+    [[ -d "$d" && ! -L "$d" ]] || return 1
+    [[ "$(ls -A "$d" 2>/dev/null | LC_ALL=C sort | tr '\n' '/')" == "manifest.json/src/" ]] || return 1
+    [[ -f "$d/manifest.json" && ! -L "$d/manifest.json" && -d "$d/src" && ! -L "$d/src" ]] || return 1
+    return 0
+}
+
+converge_plugin_users() {
+    # Every site on this machine, so one site's run never removes a user
+    # another site still needs.
+    # want: a sandboxed plugin folder in that shape, which gets a user.
+    # present: any real folder of that name, which keeps one (a stray file
+    # in it is not the plugin leaving).
+    local -A want=() present=()
+    local d name
+    for d in "${PUBLIC_HTML}/plugins"/* /var/www/html/*/public_html/plugins/*; do
+        name="$(basename "$d")"
+        [[ -d "$d" && ! -L "$d" ]] && present["jpx-${name}"]=1
+        jpx_plugin_dir "$d" && want["jpx-${name}"]=1
+    done
+
+    if [[ ${#want[@]} -gt 0 ]] && ! getent group "${JPX_GROUP}" >/dev/null 2>&1; then
+        groupadd --system "${JPX_GROUP}" 2>/dev/null \
+            || { echo "parser jail: WARNING - could not create group ${JPX_GROUP}; no plugin users" >&2; return; }
+    fi
+    if [[ -L "${JPX_STATE_DIR}" ]]; then
+        echo "parser jail: WARNING - ${JPX_STATE_DIR} is a link; no plugin users" >&2
+        return
+    fi
+    install -d -o root -g root -m 0700 "${JPX_STATE_DIR}" "${JPX_GONE_DIR}"
+
+    local mark uid
+    mark="$(cat "${JPX_MARK}" 2>/dev/null || true)"
+    [[ "${mark}" =~ ^[0-9]+$ ]] || mark=$((JPX_UID_BASE - 1))
+    # Never below a plugin user that exists already (a mark lost with its disk).
+    while IFS=: read -r _ _ uid _; do
+        [[ "${uid}" =~ ^[0-9]+$ ]] && (( uid > mark )) && mark="${uid}"
+    done < <(getent passwd | awk -F: '$1 ~ /^jpx-/')
+
+    local u next made=0 total
+    total="$(getent passwd | grep -c '^jpx-' || true)"
+    for u in "${!want[@]}"; do
+        id -u "$u" >/dev/null 2>&1 && continue
+        if (( made >= JPX_MAX_NEW_PER_RUN || total >= JPX_MAX_USERS )); then
+            echo "parser jail: WARNING - plugin user limit reached (${JPX_MAX_NEW_PER_RUN} per run, ${JPX_MAX_USERS} in all); ${u} waits" >&2
+            continue
+        fi
+        next=$((mark + 1))
+        while getent passwd "${next}" >/dev/null 2>&1; do next=$((next + 1)); done
+        if (( next > JPX_UID_MAX )); then
+            echo "parser jail: WARNING - no plugin uid left below ${JPX_UID_MAX}; ${u} not created" >&2
+            continue
+        fi
+        # Written before the user exists: a crash between the two wastes a
+        # uid, never reuses one.
+        printf '%s\n' "${next}" > "${JPX_MARK}.tmp" && mv -f "${JPX_MARK}.tmp" "${JPX_MARK}"
+        mark="${next}"
+        if useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin \
+                --uid "${next}" --gid "${JPX_GROUP}" "$u" 2>/dev/null; then
+            echo "parser jail: created plugin user ${u} (uid ${next})"
+            made=$((made + 1)); total=$((total + 1))
+        else
+            echo "parser jail: WARNING - could not create plugin user ${u}" >&2
+        fi
+    done
+
+    # A plugin whose folder has been gone from every site for a week loses its
+    # user. userdel refuses while a run of it is still going; the next root
+    # moment finishes the job.
+    local now first gone
+    now="$(date +%s)"
+    while IFS=: read -r u _; do
+        [[ "$u" =~ ^jpx-[a-z0-9_]+$ ]] || continue
+        gone="${JPX_GONE_DIR}/${u}"
+        if [[ -n "${present[$u]:-}" ]]; then
+            rm -f "${gone}"
+            continue
+        fi
+        first="$(cat "${gone}" 2>/dev/null || true)"
+        if [[ ! "${first}" =~ ^[0-9]+$ ]]; then
+            printf '%s\n' "${now}" > "${gone}"
+            continue
+        fi
+        (( now - first >= JPX_KEEP_GONE_SECONDS )) || continue
+        userdel "$u" 2>/dev/null && rm -f "${gone}" \
+            && echo "parser jail: removed plugin user ${u} (its plugin has been gone a week)"
+    done < <(getent passwd)
+
+    # The tree's read grant for plugin users, where the tree is not already
+    # world-readable (a node's 770 tree): the same grant the jail user has.
+    local probe_user=""
+    for u in "${!want[@]}"; do id -u "$u" >/dev/null 2>&1 && { probe_user="$u"; break; }; done
+    if [[ -n "${probe_user}" ]] && ! runuser -u "${probe_user}" -- /usr/bin/test -r "${PROBE_CODE}" 2>/dev/null; then
+        if command -v setfacl >/dev/null 2>&1; then
+            # A recursive walk as root is safe here, as it is for the jail
+            # user's grant above, only because public_html is the executable
+            # set: 755/644 and writable by its owner alone, never by the web
+            # user (specs/implemented/read_only_tree.md; fix_permissions.sh).
+            # cache/, which the web user writes, never gets this walk.
+            setfacl -m "g:${JPX_GROUP}:x" "${SITE_ROOT}" 2>/dev/null || true
+            setfacl -R -m "$(jail_acl public_html "g:${JPX_GROUP}")" "${PUBLIC_HTML}" 2>/dev/null \
+                && echo "parser jail: granted ${JPX_GROUP} read access to ${PUBLIC_HTML}" \
+                || echo "parser jail: WARNING - setfacl failed on ${PUBLIC_HTML} for ${JPX_GROUP}" >&2
+        else
+            echo "parser jail: WARNING - plugin users cannot read ${PUBLIC_HTML} and setfacl is missing" >&2
+        fi
+    fi
+}
+converge_plugin_users
 
 exit 0
