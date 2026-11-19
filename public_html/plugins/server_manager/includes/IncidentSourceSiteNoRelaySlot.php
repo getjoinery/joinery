@@ -12,9 +12,13 @@
  * two paid sites sat without a slot, one for a day).
  *
  * Open while the site's provision is done, was handed the fleet's settings
- * (cvp_fleet_apk_api_key_id), has no active slot, and its install ended more
- * than WAIT_MINUTES ago. Recorded facts only.
+ * (cvp_fleet_apk_api_key_id), has no slot, and its install ended more than
+ * WAIT_MINUTES ago. Open too, and critical, while it has a slot its shard
+ * never took: assigned more than WAIT_MINUTES ago and still at provisioning
+ * (re-run finding 113: a shard whose applier had stopped answered every add
+ * with a timeout, and two sites sat enrolled in name only). Recorded facts only.
  *
+ * @version 1.1 - a slot assigned and never applied on its shard
  * @version 1.0
  */
 class IncidentSourceSiteNoRelaySlot implements IncidentSource {
@@ -35,9 +39,12 @@ class IncidentSourceSiteNoRelaySlot implements IncidentSource {
 		$provision = CustomerCloudProvision::latest_for_node((int)$node->key);
 		if (!$provision || (string)$provision->get('cvp_status') !== 'done'
 				|| (int)$provision->get('cvp_fleet_apk_api_key_id') <= 0
-				|| !FleetService::site_plan_grants_slot($provision)
-				|| MailboxFleetSlot::activeForProvision((int)$provision->key) !== null) {
+				|| !FleetService::site_plan_grants_slot($provision)) {
 			return null;
+		}
+		$slot = MailboxFleetSlot::activeForProvision((int)$provision->key);
+		if ($slot !== null) {
+			return self::unapplied($provision, $slot);
 		}
 		$install = ManagementJob::latestForNode((int)$node->key, 'install_node');
 		$ended = $install ? trim((string)$install->get('mjb_completed_time')) : '';
@@ -62,8 +69,35 @@ class IncidentSourceSiteNoRelaySlot implements IncidentSource {
 		);
 	}
 
+	/**
+	 * A slot the fleet assigned and its shard never took: it stays at
+	 * provisioning while the shard refuses or does not answer the add. The
+	 * site looks enrolled and its buyer was given the records, but the relay
+	 * turns its mail away.
+	 */
+	private static function unapplied($provision, MailboxFleetSlot $slot): ?array {
+		if ((string)$slot->get('mft_status') !== MailboxFleetSlot::STATUS_PROVISIONING) {
+			return null;
+		}
+		$assigned = trim((string)$slot->get('mft_create_time'));
+		if ($assigned === '' || (time() - strtotime(substr($assigned, 0, 19) . ' UTC')) < self::WAIT_MINUTES * 60) {
+			return null;
+		}
+		return array(
+			'title'    => 'This site\'s mail relay slot is not live on its relay, so it cannot receive mail',
+			'severity' => IncidentRecord::SEVERITY_CRITICAL,
+			'detail'   => array(
+				'Site'          => (string)$provision->get('cvp_domain'),
+				'Slot'          => (string)$slot->get('mft_slug') . ', assigned ' . substr($assigned, 0, 19) . ' UTC',
+				'What it means' => 'The fleet gave the site a slot, but the relay shard has not added it. Its buyer was shown the receiving records; mail sent to the domain is refused at the relay.',
+				'What to do'    => 'Read the scheduled tasks log for FleetService lines naming this slot: they carry the shard\'s answer. '
+					. 'An answer of timeout on every request means the shard is not applying requests and needs renewing (Mailbox, Relay fleet).',
+			),
+		);
+	}
+
 	public function cleared_text(ManagedNode $node): string {
-		return 'The site has its relay slot.';
+		return 'The site has its relay slot, live on its relay.';
 	}
 }
 ?>

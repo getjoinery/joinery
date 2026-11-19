@@ -45,6 +45,17 @@
 	if ($current_key === 'encryption_key') {
 		$page->needs_vault_client();
 	}
+	// Connect (the email and backups steps) posts here and is answered with a
+	// redirect to the operator's approval page. The form policy governs that
+	// hop too, so the operator's address is named or the browser drops the
+	// press without a word.
+	if (in_array($current_key, array('mail_send', 'backups'), true) && !ServicesClient::connected()) {
+		$operator = parse_url(ServicesClient::operatorUrl());
+		if (!empty($operator['scheme']) && !empty($operator['host'])) {
+			$page->allow_form_action_origin($operator['scheme'] . '://' . $operator['host']
+				. (isset($operator['port']) ? ':' . $operator['port'] : ''));
+		}
+	}
 	$page->public_header([
 		'is_valid_page' => true,
 		'title'         => 'Set up — ' . $site_name,

@@ -454,6 +454,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 					$tdata['usr_timezone'] = $data['usr_timezone'];
 				}
 
+				if(!empty($data['usr_timezone'])){
+					$tdata['usr_timezone'] = $data['usr_timezone'];
+				}
+
 				$user = User::CreateNew($tdata);
 				$is_new_user = true;
 			}

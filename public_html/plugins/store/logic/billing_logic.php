@@ -9,9 +9,29 @@
  * one of the buyer's own active ones. The card is one per Stripe customer,
  * shown once.
  *
+ * @version 1.2 - each subscription carries what its line was bought for (a site's name); the history
+ *                lists one-time purchases beside the subscription invoices
  * @version 1.1 - one section per active subscription; change_billing_cycle names its subscription
  *                (hosting_paid_launch B12)
  */
+
+/**
+ * What a requirement recorded about a bought line (a domain, a configured
+ * site), as the cart and checkout showed it: 'Site: example.com'. It tells two
+ * subscriptions to the same product apart.
+ *
+ * @return string[]
+ */
+function billing_line_details(OrderItem $item): array {
+    $lines = array();
+    foreach ($item->get_data() as $value) {
+        if (is_array($value) && isset($value['question'], $value['answer'])
+                && empty($value['internal']) && (string)$value['answer'] !== '') {
+            $lines[] = $value['question'] . ': ' . $value['answer'];
+        }
+    }
+    return $lines;
+}
 
 /**
  * One active subscription as the page shows it: the line, how it is paid, its
@@ -26,6 +46,7 @@ function billing_subscription_section(OrderItem $item): array {
         'version'         => null,
         'alternatives'    => array(),
         'show_switcher'   => false,
+        'details'         => billing_line_details($item),
     );
     $product = new Product($item->get('odi_pro_product_id'), TRUE);
     $section['product'] = $product->key ? $product : null;
@@ -131,6 +152,7 @@ function billing_logic(array $input): LogicResult {
             $stripe_invoices = $stripe_helper->get_customer_invoices($stripe_customer_id, 10);
             foreach ($stripe_invoices as $inv) {
                 $page_vars['invoices'][] = array(
+                    'time' => (int)$inv->created,
                     'date' => date('M j, Y', $inv->created),
                     'description' => $inv->lines->data[0]->description ?? 'Subscription payment',
                     'amount' => number_format($inv->amount_paid / 100, 2),
@@ -141,6 +163,32 @@ function billing_logic(array $input): LogicResult {
         } catch (Exception $e) {
             // Invoice lookup failed — fall back to local orders
         }
+    }
+
+    // A one-time purchase (a licence, a domain's first year) is charged on its
+    // own and has no invoice, so the history takes it from the order.
+    if (!empty($page_vars['invoices'])) {
+        foreach (new MultiOrderItem(
+            array('user_id' => $user_id, 'status' => OrderItem::STATUS_PAID),
+            array('order_item_id' => 'DESC'),
+            20
+        ) as $bought) {
+            if ($bought->get('odi_is_subscription') || (float)$bought->get('odi_price') <= 0) {
+                continue;
+            }
+            $bought_product = new Product($bought->get('odi_pro_product_id'), TRUE);
+            $bought_time = strtotime((string)$bought->get('odi_status_change_time') . ' UTC');
+            $page_vars['invoices'][] = array(
+                'time' => (int)$bought_time,
+                'date' => $bought->get_local('odi_status_change_time', 'M j, Y'),
+                'description' => trim((string)$bought_product->get('pro_name') . ' '
+                    . implode(', ', billing_line_details($bought))),
+                'amount' => number_format((float)$bought->get('odi_price'), 2),
+                'status' => $bought->get('odi_refund_time') ? 'refunded' : 'paid',
+                'pdf_url' => null,
+            );
+        }
+        usort($page_vars['invoices'], function ($a, $b) { return ($b['time'] ?? 0) <=> ($a['time'] ?? 0); });
     }
 
     // Try PayPal transaction history if no Stripe invoices

@@ -31,6 +31,7 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.13 - the Connect offer says, before the press, that our email is a paid service for a self-hosted site
  * @version 3.12 - the address question takes the name alone (re-run finding 105)
  * @version 3.11 - a hosted site's email is named the email included with your hosting, not SMTP (walkthrough 50)
  * @version 3.10 - email that was set up for the site asks the one address question before the proof: the owner's
@@ -855,7 +856,8 @@ $formwriter->end_form();
 <div class="setup-provider-fields d-none jy-mt-2" data-email-provider="<?php echo htmlspecialchars(ServicesClient::MAIL_SERVICE_KEY); ?>">
 <?php if (!$setup_services_connected) { ?>
 	<p class="jy-muted">Email through getjoinery needs this site linked to a getjoinery account. Nothing is typed: press Connect,
-		sign in or sign up there, approve the link, and you land back here.</p>
+		sign in or sign up there, approve the link, and you land back here. Connecting costs nothing. For a self-hosted
+		site the email is a paid service, with backup storage included, and you see its price there before you buy it.</p>
 	<form method="POST" action="/setup">
 		<input type="hidden" name="action" value="services_connect">
 		<input type="hidden" name="step" value="mail_send">

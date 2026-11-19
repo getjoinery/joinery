@@ -8,8 +8,11 @@
  * command-line sitemap and SEO sweep know them too).
  *
  * It also names the pages of a purchase under way to the setup wizard, which
- * leaves them alone, so someone who signs up to buy pays before it starts.
+ * leaves them alone, so someone who signs up to buy pays before it starts,
+ * and the subscription and billing pages, so someone who came to cancel or
+ * change a card does that first.
  *
+ * @version 1.2.0 - the subscription and billing pages are quiet for the setup wizard
  * @version 1.1.0 - the cart and checkout pages are quiet for the setup wizard (SetupSteps::quietOn)
  * @version 1.0.0
  */
@@ -21,7 +24,9 @@ SeoPageMetadata::register_entity_class(
 	'/plugins/store/admin/admin_product_edit?pro_product_id=', 'product'
 );
 
-// ---- Setup wizard: a purchase under way is not interrupted ----
-foreach (array('/cart', '/checkout', '/cart_charge', '/cart_confirm') as $store_quiet_path) {
+// ---- Setup wizard: a purchase under way is not interrupted, and neither is
+// someone managing what they pay for (cancelling, changing the card) ----
+foreach (array('/cart', '/checkout', '/cart_charge', '/cart_confirm',
+		'/profile/subscriptions', '/profile/billing') as $store_quiet_path) {
 	SetupSteps::quietOn($store_quiet_path);
 }

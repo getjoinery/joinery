@@ -199,6 +199,8 @@ section('Reset completion');
 
 $resetter = make_user('ResetComplete');
 $resetter->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+// An owner who lost the one-time password a new site hands out resets by email.
+$resetter->set('usr_force_password_change', true);
 $resetter->save();
 $old_hash = $resetter->get('usr_password');
 
@@ -220,6 +222,8 @@ check((string)$resetter->get('usr_password') !== (string)$old_hash,
 	'the stored hash changed');
 check(!$resetter->check_password('TestPassword_ResetComplete'),
 	'the previous password no longer works');
+check(!$resetter->get('usr_force_password_change'),
+	'a password chosen by reset is not asked for again at sign-in');
 
 // Single use, through the flow rather than the resolver.
 check(!Activation::checkTempCode($reset_code, Activation::EMAIL_VERIFY),

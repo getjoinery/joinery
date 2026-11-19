@@ -544,6 +544,33 @@ func TestApplierRefusesWhatTheListenerDidNotFile(t *testing.T) {
 		t.Fatal("stray request left in place")
 	}
 
+	// Leftovers would keep the path unit firing for ever: a file that is not a
+	// request goes at once, an abandoned temporary file once it is old, and a
+	// request still being written is left alone.
+	foreign := filepath.Join(f.paths.requestsDir(), "note.txt")
+	fresh := filepath.Join(f.paths.requestsDir(), "00112233445566778899aabbccddee01.json.tmp")
+	abandoned := filepath.Join(f.paths.requestsDir(), "00112233445566778899aabbccddee02.json.tmp")
+	for _, path := range []string{foreign, fresh, abandoned} {
+		if err := os.WriteFile(path, []byte(`{}`), 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-2 * leftoverGrace)
+	if err := os.Chtimes(abandoned, old, old); err != nil {
+		t.Fatal(err)
+	}
+	runApplyRequests()
+	if _, err := os.Stat(foreign); !os.IsNotExist(err) {
+		t.Fatal("a file that is not a request was left in the drop directory")
+	}
+	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {
+		t.Fatal("an abandoned temporary file was left in the drop directory")
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Fatal("a request still being written was removed")
+	}
+	_ = os.Remove(fresh)
+
 	// A fragment filed in another tenant's name is rejected by root even if the
 	// listener were fooled.
 	req = relayRequest{ID: "ffeeddccbbaa99887766554433221100", Type: requestTypeFragment, Tenant: "main", By: "other",

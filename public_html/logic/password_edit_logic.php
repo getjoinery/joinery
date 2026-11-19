@@ -48,6 +48,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		else {
 			$user->set('usr_password', User::GeneratePassword($input['usr_password']));
+			// The person has just chosen this password themselves: a one-time
+			// password's demand for a new one is met.
+			$user->set('usr_force_password_change', false);
 			$user->save();
 
 			// Credential event (specs/mailbox_security_levels.md § 6.6): a password

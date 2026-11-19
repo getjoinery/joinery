@@ -27,6 +27,7 @@
  * to nothing — the exact silent failure that made Joinery Direct undiscoverable
  * on those providers. These checks make a mis-mapping fail here instead.
  *
+ * @version 1.2 - Linode: a record below the zone apex, and the name Linode really returns
  * @version 1.1 - Hetzner is checked with the other record-set passthrough vendors
  * @version 1.0
  */
@@ -170,14 +171,32 @@ check(($body['service'] ?? null) === 'joinery' && ($body['protocol'] ?? null) ==
 	'Linode carries the service and protocol as underscore-free fields', json_encode($body));
 check(($body['name'] ?? null) === '',
 	'and leaves name empty, since Linode ignores it for SRV', json_encode($body));
-// And a row Linode hands back — name empty, labels in their own fields — is
-// reassembled into the whole name rather than reading as the bare apex.
+// A record below the zone apex (a site on a subdomain of the zone): Linode has
+// no host field for SRV, so the host labels ride on the protocol. Sent as plain
+// tcp, Linode files the record at the apex and it never resolves.
+$body = driver_call($linode, 'toApi', array($zone,
+	new DnsRecord(DnsRecord::TYPE_SRV, '_joinery._tcp.shop.example.com', '0 5 443 shop.example.com')));
+check(($body['service'] ?? null) === 'joinery' && ($body['protocol'] ?? null) === 'tcp.shop'
+	&& ($body['name'] ?? null) === '',
+	'Linode carries a subdomain record\'s host labels on the protocol', json_encode($body));
+// A row Linode hands back names the record whole and zone-relative.
+$read = driver_call($linode, 'toRecord', array($zone, array(
+	'type' => 'SRV', 'name' => '_joinery._tcp', 'service' => 'joinery', 'protocol' => 'tcp',
+	'target' => 'direct.example.com', 'priority' => 0, 'weight' => 5, 'port' => 443)));
+check($read !== null && $read->name === SRV_NAME && $read->value === SRV_VALUE,
+	'and reads an apex record back as the whole name and canonical RDATA',
+	$read ? ($read->name . ' / ' . $read->value) : 'null');
+$read = driver_call($linode, 'toRecord', array($zone, array(
+	'type' => 'SRV', 'name' => '_joinery._tcp.shop', 'service' => 'joinery', 'protocol' => 'tcp',
+	'target' => 'shop.example.com', 'priority' => 0, 'weight' => 5, 'port' => 443)));
+check($read !== null && $read->name === '_joinery._tcp.shop.example.com',
+	'and a subdomain record back at its own name, so it matches its plan', $read ? $read->name : 'null');
+// A row with no name is reassembled from the service and protocol fields.
 $read = driver_call($linode, 'toRecord', array($zone, array(
 	'type' => 'SRV', 'name' => '', 'service' => 'joinery', 'protocol' => 'tcp',
 	'target' => 'direct.example.com', 'priority' => 0, 'weight' => 5, 'port' => 443)));
-check($read !== null && $read->name === SRV_NAME && $read->value === SRV_VALUE,
-	'and reads one back as the whole name and canonical RDATA',
-	$read ? ($read->name . ' / ' . $read->value) : 'null');
+check($read !== null && $read->name === SRV_NAME,
+	'and a row with no name is put together from its fields', $read ? $read->name : 'null');
 
 // --- GoDaddy: service and protocol leave the NAME and become fields ---------
 $gd = new GoDaddyDnsDriver(array('api_key' => 'k', 'api_secret' => 's'));

@@ -28,8 +28,10 @@
  *    exchanged for a scoped token at publish time and never recorded.
  *  - SRV carries its service and protocol as their own fields (name unused),
  *    and Linode prepends the underscore itself, so those labels are submitted
- *    bare and reassembled on read.
+ *    bare. A record below the zone apex carries its host labels on the
+ *    protocol (`tcp.shop`), the one way Linode serves it at that name.
  *
+ * @version 1.3 - An SRV record below the zone apex is written and read at its whole name
  * @version 1.2 - Authorized by a pasted personal access token; the OAuth consent path is retired
  * @version 1.1 - SRV writes the service/protocol fields Linode requires
  * @version 1.0
@@ -272,14 +274,16 @@ class LinodeDnsDriver extends DnsDriverBase {
 				(int)($row['port'] ?? 0), $target);
 		}
 		$ttl = (int)($row['ttl_sec'] ?? 0);
-		// Linode leaves an SRV row's name empty and carries the labels in its own
-		// service/protocol fields, so the whole name is reassembled from those or
-		// every SRV record would read back as the bare zone apex and never match
-		// its plan.
-		$name = $type === DnsRecord::TYPE_SRV
-			? self::srvNameFromParts((string)($row['service'] ?? ''), (string)($row['protocol'] ?? ''),
-				(string)($row['name'] ?? ''), $zone)
-			: self::absoluteName((string)($row['name'] ?? ''), $zone);
+		// Linode hands an SRV row's name back whole and zone-relative
+		// (`_joinery._tcp.shop`), built from its service and protocol fields.
+		// Where a row carries no name, it is reassembled from those fields.
+		$row_name = trim((string)($row['name'] ?? ''));
+		if ($type === DnsRecord::TYPE_SRV && substr($row_name, 0, 1) !== '_') {
+			$name = self::srvNameFromParts((string)($row['service'] ?? ''), (string)($row['protocol'] ?? ''),
+				$row_name, $zone);
+		} else {
+			$name = self::absoluteName($row_name, $zone);
+		}
 		$record = new DnsRecord(
 			$type,
 			$name,
@@ -292,16 +296,27 @@ class LinodeDnsDriver extends DnsDriverBase {
 	}
 
 	/**
-	 * The service and protocol labels Linode wants as its own fields, taken from
-	 * an SRV record's name and stripped of the leading underscore Linode prepends
+	 * The service and protocol Linode wants as its own fields, taken from an SRV
+	 * record's name and stripped of the leading underscore Linode prepends
 	 * itself: `_joinery._tcp.example.com` becomes `['joinery', 'tcp']`.
+	 *
+	 * Linode has no field for the host an SRV record sits under: it builds the
+	 * name as `_service._protocol` and ignores `name`. A record below the zone
+	 * apex therefore carries its host labels on the protocol, which Linode
+	 * appends as given: `_joinery._tcp.shop.example.com` in zone example.com
+	 * becomes `['joinery', 'tcp.shop']` and is served at that whole name.
 	 *
 	 * @return array{0:string,1:string}
 	 */
-	private static function srvSubmitLabels(string $name): array {
-		$parts = explode('.', DnsRecord::normalizeName($name));
+	private static function srvSubmitLabels(string $name, string $zone): array {
+		$relative = self::relativeName($name, $zone, '');
+		$parts = explode('.', $relative !== '' ? $relative : DnsRecord::normalizeName($name));
 		$service  = isset($parts[0]) ? ltrim($parts[0], '_') : '';
 		$protocol = isset($parts[1]) ? ltrim($parts[1], '_') : '';
+		$host = implode('.', array_slice($parts, 2));
+		if ($host !== '') {
+			$protocol .= '.' . $host;
+		}
 		return array($service, $protocol);
 	}
 
@@ -317,13 +332,12 @@ class LinodeDnsDriver extends DnsDriverBase {
 			$body['target'] = $caa['value'];
 		} elseif ($record->type === DnsRecord::TYPE_SRV) {
 			// Linode models SRV as service + protocol fields, prepends the
-			// underscore itself, and IGNORES name — so the service and protocol
-			// labels move out of the name (submitted without their leading
-			// underscore) and name is left empty. Omitting them writes a record
-			// Linode rejects or files at the wrong service, and the capability
-			// record never resolves.
+			// underscore itself, and IGNORES name, so the labels move out of the
+			// name (without their leading underscore), the host labels ride on
+			// the protocol, and name is left empty. Anything else is a record
+			// filed at the wrong name, which never resolves.
 			$srv = self::parseSrv($record->value);
-			list($service, $protocol) = self::srvSubmitLabels($record->name);
+			list($service, $protocol) = self::srvSubmitLabels($record->name, $zone);
 			$body['name']     = '';
 			$body['service']  = $service;
 			$body['protocol'] = $protocol;

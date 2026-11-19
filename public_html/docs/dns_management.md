@@ -640,7 +640,7 @@ untested driver surfaces as a wrong diff to decline, never a silent bad write.
 
 | Provider | Credential |
 |---|---|
-| **Linode DNS** *(default)* | Personal access token, scope Domains read/write — self-serve at any account size. Prerequisite: Linode serves a zone only for accounts with at least one active Linode service |
+| **Linode DNS** *(default)* | Personal access token, scope Domains read/write — self-serve at any account size. Prerequisite: Linode serves a zone only for accounts with at least one active Linode service. Linode has no host field for SRV, so a record below the zone apex is written with its host labels on the protocol field (`tcp.shop`), which Linode serves at the whole name |
 | Google Cloud DNS | OAuth2 · `GoogleOAuthProvider`; the zone lives in a GCP project the driver selects |
 | Azure DNS | OAuth2 · `MicrosoftOAuthProvider`; the zone sits under a subscription the driver selects |
 | DigitalOcean DNS | OAuth2 · `DigitalOceanOAuthProvider` |

@@ -356,10 +356,15 @@ $res = reg_call(reg_input(array(
 	'usr_email'      => $good_email,
 	'usr_first_name' => 'Success',
 	'usr_last_name'  => 'Case',
+	'usr_timezone'   => 'Europe/Lisbon',
 )));
 
 check($res->error === null, 'registration succeeds',
 	'error: ' . var_export($res->error, true));
+$made = User::GetByEmail($good_email);
+check($made && $made->get('usr_timezone') === 'Europe/Lisbon',
+	'the time zone chosen on the form is the account\'s',
+	'zone: ' . var_export($made ? $made->get('usr_timezone') : null, true));
 check($res->redirect === '/page/register-thanks',
 	'registration redirects to the thanks page',
 	'redirect: ' . var_export($res->redirect, true));

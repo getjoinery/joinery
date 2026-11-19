@@ -9,6 +9,7 @@
  * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
  * views/setup.php with $page, $settings in scope.
  *
+ * @version 2.9 - the Connect offer says, before the press, that the storage is a paid service for a self-hosted site
  * @version 2.8 - a connected site is told getjoinery backup storage is a paid service for a self-hosted site, and where it is bought
  * @version 2.7 - getjoinery backup storage is offered first, before a bucket of the owner's own: Connect, then one
  *                button; a target there shows as the service, with no bucket (specs/easy_signup_completion.md WP4)
@@ -78,7 +79,9 @@ $setup_bk_services_account = ServicesClient::account();
 			<input type="hidden" name="step" value="backups">
 			<button type="submit" class="btn btn-primary">Connect your getjoinery account</button>
 		</form>
-		<p class="jy-muted small">Nothing is typed: getjoinery asks you to sign in there and sends this site back here, connected.</p>
+		<p class="jy-muted small">Nothing is typed: getjoinery asks you to sign in there and sends this site back here, connected.
+			Connecting costs nothing. For a self-hosted site the storage is a paid service, with email included, and you
+			see its price there before you buy it.</p>
 <?php } ?>
 		<h5 class="jy-mt-3">Or use a storage account of your own</h5>
 	<p class="mb-1">You need a bucket at a storage service. Any service in the list below works the same here; these three are the most common:</p>

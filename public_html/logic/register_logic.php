@@ -109,6 +109,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
+		// The form's time zone list is not required, so it is not in the loop
+		// above: left out here, the answer was dropped and every account took
+		// the site's default zone.
+		$chosen_timezone = trim((string)($input['usr_timezone'] ?? $input['lbx_reg_usr_timezone'] ?? ''));
+		if ($chosen_timezone !== '' && isset(Address::get_timezone_drop_array()[$chosen_timezone])) {
+			$fixed_fields['usr_timezone'] = $chosen_timezone;
+		}
+
 		if (isset($input['setcookie']) || isset($input['lbx_reg_setcookie'])) {
 			$fixed_fields['setcookie'] = TRUE;
 		} else {

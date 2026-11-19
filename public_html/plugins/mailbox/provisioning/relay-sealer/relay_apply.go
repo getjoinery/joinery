@@ -156,11 +156,17 @@ func runApplyRequests() int {
 	expectedUID := requestOwnerUID()
 	failed := 0
 	for _, name := range names {
+		path := filepath.Join(p.requestsDir(), name)
 		if !strings.HasSuffix(name, ".json") {
+			// A request on its way in is a .tmp for a few milliseconds. Anything
+			// else, or a .tmp its writer never renamed, would keep the directory
+			// non-empty and the path unit firing for ever.
+			if staleLeftover(path, name) {
+				_ = os.Remove(path)
+			}
 			continue
 		}
 		id := strings.TrimSuffix(name, ".json")
-		path := filepath.Join(p.requestsDir(), name)
 		if !requestIDRe.MatchString(id) {
 			// Not something the listener wrote. Remove it: nothing else may
 			// put files here, and leaving one would fire the path unit for ever.
@@ -179,6 +185,24 @@ func runApplyRequests() int {
 		return 1
 	}
 	return 0
+}
+
+// leftoverGrace is how long a request's temporary file may sit before it is
+// taken for abandoned. The listener writes and renames it in one breath.
+const leftoverGrace = 5 * time.Second
+
+// staleLeftover reports whether a file in the drop directory that is not a
+// request should be removed: anything but a request's temporary file at once,
+// and a temporary file once it is older than leftoverGrace.
+func staleLeftover(path, name string) bool {
+	if !strings.HasSuffix(name, ".json.tmp") {
+		return true
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	return time.Since(info.ModTime()) > leftoverGrace
 }
 
 // requestOwnerUID is the uid a request file must be owned by: the relay user's.

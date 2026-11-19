@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.24 - the one-time admin password and Visit your site wait until the domain points at the site
  * @version 2.23 - Ask us tells the support desk which page, and which site, the buyer came from
  * @version 2.22 - Move to your own Linode account is one closed line on a card until a move is asked for
  * @version 2.21 - a buyer's own-domain records appear once, all together, with a line saying so while they are gathered (walkthrough Q16)
@@ -304,7 +305,7 @@ echo $page->render_messages();
 		</section>
 		<?php endif; ?>
 
-		<?php if ($site['status'] === 'done'): ?>
+		<?php if ($site['status'] === 'done' && $site['dns_record'] === null && empty($site['dns_pending'])): ?>
 			<p><a href="<?php echo htmlspecialchars($site['url']); ?>" class="btn btn-primary">Visit your site</a></p>
 		<?php endif; ?>
 		<?php if (!empty($site['links'])): ?>
@@ -334,7 +335,11 @@ echo $page->render_messages();
 		<?php echo $availability_html; ?>
 		<?php endif; ?>
 
-		<?php if ($site['password_state'] === 'sealed'): ?>
+		<?php if ($site['password_state'] === 'sealed' && ($site['dns_record'] !== null || !empty($site['dns_pending']))): ?>
+			<?php // Shown once: not offered while there is nowhere to sign in with it. ?>
+			<p class="sms-note">Your admin password is shown here, once, as soon as your domain points at
+				your site. Until then there is nowhere to sign in with it.</p>
+		<?php elseif ($site['password_state'] === 'sealed'): ?>
 			<form method="post" action="/profile/server_manager">
 				<input type="hidden" name="action" value="reveal_password">
 				<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$site['id']; ?>">

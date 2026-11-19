@@ -14,6 +14,11 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.21 - the request applier has no start limit: a few requests seconds apart tripped systemd's
+#                default, which failed its path unit for good and left every later request (a tenant
+#                add, a domain list, a removal) answered timeout; the applier clears stale leftovers
+#                from the drop directory, which kept the unit firing
+#                (specs/hosting_purchase_walkthrough_test.md, re-run finding 113)
 # Version: 3.20 - the operator's tenant-remove takes force: a released slot's spool nobody will collect
 #                is removed with it; removing a tenant already gone answers ok
 #                (specs/hosting_paid_launch.md B6)
@@ -131,7 +136,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.20"
+RELAY_VERSION="3.21"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -854,6 +859,11 @@ fi
 if write_if_changed /etc/systemd/system/joinery-relay-apply.service 644 <<APPLYUNIT
 [Unit]
 Description=Joinery relay: apply filed requests (merge, tenant changes)
+# Each request starts this unit two or three times (the file written, renamed,
+# removed), so a handful of requests seconds apart is past systemd's default
+# of five starts in ten seconds. Past it the path unit fails for good
+# (unit-start-limit-hit) and no request is applied again until a reboot.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

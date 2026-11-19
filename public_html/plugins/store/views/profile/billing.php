@@ -119,6 +119,9 @@ $page->public_header([
                 </div>
                 <div class="card-body">
                     <div class="jy-mb-4">
+                        <?php foreach ($sub['details'] as $detail): ?>
+                        <div><?php echo htmlspecialchars($detail, ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endforeach; ?>
                         <?php if ($version): ?>
                         <span class="jy-billing-bold">Current:</span>
                         <?php echo htmlspecialchars($version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?>

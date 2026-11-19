@@ -538,6 +538,24 @@ $ia_row->save();
 $ia_row->load();
 harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $ia_row->key);
 check($nr->evaluate($node) === null, 'No relay slot: nothing for a site that was never handed the fleet\'s settings');
+// A failed build: named on the plane's own node, with the reason it stopped on.
+$bf = new IncidentSourceSiteBuildFailed();
+check($bf->name() === 'plane:site_build_failed' && $bf->evaluate($node) === null, 'Failed build: nothing on a node that is not this management node');
+$bf_before = IncidentSourceSiteBuildFailed::condition();
+check($bf_before === null || !isset($bf_before['detail']['ia-' . $ia_run . '.example']), 'Failed build: a built site is not named');
+$ia_row->set('cvp_status', 'failed');
+$ia_row->set('cvp_error', 'The account refused another server.');
+$ia_row->save();
+$bf_v = IncidentSourceSiteBuildFailed::condition();
+check($bf_v !== null && $bf_v['severity'] === 'critical'
+	&& strpos((string)($bf_v['detail']['ia-' . $ia_run . '.example'] ?? ''), 'The account refused another server.') === 0
+	&& strpos((string)$bf_v['detail']['ia-' . $ia_run . '.example'], 'Retry install') !== false,
+	'Failed build: critical, naming the site, its reason, and where to retry one that has a node', json_encode($bf_v));
+$ia_row->set('cvp_status', 'done');
+$ia_row->set('cvp_error', null);
+$ia_row->save();
+$bf_after = IncidentSourceSiteBuildFailed::condition();
+check($bf_after === null || !isset($bf_after['detail']['ia-' . $ia_run . '.example']), 'Failed build: gone once it is built');
 $ia_job = new ManagementJob(NULL);
 $ia_job->set('mjb_mgn_managed_node_id', (int)$node->key);
 $ia_job->set('mjb_job_type', 'install_node');

@@ -77,6 +77,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 
 		$user->set('usr_password', User::GeneratePassword($input['usr_password']));
+		// The person has just chosen this password themselves: a one-time
+		// password's demand for a new one is met.
+		$user->set('usr_force_password_change', false);
 		if (!$terms_already_accepted) {
 			$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		}

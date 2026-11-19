@@ -130,7 +130,9 @@ signing key, SPF and DMARC give way to the provider's. Where the domain's DNS
 host has a driver the page offers to add every record at once
 (the DNS publish box, docs/dns_management.md). There
 the admin password their account was born with is shown **once** — reading it
-erases it, and the site asks them to choose their own at first sign-in. The
+erases it, and the site asks them to choose their own at first sign-in. On the
+buyer's own domain the button, and Visit your site, wait until the domain
+points at the site, since before that there is nowhere to sign in. The
 password is never in an email: email is a copy that persists in somebody else's
 system.
 
