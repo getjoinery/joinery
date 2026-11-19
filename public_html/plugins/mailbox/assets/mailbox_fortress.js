@@ -42,6 +42,8 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.21.1 - the relay-change popup closes at the Trust press, before the passkey prompt; a trust that
+ *   does not finish saves no pin, so the next page load shows the popup again
  * @version 1.21 - showPending(n): every list read sets the waiting line (end-to-end mail waiting to be opened lists
  *   nowhere until it is) and, with the vault open, opens what waits; the line hides rather than leaving the page
  * @version 1.20.2 - the relay-change popup is a few lines: what the site says was done and when, that the new relay
@@ -1471,18 +1473,15 @@ window.MailboxFortress = (function () {
 		full.style.fontFamily = 'monospace';
 		dlg.appendChild(full);
 		dlg.appendChild(el('p', 'Mailboxes: ' + items.map(function (it) { return it.box.address; }).join(', ')));
-		var msg = el('p', '', 'mbx-relay-alarm-status');
 		var trust = el('button', v.trustPlain ? 'Trust the new relay' : 'Trust it anyway', 'btn btn-primary');
 		trust.type = 'button';
 		trust.addEventListener('click', function () {
-			trust.disabled = true;
-			msg.textContent = 'Confirm it is you to trust the new relay…';
-			trustAll(items, identity, update, session).then(function () {
-				dlg.close();
-				dlg.remove();
-			}, function (e) {
-				trust.disabled = false;
-				msg.textContent = 'The new relay was not trusted: ' + ((e && e.message) || 'the confirmation did not finish') + '.';
+			// The popup leaves at the press, so the passkey prompt stands alone.
+			// A trust that does not finish saves no pin: the next page load asks again.
+			dlg.close();
+			dlg.remove();
+			trustAll(items, identity, update, session).catch(function (e) {
+				if (window.console) console.warn('MailboxFortress: the new relay was not trusted: ' + ((e && e.message) || 'the confirmation did not finish') + '.');
 			});
 		});
 		var buttons = el('div');
@@ -1499,7 +1498,6 @@ window.MailboxFortress = (function () {
 			det.appendChild(trust);
 			buttons.appendChild(det);
 		}
-		dlg.appendChild(msg);
 		dlg.appendChild(buttons);
 		showDialog(dlg);
 	}
