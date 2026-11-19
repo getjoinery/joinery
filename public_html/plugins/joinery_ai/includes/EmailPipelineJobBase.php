@@ -20,6 +20,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_item_log
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
+ * @version 1.9 - contextNotice() hands an operator the domain's settings page as 'url'
  * @version 1.8 - contextNotice(): why the panel is greyed out on a domain with AI off
  * @version 1.7 - runsOnDeviceFor(): a device job on a Fortress mailbox runs in the browser
  * @version 1.6 - includesAttachmentDigest(), public, for a browser run
@@ -215,15 +216,19 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
      * The panel greys its heading and shows this on hover; an operator who
      * can change the switch is told where it is.
      *
-     * @return ?array{text:string}
+     * @return ?array{text:string, url:?string}
      */
     public function contextNotice(array $context, int $permission): ?array {
         $address = strtolower(trim((string)($context['mailbox'] ?? '')));
         $off = $address !== '' ? MailboxAliasConfig::aiOffDomain($address) : null;
         if ($off === null) return null;
-        return ['text' => Access::allows('config:write', $permission)
-            ? 'AI is turned off for mail on ' . $off['domain'] . '. Turn it on in that domain\'s mail settings.'
-            : 'AI has been turned off by your administrator for mail on ' . $off['domain'] . '.'];
+        if (!Access::allows('config:write', $permission)) {
+            return ['text' => 'AI has been turned off by your administrator for mail on ' . $off['domain'] . '.', 'url' => null];
+        }
+        return [
+            'text' => 'AI is turned off for mail on ' . $off['domain'] . '. Click to turn it on in that domain\'s mail settings.',
+            'url'  => '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . (int)$off['domain_id'],
+        ];
     }
 
     /** Off for the family; the triage and the security scan turn it on. */

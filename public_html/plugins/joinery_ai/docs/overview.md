@@ -540,9 +540,10 @@ the authorization, there is no permission gate):
   caller has no instance of — so on a stock install the panel is never empty.
   When the panel is off for the context (a job's `contextNotice()`: the
   mailbox's domain has AI switched off) it answers no cards and a `notice`
-  {text} naming the domain — and, for a `config:write` viewer, where to turn
-  it on. The panel then shows only its heading (and button), greyed, with the
-  text on hover; nothing else in the panel shows.
+  {text, url} naming the domain. For a `config:write` viewer `url` is the
+  domain's settings page; for anyone else it is null. The panel then shows
+  only its heading (and button), greyed, with the text on hover; with a `url`,
+  clicking either goes there. Nothing else in the panel shows.
 - **`joinery_ai/ai_panel_toggle`** (write) — binds or unbinds the context on
   the caller's recipe under a row lock (the stored list is re-read inside the
   toggle's own transaction, so a dashboard save racing a panel toggle can

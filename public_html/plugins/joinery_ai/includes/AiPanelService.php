@@ -95,7 +95,7 @@ class AiPanelService {
      * that answers speaks for the area — the reason is the context's, not
      * any one job's.
      *
-     * @return ?array{text:string}
+     * @return ?array{text:string, url:?string}
      */
     public static function notice(int $permission, string $area, array $context): ?array {
         foreach (self::areaJobs($area) as $job) {

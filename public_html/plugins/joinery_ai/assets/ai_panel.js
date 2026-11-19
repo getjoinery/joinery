@@ -53,7 +53,9 @@
  * the person as the blue circle — one is progress, the other is a request, and
  * they must not read as the same kind of number.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 2.13.0 - a context whose domain has AI
+ * Vanilla JS, jy-ui styling, no framework. @version 2.14.0 - the greyed heading (and button)
+ *   opens the domain's settings when the notice carries a url (operators only)
+ * @version 2.13.0 - a context whose domain has AI
  * off greys the heading and button, says why on hover, and shows nothing under them
  * @version 2.12.0 - one line per recipe
  * (name, switch, pencil) with its progress under it; the Working now list is gone,
@@ -183,11 +185,17 @@
 		// The open mailbox's domain has AI turned off: nothing under the
 		// heading could be turned on, so there is nothing under it at all —
 		// a greyed heading (and button) whose hover says why.
+		// An operator's notice carries the domain's settings page; the greyed
+		// heading and button then go there. A member's has none — the hover
+		// is the whole answer, since they cannot change it.
 		var disabledText = null;
-		function setDisabled(text) {
+		var disabledUrl = null;
+		function setDisabled(text, url) {
 			disabledText = text || null;
+			disabledUrl = disabledText && url ? url : null;
 			var off = !!disabledText;
 			panel.classList.toggle('aip-disabled', off);
+			panel.classList.toggle('aip-disabled-link', !!disabledUrl);
 			if (off) head.title = disabledText; else head.removeAttribute('title');
 			headCounts.hidden = off;
 			if (btn) {
@@ -295,7 +303,11 @@
 		// page is up, rather than decided on the first paint alone.
 		document.addEventListener('DOMContentLoaded', place);
 		window.addEventListener('load', place);
-		if (btn) btn.addEventListener('click', open);
+		function goToSettings() { window.location.href = disabledUrl; }
+		if (btn) btn.addEventListener('click', function () { if (disabledUrl) goToSettings(); else open(); });
+		head.addEventListener('click', function (ev) {
+			if (disabledUrl && !closeBtn.contains(ev.target)) goToSettings();
+		});
 		headToggle.addEventListener('click', function () { setCollapsed(!collapsed()); if (!collapsed()) refresh(); });
 		closeBtn.addEventListener('click', close);
 		overlay.addEventListener('click', function (ev) { if (ev.target === overlay) close(); });
@@ -368,7 +380,7 @@
 				.then(function (data) {
 					recipesBox.classList.remove('aip-stale');
 					var cards = data && data.cards ? data.cards : [];
-					setDisabled(data && data.notice ? data.notice.text : null);
+					setDisabled(data && data.notice ? data.notice.text : null, data && data.notice ? data.notice.url : null);
 					showCards(cards.length ? { cards: cards } : { message: 'No AI features for this page yet.' });
 				})
 				.catch(function (err) {

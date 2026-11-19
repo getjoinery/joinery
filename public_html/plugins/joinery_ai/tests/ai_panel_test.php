@@ -562,6 +562,10 @@ check(is_array($notice) && strpos((string)$notice['text'], 'your administrator')
 $op_notice = AiPanelService::notice(8, 'mailbox', array('mailbox' => $addr_off));
 check(is_array($op_notice) && strpos((string)$op_notice['text'], 'domain\'s mail settings') !== false,
 	'an operator is told where to turn it on', var_export($op_notice, true));
+check(is_array($op_notice) && $op_notice['url'] === '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id=' . (int)$sealed_off->key,
+	'an operator\'s notice links to that domain\'s settings page', var_export($op_notice, true));
+check(is_array($notice) && array_key_exists('url', $notice) && $notice['url'] === null,
+	'a member\'s notice carries no link', var_export($notice, true));
 check(AiPanelService::notice(8, 'mailbox', array('mailbox' => $addr1)) === null,
 	'a domain AI may read gets no notice');
 $r = harness_call_logic('plugins/joinery_ai/logic/ai_panel_state_logic.php',

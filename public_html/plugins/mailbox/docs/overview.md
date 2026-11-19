@@ -2549,8 +2549,8 @@ harder than giving it.
 
 With the switch off, the AI panel on a mailbox of that domain shows only its
 heading, greyed; hovering it names the domain and says the administrator
-turned AI off (an operator who can change it, `config:write`, is told it is in
-the domain's mail settings).
+turned AI off. For an operator who can change it (`config:write`), clicking
+the heading opens that domain's settings page, where the switch is.
 
 A second, separate answer — `ied_ai_processing_consent` — says how far the
 domain's mail may travel to be read by a model: `local` (hardware the operator
