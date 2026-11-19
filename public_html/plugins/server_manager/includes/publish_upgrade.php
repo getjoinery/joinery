@@ -1387,6 +1387,7 @@
 		// then is anything tarred. Logging comes this late so nothing that can
 		// still fail runs after a log entry exists.
 		$statement_bytes = null;
+		$logged = null;   // the log's entry for the statement, once it is logged
 		if ($logs_release) {
 			$agent_dist_dir = $full_site_dir . '/public_html/agent_dist';
 			try {

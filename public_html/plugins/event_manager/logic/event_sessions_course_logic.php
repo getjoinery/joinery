@@ -30,7 +30,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		$event_id = LibraryFunctions::fetch_variable_local($input, 'event_id', 0, 'required', 'Event id is required.', 'safemode', 'int');
 	}
 	else{
-		require_once(LibraryFunctions::display_404_page());
+		LibraryFunctions::display_404_page();
 	}
 
 	$event = new Event($event_id, TRUE);

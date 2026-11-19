@@ -35,6 +35,7 @@
  * left on a released address names whoever the provider gives that address
  * to next.
  *
+ * @version 1.3 - ts_fail() is declared never
  * @version 1.2 - a create the provider refuses leaves no password file, and the file is 0600 from its first byte;
  *                dns-delete takes a name only: --stale removed the records of live servers this management node
  *                cannot see, such as a Hetzner test server managed from another plane (B23)
@@ -53,7 +54,7 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 const TEST_SERVER_DNS_DOMAIN = 'joinerytest.com';
 const TEST_SERVER_PASSWORD_DIR = '/dev/shm';
 
-function ts_fail(string $message): void {
+function ts_fail(string $message): never {
 	fwrite(STDERR, 'test_server: ' . $message . "\n");
 	exit(1);
 }

@@ -81,6 +81,7 @@
 
 
 	
+	$page = NULL;   // an AdminPage only for the html-format view
 	if(!empty($_REQUEST['html-format'])){
 		$session = SessionControl::get_instance();
 		$page = new AdminPage();
@@ -135,8 +136,8 @@
 			
 		foreach($stripe_invoices as $stripe_invoice) {
 			$stripe_invoicenum++;
+			$rowvalues = array();
 			if($verbose){
-				$rowvalues = array();
 				array_push($rowvalues, '('.$stripe_invoicenum . ') '.$stripe_invoice->id);
 				array_push($rowvalues, $stripe_invoice->customer_email);	
 				array_push($rowvalues, $stripe_invoice->amount_paid/100);
@@ -205,10 +206,10 @@
 					array_push($rowvalues, 'skipped');
 				}
 			}
-			if(!empty($_REQUEST['html-format'])){
+			if($verbose && $page){
 				$page->disprow($rowvalues);
 			}
-			else{
+			elseif($verbose){
 				print_r($rowvalues);
 			}
 			$offset = $stripe_invoice->id;

@@ -56,6 +56,7 @@ require_once(__DIR__ . '/lib/discovery.php');  // harness_discover(), harness_re
 require_once(__DIR__ . '/lib/coverage.php');   // coverage map + --changed selection
 require_once(__DIR__ . '/lib/gate.php');       // the lock, run records, result reuse
 require_once(__DIR__ . '/lib/php_warnings.php'); // warnings the site logs during the run
+require_once(__DIR__ . '/lib/undefined_variables.php'); // undefvar_psalm_bin() for the psalm need
 
 // Every suite this run starts, and the lane worker, inherit the mark the git
 // guard hooks look for (tests/lib/repo_guard.php).
@@ -302,6 +303,11 @@ function harness_unmet_needs(array $needs) {
 					// with their root passwords.
 					$cache[$need] = class_exists('TestCloudCleanup') && TestCloudCleanup::accounts() !== array()
 						&& trim((string)shell_exec('command -v sshpass 2>/dev/null')) !== '';
+					break;
+				case 'psalm':
+					// Psalm is a developer tool outside the repository
+					// (tests/lib/undefined_variables.php says where it is found).
+					$cache[$need] = undefvar_psalm_bin() !== null;
 					break;
 				case 'agent-source':
 					// The agent's Go source, which lives outside the repository.

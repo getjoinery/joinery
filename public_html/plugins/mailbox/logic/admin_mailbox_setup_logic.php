@@ -24,6 +24,7 @@
  * (setup_fix_actions.php) — each writes through a model and redirects so the
  * next render reads fresh settings.
  *
+ * @version 2.28 - the focused domain starts null
  * @version 2.27 - the one-press handler drops its own level check: the page header (class=restricted, level 8) is the gate
  * @version 2.26 - without a press, the records come as one ordered list that rechecks itself (protect_record_list);
  *   after the flag, while the ceremony is open, the same list with group 2 active
@@ -285,6 +286,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// link. Dropping the focus dumps the operator on the picker with no way
 		// back in. Keep it whenever the domain resolves.
 		$keep = false;
+		$dm = null;
 		if ($selected_domain_id > 0) {
 			$dm = new InboundEmailDomain($selected_domain_id, TRUE);
 			$keep = (bool)$dm->key && !$dm->get('ied_is_imap_source');

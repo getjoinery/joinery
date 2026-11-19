@@ -5,6 +5,7 @@
  * vault_setup_options / vault_setup_verify / vault_setup_passphrase). Included by views/setup.php with $page, $viewer, $settings,
  * $next_key in scope.
  *
+ * @version 1.9 - names $viewer, which views/setup.php sets
  * @version 1.8 - its scripts are assets/js/setup/encryption_key.js; the phrase minimum is data-min-chars (no inline script)
  * @version 1.7 - the shown-once panel offers the codes only
  * @version 1.6 - one vault: the codes, the phrase's keys and the root vault are made in the browser
@@ -13,6 +14,7 @@
  * @version 1.4
  */
 require_once(PathHelper::getIncludePath('data/passkey_credentials_class.php'));
+/** @var User $viewer */   // set by views/setup.php
 
 // The key is unlocked by a passkey that can derive a PRF secret. A U2F-only
 // authenticator answers 'incapable' and can never hold a wrapping, so an

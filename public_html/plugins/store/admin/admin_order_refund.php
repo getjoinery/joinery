@@ -41,7 +41,7 @@
 			!empty($_POST['cancel_subscription']));
 		$order = $order_item->get_order();
 
-		$pageoptions['title'] = 'Refund confirm';
+		$pageoptions = array('title' => 'Refund confirm');
 		$page->begin_box($pageoptions);
 
 		echo $currency_symbol . number_format($result['refunded'], 2) . ' was refunded from ' . htmlspecialchars($result['what'])
@@ -73,7 +73,7 @@ else{
 	$session = SessionControl::get_instance();
 	$session->set_return("/plugins/store/admin/admin_order_refund");
 
-	$pageoptions['title'] = 'Refund charge';
+	$pageoptions = array('title' => 'Refund charge');
 	$page->begin_box($pageoptions);
 
 	echo '<fieldset><h4>Confirm Refund ('.htmlspecialchars($product->get('pro_name')).')</h4>';

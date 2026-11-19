@@ -64,6 +64,7 @@
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
+ * @version 1.0.2 - the refuse, finish and fail helpers are declared never
  * @version 1.0.1 - the tree path's survey is uncapped by bytes as well as by count
  * @version 1.0
  */
@@ -85,7 +86,7 @@ require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 
 $restore_objects_started = time();
 
-function restore_objects_refuse($message, $code = 2) {
+function restore_objects_refuse($message, $code = 2): never {
 	fwrite(STDERR, 'RESTORE_OBJECTS_FAIL: ' . $message . "\n");
 	echo "RESTORE_OBJECTS_RESULT=fail\n";
 	echo 'RESTORE_OBJECTS_REASON=' . str_replace(array("\r", "\n"), ' ', $message) . "\n";
@@ -93,14 +94,14 @@ function restore_objects_refuse($message, $code = 2) {
 }
 
 /** Print the contract and leave with the exit status it implies. */
-function restore_objects_finish(array $result) {
+function restore_objects_finish(array $result): never {
 	$result['duration'] = time() - $GLOBALS['restore_objects_started'];
 	echo BackupObjectRestore::format_contract($result);
 	exit(($result['result'] ?? '') === BackupObjectRestore::RESULT_OK ? 0 : 1);
 }
 
 /** A failure after the request was understood: the contract, with the reason, exit 1. */
-function restore_objects_fail(array $base, $reason) {
+function restore_objects_fail(array $base, $reason): never {
 	restore_objects_finish(array_merge($base, array('result' => BackupObjectRestore::RESULT_FAIL, 'reason' => $reason)));
 }
 

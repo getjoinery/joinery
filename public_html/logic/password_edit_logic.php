@@ -80,6 +80,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 
 
+	$page_vars = array();
 	if ($has_old_password) {
 		$page_vars['page_title'] = 'Change Password';
 	}

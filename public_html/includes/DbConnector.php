@@ -1,5 +1,6 @@
 <?php
 /**
+ * @version 1.7 - handle_query_error() is declared never and get_instance() returns self
  * @version 1.6 - connect(): over PostgreSQL's unix socket (config file db_socket_dir), TCP when it is
  *                missing or refuses the link
  * @version 1.5 - end_abandoned_transaction(): a transaction still open when the process ends, or
@@ -148,7 +149,7 @@ class DbConnector {
 		return true;
 	}
 
-	public static function get_instance() {
+	public static function get_instance(): self {
 		if (!self::$instance instanceof self) {
 			self::$instance = new self;
 		}
@@ -354,7 +355,7 @@ class DbConnector {
 		return true;
 	}
 
-	function handle_query_error($e) {
+	function handle_query_error($e): never {
 		require_once(__DIR__ . '/ErrorClasses.php');
 		
 		$error_context = "DATABASE ERROR CONTEXT:\n";

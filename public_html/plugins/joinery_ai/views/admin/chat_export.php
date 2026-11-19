@@ -45,7 +45,7 @@ if (!$conversation->key
 
 // Locked-state contract: an export IS a content read (title + every message
 // decrypt) — a locked protected chat prompts unlock instead of assembling.
-function chat_export_locked(): void {
+function chat_export_locked(): never {
     echo json_encode(['success' => false, 'locked' => true,
         'message' => 'Unlock your vault to export this chat.']);
     exit;

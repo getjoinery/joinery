@@ -8,6 +8,7 @@
  *
  * Usage: php validate_php_file.php <path_to_php_file>
  *
+ * @version 1.2 - the method-name position starts set, so a call with no name after :: or -> reads no stale index
  * @version 1.1 - includes the file only when it just declares, or is a class file in includes/ or data/;
  *                a script (utils/upgrade.php ran a real upgrade) is read from its source, with the files it
  *                requires by a written-out path
@@ -833,6 +834,7 @@ class MethodExistenceTest {
                         if ($next_token[0] === T_STRING) {
                             $class_name = $next_token[1];
                             $method_name = null;
+                            $m = $j;   // where the method name was found
 
                             // Look for :: and method name
                             for ($k = $j + 1; $k < $count; $k++) {
@@ -879,6 +881,7 @@ class MethodExistenceTest {
                         if ($next_token[0] === T_VARIABLE) {
                             $source_var = $next_token[1];
                             $method_name = null;
+                            $m = $j;   // where the method name was found
 
                             // Look for -> and method name
                             for ($k = $j + 1; $k < $count; $k++) {

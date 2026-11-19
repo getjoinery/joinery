@@ -7,6 +7,7 @@
  * through the record endpoints (docs/api.md § Scoped machine keys). A key's
  * scope is fixed when it is made; changing it means a new key.
  *
+ * @version 1.3 - the plain secret is declared before the new-key branch sets it
  * @version 1.2 - an action's level is read through Access::allows(), so class:verb levels count
  * @version 1.1 - scoped keys can be made here; a new key starts Active; saving an edit no longer
  *   hands the key to the admin who saved it (the owner is set on create only)
@@ -106,6 +107,7 @@ function admin_api_key_edit_logic(array $input): LogicResult {
 
 		// Only a new key gets its owner and its keys. The owner is whose
 		// account the key acts as; an edit must not hand it to whoever saved.
+		$secret_key = null;
 		if($is_new){
 			$api_key->set('apk_usr_user_id', $session->get_user_id());
 			$public_key = 'public_'.LibraryFunctions::random_string(16);

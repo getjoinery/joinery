@@ -16,6 +16,7 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.10 - fail() is declared never
  * @version 1.9 - email templates come from public_html/email_templates/ (step 8.9), not
  *                the publishing site's table (spec email_template_defaults)
  * @version 1.8 - the seeded accounts have usernames and no email: admin (user 1), system (2),
@@ -43,7 +44,7 @@ if (php_sapi_name() !== 'cli') {
  * Print what went wrong and stop with a failing exit status. die() with a
  * message exits 0, which a caller (publish_upgrade.php) reads as success.
  */
-function fail($message) {
+function fail($message): never {
 	echo $message;
 	exit(1);
 }

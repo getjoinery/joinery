@@ -86,31 +86,11 @@ $order_items = new MultiOrderItem(
     1
 );
 
-// Check if the filter key exists in MultiOrderItem
-try {
-    $order_items->load();
-} catch (Exception $e) {
-    // Fallback: direct query if the Multi class doesn't support this filter
-    $dbconnector = DbConnector::get_instance();
-    $dblink = $dbconnector->get_db_link();
-    $q = $dblink->prepare("SELECT odi_order_item_id FROM odi_order_items WHERE odi_paypal_subscription_id = ? LIMIT 1");
-    $q->execute([$subscription_id]);
-    $row = $q->fetch(PDO::FETCH_ASSOC);
-    if (!$row) {
-        error_log("PayPal webhook: no order item found for subscription $subscription_id");
-        exit;
-    }
-    $order_item = new OrderItem($row['odi_order_item_id'], TRUE);
-    $order_items = null; // Skip the iterator below
+if ($order_items->count() === 0) {
+    error_log("PayPal webhook: no order item found for subscription $subscription_id");
+    exit;
 }
-
-if ($order_items !== null) {
-    if ($order_items->count() === 0) {
-        error_log("PayPal webhook: no order item found for subscription $subscription_id");
-        exit;
-    }
-    $order_item = $order_items->get(0);
-}
+$order_item = $order_items->get(0);
 
 // Handle the event
 $event_type = $event['event_type'];

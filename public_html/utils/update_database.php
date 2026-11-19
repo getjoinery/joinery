@@ -271,6 +271,8 @@
 		$db_structure_hash = md5($db_structure_contents);
 		echo 'DB Hash: '. $db_structure_hash."<br>\n";
 		
+		$advanced_result = array();      // filled only by an upgrade or a cleanup
+		$primary_key_result = array();
 		// Step 2: Process advanced column operations (modifications only) if requested.
 		// Column-drop cleanup is DEFERRED to run after the migrations step (Step 4.5)
 		// so a not-yet-migrated column isn't dropped before its backfill migration.

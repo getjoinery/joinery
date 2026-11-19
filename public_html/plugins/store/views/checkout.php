@@ -179,8 +179,8 @@
                         <!-- BILLING USER SECTION -->
                         <?php
                         $is_logged_in = $session->is_logged_in();
-                        if ($is_logged_in && !isset($user)) {
-                            $user = new User($session->get_user_id(), TRUE);
+                        if (!isset($user)) {
+                            $user = $is_logged_in ? new User($session->get_user_id(), TRUE) : null;
                         }
                         // Logged-in users with a complete profile see read-only summary.
                         // Logged-in users with missing first/last names see editable name fields with email read-only.

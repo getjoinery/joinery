@@ -37,7 +37,6 @@ Contact Area
                         </div>
 
 							<?php			
-							$total_discount = 0;
 							foreach($cart->items as $key => $cart_item) {
 								list($quantity, $product, $data, $price, $discount) = $cart_item;
 								$product_version = $product->get_product_versions(TRUE, $data['product_version']);
@@ -62,24 +61,9 @@ Contact Area
 				  
 									  
 								<?php
-								$itemcount++;
 							}	
 
 							
-							if($total_discount){
-								
-							?>
-                        <div class="contact-item">
-                            <div class="contact-item_icon"><i class=""><img src="assets/img/icon/message.svg" alt=""></i>
-                            </div>
-                            <div class="media-body">
-                                <span class="contact-item_text">Discount <?php echo $currency_symbol.number_format($total_discount, 2, '.', ','); ?></span>
-								<span class="contact-item_text"><?php echo $currency_symbol . number_format($price, 2, '.', ','). $coupon_discount_words; ?></span>
-                                <span class="contact-item_title"><button type="submit" form="jy-cart-act" name="r" value="<?php echo (int)$key; ?>" class="btn btn-link p-0 align-baseline">Remove item</button></span>
-                            </div>
-                        </div>
-						<?php 
-							}
 							?>
 
                             
@@ -90,7 +74,7 @@ Contact Area
 
                             <div class="media-body">
                                 <span class="contact-item_text">Total
-                                    <?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total() - $total_discount, 2, '.', ','); ?></span>
+                                    <?php echo $currency_symbol; ?><?php echo  number_format($cart->get_total(), 2, '.', ','); ?></span>
                             </div>
                         </div>
 					</div>

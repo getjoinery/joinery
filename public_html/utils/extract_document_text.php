@@ -34,6 +34,7 @@
  * unsupported type, 5 = secured/encrypted document. DocumentText owns both
  * sides of this contract; nothing else parses it.
  *
+ * @version 1.1.1 - extractor_refuse() is declared never
  * @version 1.1.0 - runs under the parser jail: the vendor directory is an
  *   argument, class resolution is core-only, the stale-staging sweep runs
  *   here at startup (the jail user's files are its own to remove), and the
@@ -81,7 +82,7 @@ function extractor_stdin(): string {
 }
 
 /** Report a refusal the way the parent expects it: header, reason on stderr, kind as exit code. */
-function extractor_refuse(DocumentTextException $e): void {
+function extractor_refuse(DocumentTextException $e): never {
 	// The category header goes out even on a failure: knowing the file WAS a
 	// PDF is what lets the caller say something better than "unreadable".
 	echo 'category=' . (string)$e->category . "\n\n";

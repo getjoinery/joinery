@@ -49,6 +49,7 @@
  * Exits 0 on success, 1 on a transfer, envelope or integrity failure, 2 on a
  * malformed request.
  *
+ * @version 1.3 - stage_chain_refuse() is declared never
  * @version 1.2 - a chain this machine's key does not open is staged for the recovery key (STAGE_KEY), not refused
  * @version 1.1 - the fetch, ledger check, envelope open and key file live in BackupStaging,
  *                shared with utils/verify_backup.php so a verify can never fetch something a
@@ -67,7 +68,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/BackupStaging.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 
-function stage_chain_refuse($message, $code = 2) {
+function stage_chain_refuse($message, $code = 2): never {
 	fwrite(STDERR, 'STAGE_FAIL: ' . $message . "\n");
 	echo "STAGE_RESULT=error\n";
 	exit($code);

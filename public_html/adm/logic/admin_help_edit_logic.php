@@ -71,6 +71,7 @@ function admin_help_edit_logic(array $input): LogicResult {
 			// directory from the key, so a forged request cannot point the write
 			// at a directory of its own choosing.
 			$error = '';
+			$request_id = '';
 			try {
 				$request_id = RootRequest::submit('save_doc', array(
 					'key'           => $selected_doc,

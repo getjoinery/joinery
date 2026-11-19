@@ -35,6 +35,7 @@
  * the bucket could not be reached or the write failed. A site that already
  * has a scheduled target is left alone and reports ok with already=1.
  *
+ * @version 1.4 - install_backup_target_fail() is declared never
  * @version 1.3 - reads only the fields the provider asks for (a region typed for Backblaze is
  *   dropped, so Backblaze's own is used), and runs credential_problem() before saving, as the
  *   Backups page does; a missing field is named as the form names it
@@ -51,7 +52,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 
-function install_backup_target_fail(string $reason, int $code): void {
+function install_backup_target_fail(string $reason, int $code): never {
 	echo "INSTALL_BACKUP_TARGET=error\n";
 	echo 'reason=' . str_replace(array("\r", "\n"), ' ', $reason) . "\n";
 	exit($code);

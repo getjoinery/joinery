@@ -18,20 +18,20 @@ function admin_analytics_stats_logic(array $input): LogicResult {
 		case 0:
 			$sqlinterval = "day";
 			break;
-		case 1;
+		case 1:
 			$sqlinterval = "week";
 			break;
-		case 2;
+		case 2:
 			$sqlinterval = "month";
 			break;
-		case 3;
+		case 3:
 			$sqlinterval = "quarter";
 			break;
-		case 4;
+		case 4:
 			$sqlinterval = "year";
 			break;
 		default:
-			echo "Houston, we have a problem.";
+			$sqlinterval = "day";   // an interval this page does not offer reads as daily
 	}
 
 	// Get unique visitors data. Old page views live in the rollup, recent ones

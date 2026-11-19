@@ -69,7 +69,7 @@ function admin_errors_logic(array $input): LogicResult {
 
 	// Get parsing stats for grouped view
 	$parsing_stats = array();
-	if ($view === 'grouped') {
+	if ($view === 'grouped' && isset($parser)) {
 		$parsing_stats = $parser->getLastParsingStats();
 	}
 

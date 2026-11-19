@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.37 - names the variables node_detail.php sets; the switch-over wording flags start false
  * @version 1.36 - the reload while a copy runs is data-jy-reload-after
  * @version 1.35 - a press that asks first is submitbutton's confirm; the button posts copy_confirm=1 (no inline handler)
  * @version 1.34 - the root-login sentence only for a release whose install.sh turns it off (B115)
@@ -78,6 +79,12 @@
  * @version 1.2 - the switch-over and the way back
  * @version 1.1 - the region falls back to us-east
  * @version 1.0
+ */
+/**
+ * Set by views/admin/node_detail.php, which includes this tab.
+ * @var AdminPage $page
+ * @var SessionControl $session
+ * @var string $base_url
  */
 
 $copy_h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); };
@@ -855,6 +862,8 @@ $copy_records_list = function () use ($copy_switch, $copy_h, $copy_swap_at, $cop
 
 if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	$page->begin_box(['title' => 'Switch over to the copy']);
+	$copy_powers_off = false;
+	$copy_holds = false;
 	if ($copy_dead_source) {
 		// The old server is powered off by the switch-over when this management
 		// node created it; a container is stopped on its shared server, and kept

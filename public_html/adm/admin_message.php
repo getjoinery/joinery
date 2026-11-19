@@ -15,6 +15,7 @@
 	$message = new Message($_REQUEST['msg_message_id'] ?? null, TRUE);
 	$message->assert_found();
 	$sender = new User($message->get('msg_usr_user_id_sender'), TRUE);
+	$recipient = null;
 	if($message->get('msg_usr_user_id_recipient')){
 		$recipient = new User($message->get('msg_usr_user_id_recipient'), TRUE);
 	}
@@ -71,7 +72,7 @@
 	}
 
 	echo '<strong>From:</strong> ('.$sender->key.') ' . PublicPageBase::admin_user_link($sender) . '<br />';
-	if($message->get('msg_usr_user_id_recipient')){
+	if($recipient){
 		echo '<strong>To:</strong> ('.$recipient->key.') ' . PublicPageBase::admin_user_link($recipient) . '<br />';
 	}
 	if($message->get('msg_context_type') && $message->get('msg_context_id')){

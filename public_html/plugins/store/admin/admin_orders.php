@@ -120,7 +120,8 @@
 		$order_items_out = array();
 		foreach($order_items as $order_item) {
 			$product_data = $order_item->get_data();
-			
+			$order_item_user = NULL;
+			$address_id = NULL;
 			if($order_item->get('odi_usr_user_id')){
 				$order_item_user = new User($order_item->get('odi_usr_user_id'), TRUE);
 				$address_id = $order_item_user->get_default_address();

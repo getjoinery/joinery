@@ -50,6 +50,7 @@
 	
 	// A site with no Stripe keys has no charges to list: say so instead of failing.
 	$stripe_error = null;
+	$charges = array();
 	try {
 		if($offset){
 			$charges = $stripe_helper->get_charges(['limit' => $numperpage, 'starting_after' => $offset, 'created' => $created]);
@@ -109,7 +110,7 @@
 		echo ' <strong>Page '.$currpage.'</strong> ';
 	}
 	
-	if(count($charges['data']) == $numperpage){
+	if(count($charges['data'] ?? array()) == $numperpage){
 		$last_charge_number = $numperpage - 1;
 		$last_charge = $charges['data'][$last_charge_number];
 		echo 'Multiple pages of results:  <a href="/plugins/store/admin/admin_stripe_orders?offset='.$last_charge->id.'&startdate='.$display_startdate.'&enddate='.$display_enddate.'&currpage='.$nextpage .'">Next page >></a> ';
@@ -133,6 +134,7 @@
 			//array_push($rowvalues, $conoffset);
 			
 			$order_items = NULL;
+			$order_user = NULL;
 			if($charge->metadata['ord_order_id']){
 				try{
 					$order = new Order($charge->metadata['ord_order_id'], TRUE);

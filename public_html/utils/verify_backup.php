@@ -96,6 +96,7 @@
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
+ * @version 1.5 - the refuse and finish helpers are declared never; a failed offloaded-file read before the plan is known still reports the run
  * @version 1.4 - a verify that read from backup storage stamps the machine (BackupVerifyLauncher::note_verified)
  * @version 1.3 - by hand, a chain folder may hold a version-3 chain's run manifests in place of manifest.json; the
  *                newest is read, and its sha256 is printed for the operator to compare (specs/storage_targets.md F9)
@@ -128,7 +129,7 @@ require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 const VERIFY_LOCK_WAIT_SECONDS = 1200;
 const VERIFY_LOCK_POLL_SECONDS = 10;
 
-function verify_backup_refuse($message, $code = 2) {
+function verify_backup_refuse($message, $code = 2): never {
 	// A refusal after the request named its run leaves a trace on that run's
 	// row (message only, like a skip): a verify a person started from the
 	// Backups page must not vanish without a word.
@@ -147,7 +148,7 @@ function verify_backup_refuse($message, $code = 2) {
 }
 
 /** Print the contract and leave with the exit status it implies. */
-function verify_backup_finish(array $result) {
+function verify_backup_finish(array $result): never {
 	if (($result['result'] ?? '') !== BackupVerifier::RESULT_SKIPPED) {
 		BackupVerifyLauncher::note_verified();   // the site's own schedule keeps its distance from this read
 	}
@@ -414,11 +415,11 @@ try {
 	$failed = array(
 		'result'   => BackupVerifier::RESULT_FAIL,
 		'level'    => $level,
-		'run'      => $chain_id . '/' . (int)$plan['seq'],
-		'run_time' => BackupVerifier::run_time($manifest, $plan['seq']),
+		'run'      => $chain_id . '/' . (isset($plan) ? (int)$plan['seq'] : ($seq === null ? '' : (int)$seq)),
+		'run_time' => isset($manifest, $plan) ? BackupVerifier::run_time($manifest, $plan['seq']) : '',
 		'reason'   => $e->getMessage(),
 	);
-	verify_backup_stamp($failed, $chain_id, $plan['seq'], $profile);
+	verify_backup_stamp($failed, $chain_id, isset($plan) ? $plan['seq'] : $GLOBALS['verify_backup_row']['seq'], $profile);
 	verify_backup_finish($failed);
 } catch (BackupStagingException $e) {
 	// The set could not be staged, which is a verify failure with the node's own

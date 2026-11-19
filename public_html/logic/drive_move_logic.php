@@ -13,6 +13,7 @@
  * files' key holders already match their readers at the destination needs no
  * keys.
  *
+ * @version 1.2 - the destination folder starts null for a move to the root
  * @version 1.1 - a Fortress move re-keys its files to their new readers, or is refused as keys_needed
  */
 
@@ -85,6 +86,7 @@ function drive_move_logic(array $input): LogicResult {
 		return LogicResult::error('That item has been moved since.', array('reason' => 'moved_since'));
 	}
 
+	$target = null;
 	if ($parent_id > 0) {
 		$target = DriveHelper::load_folder($parent_id);
 		if (!$target) {

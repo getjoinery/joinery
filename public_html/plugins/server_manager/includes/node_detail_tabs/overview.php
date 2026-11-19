@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.113 - names the variables node_detail.php sets; the gateway, containers and SSL words are set on every path
  * @version 1.112 - Email setup: a failed hosted mail leg shows why and offers Retry email setup (hosting_after_purchase E2)
  * @version 1.111 - Bring back asks Access::permits(10) instead of comparing the level inline
  * @version 1.110 - a shut-down Starter site shows Bring back (level 10) once a subscription pays for it again (O3)
@@ -234,6 +235,12 @@
  * @version 1.1 - Danger Zone: two-tier delete (Remove from Dashboard / Permanently Delete Site),
  *                plus Permanently Delete Entry (purge_node) on an already-removed node
  * @version 1.0
+ */
+/**
+ * Set by views/admin/node_detail.php, which includes this tab.
+ * @var AdminPage $page
+ * @var SessionControl $session
+ * @var string $base_url
  */
 ?>
 <form id="nodeActionCheckStatus" method="post" action="<?php echo $base_url; ?>" hidden>
@@ -1201,6 +1208,9 @@
 			return array('site tasks ran ' . $words . ' before the last status check', $gap < 1200);
 		};
 		$svc_body = null;
+		$mg = null;           // the mail apps gateway's report, where it is installed
+		$mg_silent = array();
+		$containers = null;   // a Docker host's site containers
 		$svc_kind = '';
 		if ($hr && !$units_known && trim((string)$node->get('mgn_container_name')) !== '') {
 			// A site in a container: its agent sees the container, not the
@@ -1538,10 +1548,10 @@
 			if ($any_self_signed) {
 				echo '<div class="small text-muted mt-2">Self-signed: the placeholder this site answers with until a real certificate lands. A visitor who reaches this machine directly gets a browser warning; one who comes through a proxy that serves its own certificate (Cloudflare, or the host in front of a container site) does not.</div>';
 			}
+			$ssl_words = array('pending' => array('Waiting for DNS and certbot', 'warning'), 'failed' => array('Failed: see SSL Setup below', 'danger'),
+				'active' => array('Active', 'success'));
+			$sw = $ssl_words[$ssl_state] ?? array('None configured', 'secondary');
 			if (!$cert_rows) {
-				$ssl_words = array('pending' => array('Waiting for DNS and certbot', 'warning'), 'failed' => array('Failed: see SSL Setup below', 'danger'),
-					'active' => array('Active', 'success'));
-				$sw = $ssl_words[$ssl_state] ?? array('None configured', 'secondary');
 				echo '<span class="badge bg-' . $sw[1] . '">' . htmlspecialchars($sw[0]) . '</span>';
 			}
 			echo '<div class="small text-muted mt-2">Each renews by itself 14 days before it runs out. Green over 30 days, amber 14 to 30, red under 14.</div>';

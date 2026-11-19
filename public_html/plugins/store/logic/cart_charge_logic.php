@@ -232,6 +232,7 @@ function _cart_charge_paypal_amount_matches($paypal, $payment, $cart): bool {
 		return false;
 	}
 	$want_cents = 0;
+	$want_currency = null;   // a payment unit must name the currency the cart expects
 	foreach ($expected['purchase_units'] as $unit) {
 		$want_cents += (int)round((float)$unit['amount']['value'] * 100);
 		$want_currency = strtoupper((string)$unit['amount']['currency_code']);
@@ -595,6 +596,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$settings = Globalvars::get_instance();
 	$page_vars['settings'] = $settings;
 
+	// Set once the charge is under way; the catch below reads them to take
+	// back what a failed checkout had started.
+	$payment_refused = null;
+	$stripe_subscriptions = array();
+	$card_intent = null;
+
   try {
 
 	if(!$settings->get_setting('products_active')){
@@ -704,6 +711,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	
 
 
+	$stripe_helper = null;
+	$stripe_customer_id = null;
 	if($charge_total){
 		if($settings->get_setting('use_paypal_checkout')){
 			$paypal = _cart_charge_gateway('PaypalHelper');
@@ -1734,7 +1743,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
   } catch (Exception $e) {
 	error_log("Checkout error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
 	// Subscriptions started for a checkout that never got paid are taken back.
-	if((!empty($stripe_subscriptions) || !empty($card_intent)) && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID){
+	if((!empty($stripe_subscriptions) || !empty($card_intent)) && $payment_refused !== null && isset($order) && (int)$order->get('ord_status') !== Order::STATUS_PAID){
 		return $payment_refused("Something went wrong processing your order. Please try again.", false);
 	}
 	if($return !== null){

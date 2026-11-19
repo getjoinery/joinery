@@ -25,6 +25,7 @@
  * "A dev site" is one with the debug setting on: load writes into plugins/,
  * which the installer does everywhere else, and call fires real calls.
  *
+ * @version 1.1 - sbx_fail() is declared never; call picks its host with a match
  * @version 1.0
  */
 
@@ -48,7 +49,7 @@ function sbx_out(string $line): void {
 	echo $line . "\n";
 }
 
-function sbx_fail(string $line, int $code = 1): void {
+function sbx_fail(string $line, int $code = 1): never {
 	fwrite(STDERR, $line . "\n");
 	exit($code);
 }
@@ -220,19 +221,12 @@ switch ($command) {
 		if (!SandboxPlugins::isActive($plugin)) {
 			sbx_fail("$plugin is not an active sandboxed plugin.");
 		}
-		switch ($kind) {
-			case 'ui':
-				$result = SandboxHost::ui($plugin, $what, $json, null);
-				break;
-			case 'signal':
-				$result = SandboxHost::signal($plugin, $what, $json, 'msg_dev_' . bin2hex(random_bytes(6)), gmdate('Y-m-d\TH:i:s\Z'));
-				break;
-			case 'schedule':
-				$result = SandboxHost::schedule($plugin, $what);
-				break;
-			default:
-				sbx_fail('Usage: sandbox_plugin.php call PLUGIN ui|signal|schedule NAME [JSON]', 2);
-		}
+		$result = match ($kind) {
+			'ui'       => SandboxHost::ui($plugin, $what, $json, null),
+			'signal'   => SandboxHost::signal($plugin, $what, $json, 'msg_dev_' . bin2hex(random_bytes(6)), gmdate('Y-m-d\TH:i:s\Z')),
+			'schedule' => SandboxHost::schedule($plugin, $what),
+			default    => sbx_fail('Usage: sandbox_plugin.php call PLUGIN ui|signal|schedule NAME [JSON]', 2),
+		};
 		sbx_out('status: ' . $result['status'] . ($result['duration_ms'] !== null ? ' (' . $result['duration_ms'] . ' ms)' : ''));
 		if ($result['message'] !== '') {
 			sbx_out('message: ' . $result['message']);

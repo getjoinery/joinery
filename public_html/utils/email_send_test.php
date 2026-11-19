@@ -20,6 +20,7 @@
  * "unverified". A second mode sends to any external address for a manual
  * deliverability spot-check.
  *
+ * @version 2.5 - the recipient starts empty
  * @version 2.4 - the loopback wait is assets/js/email-send-test.js (no inline script)
  * @version 2.3 - works on a site without the mailbox plugin: loopback is offered only when it is active
  * @version 2.2
@@ -175,6 +176,7 @@ $result = null; // ['mode','ok','error','to','token','subject']
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $mode  = ($_POST['mode'] ?? 'loopback') === 'external' ? 'external' : 'loopback';
     $token = 'est' . bin2hex(random_bytes(5));
+    $to = '';
 
     if ($mode === 'external') {
         $to = trim((string)($_POST['external_email'] ?? ''));

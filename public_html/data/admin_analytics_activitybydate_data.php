@@ -24,7 +24,7 @@ switch ($interval)
 		$sqlinterval = "year";
 		break;
 	default:
-		echo "Houston, we have a problem.";
+		$sqlinterval = "month";   // an interval this page does not offer reads as the default
 }
 
 $sqlstart = "'".$startdate."'";

@@ -33,9 +33,10 @@ if (!isset($_GET['confirm']) || $_GET['confirm'] !== 'yes') {
     exit;
 }
 
+$dbhelper = DbConnector::get_instance();
+$dblink = $dbhelper->get_db_link();
+
 try {
-    $dbhelper = DbConnector::get_instance();
-    $dblink = $dbhelper->get_db_link();
 
     // Start transaction
     $dblink->beginTransaction();

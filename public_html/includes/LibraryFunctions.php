@@ -175,7 +175,7 @@ class LibraryFunctions {
 		}
 	}
 
-	static function display_404_page(){
+	static function display_404_page(): never {
 		$settings = Globalvars::get_instance();
 
 		$theme_template = $settings->get_setting('theme_template');

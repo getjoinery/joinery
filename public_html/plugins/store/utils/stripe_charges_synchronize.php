@@ -87,6 +87,7 @@
 
 	
 
+	$page = NULL;   // an AdminPage only for the html-format view
 	if(!empty($_REQUEST['html-format'])){
 		$page = new AdminPage();
 		$page->admin_header(
@@ -152,6 +153,7 @@
 				//echo 'Order count: '.$chargenum.'<br>';
 				
 				$found_order = FALSE;
+				$order = NULL;
 				if($charge->metadata['ord_order_id']){
 					try{
 						$order = new Order($charge->metadata['ord_order_id'], TRUE);
@@ -167,7 +169,7 @@
 				
 				if(!$found_order && $charge->payment_intent){
 					$order = Order::GetByStripePaymentIntent($charge->payment_intent);
-					if($order->key){
+					if($order && $order->key){
 						if($verbose){
 							echo 'Found order from payment intent<br>';
 						}
@@ -177,7 +179,7 @@
 				
 				if(!$found_order && $charge->id){
 					$order = Order::GetByStripeCharge($charge->id);
-					if($order->key){
+					if($order && $order->key){
 						if($verbose){
 							echo 'Found order from charge id<br>';
 						}
@@ -207,7 +209,7 @@
 					}
 				}		
 
-				if(!$found_order){
+				if(!$found_order || $order === NULL){
 					$order = new Order(NULL);
 					if(StripeHelper::isTestMode()){
 						$order->set('ord_test_mode', true);
@@ -225,6 +227,7 @@
 
 				//HANDLE THE ORDER USER
 				$found_user = FALSE;
+				$order_user = NULL;
 				if($order->get('ord_usr_user_id')){
 					$order_user = new User($order->get('ord_usr_user_id'), TRUE);
 					if($order_user->key){
@@ -242,14 +245,14 @@
 				
 				if(!$found_user && $charge['metadata']['customer_email']){
 					$order_user = User::GetByEmail($charge['metadata']['customer_email']);
-					if($order_user->key){
+					if($order_user && $order_user->key){
 						$found_user = TRUE;
 					}
 				}
 				
 				if(!$found_user && $charge->billing_details->email){
 					$order_user = User::GetByEmail($charge->billing_details->email);
-					if($order_user->key){
+					if($order_user && $order_user->key){
 						$found_user = TRUE;
 					}
 				}			
@@ -274,7 +277,7 @@
 					$order_item = new OrderItem(NULL);
 					$order_item->set('odi_ord_order_id', $order->key);
 					$order_item->set('odi_pro_product_id', 5); //THIS IS THE PRODUCT ID FOR SUBSCRIPTION PAYMENTS
-					$order_item->set('odi_usr_user_id', $order_user->key);
+					$order_item->set('odi_usr_user_id', $order_user ? $order_user->key : NULL);
 					$order_item->set('odi_price', $charge->amount/100);
 					$order_item->set('odi_stripe_foreign_invoice_id', $charge->invoice);
 
@@ -332,15 +335,15 @@
 					echo 'Invoice: '.$order->get('ord_stripe_invoice_id').'<br>';
 				}
 				
-				if(!$order->get('ord_usr_user_id')){
+				if(!$order->get('ord_usr_user_id') && $order_user){
 					$order->set('ord_usr_user_id', $order_user->key);			
 				}	
 				if($verbose){				
-					echo 'User: '.$order_user->display_name().'<br>';
+					echo 'User: '.($order_user ? $order_user->display_name() : '(none)').'<br>';
 				}
 
 				
-				if($order_user->key){
+				if($order_user && $order_user->key){
 					//HANDLE Address
 					$address_id = $order_user->get_default_address();
 					if($address_id){
@@ -361,8 +364,6 @@
 					}
 					else{
 						$address = new Address(NULL);
-						$address->set('usa_is_default', FALSE);
-						$address->set('usa_usr_user_id', $user_id);
 						$address->set('usa_is_bad', FALSE);
 						$address->set('usa_address1', $charge->billing_details->address->line1);
 						$address->set('usa_city', $charge->billing_details->address->city);

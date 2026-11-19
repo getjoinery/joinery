@@ -266,6 +266,34 @@ A test of the runner spawns runners while the real gate is held:
 `JOINERY_GATE_CUTOFF` lowers the cutoff so a one-suite run exercises the
 wait. Both are read only when the `debug` setting is on.
 
+### Variables that may be unset
+
+PHP warns about a variable read before it was set only when the path that
+skips the assignment runs, so a site meets it long after the edit, and
+`validate_php_file.php` checks names, not paths. The safe suite
+`undefined_variables` (`tests/unit/undefined_variables_test.php`) runs Psalm
+over every PHP file `git status` lists as edited or new, under `public_html/`
+and `maintenance_scripts/` (not tests, vendored code or specs), and fails on
+each read of a variable that may never have been set: one set in only one
+branch of an `if`, or only inside a loop. Its `covers:` is every
+PHP file, so any PHP edit runs it under `--changed`, and a run with nothing
+edited checks nothing.
+
+What it reports, and what it leaves out, is in
+`tests/lib/undefined_variables.php`: includes Psalm cannot resolve
+(`PathHelper::getIncludePath(...)`) are blanked line for line in the copy it
+analyzes, since Psalm otherwise stops checking variables after the first one;
+a name read at a file's top level that the file never assigns at all is not
+reported, because a view or admin page gets such names from the router's scope
+(`$is_valid_page`), and neither are superglobals. A name assigned on only some
+paths is reported wherever it is read. A file that is included with variables
+already in scope says which, in one docblock of `@var` lines at its top
+(`includes/setup_steps/encryption_key.php`), and a helper that always exits or
+throws is declared `: never`, so the code after a call to it is not read as
+reachable. Psalm is a developer tool, not part of
+the platform: `needs: [psalm]` finds it at `$JOINERY_PSALM` or under
+`~/tools/psalm`, and a box without it skips the suite.
+
 ### Run records and reuse
 
 Every run leaves a record under `{site root}/cache/tests/runs/`: `{run_id}.json`
@@ -430,7 +458,7 @@ test simply does not run until its header is corrected. `env` fails closed the
 same way, defaulting to `dev-only`.
 
 A test's `needs` are enforced: before running, the runner probes each declared
-dependency (`macmini`, `node`, `rust`, `curl`, `chrome`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
+dependency (`macmini`, `node`, `rust`, `curl`, `chrome`, `psalm`, `stripe-test-keys`, `mailgun`, `b2`, …). An unmet
 need makes the test a reported **SKIP** with its reason — never a silent pass and
 never a hard failure — so a box without the dependency stays green honestly. An
 unrecognized need name is treated as met (it never blindly skips).

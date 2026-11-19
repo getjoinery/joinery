@@ -2,6 +2,7 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.36 - api_error() is declared never
  * @version 2.35 - /api/v1/csp-report: the strict script policy's report channel, its own bucket
  * @version 2.34
  * @changelog 2.34 - A logic action's refusal may name its HTTP status (data.http_status, 400-599) in place
@@ -132,7 +133,7 @@ $api_start_time = microtime(true);
 /** The most rows one collection read answers with. */
 const API_MAX_PAGE = 200;
 
-function api_error($message, $error_type = 'TransactionError', $status_code = 400, $data = array()) {
+function api_error($message, $error_type = 'TransactionError', $status_code = 400, $data = array()): never {
 	header("Content-Type: application/json");
 	http_response_code($status_code);
 	$envelope = array(

@@ -159,6 +159,7 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 	$response = $upload_handler->get_response();
 	$files = $response['files'];
 	$file_count = count($files);
+	$file = null;   // the last file saved, for the fallback page
 
 	foreach ($files as $thisfile){
 		if (isset($thisfile->error)){
@@ -215,7 +216,7 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 	header('Content-Type: application/json; charset=utf-8');
 	echo json_encode($response);
 
-	if(isset($input['fallback']) || isset($input['fallback'])){
+	if(isset($input['fallback'])){
 		return LogicResult::render(array(
 			'file' => $file,
 			'show_fallback' => true
