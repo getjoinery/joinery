@@ -3,6 +3,11 @@
 # install_unseal_daemon.sh - install or converge one site's unseal daemon
 # (specs/unseal_daemon.md § Installing and supervising, docs/sealed_vault.md).
 #
+# Version: 1.2 - a site container whose memory-lock limit cannot be raised installs when swap never reaches
+#               a disk (zram with no backing device, dm-crypt, or none: the daemon's own swapcheck), and
+#               the daemon serves unlocked under its guard; it is refused when swap can reach a disk
+#               (reason=disk_swap) or the check cannot answer (reason=check_failed), the device or the
+#               error in detail=
 # Version: 1.1 - every site keeps its own builds and launcher under /var/lib/joinery-unseal/KEY/, so two
 #               sites on one host at different releases never swap a shared binary (reviewer2 B1);
 #               TimeoutStartSec=15 (B3); the health ping runs the build the site runs (B4); the
@@ -45,9 +50,10 @@
 #
 # Not applicable (exit 0, the site keeps its vault on the pool path and its
 # health page says so): not root; no prebuilt for this machine; a memory-lock
-# limit that cannot be raised here (a container started without
-# --ulimit memlock=-1), which leaves /etc/joinery-unseal/KEY/refused naming the
-# reason for the site's health row. A restart ends every window, so the daemon is restarted
+# limit that cannot be raised here (a site container) on a host whose swap can
+# reach a disk, which leaves /etc/joinery-unseal/KEY/refused naming the
+# reason for the site's health row. Where swap never reaches a disk the daemon
+# needs no locked memory, and serves unlocked while that holds. A restart ends every window, so the daemon is restarted
 # only when something this installs changed: the build, the launcher, the unit or the record.
 #
 # Runs at the platform's root moments through _plugin_installers_start.sh (a
@@ -124,13 +130,40 @@ else
     INIT_MODE="cron"
 fi
 
-# The daemon locks every page and refuses to start under a bounded memory-lock
-# limit. A unit sets the limit itself; a container needs one it may raise.
-if [[ "${INIT_MODE}" == "cron" ]] && ! prlimit --memlock=unlimited:unlimited true 2>/dev/null; then
-    say "the memory-lock limit cannot be raised here (a site container gets --ulimit memlock=-1:-1 when rebuilt with a memory budget) - not installed; the vault stays on the pool path"
+# The daemon locks every page where it can. A unit sets the limit itself; a
+# site container cannot raise its own, and there the daemon serves unlocked
+# only while swap never reaches a disk. The prebuilt answers that by the rule
+# it serves under, so the installer and the daemon never disagree.
+refuse() {  # REASON DETAIL
     install -d -o root -g root -m 0755 /etc/joinery-unseal "${CONF_DIR}"
-    printf 'reason=memlock\n' > "${REFUSED}.new" && chmod 644 "${REFUSED}.new" && mv -f "${REFUSED}.new" "${REFUSED}"
-    exit 0
+    { printf 'reason=%s\n' "$1"; printf 'detail=%s\n' "${2//$'\n'/ }"; } > "${REFUSED}.new" \
+        && chmod 644 "${REFUSED}.new" && mv -f "${REFUSED}.new" "${REFUSED}"
+}
+if [[ "${INIT_MODE}" == "cron" ]] && ! prlimit --memlock=unlimited:unlimited true 2>/dev/null; then
+    # The tree's copy is not executable (the tree is held at 0644): ask a copy
+    # that is, where the daemon's builds run from (/run may be noexec).
+    install -d -o root -g root -m 0755 /var/lib/joinery-unseal
+    CHECK_BIN=""
+    trap 'rm -f "${CHECK_BIN}"' EXIT
+    swap_rc=126
+    why="could not copy the prebuilt to ask it"
+    if CHECK_BIN="$(mktemp /var/lib/joinery-unseal/.swapcheck.XXXXXX)" && install -m 0700 "${SRC}" "${CHECK_BIN}"; then
+        why="$("${CHECK_BIN}" swapcheck 2>&1)"; swap_rc=$?
+    fi
+    rm -f "${CHECK_BIN}"
+    trap - EXIT
+    case "${swap_rc}" in
+        0)
+            say "the memory-lock limit cannot be raised here, and ${why} - the daemon serves unlocked while that holds" ;;
+        3)  # the daemon's exitDiskSwap
+            say "the memory-lock limit cannot be raised here, and swap can reach a disk (${why}) - not installed; the vault stays on the pool path"
+            refuse disk_swap "${why}"
+            exit 0 ;;
+        *)
+            say "the memory-lock limit cannot be raised here, and the swap check did not answer (exit ${swap_rc}: ${why}) - not installed; the vault stays on the pool path"
+            refuse check_failed "exit ${swap_rc}: ${why}"
+            exit 0 ;;
+    esac
 fi
 rm -f "${REFUSED}"
 

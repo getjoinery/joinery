@@ -534,8 +534,23 @@ release. Per site, keyed by the basename of the site root
 `joinery-unseal:www-data 0750` and the daemon answers only a peer whose uid
 is the site's pool user. It has no network, reads no database, opens no file
 after startup, locks every page of its memory, is never dumped, and zeroes a
-key when its window ends. It refuses to run as root, and refuses to start
-under a bounded memory-lock limit.
+key when its window ends. It refuses to run as root. Under a bounded
+memory-lock limit (a site container, which cannot raise its own) it serves
+unlocked only while swap never reaches a disk: every active swap device is a
+block device the kernel lists (`partition`) that sysfs shows, and is zram
+with no backing device or dm-crypt; or there is none. A swap file, or a name
+sysfs does not know, is a disk whatever it is called. It reads `/proc/swaps`
+and sysfs at startup and every second after, and the moment that stops
+holding it ends every window and exits with status 3; on swap that can reach a
+disk it refuses to start, also with 3. `joinery-unseal swapcheck` answers the
+same rule (exit 0, or 3 naming the device). What this leaves: an active zram
+cannot gain a backing device without being switched off and reset, so the
+only way to a disk is a new swap device added by the host's root, and pages
+the kernel swaps out in the second before the guard sees it can land there
+(zram's higher priority usually takes them first). The rule's cases are one
+corpus, `joinery_unseal/testdata/swap_rule_cases.json`, walked by the
+daemon's Go test, `VaultHealth::checkSwapSafe()`'s test and the agent's,
+whose copy must stay byte-identical (the health test compares them).
 
 **What PHP holds.** `DaemonVaultKey` (`includes/DaemonVaultKey.php`): the
 daemon's handle for the window, the public key, and nothing secret, over
@@ -547,7 +562,7 @@ daemon's handle for the window, the public key, and nothing secret, over
 | `unwrap` | Opens a list of sealed DEKs under a handle, `dek` scope only. A page of rows or a fold batch of 200 is one trip |
 | `open_previous` | Opens a retired-key chain entry inside the daemon as a child window of the handle (same clocks, closed with it); what comes back is a child handle and the retired key's public half, never its KEK or secret |
 | `close` | Ends a window by handle, answering its unwrap count |
-| `status` | Version, window count, uptime, whether it is held, whether its memory is locked; asked about one user, whether that user has a window. It never lists who is open |
+| `status` | Version, window count, uptime, whether it is held, whether its memory is locked (`memory_locked`) and whether it serves unlocked on swap that never reaches a disk (`swap_ram_only`); asked about one user, whether that user has a window. It never lists who is open |
 
 **Which holder.** `openKey()` opens in the daemon when the install record
 exists and the process is its pool user (`VaultUnlock::daemonRecord()`). Any
@@ -643,12 +658,25 @@ It installs the prebuilt for `uname -m` only when its bytes changed and its
 the unit (or the keepalive), the install record, and ends by asking the
 daemon for its status as the pool user. Where it cannot apply (not root, no
 prebuilt for the machine, a container whose memory-lock limit cannot be
-raised) it installs nothing and the site keeps its keys in the pool; a
-memory-lock refusal leaves `/etc/joinery-unseal/KEY/refused` for the health
-row. A site container with a memory budget runs with
-`--ulimit memlock=-1:-1` (`_site_run_spec.sh`), since Go's locked arena
-reservation fits no finite limit; locked pages count against the
-container's own budget. The launcher's event log
+raised on a server whose swap can reach a disk, by the shipped build's
+`swapcheck`) it installs nothing and the site keeps its keys in the pool;
+that refusal leaves `/etc/joinery-unseal/KEY/refused` for the health row:
+`reason=disk_swap` with the device in `detail=`, or `reason=check_failed`
+with the error when the check could not answer. A container that cannot
+raise the limit on RAM-only swap installs, and the launcher starts the daemon
+without raising it. Before each start the container's keepalive asks the
+current build's `swapcheck`; on a disk swap it starts nothing, writes
+`/var/lib/joinery-unseal/KEY/swap_refused` naming the device, and records one
+`swap_refused` event, never a crash or a counted start, so a swap refusal
+never moves the site to its previous build. When swap is RAM-only again it
+removes the file, records `swap_cleared` and starts the daemon; a daemon its
+guard ended is recorded as `swap_exit`. Where the limit can be raised (a
+container rebuilt with a memory budget) the daemon locks, and the keepalive
+clears an old `swap_refused` the same way. The agent reports `swap_refused` as
+its own word, an incident on the fleet dashboard. A site container with a memory budget runs with
+`--ulimit memlock=-1:-1` (`_site_run_spec.sh`), so its daemon locks: Go's
+locked arena reservation fits no finite limit, and locked pages count
+against the container's own budget. The launcher's event log
 (`/var/lib/joinery-unseal/KEY/events`, one JSON object per line, the newest
 200: every start, stop, fallback, hold and lift) is what the agent reads into
 `check_status` and its poll's `unseal_daemon` field, so the fleet dashboard
@@ -690,8 +718,11 @@ opens, and the secret key itself wherever the pool holds it (a site with no
 daemon, a process that is not the pool user, the five-minute fallback):
 
 - The unseal daemon (`unseal_daemon`): installed, answering, on the current
-  build, not held, its memory locked. Unmet names what is wrong and the fix:
-  the installer's command, the container's memory-lock run option, the
+  build, not held, its memory locked or serving unlocked on swap that never
+  reaches a disk (the verified row says which). Unmet names what is wrong and the fix:
+  the installer's command, a container refused for disk swap (with the
+  device) or a swap check that did not answer, the launcher not starting it
+  while swap can reach a disk, the
   daemon's log, the open security case, or new windows held in the pool
   after five silent minutes. A shell cannot ask the daemon (only the pool
   user can), so the row run from `check_vault_health.php` reads `unknown`
@@ -718,9 +749,17 @@ daemon, a process that is not the pool user, the five-minute fallback):
   leading bytes.
 - Swap off, or every active swap device encrypted. The device-mapper type is
   read from `/sys/block/dm-N/dm/uuid`: `CRYPT-` is dm-crypt and verified,
-  `LVM-` is a plain volume and unmet. zram is accepted (compressed RAM, no
-  disk without its writeback feature). The installer's housekeeping creates
-  1 GB of swap as dm-crypt with a per-boot random key.
+  `LVM-` is a plain volume and unmet. A swap file is unmet. zram is accepted
+  when sysfs shows the device and `/sys/block/zramN/backing_dev` reads `none`
+  (or is absent): compressed RAM, and its writeback feature is what would
+  write idle pages to that device. A container sees the host's devices in
+  `/proc/swaps` but not in its `/dev`, so a device is found in sysfs by name,
+  a device-mapper one by `dm/name`. A device in this `/dev` that is not a
+  whole device in sysfs (a partition, which sysfs lists under its disk) is a
+  plain device and unmet; one neither `/dev` nor sysfs shows is `unknown`.
+  This is the daemon's rule, on the same corpus.
+  The installer's `host_swap.sh` sets up zram (half the memory, up to 4 GiB)
+  with no backing device.
 
 Best-effort and advisory (a check that can't be verified reports `unknown`,
 never a false pass), and never a gate. Where they show:

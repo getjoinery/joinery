@@ -15,6 +15,10 @@
  * KEY is the basename of the site root, made safe for a path, exactly as the
  * installer derives it.
  *
+ * @version 1.3 - refused() reads disk_swap and check_failed (a container that cannot lock memory, on swap
+ *                that reaches a disk or with a swap check that did not answer) and refusedDetail() what
+ *                the installer said; facts() carries swap_ram_only (the daemon serving unlocked under its
+ *                swap guard) and swap_refused (the launcher not starting it while swap can reach a disk)
  * @version 1.2 - facts(): down_since, when the site's unlocks first found the daemon silent
  * @version 1.1 - refused(): the reason an installer left for not installing (a container that cannot
  *                lock memory, reviewer2 B8); the process table is read only when status was not asked (B10)
@@ -66,15 +70,27 @@ class UnsealDaemon {
 	}
 
 	/**
-	 * Why the installer did not install here, when it said: 'memlock' for a
-	 * site container whose memory-lock limit cannot be raised. Null otherwise.
+	 * Why the installer did not install here, when it said, for a site
+	 * container whose memory-lock limit cannot be raised: 'disk_swap' when the
+	 * server's swap can reach a disk, 'check_failed' when the swap check did
+	 * not answer, 'memlock' from an installer before 1.2 (which refused every
+	 * such container). Null otherwise.
 	 */
 	public static function refused(?string $key = null): ?string {
 		$body = @file_get_contents(self::path(self::CONF_ROOT . '/' . ($key ?? self::key()) . '/refused'));
-		if ($body !== false && preg_match('/^reason=(memlock)$/m', $body, $m)) {
+		if ($body !== false && preg_match('/^reason=(memlock|disk_swap|check_failed)$/m', $body, $m)) {
 			return $m[1];
 		}
 		return null;
+	}
+
+	/** What the installer said beside its refusal (the swap device, or the check's error), '' when nothing. */
+	public static function refusedDetail(?string $key = null): string {
+		$body = @file_get_contents(self::path(self::CONF_ROOT . '/' . ($key ?? self::key()) . '/refused'));
+		if ($body !== false && preg_match('/^detail=(.*)$/m', $body, $m)) {
+			return mb_substr(trim($m[1]), 0, 300);
+		}
+		return '';
 	}
 
 	/** Whether root has put the sentinel's hold on this site's daemon. */
@@ -86,6 +102,8 @@ class UnsealDaemon {
 	 * Every fact the health row and the notice read:
 	 *   installed      the install record exists
  *   refused        why the installer did not install, when it said (see refused())
+ *   refused_detail what it said beside that (refusedDetail())
+ *   swap_refused   while the launcher will not start it because swap can reach a disk: the device, else null
 	 *   socket         its socket path
 	 *   binary         'current' or 'previous' (the launcher moved it after four starts with no run lasting five minutes)
 	 *   held           the hold file exists
@@ -95,6 +113,7 @@ class UnsealDaemon {
  *                  another user cannot), so a check run elsewhere reads `running` alone
  *   answering      the daemon answered status (null when not asked)
 	 *   memory_locked  as the daemon reports it
+	 *   swap_ram_only  the daemon serves unlocked because swap never reaches a disk (it reports it)
 	 *   daemon         its version
 	 *   error          why it did not answer
 	 *   down_since     when this site's unlocks first found it silent (VaultUnlock), when not answering
@@ -102,13 +121,20 @@ class UnsealDaemon {
 	public static function facts(bool $ask = true, float $timeout = 0.5): array {
 		$key = self::key();
 		$rec = self::installRecord($key);
-		$facts = array('installed' => $rec !== null, 'refused' => $rec === null ? self::refused($key) : null, 'socket' => $rec['socket'] ?? null, 'binary' => 'current',
+		$refused = $rec === null ? self::refused($key) : null;
+		$facts = array('installed' => $rec !== null, 'refused' => $refused,
+			'refused_detail' => $refused !== null ? self::refusedDetail($key) : '', 'swap_refused' => null,
+			'socket' => $rec['socket'] ?? null, 'binary' => 'current',
 			'held' => self::held($key), 'crashes_hour' => 0, 'running' => null, 'asked' => false, 'answering' => null,
-			'memory_locked' => null, 'daemon' => null, 'error' => null, 'down_since' => null);
+			'memory_locked' => null, 'swap_ram_only' => null, 'daemon' => null, 'error' => null, 'down_since' => null);
 		if ($rec === null) {
 			return $facts;
 		}
 		$state = self::path(self::STATE_ROOT . '/' . $key);
+		$swap = @file_get_contents($state . '/swap_refused');
+		if ($swap !== false) {
+			$facts['swap_refused'] = mb_substr(trim($swap), 0, 300);
+		}
 		if (trim((string)@file_get_contents($state . '/binary')) === 'previous') {
 			$facts['binary'] = 'previous';
 		}
@@ -131,6 +157,7 @@ class UnsealDaemon {
 			$facts['answering'] = ($f['ok'] ?? false) === true;
 			if ($facts['answering']) {
 				$facts['memory_locked'] = ($f['memory_locked'] ?? false) === true;
+				$facts['swap_ram_only'] = ($f['swap_ram_only'] ?? false) === true;
 				$facts['daemon'] = (string)($f['daemon'] ?? '');
 				$facts['held'] = $facts['held'] || (($f['held'] ?? false) === true);
 			} else {

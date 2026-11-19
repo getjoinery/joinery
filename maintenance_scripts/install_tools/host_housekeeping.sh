@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.41 - The PHP-FPM pool drop-in sets rlimit_core = 0, so a crashing worker never writes its memory
+#                (an open vault window's key included) to a core file. A site container inherits Docker's
+#                unlimited core limit, which the host's DefaultLimitCORE=0 never reaches.
 # Version: 1.40 - A firewall rule opening PostgreSQL (5432) to the world, which bare-metal installs before
 #                install.sh 2.23 added, is deleted; a rule for a named source is left as someone's choice.
 # Version: 1.39 - In a container, a standalone server's listen pin (conf.d/99-joinery-local-only.conf) an
@@ -786,6 +789,11 @@ fi
 # finish when PHP-FPM reloads; the packaged 0 made a reload cut every request
 # in flight exactly as a restart does. Rewritten on every run (the file says
 # so); a change reloads PHP-FPM, which with that line is graceful.
+#
+# The [www] rlimit_core = 0 keeps a crashing worker from writing its memory
+# (an open vault window's key included) to a core file. A site container
+# inherits Docker's unlimited core limit, which the host's DefaultLimitCORE=0
+# does not reach, so the pool sets it for itself (docs/sealed_vault.md).
 FPM_STATUS_DROPIN="zz-joinery-status.conf"
 FPM_STATUS_SOCK="/run/php/joinery-fpm-status.sock"
 active_php=""
@@ -800,11 +808,13 @@ fpm_status_tmp="$(mktemp)"
 cat > "${fpm_status_tmp}" <<FPMSTATUS
 ; Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive.
 ; PHP-FPM's status page on a listener of its own, read over loopback through the
-; site vhost's /fpm-status (Require local) by the agent's web_workers word.
+; site vhost's /fpm-status (Require local) by the agent's web_workers word,
+; and no core files from a crashing worker (rlimit_core).
 [global]
 process_control_timeout = 10s
 
 [www]
+rlimit_core = 0
 pm.status_path = /fpm-status
 pm.status_listen = ${FPM_STATUS_SOCK}
 FPMSTATUS

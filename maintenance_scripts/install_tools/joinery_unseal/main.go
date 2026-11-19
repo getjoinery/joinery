@@ -7,10 +7,13 @@
 //	joinery-unseal --socket PATH --allow-uid UID [options]   serve
 //	joinery-unseal ping --socket PATH [--timeout SECONDS]    is it answering?
 //	joinery-unseal --selftest                                 the crypto, in-process
+//	joinery-unseal swapcheck                                  does swap ever reach a disk? (the installer's question)
 //	joinery-unseal --version
 //
 // Serving: no network, no database, no configuration beyond argv, and no file
-// opened after startup but the hold marker read once at startup. Signals are
+// opened after startup but the hold marker read once at startup, and, when
+// serving unlocked on swap that never reaches a disk, /proc/swaps and sysfs
+// read every second (swap_linux.go). Signals are
 // root's controls (the sentinel's): SIGUSR1 drops every window and holds,
 // refusing every open; SIGUSR2 lifts the hold. SIGTERM drops every window and
 // exits.
@@ -38,6 +41,8 @@ func main() {
 			os.Exit(runPing(args[1:]))
 		case "--selftest", "selftest":
 			os.Exit(runSelftest())
+		case "swapcheck":
+			os.Exit(runSwapcheck(args[1:]))
 		case "--version", "version":
 			fmt.Println(daemonVersion)
 			os.Exit(0)
@@ -58,6 +63,8 @@ func runServe(args []string) int {
 	maxConns := fs.Int("max-conns", 64, "connections served at once")
 	socketMode := fs.String("socket-mode", "0660", "the socket's mode; the installer passes 0666 inside a directory only the pool's group can enter")
 	unlocked := fs.Bool("unlocked-memory", false, "serve without locked memory when the limit is bounded (test suites only)")
+	swapsPath := fs.String("proc-swaps", "/proc/swaps", "where the swap guard reads the active swap devices (test suites only)")
+	sysBlockPath := fs.String("sys-block", "/sys/block", "where the swap guard reads block devices (test suites only)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -80,14 +87,18 @@ func runServe(args []string) int {
 		log.Printf("cannot make the process non-dumpable: %v", err)
 		return 1
 	}
-	locked := true
+	locked, swapGuard := true, false
 	if err := lockMemory(); err != nil {
-		if !*unlocked {
-			log.Printf("cannot lock memory: %v", err)
-			return 1
-		}
 		locked = false
-		log.Printf("serving WITHOUT locked memory (--unlocked-memory): %v", err)
+		if ok, why := swapRAMOnly(*swapsPath, *sysBlockPath); ok {
+			swapGuard = true
+			log.Printf("memory not locked (%v); serving because swap never reaches a disk, checked every second", err)
+		} else if *unlocked {
+			log.Printf("serving WITHOUT locked memory (--unlocked-memory): %v", err)
+		} else {
+			log.Printf("cannot lock memory (%v), and swap can reach a disk (%s)", err, why)
+			return exitDiskSwap
+		}
 	}
 
 	st := newStore(*maxWindows, time.Duration(*maxWindow)*time.Second)
@@ -95,7 +106,7 @@ func runServe(args []string) int {
 		st.setHeld(true)
 		log.Printf("starting held: %s exists", *holdFile)
 	}
-	d := &daemon{store: st, started: time.Now(), memoryLocked: locked}
+	d := &daemon{store: st, started: time.Now(), memoryLocked: locked, swapRAMOnly: swapGuard}
 
 	l, own, err := listen(*socket, os.FileMode(mode))
 	if err != nil {
@@ -137,6 +148,13 @@ func runServe(args []string) int {
 		lastFed := time.Now()
 		for range tick.C {
 			st.sweep() // takes the store's lock: a fed watchdog means the store is not wedged
+			if swapGuard {
+				if ok, why := swapRAMOnly(*swapsPath, *sysBlockPath); !ok {
+					n := st.dropAndHold()
+					log.Printf("swap can reach a disk now (%s): dropped %d windows, exiting", why, n)
+					os.Exit(exitDiskSwap)
+				}
+			}
 			if watchdog > 0 && time.Since(lastFed) >= watchdog {
 				notify.send("WATCHDOG=1")
 				lastFed = time.Now()
@@ -144,8 +162,8 @@ func runServe(args []string) int {
 		}
 	}()
 
-	log.Printf("%s serving %s for uid %d (memory locked: %v, held: %v, last peer pid reported on any recovered fault)",
-		daemonVersion, *socket, *allowUID, locked, st.isHeld())
+	log.Printf("%s serving %s for uid %d (memory locked: %v, swap never reaches a disk: %v, held: %v, last peer pid reported on any recovered fault)",
+		daemonVersion, *socket, *allowUID, locked, swapGuard, st.isHeld())
 	notify.send("READY=1")
 	err = srv.serve(l)
 	own.release()

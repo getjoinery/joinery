@@ -28,7 +28,10 @@
  *    wrapping from open;
  *  - SIGUSR1 dropping every window and holding, SIGUSR2 lifting it, and the
  *    hold file making a restarted daemon start held;
- *  - ping and --selftest.
+ *  - ping and --selftest;
+ *  - under a bounded memory-lock limit (a site container), serving unlocked
+ *    only while swap never reaches a disk, and ending every window and itself
+ *    when a disk swap appears; swapcheck's answer.
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -420,5 +423,54 @@ ud_start($bin, $sock, $hold, $uid);
 check((ud_call($sock, array('op' => 'status'))['fields']['held'] ?? null) === false
 	&& ud_call($sock, array('op' => 'status'))['fields']['windows'] === 0,
 	'without the file it starts unheld, holding nothing from before');
+
+// ---------------------------------------------------------------------------
+section('Unlocked only while swap never reaches a disk');
+
+ud_stop();
+$fsw = $dir . '/swaps';
+$fblock = $dir . '/block';
+mkdir($fblock . '/zram0', 0700, true);
+file_put_contents($fblock . '/zram0/backing_dev', "none\n");
+$header = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
+file_put_contents($fsw, $header . "/dev/zram0                              partition\t2004476\t\t0\t\t100\n");
+// A bounded memory-lock limit, as a site container has: the daemon cannot lock.
+$guarded = array('prlimit', '--memlock=65536:65536', $bin, '--socket', $sock, '--allow-uid', (string)$uid,
+	'--hold-file', $hold, '--proc-swaps', $fsw, '--sys-block', $fblock,
+	'--max-frame-bytes', '1048576', '--memory-budget', '4194304', '--max-windows', '50');
+exec(implode(' ', array_map('escapeshellarg', array($bin, 'swapcheck', $fsw, $fblock))) . ' 2>&1', $o1, $rc);
+check($rc === 0, 'swapcheck answers 0 for zram with no backing device', implode(' ', $o1));
+$GLOBALS['ud_proc'] = proc_open($guarded, array(0 => array('file', '/dev/null', 'r'),
+	1 => array('file', $dir . '/out.log', 'a'), 2 => array('file', $dir . '/out.log', 'a')), $pipes);
+for ($i = 0; $i < 100 && !(file_exists($sock) && ($c = @stream_socket_client('unix://' . $sock, $e, $s2, 1))); $i++) {
+	usleep(50000);
+}
+$st = ud_call($sock, array('op' => 'status'));
+check(ud_ok($st) && $st['fields']['memory_locked'] === false && $st['fields']['swap_ram_only'] === true,
+	'under a bounded lock limit, without --unlocked-memory, it serves on RAM-only swap and says so', json_encode($st['fields']));
+$g = ud_call($sock, array('op' => 'open', 'user' => 42, 'scope' => 'vault', 'idle' => 600));
+check(ud_ok($g), 'and opens a window');
+file_put_contents($fsw, $header . "/dev/zram0                              partition\t2004476\t\t0\t\t100\n"
+	. "/swapfile                               file\t\t1048572\t\t0\t\t-2\n");
+for ($i = 0; $i < 60 && ud_pid(); $i++) {
+	usleep(100000);
+}
+check(ud_pid() === 0 && strpos((string)file_get_contents($dir . '/out.log'), 'swap can reach a disk now') !== false,
+	'a disk swap appearing ends every window and the daemon within seconds', (string)file_get_contents($dir . '/out.log'));
+ud_stop();
+@unlink($sock);
+$o5 = array();
+exec('timeout 10 ' . implode(' ', array_map('escapeshellarg', $guarded)) . ' 2>&1', $o5, $rc5);
+check($rc5 === 3 && strpos(implode(' ', $o5), 'swap can reach a disk (') !== false,
+	'and it will not start again unlocked while that swap is there, exiting 3 (the launcher\'s swap refusal, not a crash)', $rc5 . ' ' . implode(' ', $o5));
+exec(implode(' ', array_map('escapeshellarg', array($bin, 'swapcheck', $fsw, $fblock))) . ' 2>&1', $o3, $rc3);
+check($rc3 === 3 && strpos(implode(' ', $o3), '/swapfile') !== false, 'swapcheck answers 3, naming the disk', implode(' ', $o3));
+file_put_contents($fblock . '/zram0/backing_dev', "/dev/sdb\n");
+file_put_contents($fsw, $header . "/dev/zram0                              partition\t2004476\t\t0\t\t100\n");
+exec(implode(' ', array_map('escapeshellarg', array($bin, 'swapcheck', $fsw, $fblock))) . ' 2>&1', $o4, $rc4);
+check($rc4 === 3 && strpos(implode(' ', $o4), '/dev/sdb') !== false, 'zram writing back to a disk counts as a disk', implode(' ', $o4));
+@unlink($fblock . '/zram0/backing_dev');
+@rmdir($fblock . '/zram0');
+@rmdir($fblock);
 
 harness_finish();

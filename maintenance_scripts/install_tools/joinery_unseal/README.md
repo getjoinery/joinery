@@ -9,6 +9,7 @@ carry it away (`specs/unseal_daemon.md`, `docs/sealed_vault.md`).
                    [--max-frame-bytes N] [--memory-budget N] [--max-conns N]
     joinery-unseal ping [--socket PATH] [--timeout S]
     joinery-unseal --selftest
+    joinery-unseal swapcheck
     joinery-unseal --version
 
 It answers on one unix socket (mode 0660 by default; the installed unit passes
@@ -16,10 +17,19 @@ It answers on one unix socket (mode 0660 by default; the installed unit passes
 directory is the access) and serves only the peer whose
 `SO_PEERCRED` uid is `--allow-uid` (the pool user). It has no network, reads no
 database, holds no configuration beyond its argv, and opens no file after
-startup but the hold marker. It refuses to serve as root, locks every page
-(`mlockall`), is not dumpable, and has a zero core limit; under a bounded
-memory-lock limit it refuses to start (`--unlocked-memory` lets the test
-suites run it anyway, and every `status` then says `memory_locked: false`).
+startup but the hold marker (and, serving unlocked, `/proc/swaps` and sysfs).
+It refuses to serve as root, locks every page (`mlockall`), is not dumpable,
+and has a zero core limit. Under a bounded memory-lock limit (a site
+container) it serves unlocked only while swap never reaches a disk (every
+device a `partition` sysfs shows, zram with no backing device or dm-crypt, or
+no swap: `swap_linux.go`, cases in `testdata/swap_rule_cases.json`),
+rechecked every second; when that stops holding it drops every window and
+exits 3, and on swap that can reach a disk it refuses to start with 3, which
+the launcher records as a swap refusal, never a crash. `status` then says
+`memory_locked: false, swap_ram_only: true`. `swapcheck` answers the same rule
+for the installer and the launcher (exit 0, or 3 naming the device). `--unlocked-memory` lets
+the test suites run it on any swap (`memory_locked: false` alone), and
+`--proc-swaps` / `--sys-block` point the guard at their fixtures.
 
 ## The wire
 
@@ -40,7 +50,7 @@ there is one) and ends that connection.
 | `unwrap` | `handle`, `activity` | sealed blobs (raw v2, the `dek` scope) | | the plaintexts, all or nothing |
 | `open_previous` | `handle` | sealed chain KEK, the retired secret's wrapping, its AD | `handle` (a child), `version` | the retired public key |
 | `close` | `handle`, or `user` | | `closed`, `unwraps` | |
-| `status` | nothing, or `user` | | `daemon`, `windows`, `uptime`, `held`, `memory_locked`; or `open` | |
+| `status` | nothing, or `user` | | `daemon`, `windows`, `uptime`, `held`, `memory_locked`, `swap_ram_only`; or `open` | |
 
 A wrapping is `SealedBox::wrapKey()`'s form, `v1.aead.` + XChaCha20-Poly1305;
 the secret inside is `v2.` + base64url of the 32-byte X-Wing seed. The vault

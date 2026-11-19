@@ -10,7 +10,7 @@ package main
 //	open_previous  handle; parts [sealed chain KEK, wrapped retired secret, AD]
 //	               -> a child handle, version; parts [public]
 //	close          handle, or user -> closed, unwraps
-//	status         nothing -> daemon, windows, uptime, held, memory_locked;
+//	status         nothing -> daemon, windows, uptime, held, memory_locked, swap_ram_only;
 //	               or user -> open
 //
 // Two rules hold every secret in: the vault secret leaves only wrapped, only
@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const daemonVersion = "1.1.0"
+const daemonVersion = "1.2.0"
 
 const (
 	maxWrap   = 64
@@ -36,6 +36,7 @@ type daemon struct {
 	store        *store
 	started      time.Time
 	memoryLocked bool
+	swapRAMOnly  bool // serving unlocked because swap never reaches a disk (swap_linux.go)
 }
 
 // handle runs one parsed request. The body's parts are the caller's to zero.
@@ -287,5 +288,6 @@ func (d *daemon) status(req *request, parts [][]byte) (map[string]any, [][]byte,
 		"uptime":        int64(time.Since(d.started) / time.Second),
 		"held":          d.store.isHeld(),
 		"memory_locked": d.memoryLocked,
+		"swap_ram_only": d.swapRAMOnly,
 	}, nil, nil
 }

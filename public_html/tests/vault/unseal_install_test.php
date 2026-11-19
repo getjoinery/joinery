@@ -145,6 +145,81 @@ check($rc === 0 && !file_exists($root . '/run/joinery-unseal/' . $key . '.hold')
 check($rc !== 0, 'a key that is not a site key is refused', $out);
 
 // ---------------------------------------------------------------------------
+section('The keepalive: a disk swap is a refusal, never a failed start');
+
+$shipped = $tools . '/joinery_unseal/bin/joinery-unseal-' . php_uname('m');
+if (!is_file($shipped)) {
+	check(true, 'no prebuilt for ' . php_uname('m') . ': the swap gate is not exercised here');
+} else {
+	$k2 = 'site_two';
+	$s2 = $root . '/var/lib/joinery-unseal/' . $k2;
+	mkdir($root . '/etc/joinery-unseal/' . $k2, 0755, true);
+	mkdir($s2, 0755, true);
+	file_put_contents($root . '/etc/joinery-unseal/' . $k2 . '/installed',
+		"socket=/run/joinery-unseal/{$k2}/unseal.sock\nallow_uid=" . posix_geteuid() . "\npool_user=www-data\ninit=cron\n");
+	copy($shipped, $s2 . '/joinery-unseal');
+	chmod($s2 . '/joinery-unseal', 0755);
+	touch($s2 . '/joinery-unseal.previous');
+	chmod($s2 . '/joinery-unseal.previous', 0755);
+	touch($s2 . '/running'); // it was serving
+	$swaps = $root . '/swaps';
+	$block = $root . '/block';
+	mkdir($block . '/zram0', 0755, true);
+	file_put_contents($block . '/zram0/backing_dev', "none\n");
+	$hdr = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
+	file_put_contents($swaps, $hdr . "/dev/zram0  partition\t2004476\t0\t100\n/swapfile  file\t1048572\t0\t-2\n");
+	$env = array('JOINERY_UNSEAL_TEST_BOUNDED' => '1', 'JOINERY_UNSEAL_TEST_PROC_SWAPS' => $swaps,
+		'JOINERY_UNSEAL_TEST_SYS_BLOCK' => $block, 'JOINERY_UNSEAL_TEST_NO_START' => '1');
+	$ev = function () use ($s2) {
+		return array_map(function ($l) { return json_decode($l, true)['event'] ?? ''; }, @file($s2 . '/events', FILE_IGNORE_NEW_LINES) ?: array());
+	};
+	for ($i = 0; $i < 5; $i++) {
+		[$rc, $out] = ui_launch($launch, $root, 'keepalive ' . $k2, $env);
+	}
+	$events = $ev();
+	check($rc === 0 && file_exists($s2 . '/swap_refused') && strpos((string)file_get_contents($s2 . '/swap_refused'), '/swapfile') !== false,
+		'five keepalives on a disk swap leave swap_refused naming the device', $out);
+	check($events === array('swap_refused'), 'one swap_refused event, and no crash or start, however many keepalives', json_encode($events));
+	check(trim((string)@file_get_contents($s2 . '/starts')) === '' && trim((string)@file_get_contents($s2 . '/binary') ?: 'current') === 'current',
+		'no start is counted, so the site never moves to its previous build');
+	check(!file_exists($s2 . '/running'), 'and it is no longer marked running, so its stop is not read as found dead');
+	[, $st] = ui_launch($launch, $root, 'status ' . $k2, $env);
+	$st = json_decode($st, true);
+	check(($st['swap_refused'] ?? null) === true && ($st['binary'] ?? '') === 'current', 'status says swap_refused, on the current build', json_encode($st));
+
+	file_put_contents($swaps, $hdr . "/dev/zram0  partition\t2004476\t0\t100\n");
+	ui_launch($launch, $root, 'keepalive ' . $k2, $env);
+	$events = $ev();
+	check(!file_exists($s2 . '/swap_refused') && end($events) === 'swap_cleared'
+		&& !in_array('crash', $events, true) && trim((string)@file_get_contents($s2 . '/starts')) === '',
+		'RAM-only swap again: swap_cleared, the start goes ahead on the current build, nothing counted against it', json_encode($events));
+
+	// A container rebuilt with a memory budget over the kept state directory: it locks now.
+	file_put_contents($swaps, $hdr . "/swapfile  file\t1048572\t0\t-2\n");
+	ui_launch($launch, $root, 'keepalive ' . $k2, $env);
+	$lockable = $env;
+	unset($lockable['JOINERY_UNSEAL_TEST_BOUNDED']);
+	$lockable['JOINERY_UNSEAL_TEST_LOCKABLE'] = '1';
+	ui_launch($launch, $root, 'keepalive ' . $k2, $lockable);
+	$events = $ev();
+	check(!file_exists($s2 . '/swap_refused') && end($events) === 'swap_cleared',
+		'where the lock limit can be raised, an old swap refusal is cleared (the daemon locks; swap no longer matters)', json_encode(array_slice($events, -3)));
+	file_put_contents($swaps, $hdr . "/dev/zram0  partition\t2004476\t0\t100\n");
+
+	// The guard ended a running daemon, and swap was RAM-only again by the next keepalive.
+	touch($s2 . '/running');
+	file_put_contents($root . '/joinery-unseal-' . $k2 . '.log', "joinery-unseal: swap can reach a disk now (swap /swapfile is a file, not a block device): dropped 2 windows, exiting\n");
+	ui_launch($launch, $root, 'keepalive ' . $k2, $env);
+	$events = $ev();
+	check(end($events) === 'swap_exit' && !in_array('crash', $events, true), 'a daemon its swap guard ended is recorded as swap_exit, not a crash', json_encode($events));
+	file_put_contents($root . '/joinery-unseal-' . $k2 . '.log', "joinery-unseal: something else\n");
+	touch($s2 . '/running');
+	ui_launch($launch, $root, 'keepalive ' . $k2, $env);
+	$events = $ev();
+	check(end($events) === 'crash', 'any other death found is still a crash', json_encode($events));
+}
+
+// ---------------------------------------------------------------------------
 section('The installer');
 
 $src = (string)file_get_contents($installer);
@@ -163,7 +238,11 @@ check(strpos($src, 'DEST="${STATE_DIR}/joinery-unseal"') !== false && strpos($sr
 	'each site keeps its own builds and launcher, so sites on different releases share nothing to swap');
 check(strpos($src, 'TimeoutStartSec=15') !== false && strpos($src, 'Description=Joinery unseal daemon (${KEY})') !== false,
 	'a start that hangs is ended in 15 s, and the unit names the key, never the caller\'s site name');
-check(strpos($src, 'reason=memlock') !== false, 'a container that cannot lock memory leaves its reason');
+check(strpos($src, 'refuse disk_swap') !== false && strpos($src, 'refuse check_failed') !== false && strpos($src, 'swapcheck') !== false
+	&& strpos($src, 'trap \'rm -f "${CHECK_BIN}"\' EXIT') !== false,
+	'a container that cannot lock memory asks the shipped build whether swap reaches a disk: exit 3 is disk_swap, any other failure check_failed, and the copy it asks is removed on every exit');
+check(preg_match('/prlimit "\$\{memlock\}" true 2>\/dev\/null \|\| memlock=/', (string)file_get_contents($launch)) === 1,
+	'the launcher raises the memory-lock limit only where it can, so a container\'s daemon still starts');
 $lsrc = (string)file_get_contents($launch);
 check(strpos($lsrc, '--kill-who=main') !== false && strpos($lsrc, '--kill-whom') === false,
 	'the hold signals with systemctl kill --kill-who, which systemd 249 knows');

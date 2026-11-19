@@ -9,9 +9,11 @@ package main
 // grows by arenas, and a bounded limit fails an allocation at the worst
 // moment, which in Go is a fatal error. So the daemon locks only under an
 // unbounded limit (or as root, which the limit does not bind, though the
-// daemon refuses to serve as root), and otherwise refuses to start unless it
-// was told it may run unlocked (--unlocked-memory, the test suites' flag),
-// which it then reports on every status as memory_locked: false.
+// daemon refuses to serve as root). Under a bounded limit (a site container)
+// it serves unlocked only while swap never reaches a disk (swap_linux.go),
+// reported as memory_locked: false, swap_ram_only: true; otherwise it refuses
+// to start unless told it may run unlocked (--unlocked-memory, the test
+// suites' flag), reported as memory_locked: false.
 
 import (
 	"errors"

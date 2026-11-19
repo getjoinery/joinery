@@ -6,6 +6,11 @@
 # the unit and the keepalive call it there, and the agent's unseal_hold runs the
 # tree's own copy, verified against the signed release manifest.
 #
+# Version: 1.3 - the memory-lock limit is raised only where it can be: a site container's cannot, and its
+#               daemon serves unlocked while swap never reaches a disk (the daemon's own check). Where
+#               swap can reach a disk the keepalive starts nothing and records swap_refused once (the
+#               swap_refused file names the device), never a crash or a start, so a swap refusal
+#               never moves a site to its previous build; swap_cleared when it is RAM-only again
 # Version: 1.2 - prepare records a crash the previous run left no record of (its stop hook killed with it)
 # Version: 1.1 - the site's own builds under its state directory (reviewer2 B1); the fallback counts
 #               starts since the last run that stayed up five minutes, so a build that hangs falls
@@ -24,7 +29,8 @@
 #                                          start it, restart it when it died or stopped answering
 #   joinery-unseal-launch hold KEY|--all  drop every window and hold: the hold file, then SIGUSR1
 #   joinery-unseal-launch lift KEY|--all  lift the hold: the file removed, then SIGUSR2
-#   joinery-unseal-launch status KEY      one line of JSON: installed, running, held, binary, crashes
+#   joinery-unseal-launch status KEY      one line of JSON: installed, running, held, binary, crashes,
+#                                          swap_refused
 #
 # KEY is the site's key (the basename of its root, made safe for a path); the
 # install record /etc/joinery-unseal/KEY/installed says everything else.
@@ -36,7 +42,8 @@
 #   /var/lib/joinery-unseal/KEY/      root-owned, world-readable: the site's builds (joinery-unseal,
 #                                     joinery-unseal.previous) and this launcher (launch), binary
 #                                     (current or previous), active (the symlink the unit starts),
-#                                     starts, events
+#                                     starts, events, swap_refused (present while the keepalive
+#                                     will not start the daemon because swap can reach a disk)
 #
 # The previous build: the installer keeps the build it replaced beside the
 # current one. A fourth start with no run since that stayed up five minutes
@@ -69,6 +76,13 @@ if [[ "$(id -u)" != "0" ]]; then
     TEST_ROOT="${JOINERY_UNSEAL_TEST_ROOT%/}"
     CONF_ROOT="${TEST_ROOT}${CONF_ROOT}" RUN_ROOT="${TEST_ROOT}${RUN_ROOT}" STATE_ROOT="${TEST_ROOT}${STATE_ROOT}"
 fi
+# The swap rule's fixtures, and a keepalive that decides but starts nothing:
+# the test hook's only (an unprivileged run cannot start the daemon's user).
+SWAPCHECK_ARGS=()
+if [[ -n "${TEST_ROOT}" && -n "${JOINERY_UNSEAL_TEST_PROC_SWAPS:-}" ]]; then
+    SWAPCHECK_ARGS=("${JOINERY_UNSEAL_TEST_PROC_SWAPS}" "${JOINERY_UNSEAL_TEST_SYS_BLOCK:-}")
+fi
+EXIT_DISK_SWAP=3   # the daemon's exitDiskSwap (swap_linux.go)
 
 # mkdir_as OWNER GROUP MODE DIR: a directory with exactly that ownership (the
 # test hook makes it its own).
@@ -107,6 +121,8 @@ load() {
     PREVIOUS="${STATE_DIR}/joinery-unseal.previous"
     SERVICE="joinery-unseal-${KEY}"
     LOG_FILE="/var/log/joinery-unseal-${KEY}.log"
+    [[ -z "${TEST_ROOT}" ]] || LOG_FILE="${TEST_ROOT}/joinery-unseal-${KEY}.log"
+    SWAP_REFUSED="${STATE_DIR}/swap_refused"
 }
 
 # The daemon's arguments: the same for the unit and the keepalive.
@@ -224,10 +240,14 @@ start_detached() {
     # Every descriptor above stdio is closed before runuser starts, as
     # install_agent.sh's launch does: runuser stays alive as the
     # daemon's parent, and whatever it inherited it would hold. The memory-lock
-    # limit is raised as the last hop; the daemon refuses to start under a
-    # bounded one.
-    nohup bash -c 'for f in /proc/$$/fd/*; do n=${f##*/}; case "$n" in 0|1|2) continue;; esac; eval "exec $n>&-" 2>/dev/null || true; done; umask 0007; exec prlimit --memlock=unlimited:unlimited --core=0:0 runuser -u "$0" -- "$@"' \
-        "${DAEMON_USER}" "${STATE_DIR}/active" "${args[@]}" >> "${LOG_FILE}" 2>&1 < /dev/null &
+    # limit is raised as the last hop where it can be. A site container's
+    # cannot (its hard limit is bounded and it holds no CAP_SYS_RESOURCE): the
+    # daemon then serves unlocked only while swap never reaches a disk, and
+    # refuses to start otherwise.
+    local memlock="--memlock=unlimited:unlimited"
+    prlimit "${memlock}" true 2>/dev/null || memlock="--core=0:0"
+    nohup bash -c 'for f in /proc/$$/fd/*; do n=${f##*/}; case "$n" in 0|1|2) continue;; esac; eval "exec $n>&-" 2>/dev/null || true; done; umask 0007; m="$1"; shift; exec prlimit "$m" --core=0:0 runuser -u "$0" -- "$@"' \
+        "${DAEMON_USER}" "${memlock}" "${STATE_DIR}/active" "${args[@]}" >> "${LOG_FILE}" 2>&1 < /dev/null &
 }
 
 # The build the site runs asks: a site on its previous build because the
@@ -251,11 +271,67 @@ stop_daemon() {
     event "stop" ",\"result\":\"intended\""
 }
 
+# swap_gate: whether the keepalive may start the daemon. Where the memory-lock
+# limit can be raised the daemon locks, and swap does not matter. Where it
+# cannot (a site container) the daemon serves only while swap never reaches a
+# disk, and refuses otherwise; asking first, with the current build's own
+# rule, keeps that refusal out of the crash count and the starts, so it never
+# moves the site to its previous build (which may not know the rule) and is
+# recorded as what it is. Any answer but the refusal (an unexpected error)
+# lets the start go ahead: the daemon decides for itself.
+swap_gate() {
+    local why rc
+    local lockable=0
+    if [[ -n "${TEST_ROOT}" && -n "${JOINERY_UNSEAL_TEST_LOCKABLE:-}" ]]; then
+        lockable=1
+    elif [[ -z "${TEST_ROOT}" || -z "${JOINERY_UNSEAL_TEST_BOUNDED:-}" ]] \
+            && prlimit --memlock=unlimited:unlimited true 2>/dev/null; then
+        lockable=1
+    fi
+    if [[ "${lockable}" == 1 ]]; then
+        # It locks here (a container rebuilt with a memory budget over a kept
+        # state directory included): an old refusal no longer stands.
+        swap_clear
+        return 0
+    fi
+    why="$("${CURRENT}" swapcheck ${SWAPCHECK_ARGS[@]+"${SWAPCHECK_ARGS[@]}"} 2>&1)"
+    rc=$?
+    if [[ "${rc}" == "${EXIT_DISK_SWAP}" ]]; then
+        if [[ ! -f "${SWAP_REFUSED}" ]]; then
+            printf '%s\n' "${why}" > "${SWAP_REFUSED}.tmp" && chmod 644 "${SWAP_REFUSED}.tmp" \
+                && mv -f "${SWAP_REFUSED}.tmp" "${SWAP_REFUSED}"
+            event "swap_refused" ",\"reason\":\"${why//[^A-Za-z0-9 ._\/()-]/}\""
+            echo "joinery-unseal-launch: ${KEY}: not started - this container cannot lock memory and ${why}" >&2
+        fi
+        rm -f "${STATE_DIR}/running"
+        return 1
+    fi
+    swap_clear
+    return 0
+}
+
+swap_clear() {
+    if [[ -f "${SWAP_REFUSED}" ]]; then
+        rm -f "${SWAP_REFUSED}"
+        event "swap_cleared"
+    fi
+}
+
+# The daemon's last line says it ended itself because a disk swap appeared
+# (its guard): not a crash.
+ended_for_swap() {
+    [[ -f "${LOG_FILE}" ]] && tail -n 1 "${LOG_FILE}" | grep -q 'swap can reach a disk now'
+}
+
 keepalive() {
     local pid attempt
     # One keepalive at a time: cron's and the installer's would count two starts.
     exec 9>"${STATE_DIR}/keepalive.lock"
     flock -w 60 9 || return 0
+    if ! swap_gate; then
+        # A running daemon's guard ends it within a second; nothing to start.
+        return 0
+    fi
     pid="$(daemon_pid)"
     if [[ -n "${pid}" ]]; then
         if answers; then
@@ -268,12 +344,21 @@ keepalive() {
         event "crash" ",\"result\":\"watchdog\""
         sleep 1
     elif [[ -f "${STATE_DIR}/running" ]]; then
-        event "crash" ",\"result\":\"found-dead\""
+        if ended_for_swap; then
+            # Its guard ended it, and swap is RAM-only again by now (swap_gate).
+            event "swap_exit"
+        else
+            event "crash" ",\"result\":\"found-dead\""
+        fi
     fi
+    [[ -z "${TEST_ROOT}" || -z "${JOINERY_UNSEAL_TEST_NO_START:-}" ]] || return 0
     # Up to four starts five seconds apart, so a build that will not stay up
     # meets the fallback rule inside one run, as under systemd. One that
     # started and does not answer is ended before the next start.
     for attempt in 1 2 3 4; do
+        # A disk swap that appeared since the last start is a refusal, not a
+        # failed start.
+        swap_gate || return 0
         pid="$(daemon_pid)"
         if [[ -n "${pid}" ]]; then
             kill -KILL "${pid}" 2>/dev/null || true
@@ -327,9 +412,10 @@ status_one() {
     pid="$(daemon_pid)"
     binary="$(cat "${STATE_DIR}/binary" 2>/dev/null || echo current)"
     crashes="$(awk -v since=$(( $(date +%s) - 3600 )) -F'[:,]' '/"event":"crash"/ && $2 >= since' "${STATE_DIR}/events" 2>/dev/null | wc -l)"
-    printf '{"key":"%s","installed":true,"init":"%s","running":%s,"held":%s,"binary":"%s","crashes_last_hour":%s}\n' \
+    printf '{"key":"%s","installed":true,"init":"%s","running":%s,"held":%s,"binary":"%s","crashes_last_hour":%s,"swap_refused":%s}\n' \
         "${KEY}" "${INIT}" "$([[ -n "${pid}" ]] && echo true || echo false)" \
-        "$([[ -e "${HOLD}" ]] && echo true || echo false)" "${binary}" "${crashes}"
+        "$([[ -e "${HOLD}" ]] && echo true || echo false)" "${binary}" "${crashes}" \
+        "$([[ -e "${SWAP_REFUSED}" ]] && echo true || echo false)"
 }
 
 case "${1:-}" in

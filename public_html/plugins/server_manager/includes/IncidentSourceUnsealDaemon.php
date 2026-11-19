@@ -24,6 +24,9 @@
  * installer has not reached (the vault works on the pool path there), and
  * restarting is the seconds between a crash and its restart.
  *
+ * @version 1.2 - unlocked means unlocked on swap that can reach a disk: the agent reports a container's
+ *                daemon serving unlocked on RAM-only swap as running; swap_refused, the launcher not
+ *                starting a container's daemon while swap can reach a disk
  * @version 1.1 - the lift names the site's own launcher; the previous-build rule as the launcher applies it
  * @version 1.0
  */
@@ -32,7 +35,7 @@ class IncidentSourceUnsealDaemon implements IncidentSource {
 	const NAME = 'plane:unseal_daemon';
 
 	/** Every word the agent may report. */
-	const STATES = array('absent', 'running', 'restarting', 'down', 'previous', 'held', 'unlocked');
+	const STATES = array('absent', 'running', 'restarting', 'down', 'previous', 'held', 'unlocked', 'swap_refused');
 
 	const OPEN = array(
 		'held' => array(
@@ -59,11 +62,21 @@ class IncidentSourceUnsealDaemon implements IncidentSource {
 				. 'release with a working build is installed.',
 			'next'     => 'Read the daemon\'s journal on the node for why the new build will not stay up, fix it and publish a newer release.',
 		),
+		'swap_refused' => array(
+			'severity' => IncidentRecord::SEVERITY_WARNING,
+			'title'    => 'The unseal daemon is stopped: this server\'s swap can reach a disk',
+			'means'    => 'The site runs in a container that cannot lock memory, so its unseal daemon serves only while every swap '
+				. 'device keeps its pages off a disk (compressed memory with no backing device, or encrypted). A swap that can '
+				. 'reach a disk is active, so the launcher does not start it, and new vault windows are held in the PHP pool, '
+				. 'on that same swap.',
+			'next'     => 'On the host, turn off the swap that reaches a disk (swapon --show names it) and keep the compressed-memory '
+				. 'swap host_swap.sh sets up. The daemon starts at the next keepalive, within a minute.',
+		),
 		'unlocked' => array(
 			'severity' => IncidentRecord::SEVERITY_WARNING,
 			'title'    => 'The unseal daemon is running without locked memory',
-			'means'    => 'The daemon is serving, but its memory is not locked, so a key it holds could be written to swap.',
-			'next'     => 'Run its installer again on the node (run_installer install_unseal_daemon.sh), which sets the memory-lock limit.',
+			'means'    => 'The daemon is serving, but its memory is not locked and the node\'s swap can reach a disk, so a key it holds could be written there.',
+			'next'     => 'Make the host\'s swap compressed memory (host_swap.sh, which the host converger runs) or encrypted, or run the daemon\'s installer again on the node (run_installer install_unseal_daemon.sh), which sets the memory-lock limit where it can be set.',
 		),
 	);
 

@@ -24,6 +24,11 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.24 - the swap rule judges a row as zram or dm-crypt only as a block device (Type partition)
+ *                sysfs has, and zram only with no backing device; a container finds the host's zram in
+ *                sysfs by name (it read unknown). The unseal daemon row accepts a daemon serving unlocked
+ *                on swap that never reaches a disk, and words each refusal: disk swap, a swap check that
+ *                did not answer, an older installer's memlock, and the launcher's swap refusal
  * @version 1.23 - checkUnsignedExtensions() lists a sandboxed plugin our key did not sign
  * @version 1.22 - a swap device a container cannot see is found by its device-mapper name, else unknown, not plain
  * @version 1.21 - header names where the rows show (VaultHostHealth); no row is shown at vault setup
@@ -454,16 +459,35 @@ class VaultHealth {
 		$unmet = function (string $why) use ($key, $label) {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet', 'reason' => $why];
 		};
-		if (empty($facts['installed']) && ($facts['refused'] ?? null) === 'memlock') {
-			return $unmet('The unseal daemon is not installed: this site container cannot lock memory, and the daemon '
-				. 'refuses to hold keys it cannot keep out of swap, so an open vault window\'s key is held in the PHP pool. '
-				. 'A site container with a memory budget is given unbounded memory locking (--ulimit memlock=-1:-1) when it '
-				. 'is next rebuilt; one with no budget is not, because nothing would bound what it could lock.');
+		$refused = empty($facts['installed']) ? ($facts['refused'] ?? null) : null;
+		$detail = trim((string)($facts['refused_detail'] ?? ''));
+		$pool = ' An open vault window\'s key is held in the PHP pool.';
+		if ($refused === 'disk_swap') {
+			return $unmet('The unseal daemon is not installed: this site container cannot lock memory, and this server\'s '
+				. 'swap can reach a disk' . ($detail !== '' ? ' (' . $detail . ')' : '') . ', so the daemon could not keep keys '
+				. 'off it.' . $pool . ' Where swap is compressed memory with no backing device (the installer\'s zram) or '
+				. 'encrypted, the daemon serves without locked memory; it installs at the next upgrade once swap is.');
+		}
+		if ($refused === 'check_failed') {
+			return $unmet('The unseal daemon is not installed: this site container cannot lock memory, and the check of '
+				. 'whether this server\'s swap can reach a disk did not answer' . ($detail !== '' ? ' (' . $detail . ')' : '')
+				. '.' . $pool . ' The installer asks again at the next upgrade.');
+		}
+		if ($refused === 'memlock') {
+			return $unmet('The unseal daemon is not installed: an earlier installer refused every site container that '
+				. 'cannot lock memory.' . $pool . ' This release serves without locked memory where swap never reaches a '
+				. 'disk; the installer judges this server\'s swap at the next upgrade.');
 		}
 		if (empty($facts['installed'])) {
 			return $unmet('The unseal daemon is not installed on this node, so an open vault window\'s key is held '
 				. 'in the PHP pool. The host converger installs it at its next run; by hand, on the host: '
 				. UnsealDaemon::installCommand());
+		}
+		if (!empty($facts['installed']) && is_string($facts['swap_refused'] ?? null)) {
+			$why = trim($facts['swap_refused']);
+			return $unmet('The unseal daemon is stopped: this site container cannot lock memory, and this server\'s swap '
+				. 'can reach a disk' . ($why !== '' ? ' (' . $why . ')' : '') . ', so it does not start until swap is '
+				. 'compressed memory with no backing device or encrypted. New vault windows are held in the PHP pool.');
 		}
 		if (empty($facts['asked'])) {
 			// Only the pool user may ask it; a check run from a shell reads the process table.
@@ -493,12 +517,14 @@ class VaultHealth {
 			return $unmet('The unseal daemon is running the previous build: this release\'s build did not stay up '
 				. '(four starts with no run lasting five minutes). The next release with a working build moves it back.');
 		}
-		if (empty($facts['memory_locked'])) {
+		if (empty($facts['memory_locked']) && empty($facts['swap_ram_only'])) {
 			return $unmet('The unseal daemon is running without locked memory, so its keys could reach swap.');
 		}
 		$crashes = (int)($facts['crashes_hour'] ?? 0);
 		return ['key' => $key, 'label' => $label, 'state' => 'verified',
 			'reason' => 'Version ' . (string)($facts['daemon'] ?? '?')
+				. (empty($facts['memory_locked']) ? '; memory not locked (this site container cannot), serving because '
+					. 'swap never reaches a disk, which it checks every second' : '')
 				. ($crashes > 0 ? '; ' . $crashes . ' crash' . ($crashes === 1 ? '' : 'es') . ' in the last hour' : '')];
 	}
 
@@ -712,8 +738,10 @@ class VaultHealth {
 	 * unwrapped key must not land on an unencrypted disk. Every device-mapper
 	 * device states its type in /sys/block/dm-N/dm/uuid: CRYPT- is dm-crypt
 	 * (verified), LVM- is a plain logical volume (unmet). zram is compressed
-	 * RAM and only reaches disk with its writeback feature, which no distro
-	 * enables by default (verified).
+	 * RAM and reaches a disk only through its writeback feature, so it is
+	 * verified when /sys/block/zramN/backing_dev reads none (or is absent: a
+	 * kernel without writeback) and unmet when it names a device. The unseal
+	 * daemon serves unlocked by this same rule (joinery_unseal/swap_linux.go).
 	 *
 	 * @param string $proc_swaps Path of /proc/swaps, or a fixture.
 	 * @param string $sys_block  Path of /sys/block, or a fixture tree.
@@ -733,25 +761,57 @@ class VaultHealth {
 			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 		}
 		foreach ($devices as $line) {
-			$path = trim(explode(' ', $line)[0] ?? '');
+			$cols = preg_split('/\s+/', trim($line));
+			$path = str_replace('\\040', ' ', (string)($cols[0] ?? ''));
+			if ($path === '') {
+				continue;
+			}
+			// Judged as zram or device-mapper only as a block device the kernel
+			// lists (Type partition) that sysfs has: a swap file, or a name
+			// sysfs does not know, is a disk whatever it is called.
+			if (($cols[1] ?? '') !== 'partition') {
+				return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+					'reason' => 'Active swap "' . $path . '" is a file - its pages reach disk in the clear. Turn it off (the installer\'s host_swap.sh uses compressed memory instead).'];
+			}
 			$real = @realpath($path);
 			$name = basename($real !== false ? $real : $path);
-			if ($real === false && strpos($path, '/dev/') === 0 && strpos($name, 'dm-') !== 0) {
+			if (!is_dir($sys_block . '/' . $name)) {
+				if ($real !== false) {
+					// In this /dev but not a whole device in sysfs: a partition
+					// (sysfs lists those under their disk), a plain device.
+					return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+						'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. Encrypt it or turn swap off (the installer\'s host_swap.sh uses compressed memory instead).'];
+				}
 				// Inside a container /proc/swaps lists the host's devices, which
 				// its /dev does not have: /dev/mapper/cryptswap cannot be
-				// resolved here. sysfs still names every device-mapper device,
-				// so find it by name; a device not found there cannot be judged
-				// from here, which is unknown, not a plain device.
-				$mapped = self::dmDeviceNamed($sys_block, $name);
+				// resolved here. sysfs still names the dm-N behind it by its
+				// dm/name; a device not found there cannot be judged from here,
+				// which is unknown, not a plain device.
+				$mapped = self::dmDeviceNamed($sys_block, basename($path));
 				if ($mapped === null) {
 					return ['key' => $key, 'label' => $label, 'state' => 'unknown',
-						'reason' => 'Active swap device "' . $path . '" is not visible from here (a container sees the host\'s swap); check it on the host.'];
+						'reason' => 'Active swap device "' . $path . '" is not visible in sysfs from here (a container sees the host\'s swap); check it on the host.'];
 				}
 				$name = $mapped;
 			}
 
 			if (strpos($name, 'zram') === 0) {
-				continue;
+				$backing_file = $sys_block . '/' . $name . '/backing_dev';
+				if (!file_exists($backing_file)) {
+					continue; // the device is in sysfs: a kernel without zram writeback cannot write one out
+				}
+				$backing = @file_get_contents($backing_file);
+				if (!is_string($backing)) {
+					return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+						'reason' => 'Active swap device "' . $path . '" is zram whose backing device could not be read from sysfs.'];
+				}
+				$backing = trim($backing);
+				if ($backing === '' || $backing === 'none') {
+					continue;
+				}
+				return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+					'reason' => 'Active swap device "' . $path . '" is zram writing idle pages back to ' . $backing
+						. ' - those pages reach that disk in the clear.'];
 			}
 			if (strpos($name, 'dm-') === 0) {
 				$uuid = @file_get_contents($sys_block . '/' . $name . '/dm/uuid');

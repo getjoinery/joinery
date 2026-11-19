@@ -12,6 +12,8 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.11 - a failed core installer's log is expected where this machine keeps it
+ *   (RootState::convergerLogHint), so the test passes inside a site container too
  * @version 1.10 - the RAM store row counts among the host facts, its branches driven from fixtures,
  *                 including a store that cannot follow a reload (OPcache read from php-fpm -i)
  * @version 1.9 - a failed plugin installer is named with the Plugins page; a failed core installer names its
@@ -24,6 +26,8 @@
  * @version 1.4 - the certificate row counts among the host facts
  * @version 1.3 - the host converger check
  * @version 1.2 - the parser jail check
+ * @version 1.2 - zram's backing device, the host's zram seen from a container, the daemon serving
+ *                unlocked under its swap guard, and the disk_swap refusal
  * @version 1.1 - branch coverage for core_pattern, exception args, and the swap device types
  * @version 1.0
  */
@@ -167,10 +171,21 @@ $r = VaultHealth::checkUnsealDaemon($ud(array('crashes_hour' => 2)));
 check($r['state'] === 'verified' && strpos($r['reason'], '2 crashes') !== false, 'recent crashes are named on a verified row');
 $r = VaultHealth::checkUnsealDaemon($ud(array('installed' => false, 'answering' => null)));
 check($r['state'] === 'unmet' && strpos($r['reason'], 'install_unseal_daemon.sh') !== false, 'not installed: unmet, naming the installer', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array('installed' => false, 'refused' => 'disk_swap', 'refused_detail' => 'swap /swap.img is a file, not a block device', 'answering' => null)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'swap can reach a disk (swap /swap.img is a file') !== false
+	&& strpos($r['reason'], 'memory budget') === false,
+	'refused for disk swap: unmet, naming the device the installer found', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array('installed' => false, 'refused' => 'check_failed', 'refused_detail' => 'exit 126: x', 'answering' => null)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'did not answer (exit 126') !== false && strpos($r['reason'], 'can reach a disk,') === false,
+	'refused because the swap check did not answer: says so, never that swap is unsafe', $r['reason']);
 $r = VaultHealth::checkUnsealDaemon($ud(array('installed' => false, 'refused' => 'memlock', 'answering' => null)));
-check($r['state'] === 'unmet' && strpos($r['reason'], 'memlock=-1:-1') !== false && strpos($r['reason'], 'memory budget') !== false
-	&& strpos($r['reason'], 'host converger') === false,
-	'refused in a container that cannot lock memory: unmet, naming the run option, never promising the converger', $r['reason']);
+check($r['state'] === 'unmet' && strpos($r['reason'], 'earlier installer') !== false && strpos($r['reason'], 'next upgrade') !== false
+	&& strpos($r['reason'], 'swap can reach a disk') === false,
+	'an older installer\'s memlock refusal: unmet, never claiming the swap is unsafe', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array('swap_refused' => 'swap /swapfile is a file, not a block device', 'answering' => false)));
+check($r['state'] === 'unmet' && strpos($r['reason'], 'stopped') !== false && strpos($r['reason'], '/swapfile') !== false
+	&& strpos($r['reason'], 'previous build') === false,
+	'the launcher not starting it for disk swap: unmet as a swap stop, never as a bad build', $r['reason']);
 $r = VaultHealth::checkUnsealDaemon($ud(array('answering' => false, 'error' => 'connect')));
 check($r['state'] === 'unmet' && strpos($r['reason'], 'did not answer') !== false, 'not answering: unmet');
 $r = VaultHealth::checkUnsealDaemon($ud(array('held' => true)));
@@ -179,6 +194,11 @@ $r = VaultHealth::checkUnsealDaemon($ud(array('binary' => 'previous')));
 check($r['state'] === 'unmet' && strpos($r['reason'], 'previous build') !== false, 'on the previous build: unmet');
 $r = VaultHealth::checkUnsealDaemon($ud(array('memory_locked' => false)));
 check($r['state'] === 'unmet' && strpos($r['reason'], 'locked memory') !== false, 'unlocked memory: unmet');
+$r = VaultHealth::checkUnsealDaemon($ud(array('memory_locked' => false, 'swap_ram_only' => true)));
+check($r['state'] === 'verified' && strpos($r['reason'], 'swap never reaches a disk') !== false,
+	'unlocked under the swap guard: verified, and the row says why', $r['reason']);
+$r = VaultHealth::checkUnsealDaemon($ud(array()));
+check(strpos($r['reason'], 'not locked') === false, 'a locked daemon\'s row does not mention the guard', $r['reason']);
 $r = VaultHealth::checkUnsealDaemon($ud(array('asked' => false, 'answering' => null)));
 check($r['state'] === 'unknown', 'running, but asked from a shell the daemon does not serve: unknown, never a false pass');
 $r = VaultHealth::checkUnsealDaemon($ud(array('asked' => false, 'answering' => null, 'running' => false)));
@@ -279,7 +299,10 @@ check(strpos($plugin_failed, 'mailbox') !== false && strpos($plugin_failed, '/ad
 check(strpos($plugin_failed, 'sudo bash x') === false,
 	'and the converger reinstall is not offered: it fixes nothing when one plugin failed');
 $core_failed = HostConvergerNotice::forState(true, $now - 300, 'installer-failed', $now, 'sudo bash x');
-check(strpos($core_failed, 'core installer') !== false && strpos($core_failed, '/var/log/joinery/host_converger.') !== false,
+// The log the notice names is where this machine keeps it (RootState::convergerLogHint):
+// the host's file on a host, the state volume in a site container.
+$log_hint = strtok(RootState::convergerLogHint(), ' ');
+check(strpos($core_failed, 'core installer') !== false && strpos($core_failed, $log_hint) !== false,
 	'with no failed plugin record, a core installer failed and its log is named', $core_failed);
 check(strpos($core_failed, 'sudo bash x') === false && strpos($core_failed, 'admin_plugins') === false,
 	'with neither the reinstall nor the Plugins page, which has no button for core');
@@ -287,61 +310,61 @@ $hcp = VaultHealth::checkHostConverger(['installed' => true, 'last_run' => $now 
 	'failed_plugins' => array('office_editor')], $now);
 check($hcp['state'] === 'unmet' && strpos($hcp['reason'], 'office_editor') !== false && strpos($hcp['reason'], 'Plugins page') !== false,
 	'the health check names the failed plugin and the Plugins page', $hcp['reason']);
-check(strpos($hc(true, $now - 300, 'installer-failed')['reason'], '/var/log/joinery/host_converger.') !== false,
+check(strpos($hc(true, $now - 300, 'installer-failed')['reason'], $log_hint) !== false,
 	'and a core failure names the log');
 check(array_key_exists('failed_plugins', $facts), 'the live fact reader reports the failed plugin installers');
 
 // ---------------------------------------------------------------------------
-section('Swap: the device type decides, read from sysfs');
+section('Swap: the shared rule corpus (joinery_unseal/testdata/swap_rule_cases.json)');
 
-$fx = sys_get_temp_dir() . '/vault_health_' . bin2hex(random_bytes(4));
-mkdir($fx . '/dev/mapper', 0700, true);
-mkdir($fx . '/sys/block/dm-0/dm', 0700, true);
-mkdir($fx . '/sys/block/dm-1/dm', 0700, true);
-mkdir($fx . '/sys/block/dm-2/dm', 0700, true);
-touch($fx . '/dev/dm-0');
-touch($fx . '/dev/dm-1');
-touch($fx . '/dev/dm-2');
-touch($fx . '/dev/zram0');
-touch($fx . '/dev/sdb');
-symlink('../dm-0', $fx . '/dev/mapper/cryptswap');
-symlink('../dm-1', $fx . '/dev/mapper/vg0-swap');
-symlink('../dm-2', $fx . '/dev/mapper/mystery');
-file_put_contents($fx . '/sys/block/dm-0/dm/uuid', "CRYPT-PLAIN-cryptswap\n");
-file_put_contents($fx . '/sys/block/dm-1/dm/uuid', "LVM-abc123def456-swap\n");
-// dm-2 has no uuid file: a mapper device whose type cannot be read.
-
-$swaps = function (array $devices) use ($fx) {
-	$path = $fx . '/swaps_' . bin2hex(random_bytes(3));
-	$lines = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
-	foreach ($devices as $d) { $lines .= $d . "                             partition\t2097148\t\t0\t\t-2\n"; }
-	file_put_contents($path, $lines);
-	return VaultHealth::checkSwapSafe($path, $fx . '/sys/block');
+// One corpus of cases, walked by this check, the daemon's swap_linux_test.go
+// and the agent's unseal_daemon_test.go, so the three copies of the rule
+// cannot drift. ram_only true is verified here; false is unmet or unknown.
+$tools_dir = dirname(PathHelper::getIncludePath('includes')) . '/../maintenance_scripts/install_tools';
+$corpus_file = $tools_dir . '/joinery_unseal/testdata/swap_rule_cases.json';
+$corpus = json_decode((string)@file_get_contents($corpus_file), true);
+check(is_array($corpus) && count($corpus['cases'] ?? array()) >= 10, 'the swap rule corpus loads', $corpus_file);
+$rmtree = function (string $d) use (&$rmtree) {
+	foreach (scandir($d) ?: array() as $e) {
+		if ($e === '.' || $e === '..') { continue; }
+		$p = $d . '/' . $e;
+		is_dir($p) && !is_link($p) ? $rmtree($p) : @unlink($p);
+	}
+	@rmdir($d);
 };
-
-check($swaps([])['state'] === 'verified', 'no swap is verified');
-$r = $swaps([$fx . '/dev/mapper/cryptswap']);
-check($r['state'] === 'verified', 'a dm-crypt mapping is verified - not merely encrypted-looking', $r['reason']);
-$r = $swaps([$fx . '/dev/dm-0']);
-check($r['state'] === 'verified', 'the same device named as /dev/dm-N is verified too', $r['reason']);
-$r = $swaps([$fx . '/dev/mapper/vg0-swap']);
-check($r['state'] === 'unmet', 'an LVM volume under /dev/mapper is unmet - a mapper path is not encryption', $r['reason']);
-check(strpos($r['reason'], 'LVM') !== false, 'and the reason names the type');
-$r = $swaps([$fx . '/dev/mapper/mystery']);
-check($r['state'] === 'unknown', 'a mapper device with no readable type is unknown', $r['reason']);
-$r = $swaps([$fx . '/dev/zram0']);
-check($r['state'] === 'verified', 'zram is verified - compressed RAM, no disk without writeback', $r['reason']);
-$r = $swaps([$fx . '/dev/sdb']);
-check($r['state'] === 'unmet', 'a plain partition is unmet', $r['reason']);
-$r = $swaps([$fx . '/dev/mapper/cryptswap', $fx . '/dev/sdb']);
-check($r['state'] === 'unmet', 'one plain device among encrypted ones fails the whole check');
-check(VaultHealth::checkSwapSafe($fx . '/nope', $fx . '/sys/block')['state'] === 'unknown', 'an unreadable /proc/swaps is unknown');
-
-foreach (glob($fx . '/dev/mapper/*') as $f) { unlink($f); }
-foreach (glob($fx . '/dev/*') as $f) { if (is_file($f)) unlink($f); }
-foreach (glob($fx . '/swaps_*') as $f) { unlink($f); }
-foreach (['dm-0', 'dm-1', 'dm-2'] as $d) { @unlink($fx . "/sys/block/$d/dm/uuid"); rmdir($fx . "/sys/block/$d/dm"); rmdir($fx . "/sys/block/$d"); }
-rmdir($fx . '/sys/block'); rmdir($fx . '/sys'); rmdir($fx . '/dev/mapper'); rmdir($fx . '/dev'); rmdir($fx);
+foreach ($corpus['cases'] ?? array() as $c) {
+	$fx = sys_get_temp_dir() . '/vault_health_' . bin2hex(random_bytes(4));
+	mkdir($fx . '/block', 0700, true);
+	foreach ($c['block'] ?? array() as $rel => $body) {
+		@mkdir(dirname($fx . '/block/' . $rel), 0700, true);
+		file_put_contents($fx . '/block/' . $rel, $body);
+	}
+	foreach ($c['block_dirs'] ?? array() as $d) { @mkdir($fx . '/block/' . $d, 0700, true); }
+	foreach ($c['files'] ?? array() as $f) { $f = str_replace('@DIR@', $fx, $f); @mkdir(dirname($f), 0700, true); touch($f); }
+	$swaps = "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n";
+	foreach ($c['swaps'] ?? array() as $row) {
+		$swaps .= str_replace('@DIR@', $fx, $row[0]) . '                              ' . $row[1] . "\t2097148\t\t0\t\t-2\n";
+	}
+	file_put_contents($fx . '/swaps', $swaps);
+	$r = VaultHealth::checkSwapSafe($fx . '/swaps', $fx . '/block');
+	$want = $c['ram_only'] ? 'verified' : (string)($c['php_state'] ?? '');
+	check($r['state'] === $want && ($r['state'] === 'verified' || $r['reason'] !== ''),
+		$c['name'] . ': ' . $want . ($c['ram_only'] ? '' : ', saying why'), $r['state'] . ' ' . $r['reason']);
+	$rmtree($fx);
+}
+check(VaultHealth::checkSwapSafe(sys_get_temp_dir() . '/vault_health_nope_' . bin2hex(random_bytes(3)), '/nonexistent')['state'] === 'unknown',
+	'an unreadable /proc/swaps is unknown');
+$agent_src = class_exists('AgentDistPublisher') ? (string)AgentDistPublisher::DEFAULT_SOURCE_PATH : '';
+try {
+	if (class_exists('AgentDistPublisher')) { $agent_src = (string)AgentDistPublisher::sourcePath(); }
+} catch (Throwable $e) {
+	// No settings to read: the dev default stands.
+}
+$agent_copy = $agent_src . '/primitives/swap_rule_cases_test.json';
+if ($agent_src !== '' && is_dir($agent_src . '/primitives')) {
+	check(@file_get_contents($agent_copy) === @file_get_contents($corpus_file),
+		'the agent\'s copy of the corpus is byte-identical to this one', $agent_copy);
+}
 
 section('Release verification key (specs/package_signing.md WP1)');
 // Root installs nothing it cannot verify, and it verifies against this file;
