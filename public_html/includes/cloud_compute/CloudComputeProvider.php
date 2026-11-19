@@ -27,6 +27,7 @@
  * @version 1.10 - CloudVolumeFacts: the provider's own encryption of a storage volume at a device path
  * @version 1.9 - CloudProviderEvents: an instance's activity log, and the instance an address belongs to
  *                (Tier 2 of specs/hosted_data_promise_disk_encryption.md D3)
+ * @version 1.9 - an absent swap_size means no provider swap disk, not the provider's default
  * @version 1.8 - createInstance() takes disk_encryption and swap_size; the instance array reports disk_encryption;
  *                CloudRegionFacts: a region's site type and whether the provider's disk encryption is offered there
  *                (specs/hosted_data_promise_disk_encryption.md D1a)
@@ -71,7 +72,9 @@ interface CloudComputeProvider {
 	 *                           layer off (in that region, or at all) throws on
 	 *                           'disabled' rather than stacking silently.
 	 *   swap_size       int     the provider-made swap disk in MB; 0 = none.
-	 *                           Absent = the provider's default.
+	 *                           Absent = none: a driver never leaves the
+	 *                           provider's own swap disk on by default (the
+	 *                           host's swap is compressed memory, host_swap.sh).
 	 *
 	 * @return array Normalized instance array.
 	 * @throws CloudComputeException on any API failure.

@@ -15,10 +15,10 @@
  *
  *  - the driver sends disk_encryption only where the region offers the
  *    capability, refuses 'disabled' in a distributed region before any create,
- *    sends swap_size when given, and reports each instance's disk_encryption;
+ *    sends swap_size when given and 0 otherwise, and reports each instance's disk_encryption;
  *    regions() carries site_type and the capability;
  *  - the pipeline: an encrypted provision is created with disk_encryption
- *    disabled and swap_size 0, an unencrypted one with neither; an instance
+ *    disabled and swap_size 0, an unencrypted one with its encryption on and swap_size 0; an instance
  *    reporting the provider's layer on fails the provision before install, at
  *    create and at booting, with its instance id already saved; an absent
  *    answer is unknown and proceeds; a distributed region is refused before
@@ -196,8 +196,8 @@ check(pol_create_body($h) === null && count($h) === 1, 'and nothing is created')
 $d = pol_driver(array(pol_instance('880004', 'enabled')), $h);
 $d->createInstance($create);
 $body = pol_create_body($h);
-check(count($h) === 1 && is_array($body) && !array_key_exists('disk_encryption', $body) && !array_key_exists('swap_size', $body),
-	'with neither option, one call and neither field: the provider\'s defaults', json_encode($body));
+check(count($h) === 1 && is_array($body) && !array_key_exists('disk_encryption', $body) && ($body['swap_size'] ?? null) === 0,
+	'with neither option, one call: no disk_encryption field, and swap_size 0 (never Linode\'s swap disk)', json_encode($body));
 
 $d = pol_driver(array(pol_instance('880005', 'enabled', 'running', '198.51.100.5'), pol_instance('880005', 'garbage')), $h);
 check($d->getInstance('880005')['disk_encryption'] === 'enabled', 'getInstance reports the provider\'s layer on');
@@ -267,8 +267,8 @@ if (!$key_ready) {
 	$probe->ready($p);
 	$p->load();
 	$body = pol_create_body($h);
-	check(is_array($body) && ($body['disk_encryption'] ?? null) === 'enabled' && !array_key_exists('swap_size', $body),
-		'an unencrypted provision asks the provider\'s own disk encryption on, by name, and leaves swap alone', json_encode(pol_requests($h)));
+	check(is_array($body) && ($body['disk_encryption'] ?? null) === 'enabled' && ($body['swap_size'] ?? null) === 0,
+		'an unencrypted provision asks the provider\'s own disk encryption on, by name, and no swap disk', json_encode(pol_requests($h)));
 
 	$p2 = $make_provision('plainnocap', false, array('cvp_region' => 'us-west'));
 	$probe2 = new OneLayerProbe();
@@ -469,8 +469,8 @@ if (!class_exists('RelayCloudProvisioner') || !class_exists('RelayCloudProvision
 	harness_defer(function () use ($run) { $run->eraseBundle(); });
 	$said = (new RelayCloudProvisioner())->advance($run);
 	$body = pol_create_body($rh);
-	check(is_array($body) && !array_key_exists('disk_encryption', $body) && !array_key_exists('swap_size', $body),
-		'the relay is created with the provider\'s defaults: neither field', $said . ' ' . json_encode(pol_requests($rh)));
+	check(is_array($body) && !array_key_exists('disk_encryption', $body) && ($body['swap_size'] ?? null) === 0,
+		'the relay is created with the provider\'s disk defaults and no swap disk', $said . ' ' . json_encode(pol_requests($rh)));
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,13 @@
 #
 # host_swap.sh - this host's swap: compressed memory (zram), never a disk.
 #
+# Version: 1.2 - Plain swap goes too: a swap file, or a block device that is neither zram nor
+#                device-mapper (Linode's 512 MB swap disk on every server it made), once zram is on and
+#                memory can take back what it holds. It is zeroed (the pages an open vault window's key
+#                reached stay readable otherwise), made swap again with its own UUID and label, its fstab
+#                line commented out with a marker, and its swap unit masked (a GPT swap partition needs
+#                no fstab line). zram is the size of memory up to 4 GiB (was half): a 1 GB machine keeps
+#                about the swap it had with the disk. Encrypted swap (dm-crypt, any device-mapper) is kept.
 # Version: 1.1 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
 # Version: 1.0 - Swap moves from an encrypted file to zram. Swap through dm-crypt over a loop
 #                device over a file on ext4 (the /swapfile every install made) locks a 1 GB machine
@@ -15,13 +22,20 @@
 # A core installer (every site, every converge) and a host installer (a machine
 # with no site). In a container it does nothing: the host owns swap.
 #
-#   1. zram: systemd-zram-generator, half the memory up to 4 GiB, zstd, ahead
+#   1. zram: systemd-zram-generator, the size of memory up to 4 GiB (uncompressed: about a third of that in RAM when full), zstd, ahead
 #      of any other swap. Started now, and at every boot.
 #   2. The encrypted swap file the platform made (crypttab "cryptswap"
 #      over /swapfile) is switched off once zram is on and memory can take
 #      back what it holds; its crypttab and fstab lines and the file go.
 #      Memory that cannot take it yet: kept, and tried again next run.
-#   Swap this did not make is left alone (VaultHealth names a plain one).
+#   3. Plain swap, whoever made it: a swap file, or a block device that is
+#      neither zram nor device-mapper, active now or named by an fstab line.
+#      Once zram is on and memory can take back what it holds (read again
+#      before each one): switched off, zeroed and made swap again under its
+#      own UUID and label (so the line restores it), its fstab line commented
+#      out behind "#joinery-host-swap ", and its swap unit masked. A machine
+#      that wants disk swap encrypts it: device-mapper swap is never touched,
+#      and VaultHealth names one that is not dm-crypt.
 #
 # Usage:  host_swap.sh [SITENAME] [SITE_ROOT]
 #         host_swap.sh --machine ROOT
@@ -62,7 +76,7 @@ PKG="systemd-zram-generator"
 
 ZRAM_TEXT="# Written by host_swap.sh. Swap is compressed memory: nothing reaches a disk.
 [zram0]
-zram-size = min(ram / 2, 4096)
+zram-size = min(ram, 4096)
 compression-algorithm = zstd
 swap-priority = 100"
 
@@ -114,7 +128,8 @@ elif (( changed )); then
 fi
 
 # --- 2. the platform's encrypted swap file goes -----------------------------
-grep -qE "^${CRYPT_NAME}[[:space:]]+/swapfile[[:space:]]" "$CRYPTTAB" 2>/dev/null || exit 0
+retire_platform_file() {
+grep -qE "^${CRYPT_NAME}[[:space:]]+/swapfile[[:space:]]" "$CRYPTTAB" 2>/dev/null || return 0
 dev="$(crypt_device)"
 used_kb=0
 if [[ -n "$dev" ]]; then
@@ -125,10 +140,10 @@ avail_kb="$(awk '$1 == "MemAvailable:" { print $2; exit }' "$MEMINFO" 2>/dev/nul
 # What it holds comes back into memory (zram takes some): only with room to spare.
 if (( used_kb > 0 )) && (( used_kb + 262144 > ${avail_kb:-0} )); then
     say "the encrypted swap file holds $(( used_kb / 1024 )) MiB and memory has $(( ${avail_kb:-0} / 1024 )) MiB free: kept until a run with room"
-    exit 0
+    return 0
 fi
 if [[ -n "$dev" ]] && awk -v d="$dev" 'NR > 1 && $1 == d { f = 1 } END { exit !f }' "$PROC_SWAPS" 2>/dev/null; then
-    swapoff "${FS_ROOT}/dev/mapper/${CRYPT_NAME}" || { warn "swapoff of the encrypted swap file failed; kept"; exit 0; }
+    swapoff "${FS_ROOT}/dev/mapper/${CRYPT_NAME}" || { warn "swapoff of the encrypted swap file failed; kept"; return 0; }
 fi
 systemctl stop "systemd-cryptsetup@${CRYPT_NAME}.service" 2>/dev/null || true
 sed -i "/^${CRYPT_NAME}[[:space:]]/d" "$CRYPTTAB"
@@ -136,4 +151,117 @@ sed -i "\#^/dev/mapper/${CRYPT_NAME}[[:space:]]#d" "$FSTAB"
 rm -f "$SWAPFILE"
 systemctl daemon-reload 2>/dev/null || true
 say "the encrypted swap file is retired: swap is compressed memory only"
+}
+retire_platform_file
+
+# --- 3. plain swap goes -----------------------------------------------------
+MARK="#joinery-host-swap "
+
+# resolve SPEC: the path an fstab spec or a /proc/swaps name stands for
+# (UUID=, LABEL=, PARTUUID= through blkid; a symlink to its target), without
+# the fixture root. Empty when it names nothing here.
+resolve() {
+    local spec="$1" path
+    case "$spec" in
+        UUID=*|LABEL=*|PARTUUID=*|PARTLABEL=*) path="$(blkid -o device -t "$spec" 2>/dev/null | head -n 1)" ;;
+        *) path="$spec" ;;
+    esac
+    [[ -n "$path" ]] || return 0
+    path="$(readlink -f "${FS_ROOT}${path}" 2>/dev/null || true)"
+    [[ -n "$path" ]] && printf '%s' "${path#"$FS_ROOT"}"
+}
+
+# plain PATH TYPE: a swap file, or a block device that is neither zram nor
+# device-mapper. Device-mapper is left to VaultHealth: LVM over LUKS reads as
+# linear, not dm-crypt, yet is encrypted underneath.
+plain() {
+    local name; name="$(basename "$1")"
+    [[ "$2" == "file" ]] && return 0
+    [[ "$name" == zram* || "$name" == dm-* ]] && return 1
+    [[ "$1" == /dev/* ]]
+}
+
+# The fstab swap lines (not commented) naming PATH, by what each resolves to.
+comment_fstab() {
+    local path="$1" n=0 line spec type
+    [[ -f "$FSTAB" ]] || return 0
+    local tmp="${FSTAB}.joinery-swap.$$"
+    : > "$tmp"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        read -r spec _ type _ <<< "$line"
+        if [[ "$line" != \#* && "$type" == "swap" && -n "$spec" && "$(resolve "$spec")" == "$path" ]]; then
+            printf '%s%s\n' "$MARK" "$line" >> "$tmp"
+            n=$((n + 1))
+        else
+            printf '%s\n' "$line" >> "$tmp"
+        fi
+    done < "$FSTAB"
+    if (( n > 0 )); then cat "$tmp" > "$FSTAB"; fi
+    rm -f "$tmp"
+}
+
+# Every swap unit whose device is PATH, masked: an fstab line's and a GPT
+# swap partition's alike (systemd-gpt-auto-generator needs no fstab line).
+mask_units() {
+    local path="$1" unit what
+    for unit in $(systemctl list-units --type=swap --all --plain --no-legend 2>/dev/null | awk '{print $1}'); do
+        what="$(systemctl show -p What --value "$unit" 2>/dev/null)"
+        [[ -n "$what" && "$(resolve "$what")" == "$path" ]] || continue
+        systemctl mask "$unit" >/dev/null 2>&1 && say "masked ${unit} (systemctl unmask ${unit} restores it)"
+    done
+}
+
+# Switch off, zero and remake one active plain swap, when memory has room.
+retire_plain() {
+    local path="$1" type="$2" used_kb="$3" avail_kb uuid label
+    avail_kb="$(awk '$1 == "MemAvailable:" { print $2; exit }' "$MEMINFO" 2>/dev/null)"
+    if (( used_kb + 262144 > ${avail_kb:-0} )); then
+        say "plain swap ${path} holds $(( used_kb / 1024 )) MiB and memory has $(( ${avail_kb:-0} / 1024 )) MiB free: kept until a run with room"
+        return 0
+    fi
+    uuid="$(blkid -s UUID -o value "${FS_ROOT}${path}" 2>/dev/null)"
+    label="$(blkid -s LABEL -o value "${FS_ROOT}${path}" 2>/dev/null)"
+    swapoff "${FS_ROOT}${path}" || { warn "swapoff of ${path} failed; kept"; return 0; }
+    # What the kernel wrote there stays readable after swapoff: zero it.
+    shred -n 0 -z "${FS_ROOT}${path}" 2>/dev/null \
+        || warn "could not zero ${path}: its old pages may still be readable"
+    mkswap ${uuid:+-U "$uuid"} ${label:+-L "$label"} "${FS_ROOT}${path}" >/dev/null 2>&1 \
+        || warn "could not make ${path} swap again; uncommenting its fstab line will need mkswap first"
+    comment_fstab "$path"
+    mask_units "$path"
+    say "plain swap ${path} ($(( used_kb / 1024 )) MiB held) is off and zeroed: swap is compressed memory only. To keep disk swap, encrypt it (dm-crypt); its fstab line is kept behind ${MARK% }"
+    retired=1
+}
+
+if zram_on; then
+    retired=0
+    while read -r name type _ used _; do
+        [[ -n "$name" ]] || continue
+        name="${name//\\040/ }"
+        path="$(resolve "$name")"
+        [[ -n "$path" ]] || path="$name"
+        plain "$path" "$type" || continue
+        retire_plain "$path" "$type" "${used:-0}"
+    done < <(awk 'NR > 1' "$PROC_SWAPS" 2>/dev/null)
+    # A plain swap fstab still names but is not on now would come back at the
+    # next boot: its line goes behind the marker too.
+    active="$(awk 'NR > 1 { print $1 }' "$PROC_SWAPS" 2>/dev/null)"
+    if [[ -f "$FSTAB" ]]; then
+        # A snapshot: comment_fstab rewrites the file this reads.
+        fstab_now="$(cat "$FSTAB")"
+        while read -r spec _ type _; do
+            [[ "$spec" != \#* && "$type" == "swap" ]] || continue
+            path="$(resolve "$spec")"
+            [[ -n "$path" ]] || continue
+            grep -qxF -- "$path" <<< "$active" && continue
+            ptype="partition"; [[ -f "${FS_ROOT}${path}" && "$path" != /dev/* ]] && ptype="file"
+            plain "$path" "$ptype" || continue
+            comment_fstab "$path"
+            mask_units "$path"
+            say "plain swap ${path} is not on, and its fstab line is now behind ${MARK% } so it stays off at boot"
+            retired=1
+        done <<< "$fstab_now"
+    fi
+    (( retired )) && systemctl daemon-reload 2>/dev/null
+fi
 exit 0

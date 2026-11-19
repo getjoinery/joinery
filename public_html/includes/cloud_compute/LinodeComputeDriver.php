@@ -6,6 +6,9 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.23 - every new instance is created with swap_size 0 unless the caller names one: Linode's default
+ *                512 MB swap disk is plain disk swap, which keeps memory a vault key reached on a disk; the
+ *                host's swap is compressed memory (host_swap.sh)
  * @version 1.22 - a new instance asks for configuration-profile interfaces (interface_generation legacy_config), and
  *                addressReport says which generation an instance is on: an address a Linode-generation interface
  *                holds cannot be swapped (fleet_security_patching B8)
@@ -120,9 +123,10 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 		}
 		$this->applyFirstBoot($body, $opts);
 		$this->applyDiskEncryption($body, $opts);
-		if (isset($opts['swap_size'])) {
-			$body['swap_size'] = max(0, (int)$opts['swap_size']);
-		}
+		// No swap disk unless asked: Linode's default is a plain disk, and the
+		// host's swap is compressed memory (host_swap.sh), so no create path
+		// can leave a box swapping to a disk by forgetting to say so.
+		$body['swap_size'] = isset($opts['swap_size']) ? max(0, (int)$opts['swap_size']) : 0;
 		return $this->normalize($this->request('POST', 'linode/instances', $body));
 	}
 

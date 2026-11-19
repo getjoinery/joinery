@@ -761,8 +761,14 @@ daemon, a process that is not the pool user, the five-minute fallback):
   whole device in sysfs (a partition, which sysfs lists under its disk) is a
   plain device and unmet; one neither `/dev` nor sysfs shows is `unknown`.
   This is the daemon's rule, on the same corpus.
-  The installer's `host_swap.sh` sets up zram (half the memory, up to 4 GiB)
-  with no backing device.
+  The installer's `host_swap.sh` sets up zram (the size of memory, up to
+  4 GiB) with no backing device, and switches off plain swap (a swap file, or
+  a block device neither zram nor device-mapper, such as Linode's swap disk)
+  once memory can take back what it holds: zeroed, made swap again under its
+  own UUID, its fstab line commented behind `#joinery-host-swap`, its swap
+  unit masked. A machine that wants disk swap encrypts it; device-mapper swap
+  is never touched. New Linodes are created with no swap disk
+  (`LinodeComputeDriver`, `swap_size` 0 unless a caller names one).
 
 Best-effort and advisory (a check that can't be verified reports `unknown`,
 never a false pass), and never a gate. Where they show:

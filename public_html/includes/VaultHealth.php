@@ -24,6 +24,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.25 - a plain swap's reason names host_swap.sh switching it off and how to keep disk swap (encrypt it)
  * @version 1.24 - the swap rule judges a row as zram or dm-crypt only as a block device (Type partition)
  *                sysfs has, and zram only with no backing device; a container finds the host's zram in
  *                sysfs by name (it read unknown). The unseal daemon row accepts a daemon serving unlocked
@@ -771,7 +772,7 @@ class VaultHealth {
 			// sysfs does not know, is a disk whatever it is called.
 			if (($cols[1] ?? '') !== 'partition') {
 				return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-					'reason' => 'Active swap "' . $path . '" is a file - its pages reach disk in the clear. Turn it off (the installer\'s host_swap.sh uses compressed memory instead).'];
+					'reason' => 'Active swap "' . $path . '" is a file - its pages reach disk in the clear. The host converger (host_swap.sh) switches it off and zeroes it once compressed-memory swap is on and memory has room; to keep disk swap, encrypt it (dm-crypt).'];
 			}
 			$real = @realpath($path);
 			$name = basename($real !== false ? $real : $path);
@@ -780,7 +781,7 @@ class VaultHealth {
 					// In this /dev but not a whole device in sysfs: a partition
 					// (sysfs lists those under their disk), a plain device.
 					return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-						'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. Encrypt it or turn swap off (the installer\'s host_swap.sh uses compressed memory instead).'];
+						'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. The host converger (host_swap.sh) switches it off and zeroes it once compressed-memory swap is on and memory has room; to keep disk swap, encrypt it (dm-crypt).'];
 				}
 				// Inside a container /proc/swaps lists the host's devices, which
 				// its /dev does not have: /dev/mapper/cryptswap cannot be
@@ -828,7 +829,7 @@ class VaultHealth {
 					'reason' => 'Active swap device "' . $path . '" is a ' . $type . ' mapping, not dm-crypt - its pages reach disk in the clear.'];
 			}
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-				'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. Encrypt it (the installer\'s housekeeping does this) or turn swap off.'];
+				'reason' => 'Active swap device "' . $path . '" is a plain device - its pages reach disk in the clear. The host converger (host_swap.sh) switches it off and zeroes it once compressed-memory swap is on and memory has room; to keep disk swap, encrypt it (dm-crypt).'];
 		}
 		return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
 	}
