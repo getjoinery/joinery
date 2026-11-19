@@ -505,6 +505,7 @@ struct SwapMixes {
     excused_by_issue: usize,
     excused_by_custody: usize,
     excused_unseen: usize,
+    excused_before_swap: usize,
 }
 
 /// The swap-separated pairs one entity's history holds, and the ones excused.
@@ -512,9 +513,13 @@ fn swap_mixes(world: &World, seed: u64, custody: Option<&Custody>) -> SwapMixes 
     let pairs = world.swap_pairs();
     let versions = world.server.all_versions();
     let mut bodies: std::collections::BTreeMap<i64, Vec<Vec<u8>>> = Default::default();
+    // The same bodies with the change id each went up under, for the one
+    // excuse that asks when.
+    let mut dated: std::collections::BTreeMap<i64, Vec<(Vec<u8>, i64)>> = Default::default();
     for v in &versions {
         if let Some(b) = world.server.blob(&v.sha256) {
-            bodies.entry(v.file_id).or_default().push(b);
+            bodies.entry(v.file_id).or_default().push(b.clone());
+            dated.entry(v.file_id).or_default().push((b, v.change_id));
         }
     }
     // One line per (entity, unordered pair): the same two bodies can be
@@ -576,6 +581,22 @@ fn swap_mixes(world: &World, seed: u64, custody: Option<&Custody>) -> SwapMixes 
     // is credited to the file the path named before the trade -- the one
     // residual, and only on such disks.
     let mut excused_by_custody = 0usize;
+    // A mix older than the swap: both bodies were versions of this entity on
+    // the server before the two names were traded, so whatever put them in
+    // one history read both before the swap existed (a rename away and a new
+    // file at the old name, read as a save; 78401). Keyed on the server, never
+    // on when a body was read or planned: a body read before the swap and
+    // sent after it still fires. And only while the entity took neither body
+    // again after the swap: a side of it misread puts one body back in as a
+    // new version, which is the mix the swap makes, older copy or not.
+    let mut excused_before_swap = 0usize;
+    // Called only where the entity's chain (`bodies`, filled from the same
+    // versions as `dated`) holds both bodies, so both went up before the swap
+    // exactly when neither went up after it.
+    let both_up_before = |id: i64, lo: &[u8], hi: &[u8], at: i64| -> bool {
+        let Some(chain) = dated.get(&id) else { return false };
+        !chain.iter().any(|(body, change)| *change > at && (body.as_slice() == lo || body.as_slice() == hi))
+    };
     let own_history = |id: i64, a: &str, b: &str| -> bool {
         let Some(c) = custody else { return false };
         if c.ambiguous.contains(&id) {
@@ -629,6 +650,19 @@ fn swap_mixes(world: &World, seed: u64, custody: Option<&Custody>) -> SwapMixes 
                     continue;
                 }
             }
+            if chain.contains(lo) && chain.contains(hi) && both_up_before(*id, lo, hi, p.server_change_at) {
+                if seen.insert((*id, lo.clone(), hi.clone())) {
+                    excused_before_swap += 1;
+                    eprintln!(
+                        "EXCUSED-BEFORE-SWAP seed={seed} record={id} bodies={}..{} separated_by={} swap_after_change={}",
+                        &sha_lo[..8],
+                        &sha_hi[..8],
+                        p.source,
+                        p.server_change_at
+                    );
+                }
+                continue;
+            }
             if chain.contains(lo) && chain.contains(hi) && seen.insert((*id, lo.clone(), hi.clone())) {
                 held.push(format!(
                     "file {id} holds {:?} and {:?} (separated by {})",
@@ -642,7 +676,7 @@ fn swap_mixes(world: &World, seed: u64, custody: Option<&Custody>) -> SwapMixes 
     let by_source = |src: &str| pairs.iter().filter(|p| p.source == src).count();
     eprintln!(
         "CHAIN-ORACLE seed={seed} pairs={} chaos={} slots={} rotation={} folders={} \
-         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused} excused_unseen={excused_unseen} excused_by_custody={excused_by_custody}",
+         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused} excused_unseen={excused_unseen} excused_by_custody={excused_by_custody} excused_before_swap={excused_before_swap}",
         pairs.len(),
         by_source("chaos"),
         by_source("slots"),
@@ -653,7 +687,7 @@ fn swap_mixes(world: &World, seed: u64, custody: Option<&Custody>) -> SwapMixes 
         versions.len(),
         held.len()
     );
-    SwapMixes { held, excused_by_issue: excused, excused_by_custody, excused_unseen }
+    SwapMixes { held, excused_by_issue: excused, excused_by_custody, excused_unseen, excused_before_swap }
 }
 
 /// Where the user put each file: the custody oracle's record of intent.
@@ -7721,6 +7755,92 @@ fn the_chain_oracle_is_quiet_on_one_files_own_history() {
         (mixes.held.len(), mixes.excused_by_custody, mixes.excused_unseen, mixes.excused_by_issue),
         (0, 1, 0, 0),
         "one file's own history is not a mix: {:?}",
+        mixes.held
+    );
+}
+
+/// ...and a mix older than the swap is not the swap's: the user renamed a
+/// synced file away and wrote a new one at its name, a reading of a save that
+/// put both bodies in one history, and only then did a chaos swap trade the
+/// two names (onekey-longhostile 78401). Both bodies were on the server
+/// before the swap, so the swap separated nothing that one history held.
+#[test]
+fn the_chain_oracle_does_not_charge_a_swap_with_a_mix_older_than_it() {
+    let seed = 9_942;
+    let world = World::of(seed, &[("box", Platform::Linux)]);
+    let custody = Custody::default();
+    let boxx = world.device("box");
+    const A: &[u8] = b"the body first saved at slot.txt";
+    const B: &[u8] = b"the new file written at slot.txt";
+    boxx.fs.user_write("slot.txt", A);
+    assert!(world.settle().is_some());
+    boxx.fs.user_rename("slot.txt", "other.txt");
+    boxx.fs.user_write("slot.txt", B);
+    assert!(world.settle().is_some());
+    let slot = world.server.files().into_iter().find(|x| x.name == "slot.txt").expect("slot.txt went up").id;
+    let chain: Vec<String> = world.server.all_versions().into_iter().filter(|v| v.file_id == slot).map(|v| v.sha256).collect();
+    assert!(
+        chain.contains(&jd_sim::sha256_hex(A)) && chain.contains(&jd_sim::sha256_hex(B)),
+        "the reading of a save put both bodies in one history before any swap"
+    );
+    world.swap_names_by_chaos("box", "slot.txt", "other.txt");
+    let mixes = swap_mixes(&world, seed, Some(&custody));
+    assert_eq!(
+        (mixes.held.len(), mixes.excused_before_swap),
+        (0, 1),
+        "a mix both of whose bodies were up before the swap is not the swap's: {:?}",
+        mixes.held
+    );
+}
+
+/// ...but a body that reaches the history only after the swap fires, though
+/// the other was up before it: the excuse asks the server, both bodies.
+#[test]
+fn the_chain_oracle_charges_a_swap_with_a_body_sent_after_it() {
+    let seed = 9_941;
+    let world = World::of(seed, &[("box", Platform::Linux)]);
+    let custody = Custody::default();
+    let boxx = world.device("box");
+    const A: &[u8] = b"the body that went up before the swap";
+    const B: &[u8] = b"the body that went up after the swap";
+    boxx.fs.user_write("f.txt", A);
+    boxx.fs.user_write("g.txt", B);
+    assert!(world.settle().is_some());
+    let f = world.server.files().into_iter().find(|x| x.name == "f.txt").expect("f went up").id;
+    world.swap_names_by_chaos("box", "f.txt", "g.txt");
+    world.server.seed_version(f, B);
+    let mixes = swap_mixes(&world, seed, Some(&custody));
+    assert_eq!(
+        (mixes.held.len(), mixes.excused_before_swap),
+        (1, 0),
+        "a body sent after the swap must fire: {:?}",
+        mixes.held
+    );
+}
+
+/// ...and a mix older than the swap is charged to it again the moment the
+/// entity takes either body after it: a misread side of the swap puts that
+/// body back in as a new version, an older copy of it notwithstanding.
+#[test]
+fn the_chain_oracle_charges_a_swap_with_a_body_taken_again_after_it() {
+    let seed = 9_940;
+    let world = World::of(seed, &[("box", Platform::Linux)]);
+    let custody = Custody::default();
+    let boxx = world.device("box");
+    const A: &[u8] = b"body A, first at f.txt";
+    const B: &[u8] = b"body B, the other file";
+    boxx.fs.user_write("f.txt", A);
+    boxx.fs.user_write("g.txt", B);
+    assert!(world.settle().is_some());
+    let f = world.server.files().into_iter().find(|x| x.name == "f.txt").expect("f went up").id;
+    world.server.seed_version(f, B);
+    world.swap_names_by_chaos("box", "f.txt", "g.txt");
+    world.server.seed_version(f, A);
+    let mixes = swap_mixes(&world, seed, Some(&custody));
+    assert_eq!(
+        (mixes.held.len(), mixes.excused_before_swap),
+        (1, 0),
+        "a body taken again after the swap must fire: {:?}",
         mixes.held
     );
 }

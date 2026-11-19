@@ -274,6 +274,11 @@ pub struct SwapPair {
     /// other there -- the user, or this device applying someone else's move.
     /// `None` for the workload's own swaps.
     pub stood_in: Option<StoodIn>,
+    /// The server's last change id when the swap was made
+    /// (`MockServer::latest_change_id`): every version with a change id no
+    /// higher was on the server before the swap, so its body had been read
+    /// before the two names were traded.
+    pub server_change_at: i64,
     /// The device the swap was made on, by its index in the world, where the
     /// recorder knows it.
     pub device: Option<usize>,
@@ -386,6 +391,7 @@ fn swap_two_names(
     b: &str,
     parked: &str,
     pairs: &std::sync::Mutex<Vec<SwapPair>>,
+    server_change_at: i64,
 ) {
     if let (Some(ba), Some(bb)) = (disk.peek(a), disk.peek(b)) {
         if ba != bb {
@@ -406,6 +412,7 @@ fn swap_two_names(
                 crossed_out,
                 crossed_out_at,
                 stood_in,
+                server_change_at,
                 device: Some(device),
             });
         }
@@ -640,6 +647,7 @@ impl World {
         )));
         let seen = self.swaps_seen.clone();
         let pairs = self.swap_pairs.clone();
+        let server = self.server.clone();
         let mut round: u64 = 0;
         self.server.while_completing_an_upload(move || {
             if round >= budget {
@@ -669,7 +677,7 @@ impl World {
             }
             round += 1;
             let (a, b) = (a.clone(), b.clone());
-            swap_two_names(disk, device, &a, &b, &format!(".swap-{round}.tmp"), &pairs);
+            swap_two_names(disk, device, &a, &b, &format!(".swap-{round}.tmp"), &pairs, server.latest_change_id());
             *seen.lock().unwrap() += 1;
         });
     }
@@ -683,7 +691,7 @@ impl World {
             .iter()
             .position(|d| d.name == device_name)
             .unwrap_or_else(|| panic!("no device called {device_name}"));
-        swap_two_names(&self.devices[device].fs, device, a, b, ".swap-pin.tmp", &self.swap_pairs);
+        swap_two_names(&self.devices[device].fs, device, a, b, ".swap-pin.tmp", &self.swap_pairs, self.server.latest_change_id());
         *self.swaps_seen.lock().unwrap() += 1;
     }
 
@@ -1074,6 +1082,7 @@ impl World {
                 crossed_out: None,
                 crossed_out_at: None,
                 stood_in: None,
+                server_change_at: self.server.latest_change_id(),
                 device,
             });
         }
