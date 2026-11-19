@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.59 - the sandboxed-plugin runner's installer leaves CORE_INSTALLERS: nothing runs a sandboxed plugin's code on the box;
+#                site_housekeeping.sh takes what it installed off the machine.
 # Version: 2.58 - an installer that exits INSTALLER_REFUSED_EXIT (78) declined to install here: its
 #                 record says refused, with its last line of output as the reason, and the converge
 #                 is not marked installer-failed (a server too small for it is not a broken one)
@@ -78,9 +80,7 @@
 #                the check runs hourly, not only daily and after a change (multi_tenant_host_hardening WP7, D8).
 # Version: 2.38 - Root request data_root_tpm2_off: the TPM2 chip no longer opens this server's data root (B43).
 # Version: 2.37 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
-# Version: 2.36 - install_sandbox_host.sh joins CORE_INSTALLERS: a site with a sandboxed plugin gets its plugin
-#                 host, a site without one has it stopped (plugin_tiers.md WP7). A sandboxed plugin's
-#                 manifest.json is part of what "changed" means, so one arriving starts the host at the next tick.
+# Version: 2.36 - A sandboxed plugin's manifest.json is part of what "changed" means (plugin_tiers.md WP7).
 # Version: 2.35 - A site whose config/ is on the data root, found with the data root not mounted, runs the
 #                 data root's tick before it waits: a plain data root that is only unmounted (an encrypt's
 #                 start cut off) is mounted again by it, and the run goes on. The wait skipped the tick, so
@@ -350,7 +350,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # EX_CONFIG). Recorded as refused, never as failed.
 INSTALLER_REFUSED_EXIT=78
 
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_unseal_daemon.sh install_sandbox_host.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_unseal_daemon.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
 
 # The host's own installers: what a machine with no site converges to. A
 # subset of CORE_INSTALLERS by construction (each is also a site's), and the
@@ -1818,8 +1818,7 @@ converge_hash() {
         # (installer_is_trusted): mending a refused one is a reason to run.
         stat -c '%U %a %n' "${TOOLS_DIR}"/*.sh 2>/dev/null
         for m in "${PUBLIC_HTML}"/plugins/*/plugin.json; do [[ -f "${m}" ]] && cat "${m}"; done
-        # A sandboxed plugin's manifest: one arriving or leaving decides
-        # whether the site runs a plugin host (install_sandbox_host.sh).
+        # A sandboxed plugin's manifest: one arriving or leaving is a change.
         for m in "${PUBLIC_HTML}"/plugins/*/manifest.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
     } | sha256sum | cut -d' ' -f1

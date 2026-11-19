@@ -8,7 +8,7 @@
  */
 /**
  * A sandboxed plugin's manifest (SandboxManifest) and the contents rule
- * (SandboxPlugins::namesAreSandboxed), with no database and no files.
+ * (SandboxPlugins::namesAreSandboxed, isSandboxedDir), with no database.
  *
  * What is pinned here:
  *  - a full, valid manifest parses, and the names the platform derives from it
@@ -19,7 +19,7 @@
  *    are refused when wrong, with a message naming the place;
  *  - the credential's scope is the declared permissions plus every verb on the
  *    plugin's own models;
- *  - a package is sandboxed only with exactly manifest.json and one .wasm.
+ *  - a package is sandboxed only with exactly manifest.json and a real src/ directory.
  *
  * Run: php tests/unit/sandbox_manifest_test.php
  *
@@ -212,14 +212,47 @@ try {
 check($caught !== '', 'A field type that is not text is refused as a manifest problem', $caught);
 
 section('What makes a package sandboxed');
-$plain = function () { return true; };
-check(SandboxPlugins::namesAreSandboxed(array('manifest.json', 'notifier.wasm'), $plain), 'manifest.json and one .wasm');
-check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'a.wasm', 'b.wasm'), $plain), 'two .wasm files is not');
-check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'notifier.wasm', 'helper.php'), $plain), 'a PHP file beside them is not');
-check(!SandboxPlugins::namesAreSandboxed(array('plugin.json', 'notifier.wasm'), $plain), 'plugin.json is not the manifest');
-check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'notifier.php'), $plain), 'no .wasm is not');
-check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', '../x.wasm'), $plain), 'a path is not a module name');
-check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'notifier.wasm'), function ($n) { return $n !== 'notifier.wasm'; }),
-	'a module that is not a plain file (a link, a folder) is not');
+$kinds = function (array $map) {
+	return function ($name) use ($map) { return $map[$name] ?? 'file'; };
+};
+$shape = $kinds(array('manifest.json' => 'file', 'src' => 'dir'));
+check(SandboxPlugins::namesAreSandboxed(array('manifest.json', 'src'), $shape), 'manifest.json and src/');
+check(SandboxPlugins::namesAreSandboxed(array('src', 'manifest.json'), $shape), 'in either order');
+check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'notifier.wasm'), $shape), 'a module file beside the manifest is not');
+check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'src', 'helper.php'), $shape), 'a third entry is not');
+check(!SandboxPlugins::namesAreSandboxed(array('manifest.json'), $shape), 'the manifest alone is not');
+check(!SandboxPlugins::namesAreSandboxed(array('plugin.json', 'src'), $shape), 'plugin.json is not the manifest');
+check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'src'), $kinds(array('src' => 'link'))), 'a symlinked src is not');
+check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'src'), $kinds(array('src' => 'file'))), 'a src that is a file is not');
+check(!SandboxPlugins::namesAreSandboxed(array('manifest.json', 'src'), $kinds(array('manifest.json' => 'link', 'src' => 'dir'))),
+	'a symlinked manifest is not');
+
+// The same rule on a real folder.
+$shape_dir = harness_scratch_dir('sbx_shape');
+$mk = function (string $name) use ($shape_dir) {
+	$d = $shape_dir . '/' . $name;
+	mkdir($d, 0755, true);
+	file_put_contents($d . '/manifest.json', '{}');
+	return $d;
+};
+$d = $mk('good');
+mkdir($d . '/src');
+check(SandboxPlugins::isSandboxedDir($d), 'A folder of manifest.json and a real src/ is sandboxed');
+$d = $mk('module');
+file_put_contents($d . '/module.wasm', "\0asm");
+check(!SandboxPlugins::isSandboxedDir($d), 'a folder of manifest.json and a module file is not');
+$d = $mk('third');
+mkdir($d . '/src');
+file_put_contents($d . '/extra.php', "<?php\n");
+check(!SandboxPlugins::isSandboxedDir($d), 'nor one with a third entry');
+$d = $mk('linked');
+mkdir($shape_dir . '/elsewhere');
+symlink($shape_dir . '/elsewhere', $d . '/src');
+check(!SandboxPlugins::isSandboxedDir($d), 'nor one whose src is a symlink');
+$d = $mk('srcfile');
+file_put_contents($d . '/src', 'x');
+check(!SandboxPlugins::isSandboxedDir($d), 'nor one whose src is a file');
+symlink($shape_dir . '/good', $shape_dir . '/goodlink');
+check(!SandboxPlugins::isSandboxedDir($shape_dir . '/goodlink'), 'nor a symlink to a sandboxed folder');
 
 harness_finish();

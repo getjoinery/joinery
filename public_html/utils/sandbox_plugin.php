@@ -4,20 +4,21 @@
  *
  *   php utils/sandbox_plugin.php validate PATH
  *       PATH is a plugin folder, its manifest.json, or a zip of it. Checks the
- *       manifest, the module against it (SandboxModule), and whether this site
- *       has everything it asks for (SandboxCompatibility). Exit 0 when it would
- *       install, 1 with each problem named.
+ *       folder's shape, the manifest, and whether this site has everything it
+ *       asks for (SandboxCompatibility). Exit 0 when it would install, 1 with
+ *       each problem named.
  *
  *   php utils/sandbox_plugin.php load DIR [--approve-as=USER_ID]      (a dev site only)
  *       Copies the plugin folder DIR into plugins/, installs or updates it,
  *       approves what it asks for as USER_ID (default: the first superadmin)
- *       and activates it. Run it again after each build.
+ *       and activates it. Run it again after each change.
  *
  *   php utils/sandbox_plugin.php call PLUGIN ui HANDLER [VALUES_JSON]     (a dev site only)
  *   php utils/sandbox_plugin.php call PLUGIN signal SIGNAL [PAYLOAD_JSON]
  *   php utils/sandbox_plugin.php call PLUGIN schedule NAME
- *       Makes one call through the plugin host, as core would, and prints what
- *       came back and what the module asked of each door.
+ *       Makes one call as core would (SandboxHost), and prints what came
+ *       back and what the plugin asked of each door. With nothing to run the
+ *       plugin's code, the call comes back unavailable.
  *
  *   php utils/sandbox_plugin.php log PLUGIN [COUNT]
  *       The plugin's last calls (SandboxLog), newest first.
@@ -25,6 +26,7 @@
  * "A dev site" is one with the debug setting on: load writes into plugins/,
  * which the installer does everywhere else, and call fires real calls.
  *
+ * @version 1.2 - the folder is manifest.json and src/; load copies src/ whole, links refused
  * @version 1.1 - sbx_fail() is declared never; call picks its host with a match
  * @version 1.0
  */
@@ -79,7 +81,7 @@ function sbx_folder(string $path): array {
 			}
 		}
 		$cleanup();
-		sbx_fail('The zip holds no folder of exactly manifest.json and one .wasm.');
+		sbx_fail('The zip holds no folder of exactly manifest.json and a src folder.');
 	}
 	if (is_file($path) && basename($path) === SandboxManifest::FILE) {
 		$path = dirname($path);
@@ -90,6 +92,33 @@ function sbx_folder(string $path): array {
 	return array(rtrim($path, '/'), function () {});
 }
 
+/**
+ * Copy a folder of regular files and folders. A link, or anything else that
+ * is neither, stops the copy.
+ *
+ * @return string|null what stopped it, or null when the whole tree was copied
+ */
+function sbx_copy_tree(string $from, string $to): ?string {
+	if (is_link($from) || !is_dir($from) || !@mkdir($to, 0755)) {
+		return basename($from) . ' is not a folder that can be copied';
+	}
+	foreach (array_diff(scandir($from) ?: array(), array('.', '..')) as $entry) {
+		$src = $from . '/' . $entry;
+		if (is_link($src)) {
+			return "$entry is a link";
+		}
+		if (is_dir($src)) {
+			$why = sbx_copy_tree($src, $to . '/' . $entry);
+			if ($why !== null) {
+				return $why;
+			}
+		} elseif (!is_file($src) || !copy($src, $to . '/' . $entry)) {
+			return "$entry could not be copied";
+		}
+	}
+	return null;
+}
+
 switch ($command) {
 	case 'validate':
 		if (!isset($args[0])) {
@@ -98,7 +127,7 @@ switch ($command) {
 		list($dir, $cleanup) = sbx_folder($args[0]);
 		$problems = array();
 		if (!SandboxPlugins::isSandboxedDir($dir)) {
-			$problems[] = 'The folder must hold exactly manifest.json and one .wasm, and nothing else.';
+			$problems[] = 'The folder must hold exactly manifest.json and a src folder, and nothing else.';
 		}
 		try {
 			$manifest = SandboxManifest::fromFile($dir . '/' . SandboxManifest::FILE, basename($dir));
@@ -106,14 +135,6 @@ switch ($command) {
 			$cleanup();
 			sbx_out('Refused: ' . $e->getMessage());
 			exit(1);
-		}
-		$wasm = glob($dir . '/*.wasm') ?: array();
-		if (count($wasm) === 1) {
-			try {
-				$problems = array_merge($problems, SandboxModule::fromFile($wasm[0])->problems($manifest));
-			} catch (SandboxModuleException $e) {
-				$problems[] = $e->getMessage();
-			}
 		}
 		foreach (SandboxCompatibility::problems($manifest) as $p) {
 			$problems[] = 'On this site: ' . $p;
@@ -141,7 +162,7 @@ switch ($command) {
 		}
 		$source = rtrim($args[0], '/');
 		if (!SandboxPlugins::isSandboxedDir($source)) {
-			sbx_fail('The folder must hold exactly manifest.json and one .wasm, and nothing else.');
+			sbx_fail('The folder must hold exactly manifest.json and a src folder, and nothing else.');
 		}
 		try {
 			$manifest = SandboxManifest::fromFile($source . '/' . SandboxManifest::FILE);
@@ -160,11 +181,12 @@ switch ($command) {
 		// call arriving meanwhile finds one whole plugin or the other.
 		$incoming = dirname($target) . '/.' . $name . '.incoming.' . getmypid();
 		@mkdir($incoming, 0755);
-		foreach (glob($source . '/*') ?: array() as $file) {
-			if (!copy($file, $incoming . '/' . basename($file))) {
-				exec('rm -rf ' . escapeshellarg($incoming));
-				sbx_fail('Could not copy ' . basename($file) . " into plugins/$name.");
-			}
+		$copied = copy($source . '/' . SandboxManifest::FILE, $incoming . '/' . SandboxManifest::FILE)
+			? sbx_copy_tree($source . '/' . SandboxPlugins::SOURCE_DIR, $incoming . '/' . SandboxPlugins::SOURCE_DIR)
+			: SandboxManifest::FILE . ' could not be copied';
+		if ($copied !== null) {
+			exec('rm -rf ' . escapeshellarg($incoming));
+			sbx_fail("Could not copy the plugin into plugins/$name: $copied.");
 		}
 		$outgoing = dirname($target) . '/.' . $name . '.outgoing.' . getmypid();
 		if (!@rename($target, $outgoing) || !@rename($incoming, $target)) {
@@ -206,8 +228,8 @@ switch ($command) {
 		foreach ($manifest->profilePages() as $page) {
 			sbx_out('  member page: ' . SandboxPages::profilePageUrl($name, $page['slug']));
 		}
-		if (!SandboxHost::isRunning()) {
-			sbx_out('The plugin host is not running yet; the host converger starts it within a minute.');
+		if (SandboxHost::$runner === null) {
+			sbx_out('Nothing on this site runs a sandboxed plugin\'s code: each call to it comes back unavailable.');
 		}
 		exit(0);
 

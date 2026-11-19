@@ -1,31 +1,31 @@
 <?php
 /**
  * Test helpers for sandboxed plugins: a throwaway sandboxed plugin folder,
- * and a stand-in plugin host (tests/lib/fake_sandbox_host.php).
+ * and a stand-in for what runs a plugin's code (SandboxHost::$runner).
  *
  *   $p = sandbox_fixture_plugin(array('models' => …, 'admin_pages' => …));
  *   PluginManager::getInstance()->install($p['name'], false);
  *   sandbox_approve($p['name']);                // activation needs it
  *   PluginManager::getInstance()->activate($p['name']);
- *   $host = fake_sandbox_host_start(array('on_ui' => array('ok' => true, 'output' => array('message' => 'Hi'))));
+ *   $host = sandbox_stand_in_runner(array('on_ui' => array('ok' => true, 'output' => array('message' => 'Hi'))));
  *   … SandboxHost::ui(…) …
- *   $host['requests']()    // what core sent, decoded
+ *   $host['requests']()    // the envelopes core handed over
  *
  * Both clean themselves up at harness_finish().
  *
+ * @version 1.2 - the fixture is manifest.json and src/; the stand-in is a closure on SandboxHost::$runner
  * @version 1.1 - sandbox_fixture_plugin() switches sandboxed plugins on for the test (off by default)
  * @version 1.0
  */
 
 /**
- * Write a sandboxed plugin folder (manifest.json + module.wasm) named
+ * Write a sandboxed plugin folder (manifest.json + an empty src/) named
  * hts_<hex>, with $manifest merged over a minimal valid one. Removed, with
  * its tables, row, menus, settings, install row and logs, at teardown.
  *
  * @return array{name:string, dir:string}
  */
-function sandbox_fixture_plugin(array $manifest = array(), ?string $wasm = null): array {
-	$wasm = $wasm ?? sandbox_minimal_wasm();
+function sandbox_fixture_plugin(array $manifest = array()): array {
 	// Off by default on every site (SandboxPlugins::enabled()); on for this test only.
 	harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
 	$name = 'hts_' . bin2hex(random_bytes(3));
@@ -33,7 +33,7 @@ function sandbox_fixture_plugin(array $manifest = array(), ?string $wasm = null)
 	mkdir($dir, 0755);
 	$data = array_merge(array('name' => $name, 'title' => 'HarnessTest ' . $name, 'version' => '1.0.0', 'platform' => 1), $manifest);
 	file_put_contents($dir . '/manifest.json', json_encode($data, JSON_PRETTY_PRINT));
-	file_put_contents($dir . '/module.wasm', $wasm);
+	mkdir($dir . '/' . SandboxPlugins::SOURCE_DIR, 0755);
 	SandboxPlugins::reset();
 	SandboxModels::reset();
 	SettingsDeclarations::reset();
@@ -67,36 +67,14 @@ function sandbox_fixture_plugin(array $manifest = array(), ?string $wasm = null)
 			}
 		}
 		$db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($name));
-		foreach (glob($dir . '/*') ?: array() as $file) {
-			@unlink($file);
-		}
+		@unlink($dir . '/manifest.json');
+		@rmdir($dir . '/' . SandboxPlugins::SOURCE_DIR);
 		@rmdir($dir);
 		SandboxPlugins::reset();
 		SandboxModels::reset();
 		SettingsDeclarations::reset();
 	});
 	return array('name' => $name, 'dir' => $dir);
-}
-
-/**
- * The smallest WebAssembly module that exports $exports, each a function
- * returning 0: enough for a manifest's checks (SandboxModule) against a
- * stand-in host that never runs it.
- */
-function sandbox_minimal_wasm(array $exports = array('on_ui', 'on_signal', 'on_schedule')): string {
-	$section = function (int $id, string $content): string {
-		return chr($id) . chr(strlen($content)) . $content;
-	};
-	$n = count($exports);
-	$functions = chr($n) . str_repeat("\0", $n);
-	$export = chr($n);
-	$code = chr($n);
-	foreach (array_values($exports) as $i => $name) {
-		$export .= chr(strlen($name)) . $name . "\0" . chr($i);
-		$code .= "\x04\x00\x41\x00\x0b";
-	}
-	return "\0asm\x01\0\0\0" . $section(1, "\x01\x60\x00\x01\x7f") . $section(3, $functions)
-		. $section(7, $export) . $section(10, $code);
 }
 
 /**
@@ -117,58 +95,36 @@ function sandbox_approve(string $name, ?User $by = null): User {
 }
 
 /**
- * Start a stand-in host and point SandboxHost at it.
+ * Set SandboxHost::$runner to a stand-in that answers from $replies and
+ * keeps every envelope it was handed. A reply is the answer a runner gives
+ * ({ok, output, error, timed_out, duration_ms, calls}), by export name
+ * ("on_ui", "on_signal", "on_schedule") or "*"; with none for an export the
+ * answer is ok with no output. Cleared at harness_finish(), or by stop().
  *
- * @param array $replies export name or '*' => reply (see fake_sandbox_host.php)
- * @return array{socket:string, set_replies:callable, requests:callable, stop:callable}
+ * @param array $replies export name or '*' => reply
+ * @return array{set_replies:callable, requests:callable, stop:callable}
  */
-function fake_sandbox_host_start(array $replies): array {
-	$base = sys_get_temp_dir() . '/sbx_' . getmypid() . '_' . bin2hex(random_bytes(2));
-	$socket = $base . '.sock';
-	$replies_file = $base . '.replies.json';
-	$log_file = $base . '.requests.log';
-	file_put_contents($replies_file, json_encode($replies));
-	touch($log_file);
-	$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/fake_sandbox_host.php') . ' '
-		. escapeshellarg($socket) . ' ' . escapeshellarg($replies_file) . ' ' . escapeshellarg($log_file);
-	$proc = proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('file', '/dev/null', 'w'), 2 => array('file', $base . '.err', 'w')), $pipes);
-	for ($i = 0; $i < 50 && !file_exists($socket); $i++) {
-		usleep(50000);
-	}
-	SandboxHost::$socket_override = $socket;
-
-	$stop = function () use ($socket, $proc, $base, $replies_file, $log_file) {
-		@touch($socket . '.stop');
-		for ($i = 0; $i < 40 && file_exists($socket); $i++) {
-			usleep(50000);
-		}
-		if (is_resource($proc)) {
-			@proc_terminate($proc);
-			@proc_close($proc);
-		}
-		@unlink($socket);
-		@unlink($socket . '.stop');
-		@unlink($replies_file);
-		@unlink($log_file);
-		@unlink($base . '.err');
-		SandboxHost::$socket_override = null;
+function sandbox_stand_in_runner(array $replies): array {
+	$state = new stdClass();
+	$state->replies = $replies;
+	$state->requests = array();
+	SandboxHost::$runner = function (array $envelope) use ($state) {
+		// Kept as a real runner would receive it: through JSON.
+		$state->requests[] = json_decode(json_encode($envelope), true);
+		$export = (string)($envelope['export'] ?? '');
+		return $state->replies[$export] ?? ($state->replies['*'] ?? array('ok' => true, 'output' => null, 'calls' => array()));
+	};
+	$stop = function () {
+		SandboxHost::$runner = null;
 	};
 	harness_defer($stop);
 
 	return array(
-		'socket' => $socket,
-		'set_replies' => function (array $replies) use ($replies_file) {
-			file_put_contents($replies_file, json_encode($replies));
+		'set_replies' => function (array $replies) use ($state) {
+			$state->replies = $replies;
 		},
-		'requests' => function () use ($log_file) {
-			$out = array();
-			foreach (file($log_file, FILE_IGNORE_NEW_LINES) ?: array() as $line) {
-				$decoded = json_decode($line, true);
-				if (is_array($decoded)) {
-					$out[] = $decoded;
-				}
-			}
-			return $out;
+		'requests' => function () use ($state) {
+			return $state->requests;
 		},
 		'stop' => $stop,
 	);

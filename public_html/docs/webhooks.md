@@ -129,7 +129,7 @@ Two models:
 
 `SignalDeliveryQueue::handle_signal()` queues for every active receiver
 whatever its kind; `drain()` sends each due delivery by its receiver's kind: a
-signed POST for a `webhook`, a call to the plugin host for a `sandbox`
+signed POST for a `webhook`, a call to the plugin for a `sandbox`
 receiver. Both share the queue, the retry rule and the retention.
 
 `drain()` and `send_test()` take an optional client (anything with

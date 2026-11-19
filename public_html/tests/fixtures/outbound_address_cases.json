@@ -1,5 +1,5 @@
 {
-  "_about": "The one list of addresses every outbound guard must refuse, and public ones it must allow. Read by tests/security/safe_http_client_test.php (UrlSafetyValidator::checkIp), the sandboxed plugin host's TestPublicAddressTable (maintenance_scripts/install_tools/sandbox_host/host_test.go) and the relay's TestIsPublicIPMatchesThePlatformTable (plugins/mailbox/provisioning/relay-sealer/direct_wire_test.go). A range added to one guard is added here, and the other two must then refuse it too.",
+  "_about": "The one list of addresses every outbound guard must refuse, and public ones it must allow. Read by tests/security/safe_http_client_test.php (UrlSafetyValidator::checkIp) and the relay's TestIsPublicIPMatchesThePlatformTable (plugins/mailbox/provisioning/relay-sealer/direct_wire_test.go). A range added to one guard is added here, and the other must then refuse it too.",
   "refused": [
     {
       "address": "0.0.0.0",

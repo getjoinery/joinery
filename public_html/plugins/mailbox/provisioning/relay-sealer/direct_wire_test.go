@@ -483,8 +483,8 @@ func TestEgressTargetGuard(t *testing.T) {
 }
 
 // The one list every outbound guard is tested against
-// (tests/fixtures/outbound_address_cases.json): this relay's, the platform's
-// UrlSafetyValidator and the sandboxed plugin host's.
+// (tests/fixtures/outbound_address_cases.json): this relay's and the
+// platform's UrlSafetyValidator.
 func TestIsPublicIPMatchesThePlatformTable(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "tests", "fixtures", "outbound_address_cases.json"))
 	if err != nil {

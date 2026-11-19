@@ -2,9 +2,9 @@
 /**
  * SandboxLog and MultiSandboxLog — what each call to a sandboxed plugin did.
  *
- * Core writes one row per call it makes to the plugin host (SandboxHost): what
+ * Core writes one row per call it makes to a sandboxed plugin (SandboxHost): what
  * the plugin was asked (a UI handler, a signal, a scheduled run, a test), how
- * it ended, how long it took, and the host's record of every door the module
+ * it ended, how long it took, and the runner's record of every door the plugin
  * used during the call — each API request and outbound request it made, and
  * each one refused with the reason. It is the per-plugin log an author reads
  * (plugin_tiers.md WP8) and an admin checks when a plugin misbehaves.
@@ -28,7 +28,7 @@ class SandboxLog extends SystemBase {
 	const STATUS_OK          = 'ok';
 	const STATUS_ERROR       = 'error';
 	const STATUS_TIMEOUT     = 'timeout';
-	/** The host was not running or not reachable. */
+	/** Nothing could run the plugin, or the call could not be made. */
 	const STATUS_UNAVAILABLE = 'unavailable';
 	/** Both UI call slots were in use. */
 	const STATUS_BUSY        = 'busy';
@@ -55,7 +55,7 @@ class SandboxLog extends SystemBase {
 			'allowed_values' => array(self::STATUS_OK, self::STATUS_ERROR, self::STATUS_TIMEOUT, self::STATUS_UNAVAILABLE, self::STATUS_BUSY)),
 		'sbl_duration_ms'    => array('type' => 'int4'),
 		'sbl_message'        => array('type' => 'varchar(500)'),
-		// The host's record of the doors the module used: a JSON list of
+		// The runner's record of the doors the plugin used: a JSON list of
 		// {door, target, status, detail}.
 		'sbl_calls'          => array('type' => 'jsonb'),
 		// Who asked, for a UI call made from a page.
@@ -68,7 +68,7 @@ class SandboxLog extends SystemBase {
 		'update_field' => 'sbl_message',
 	);
 
-	/** @return array[] the door calls the host recorded */
+	/** @return array[] the door calls the runner recorded */
 	public function calls(): array {
 		$calls = $this->get_json_decoded('sbl_calls');
 		return is_array($calls) ? $calls : array();

@@ -24,7 +24,7 @@
  * validation, which is the whole point.
  *
  * @version 1.1 - every address in tests/fixtures/outbound_address_cases.json, the list the Go
- *   guards (sandboxed plugin host, relay) are tested against too
+ *   guard in the relay is tested against too
  * @version 1.0
  */
 
@@ -79,8 +79,8 @@ foreach ($blocked as $url => $why) {
 section('The shared list: what every outbound guard refuses and allows');
 // ---------------------------------------------------------------------------
 
-// One list for this guard and the Go ones in the sandboxed plugin host and the
-// relay, so a range one of them learns cannot stay open in another.
+// One list for this guard and the Go one in the relay, so a range one of them
+// learns cannot stay open in the other.
 $cases = json_decode((string)file_get_contents(__DIR__ . '/../fixtures/outbound_address_cases.json'), true);
 check(is_array($cases) && !empty($cases['refused']) && !empty($cases['allowed']), 'the shared address list reads');
 $open = array();

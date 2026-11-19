@@ -2,9 +2,9 @@
 /**
  * SandboxManifest — the one file that says what a sandboxed plugin is and may do.
  *
- * A sandboxed plugin is a folder in plugins/ holding exactly two files: this
- * manifest (manifest.json) and one WebAssembly module (*.wasm). The manifest
- * declares everything the platform will let the module do; the module can do
+ * A sandboxed plugin is a folder in plugins/ holding exactly two entries:
+ * this manifest (manifest.json) and its code folder (src/). The manifest
+ * declares everything the platform will let the plugin do; the plugin can do
  * nothing it does not declare (plugin_tiers.md, docs/sandboxed_plugins.md).
  *
  * This class parses and validates a manifest and answers questions about it.
@@ -90,7 +90,7 @@ class SandboxManifest {
 
 	const FREQUENCIES = array('hourly', 'daily', 'weekly');
 
-	/** Ceilings the host applies whatever a manifest asks for. */
+	/** Ceilings applied to a call whatever a manifest asks for. */
 	const MAX_MEMORY_MB  = 64;
 	const MAX_TIMEOUT_MS = 10000;
 	const DEFAULT_MEMORY_MB  = 16;
@@ -541,7 +541,7 @@ class SandboxManifest {
 					$e[] = "$label: a form section holds type, title, handler, fields and submit_label";
 				}
 				if (!is_string($s['handler'] ?? null) || !preg_match(self::SLUG_PATTERN, $s['handler'])) {
-					$e[] = "$label: handler names what the module runs on submit, a-z, 0-9 and _";
+					$e[] = "$label: handler names what the plugin runs on submit, a-z, 0-9 and _";
 				}
 				if (isset($s['submit_label']) && !self::isText($s['submit_label'], 40, true)) {
 					$e[] = "$label: submit_label must be at most 40 characters";
@@ -643,7 +643,7 @@ class SandboxManifest {
 
 	public function menu(): ?array { return $this->data['menu'] ?? null; }
 
-	/** @return array{memory_mb:int,timeout_ms:int} the limits the host applies to every call */
+	/** @return array{memory_mb:int,timeout_ms:int} the limits applied to every call */
 	public function limits(): array {
 		$l = $this->data['limits'] ?? array();
 		return array(

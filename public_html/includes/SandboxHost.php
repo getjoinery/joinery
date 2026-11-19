@@ -1,18 +1,14 @@
 <?php
 /**
- * SandboxHost — how core asks the plugin host to run a sandboxed plugin.
+ * SandboxHost — how core asks a sandboxed plugin's code to run.
  *
- * The host is a separate process (plugin_tiers.md WP7) that runs
- * WebAssembly modules and listens on a local socket. Core never runs a module
- * itself: it sends the host one request per call and waits for the answer,
- * bounded. Every request carries everything the call may use, so the host
- * keeps no configuration and reads no database:
+ * Core never runs a sandboxed plugin's code itself. It builds one envelope
+ * per call, carrying everything the call may use, and hands it to the runner
+ * (SandboxHost::$runner), then records the answer:
  *
- *   POST /call
  *   {
  *     "call_id":  "c_…",
  *     "plugin":   "notifier",
- *     "module":   "/…/plugins/notifier/notifier.wasm",
  *     "export":   "on_ui" | "on_signal" | "on_schedule",
  *     "input":    { … what this call is about … },
  *     "limits":   {"memory_mb": 16, "timeout_ms": 5000},
@@ -22,22 +18,24 @@
  *                  "public_key": "…", "secret_key": "…"}   or null with no credential
  *   }
  *
- * and answers
+ * The runner answers
  *
- *   {"ok": true|false, "output": <what the module returned, JSON>,
+ *   {"ok": true|false, "output": <what the plugin returned, JSON>,
  *    "error": "…", "timed_out": false, "duration_ms": 12,
  *    "calls": [{"door": "api"|"http"|"log", "target": "…", "status": "ok"|"refused"|"error", "detail": "…"}]}
  *
  * `input` per export: on_ui {handler, values, user: {id, permission}};
  * on_signal {signal, message_id, timestamp, data}; on_schedule {schedule, time}.
  *
- * An answer larger than MAX_ANSWER_BYTES is refused unread past that point.
+ * The platform sets no runner. With none, every call is answered
+ * "No runner for this plugin." and logged as unavailable.
  *
  * Each call is recorded in SandboxLog. UI calls (door 4, Q14) are the one
- * place a page waits on a module: at most UI_SLOTS of them run at once per
- * site, one per person, each for at most UI_TIMEOUT_MS; past any of those,
+ * place a page waits on a plugin: at most UI_SLOTS of them run at once per
+ * site, one per person, each given at most UI_TIMEOUT_MS; past any of those,
  * the caller is told the plugin did not respond.
  *
+ * @version 1.2 - calls go to SandboxHost::$runner; with none set a call is unavailable
  * @version 1.1 - 5 s UI ceiling, one UI call per person, answers capped at 1 MB, logged calls' fields capped
  * @version 1.0
  */
@@ -47,31 +45,20 @@ class SandboxHost {
 	/** UI calls a site runs at once (Q14). */
 	const UI_SLOTS = 2;
 
-	/** The longest a page waits on a module, whatever its manifest asks (Q14). */
+	/** The longest a page waits on a plugin, whatever its manifest asks (Q14). */
 	const UI_TIMEOUT_MS = 5000;
 
-	/** The most of a host's answer core reads; past it the call fails. */
-	const MAX_ANSWER_BYTES = 1048576;
+	/** What a call is answered with when no runner is set. */
+	const NO_RUNNER_MESSAGE = 'No runner for this plugin.';
 
-	/** Time allowed beyond a call's own limit for the host to start and answer. */
-	const TRANSPORT_MARGIN_MS = 2000;
-
-	/** A test may point core at another socket. */
-	public static $socket_override = null;
-
-	/** The host's socket: {site root}/run/sandbox-host/host.sock. */
-	public static function socketPath(): string {
-		if (self::$socket_override !== null) {
-			return self::$socket_override;
-		}
-		return rtrim(PathHelper::getSiteRoot(), '/') . '/run/sandbox-host/host.sock';
-	}
-
-	/** Whether a host is listening on this site. */
-	public static function isRunning(): bool {
-		$path = self::socketPath();
-		return file_exists($path) && filetype($path) === 'socket';
-	}
+	/**
+	 * What runs a call: a callable taking the envelope (see the top of this
+	 * file) and returning the answer array. Null when nothing can run a
+	 * sandboxed plugin's code, which is how the platform ships.
+	 *
+	 * @var callable|null
+	 */
+	public static $runner = null;
 
 	/**
 	 * Ask the plugin a UI handler's question (a form on its page was
@@ -140,12 +127,12 @@ class SandboxHost {
 		if (isset($opts['max_timeout_ms'])) {
 			$envelope['limits']['timeout_ms'] = min($envelope['limits']['timeout_ms'], (int)$opts['max_timeout_ms']);
 		}
-		$result = self::transport($envelope);
+		$result = self::run($envelope);
 		return self::record($plugin, $kind, $name, $result, $opts['user_id'] ?? null);
 	}
 
 	/**
-	 * Everything the host needs for one call.
+	 * Everything the runner needs for one call.
 	 *
 	 * @throws SandboxManifestException when the plugin is not an active, valid sandboxed plugin
 	 */
@@ -168,7 +155,6 @@ class SandboxHost {
 		return array(
 			'call_id'        => 'c_' . bin2hex(random_bytes(8)),
 			'plugin'         => $plugin,
-			'module'         => SandboxPlugins::wasmPath($plugin),
 			'export'         => $export,
 			'input'          => $input,
 			'limits'         => $manifest->limits(),
@@ -180,67 +166,36 @@ class SandboxHost {
 	}
 
 	/**
-	 * Send one envelope to the host and read its answer.
+	 * Hand one envelope to the runner and read its answer.
 	 *
 	 * @return array status, output, message, calls, duration_ms
 	 */
-	private static function transport(array $envelope): array {
+	private static function run(array $envelope): array {
+		if (self::$runner === null) {
+			return array('status' => SandboxLog::STATUS_UNAVAILABLE, 'message' => self::NO_RUNNER_MESSAGE);
+		}
 		$started = microtime(true);
-		if (!self::isRunning()) {
-			return array(
-				'status' => SandboxLog::STATUS_UNAVAILABLE,
-				'message' => 'The plugin host is not running on this site, so the plugin did not respond.',
-			);
+		try {
+			$answer = call_user_func(self::$runner, $envelope);
+		} catch (Throwable $e) {
+			error_log('[SandboxHost] the runner failed on a call to ' . $envelope['plugin'] . ': ' . $e->getMessage());
+			$answer = null;
 		}
-		$body = json_encode($envelope, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-		$raw = '';
-		$too_large = false;
-		$ch = curl_init('http://sandbox-host/call');
-		curl_setopt_array($ch, array(
-			CURLOPT_UNIX_SOCKET_PATH => self::socketPath(),
-			CURLOPT_POST             => true,
-			CURLOPT_POSTFIELDS       => $body,
-			CURLOPT_HTTPHEADER       => array('Content-Type: application/json'),
-			// Read at most MAX_ANSWER_BYTES; a larger answer aborts the call.
-			CURLOPT_WRITEFUNCTION    => function ($ch, $chunk) use (&$raw, &$too_large) {
-				if (strlen($raw) + strlen($chunk) > self::MAX_ANSWER_BYTES) {
-					$too_large = true;
-					return 0;
-				}
-				$raw .= $chunk;
-				return strlen($chunk);
-			},
-			CURLOPT_CONNECTTIMEOUT_MS => 1000,
-			CURLOPT_TIMEOUT_MS       => (int)$envelope['limits']['timeout_ms'] + self::TRANSPORT_MARGIN_MS,
-		));
-		$ok = curl_exec($ch);
-		$errno = curl_errno($ch);
-		$code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 		$elapsed = (int)round((microtime(true) - $started) * 1000);
-
-		if ($too_large) {
-			return array('status' => SandboxLog::STATUS_ERROR, 'duration_ms' => $elapsed,
-				'message' => 'The plugin\'s answer was larger than ' . (self::MAX_ANSWER_BYTES >> 20) . ' MB, so it was not read.');
-		}
-		if ($errno === CURLE_OPERATION_TIMEDOUT) {
-			return array('status' => SandboxLog::STATUS_TIMEOUT, 'duration_ms' => $elapsed,
-				'message' => 'The plugin did not respond in time.');
-		}
-		if ($ok === false || $code !== 200) {
-			return array('status' => SandboxLog::STATUS_UNAVAILABLE, 'duration_ms' => $elapsed,
-				'message' => 'The plugin host did not answer (' . ($errno ? 'connection error ' . $errno : 'HTTP ' . $code) . ').');
-		}
-		$answer = json_decode((string)$raw, true);
 		if (!is_array($answer)) {
 			return array('status' => SandboxLog::STATUS_ERROR, 'duration_ms' => $elapsed,
-				'message' => 'The plugin host answered with something that is not JSON.');
+				'message' => 'The plugin could not be run.');
 		}
 		$status = !empty($answer['timed_out']) ? SandboxLog::STATUS_TIMEOUT
 			: (!empty($answer['ok']) ? SandboxLog::STATUS_OK : SandboxLog::STATUS_ERROR);
+		$failed = array(
+			SandboxLog::STATUS_TIMEOUT => 'The plugin did not respond in time.',
+			SandboxLog::STATUS_ERROR   => 'The plugin failed.',
+		);
 		return array(
 			'status'      => $status,
 			'output'      => $answer['output'] ?? null,
-			'message'     => $status === SandboxLog::STATUS_OK ? '' : (string)($answer['error'] ?? 'The plugin failed.'),
+			'message'     => $status === SandboxLog::STATUS_OK ? '' : (string)($answer['error'] ?? $failed[$status]),
 			'calls'       => is_array($answer['calls'] ?? null) ? $answer['calls'] : array(),
 			'duration_ms' => isset($answer['duration_ms']) ? (int)$answer['duration_ms'] : $elapsed,
 		);

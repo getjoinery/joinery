@@ -8,7 +8,7 @@
  */
 /**
  * Approval, credentials, signals and schedules for sandboxed plugins
- * (plugin_tiers.md WP5), against a stand-in host.
+ * (plugin_tiers.md WP5), against a stand-in runner.
  *
  * What is pinned here:
  *  - a plugin needing an action, a model, a signal or a platform this site
@@ -17,13 +17,13 @@
  *    approval page lists it in plain words and approves and activates in one;
  *  - activation mints a key scoped to exactly what was approved plus every
  *    verb on its own models, owned by the approver, loopback only, whose
- *    sealed secret the host is handed and which authenticates;
+ *    sealed secret the runner is handed and which authenticates;
  *  - a receiver carries the approved signals, and a raised signal reaches the
- *    module through the queue with its payload; a module failure is retried;
+ *    plugin through the queue with its payload; a plugin failure is retried;
  *  - each approved schedule is a scheduled run, never offered for activation
- *    by hand, which calls the module's on_schedule;
+ *    by hand, which calls the plugin's on_schedule;
  *  - a newer manifest asking for more changes nothing until approved again
- *    (the host is handed only approved hosts), then the key is minted anew;
+ *    (the runner is handed only approved hosts), then the key is minted anew;
  *  - deactivation switches the key, receiver and runs off; reactivation needs
  *    no new approval; the approver's account is held while the key is live,
  *    and the key cannot be deleted or reset from the key pages;
@@ -237,7 +237,7 @@ try {
 	$receivers = iterator_to_array(new MultiSignalReceiver(array('kind' => SignalReceiver::KIND_SANDBOX, 'plugin' => $name)), false);
 	check(count($receivers) === 1 && $receivers[0]->signals() === array($signal) && $receivers[0]->get('sgr_is_active'),
 		'One receiver carries the approved signal');
-	$host = fake_sandbox_host_start(array('on_signal' => array('ok' => true, 'output' => null, 'duration_ms' => 3, 'calls' => array())));
+	$host = sandbox_stand_in_runner(array('on_signal' => array('ok' => true, 'output' => null, 'duration_ms' => 3, 'calls' => array())));
 	SignalDeliveryQueue::reset_cache();
 	SignalDeliveryQueue::handle_signal($signal, array('user_id' => 7, 'email' => 'x@example.com'));
 	$q = $db->prepare('SELECT sgd_signal_delivery_id FROM sgd_signal_deliveries WHERE sgd_sgr_signal_receiver_id = ? ORDER BY sgd_signal_delivery_id DESC LIMIT 1');
@@ -247,20 +247,20 @@ try {
 	$outcome = SignalDeliveryQueue::attempt($delivery, $receivers[0], null);
 	$requests = $host['requests']();
 	$sent = end($requests);
-	check($outcome['result'] === 'delivered', 'and handed to the module', json_encode($outcome));
+	check($outcome['result'] === 'delivered', 'and handed to the plugin', json_encode($outcome));
 	check(($sent['export'] ?? '') === 'on_signal' && ($sent['input']['signal'] ?? '') === $signal
 		&& ($sent['input']['data']['user_id'] ?? null) === 7, 'as on_signal, with its payload', json_encode($sent['input'] ?? null));
 	check(($sent['outbound_hosts'] ?? null) === array('hooks.example.com') && !empty($sent['api']['secret_key'])
 		&& $sent['api']['secret_key'] === $credential['secret_key'], 'with the approved hosts and its credential');
 
-	$host['set_replies'](array('on_signal' => array('ok' => false, 'error' => 'module trapped', 'duration_ms' => 2, 'calls' => array())));
+	$host['set_replies'](array('on_signal' => array('ok' => false, 'error' => 'plugin trapped', 'duration_ms' => 2, 'calls' => array())));
 	SignalDeliveryQueue::handle_signal($signal, array('user_id' => 8));
 	$q->execute(array((int)$receivers[0]->key));
 	$delivery = new SignalDelivery((int)$q->fetchColumn(), TRUE);
 	$outcome = SignalDeliveryQueue::attempt($delivery, $receivers[0], null);
 	$delivery = new SignalDelivery((int)$delivery->key, TRUE);
-	check($outcome['result'] === 'retrying' && strpos((string)$delivery->get('sgd_last_error'), 'module trapped') !== false,
-		'A module failure is retried, and says why', (string)$delivery->get('sgd_last_error'));
+	check($outcome['result'] === 'retrying' && strpos((string)$delivery->get('sgd_last_error'), 'plugin trapped') !== false,
+		'A plugin failure is retried, and says why', (string)$delivery->get('sgd_last_error'));
 	check(empty($outcome['unreachable']), 'and the plugin is tried again in the same pass');
 	$host['set_replies'](array('on_signal' => array('ok' => false, 'timed_out' => true, 'error' => 'too slow', 'duration_ms' => 5000, 'calls' => array())));
 	SignalDeliveryQueue::handle_signal($signal, array('user_id' => 9));
@@ -286,6 +286,42 @@ try {
 		'A run calls on_schedule', json_encode($run));
 	$run = (new SandboxScheduledRun())->run(array('plugin' => $name, 'schedule' => 'not_approved'));
 	check($run['status'] === 'skipped', 'and runs nothing it was not approved for');
+
+	section('With no runner');
+	$stand_in = SandboxHost::$runner;
+	SandboxHost::$runner = null;
+	$run = (new SandboxScheduledRun())->run($tasks[0]->get_task_config());
+	check($run['status'] === 'error' && strpos($run['message'], SandboxHost::NO_RUNNER_MESSAGE) !== false,
+		'A scheduled run is an error that says nothing can run the plugin', json_encode($run));
+	SignalDeliveryQueue::handle_signal($signal, array('user_id' => 10));
+	$q->execute(array((int)$receivers[0]->key));
+	$delivery = new SignalDelivery((int)$q->fetchColumn(), TRUE);
+	$outcome = SignalDeliveryQueue::attempt($delivery, $receivers[0], null);
+	check($outcome['result'] === 'retrying' && !empty($outcome['unreachable']),
+		'A signal is kept and retried, and the plugin is not tried again this pass', json_encode($outcome));
+	SandboxHost::$runner = $stand_in;
+
+	section('Listed as code that is not ours');
+	// What root records for one our key did not sign (utils/install_extension.php).
+	Plugin::updateColumns((int)Plugin::get_by_plugin_name($name)->key, array('plg_trust' => 'sandboxed'));
+	$event = new EventLog(NULL);
+	$event->set('evl_event', 'sandboxed_package_installed');
+	$event->set('evl_usr_user_id', (int)$superadmin->key);
+	$event->set('evl_was_success', true);
+	$event->set('evl_note', "type=plugin kind=sandboxed name=$name version=1.0.0 trust=sandboxed approved_by=Harness Approver ip=127.0.0.1 at=now verdict=unsigned");
+	$event->save();
+	harness_defer(function () use ($db, $event) {
+		$db->prepare('DELETE FROM evl_event_logs WHERE evl_event_log_id = ?')->execute(array((int)$event->key));
+	});
+	$row = VaultHealth::checkUnsignedExtensions();
+	check($row['state'] === 'unmet' && strpos($row['reason'], $name) !== false,
+		'The vault health row for unsigned plugins names it', $row['reason']);
+	require_once(PathHelper::getIncludePath('adm/logic/admin_updates_logic.php'));
+	$listed = array_values(array_filter(admin_updates_sideloaded(), function ($item) use ($name) {
+		return $item['type'] === 'plugin' && $item['name'] === $name;
+	}));
+	check(count($listed) === 1 && $listed[0]['trust'] === 'sandboxed' && ($listed[0]['approval']['who'] ?? '') === 'Harness Approver',
+		'The Updates page lists it as sandboxed, with who approved it', json_encode($listed));
 
 	section('A newer version asking for more');
 	$old_key = (int)$key->key;
@@ -327,7 +363,7 @@ try {
 	$task = new ScheduledTask((int)$tasks[0]->key, TRUE);
 	check(!$key->get('apk_is_active') && !$receiver->get('sgr_is_active') && !$task->get('sct_is_active'),
 		'Deactivating switches its key, receiver and run off');
-	check(SandboxInstall::credentialFor($name) === null, 'and the host gets no credential');
+	check(SandboxInstall::credentialFor($name) === null, 'and the runner gets no credential');
 	$pm->activate($name);
 	$reset();
 	$receiver = new SignalReceiver((int)$receivers[0]->key, TRUE);

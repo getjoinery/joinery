@@ -4,6 +4,9 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.12 - Takes the retired sandboxed-plugin runner off the machine: its service or keepalive, socket
+#                folder, binary and system user, and each plugin folder of the shape it ran
+#                (specs/wasm_plugins_removal.md WP5). Temporary: it goes once every node is clean.
 # Version: 1.11 - The converger's log block also names a site container's, in its state volume
 #                (/var/lib/joinery/sites/SITENAME/host_converger.log); the 11-08 rendering is an earlier rendering
 # Version: 1.10 - The converger's log is root's, /var/log/joinery/host_converger.SITENAME.log, rotated without su;
@@ -512,6 +515,150 @@ else
     else
         warn "the code matches neither the release manifest at the site root nor the kept copy; the agent refuses scripts until the next upgrade"
         mkdir -p "${HELD}" && printf '%s\n' "${PAIR_KEY}" > "${HELD}/unmatched"
+    fi
+fi
+
+# --- the retired sandboxed-plugin runner (temporary) -----------------------------
+# Sandboxed plugins were once a manifest beside one .wasm file, run by a
+# program of ours (sandbox-host, as the user joinery-sbx) that
+# install_sandbox_host.sh installed per site. That program and its installer
+# are gone from the release, and nothing else would stop it or take it off the
+# machine, so this does (specs/wasm_plugins_removal.md WP5). Before the code
+# check below, so a leftover plugin folder is gone before it is counted as
+# unsigned code. Silent when there is nothing to do. This stanza is removed
+# once every managed node is clean.
+#
+# A fixture run (FS_ROOT set) never runs a machine command: it hands each to
+# JOINERY_SITE_HOUSEKEEPING_RUN, when a test names one, and carries on.
+old_runner_cmd() {
+    if [[ -n "${FS_ROOT}" ]]; then
+        [[ -n "${JOINERY_SITE_HOUSEKEEPING_RUN:-}" ]] && "${JOINERY_SITE_HOUSEKEEPING_RUN}" "$@"
+        return 0
+    fi
+    "$@"
+}
+OLD_RUNNER_USER="joinery-sbx"
+OLD_RUNNER_UNIT="joinery-sandbox-host-${SITENAME}"
+OLD_RUNNER_UNIT_FILE="${FS_ROOT}/etc/systemd/system/${OLD_RUNNER_UNIT}.service"
+OLD_RUNNER_CRON="${FS_ROOT}/etc/cron.d/joinery-sandbox-host-${SITENAME}"
+OLD_RUNNER_DIR="${SITE_ROOT}/run/sandbox-host"
+
+if [[ -e "${OLD_RUNNER_UNIT_FILE}" || -L "${OLD_RUNNER_UNIT_FILE}" ]]; then
+    old_runner_cmd systemctl disable --now "${OLD_RUNNER_UNIT}" > /dev/null 2>&1 || true
+    if rm -f -- "${OLD_RUNNER_UNIT_FILE}"; then
+        old_runner_cmd systemctl daemon-reload > /dev/null 2>&1 || true
+        say "stopped and removed ${OLD_RUNNER_UNIT}: nothing runs a sandboxed plugin on this machine"
+    else
+        warn "could not remove ${OLD_RUNNER_UNIT_FILE}"; FAILED=1
+    fi
+fi
+if [[ -e "${OLD_RUNNER_CRON}" || -L "${OLD_RUNNER_CRON}" ]]; then
+    # Where there is no systemd a keepalive started it; with the keepalive gone
+    # the program it started is stopped by its socket's path, which is this site's.
+    if rm -f -- "${OLD_RUNNER_CRON}"; then
+        old_runner_cmd pkill -u "${OLD_RUNNER_USER}" -f -- "-socket ${OLD_RUNNER_DIR}/host.sock" > /dev/null 2>&1 || true
+        say "removed the sandboxed-plugin runner's keepalive and stopped what it started"
+    else
+        warn "could not remove ${OLD_RUNNER_CRON}"; FAILED=1
+    fi
+fi
+for old_runner_file in "${FS_ROOT}/usr/local/bin/joinery-sandbox-host-supervise-${SITENAME}" \
+        "${FS_ROOT}/var/log/joinery-sandbox-host-${SITENAME}.log"; do
+    if [[ -e "${old_runner_file}" || -L "${old_runner_file}" ]]; then
+        rm -f -- "${old_runner_file}" && say "removed ${old_runner_file}" \
+            || { warn "could not remove ${old_runner_file}"; FAILED=1; }
+    fi
+done
+# The socket's folder. No trailing slash: were it a link, rm removes the link
+# and never what it points at. Were its parent a link, the folder is somewhere
+# else's and is left.
+if [[ -L "${SITE_ROOT}/run" ]]; then
+    warn "${SITE_ROOT}/run is a link - the sandboxed-plugin runner's socket folder is left in place"
+elif [[ -e "${OLD_RUNNER_DIR}" || -L "${OLD_RUNNER_DIR}" ]]; then
+    rm -rf -- "${OLD_RUNNER_DIR}" && say "removed ${OLD_RUNNER_DIR}" \
+        || { warn "could not remove ${OLD_RUNNER_DIR}"; FAILED=1; }
+fi
+# Its parent was made for it and holds nothing else of the platform's: gone
+# once empty (rmdir removes neither a link nor a folder with anything in it).
+if [[ -d "${SITE_ROOT}/run" && ! -L "${SITE_ROOT}/run" ]]; then
+    rmdir -- "${SITE_ROOT}/run" 2> /dev/null && say "removed ${SITE_ROOT}/run (empty)"
+fi
+
+# Each plugin folder of the shape that program ran: exactly a regular
+# manifest.json and one regular *.wasm, nothing else (the removed installer's
+# has_sandboxed_plugin test). No release ships one and a deploy keeps any
+# plugin folder a release does not ship, so nothing else removes it. Root is
+# deleting from a tree the web user may write, so a link is never followed: a
+# folder that is a link, or whose manifest or module is one, is left and
+# named; the folder must resolve to a place directly inside plugins/; the two
+# files are removed by name from inside the folder itself, and the folder with
+# rmdir. Never a recursive delete.
+OLD_RUNNER_PLUGINS="${SITE_ROOT}/public_html/plugins"
+OLD_RUNNER_PLUGINS_REAL="$(realpath -e -- "${OLD_RUNNER_PLUGINS}" 2>/dev/null)"
+if [[ -n "${OLD_RUNNER_PLUGINS_REAL}" && -d "${OLD_RUNNER_PLUGINS_REAL}" ]]; then
+    for old_plugin in "${OLD_RUNNER_PLUGINS}"/*; do
+        [[ -d "${old_plugin}" ]] || continue
+        old_name="$(basename -- "${old_plugin}")"
+        mapfile -t old_entries < <(find "${old_plugin}/" -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null | sort)
+        [[ "${#old_entries[@]}" == 2 ]] || continue
+        old_module=""
+        if [[ "${old_entries[0]}" == "manifest.json" && "${old_entries[1]}" == *.wasm ]]; then
+            old_module="${old_entries[1]}"
+        elif [[ "${old_entries[1]}" == "manifest.json" && "${old_entries[0]}" == *.wasm ]]; then
+            old_module="${old_entries[0]}"
+        fi
+        [[ -n "${old_module}" ]] || continue
+        if [[ -L "${old_plugin}" ]]; then
+            warn "plugins/${old_name} looks like a retired sandboxed plugin but is a link - left in place"
+            continue
+        fi
+        if [[ -L "${old_plugin}/manifest.json" || ! -f "${old_plugin}/manifest.json" \
+                || -L "${old_plugin}/${old_module}" || ! -f "${old_plugin}/${old_module}" ]]; then
+            warn "plugins/${old_name} looks like a retired sandboxed plugin but holds a link or something that is not a file - left in place"
+            continue
+        fi
+        if [[ "$(realpath -e -- "${old_plugin}" 2>/dev/null)" != "${OLD_RUNNER_PLUGINS_REAL}/${old_name}" ]]; then
+            warn "plugins/${old_name} looks like a retired sandboxed plugin but is not directly inside plugins/ - left in place"
+            continue
+        fi
+        # From inside the folder, once it is known to be the one checked: the
+        # names are removed where this shell stands, whatever the path
+        # becomes meanwhile.
+        if (cd -P -- "${old_plugin}" 2>/dev/null && [[ "$(pwd -P)" == "${OLD_RUNNER_PLUGINS_REAL}/${old_name}" ]] \
+                && rm -f -- ./manifest.json "./${old_module}") && rmdir -- "${old_plugin}" 2>/dev/null; then
+            say "removed plugins/${old_name}: a sandboxed plugin of a shape nothing runs any more"
+        else
+            warn "could not remove plugins/${old_name}"; FAILED=1
+        fi
+    done
+fi
+
+# The machine's share, once no site on it has the program's service or
+# keepalive left: the binary and its user.
+if ! compgen -G "${FS_ROOT}/etc/systemd/system/joinery-sandbox-host-*.service" > /dev/null \
+        && ! compgen -G "${FS_ROOT}/etc/cron.d/joinery-sandbox-host-*" > /dev/null; then
+    if [[ -e "${FS_ROOT}/usr/local/bin/sandbox-host" || -L "${FS_ROOT}/usr/local/bin/sandbox-host" ]]; then
+        rm -f -- "${FS_ROOT}/usr/local/bin/sandbox-host" && say "removed /usr/local/bin/sandbox-host" \
+            || { warn "could not remove /usr/local/bin/sandbox-host"; FAILED=1; }
+    fi
+    if [[ -n "${FS_ROOT}" ]]; then
+        grep -q "^${OLD_RUNNER_USER}:" "${FS_ROOT}/etc/passwd" 2>/dev/null && old_runner_user_exists=1 || old_runner_user_exists=0
+    else
+        getent passwd "${OLD_RUNNER_USER}" > /dev/null 2>&1 && old_runner_user_exists=1 || old_runner_user_exists=0
+    fi
+    if [[ "${old_runner_user_exists}" == 1 ]]; then
+        # userdel refuses a user with a process, so anything still running as it goes first.
+        old_runner_cmd pkill -KILL -u "${OLD_RUNNER_USER}" > /dev/null 2>&1 || true
+        for _ in 1 2 3 4 5; do
+            [[ -n "${FS_ROOT}" ]] && break
+            pgrep -u "${OLD_RUNNER_USER}" > /dev/null 2>&1 || break
+            sleep 1
+        done
+        if old_runner_cmd userdel "${OLD_RUNNER_USER}" > /dev/null 2>&1; then
+            say "removed the user ${OLD_RUNNER_USER}"
+        else
+            warn "could not remove the user ${OLD_RUNNER_USER}"; FAILED=1
+        fi
     fi
 fi
 

@@ -170,7 +170,7 @@ section('A sandboxed plugin: its manifest, never a fork, and it keeps its kind')
 // Off by default on every site (SandboxPlugins::enabled()); on for this test only.
 harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
 
-// Installed: a sandboxed plugin folder (manifest.json and one module).
+// Installed: a sandboxed plugin folder (manifest.json and src/).
 $sbx = 'zzsbxreplace';
 $sbx_dir = PathHelper::getAbsolutePath('plugins') . '/' . $sbx;
 $native_dir = PathHelper::getAbsolutePath('plugins') . '/zznativereplace';
@@ -180,14 +180,15 @@ harness_defer(function () use ($sbx_dir, $native_dir, $rmtree) {
 });
 @mkdir($sbx_dir, 0755, true);
 file_put_contents($sbx_dir . '/manifest.json', json_encode(array('name' => $sbx, 'title' => 'Fixture', 'version' => '1.0.0', 'platform' => 1)));
-file_put_contents($sbx_dir . '/' . $sbx . '.wasm', "\0asm\x01\0\0\0");
+@mkdir($sbx_dir . '/src', 0755, true);
+file_put_contents($sbx_dir . '/src/main.php', "<?php\n");
 SandboxPlugins::reset();
 $sbx_zip = function (string $name, string $version, bool $with_php = false) use ($scratch): string {
 	$path = $scratch . '/' . $name . '-' . bin2hex(random_bytes(3)) . '.zip';
 	$zip = new ZipArchive();
 	$zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
 	$zip->addFromString($name . '/manifest.json', json_encode(array('name' => $name, 'title' => 'Fixture', 'version' => $version, 'platform' => 1, 'author' => 'Fixture Two')));
-	$zip->addFromString($name . '/' . $name . '.wasm', "\0asm\x01\0\0\0");
+	$zip->addFromString($name . '/src/main.php', "<?php\n");
 	$zip->close();
 	return $path;
 };

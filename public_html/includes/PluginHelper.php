@@ -460,8 +460,8 @@ class PluginHelper extends ComponentBase {
             $directories = glob($pluginDir . '/*', GLOB_ONLYDIR);
             foreach ($directories as $dir) {
                 $pluginName = basename($dir);
-                // A sandboxed plugin has no plugin.json and no PHP: native
-                // loading takes nothing from its folder (SandboxPlugins).
+                // A sandboxed plugin has no plugin.json: native loading
+                // takes nothing from its folder (SandboxPlugins).
                 if (SandboxPlugins::isSandboxedDir($dir)) {
                     continue;
                 }

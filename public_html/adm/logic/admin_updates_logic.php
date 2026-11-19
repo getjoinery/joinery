@@ -11,6 +11,7 @@
  * A managed site is updated by its management node, and the origin publishes
  * releases instead of installing them, so neither is offered the button.
  *
+ * @version 1.2 - Installed with Install anyway lists a sandboxed plugin our key did not sign, with its approver
  * @version 1.1 - the offered version is ReleaseProvenance::offered(), shared with the node Updates tab
  * @version 1.0
  */
@@ -61,25 +62,30 @@ function admin_updates_logic(array $input): LogicResult {
 /**
  * Every plugin and theme installed with Install anyway: one that our release
  * key did not sign ('unsigned'), or did sign but that is not in the public
- * log ('unlogged'). Who approved it and when come from the event log row the
+ * log ('unlogged'), or a sandboxed plugin our key did not sign ('sandboxed').
+ * Who approved it and when come from the event log row the
  * installer writes (utils/install_extension.php); a style theme installs
  * without the warning, so it has no approver.
  */
 function admin_updates_sideloaded(): array {
 	$approvals = array();
-	foreach (new MultiEventLog(array('event' => 'unsigned_package_installed'), array('event_log_id' => 'DESC')) as $log) {
-		$note = (string)$log->get('evl_note');
-		if (!preg_match('/^type=(\w+) kind=\w+ name=(\S+) /', $note, $m) || isset($approvals[$m[1] . '/' . $m[2]])) {
-			continue;   // newest first: the first row for a name is its current install
+	// A sandboxed plugin's install is its own event, and a name is one kind
+	// or the other, so the two lists never meet.
+	foreach (array('unsigned_package_installed', 'sandboxed_package_installed') as $event) {
+		foreach (new MultiEventLog(array('event' => $event), array('event_log_id' => 'DESC')) as $log) {
+			$note = (string)$log->get('evl_note');
+			if (!preg_match('/^type=(\w+) kind=\w+ name=(\S+) /', $note, $m) || isset($approvals[$m[1] . '/' . $m[2]])) {
+				continue;   // newest first: the first row for a name is its current install
+			}
+			$approvals[$m[1] . '/' . $m[2]] = array(
+				'who'  => preg_match('/ approved_by=(.*?) ip=/', $note, $w) ? $w[1] : 'installed without the warning (a style theme)',
+				'when' => $log->get_local('evl_create_time'),
+			);
 		}
-		$approvals[$m[1] . '/' . $m[2]] = array(
-			'who'  => preg_match('/ approved_by=(.*?) ip=/', $note, $w) ? $w[1] : 'installed without the warning (a style theme)',
-			'when' => $log->get_local('evl_create_time'),
-		);
 	}
 
 	$out = array();
-	foreach (array('unsigned', 'unlogged') as $trust) {
+	foreach (array('unsigned', 'unlogged', 'sandboxed') as $trust) {
 		foreach (new MultiPlugin(array('plg_trust' => $trust)) as $plugin) {
 			if (!$plugin->plugin_directory_exists()) {
 				continue;
@@ -88,7 +94,7 @@ function admin_updates_sideloaded(): array {
 			$out[] = array('type' => 'plugin', 'name' => $name, 'version' => (string)$plugin->get_version(),
 				'trust' => $trust, 'approval' => $approvals['plugin/' . $name] ?? null);
 		}
-		foreach (new MultiTheme(array('thm_trust' => $trust)) as $theme) {
+		foreach ($trust === 'sandboxed' ? array() : new MultiTheme(array('thm_trust' => $trust)) as $theme) {
 			$name = (string)$theme->get('thm_name');
 			if (!is_dir(PathHelper::getIncludePath('theme/' . $name))) {
 				continue;

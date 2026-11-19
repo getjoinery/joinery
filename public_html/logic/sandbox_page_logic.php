@@ -4,7 +4,7 @@
  * (door 4, plugin_tiers.md WP4): text and forms.
  *
  * GET draws the page. A form submission (POST with `section`, the form's
- * index on the page) is the plugin's to answer through the plugin host, with
+ * index on the page) is the plugin's to answer through SandboxHost, with
  * the member as the user it is told about; the answer is shown on the page
  * and, for an API caller, returned as `result` {ok, status, lines, errors}.
  * The page posts its fields as sbx_{field}; an API caller may send them as

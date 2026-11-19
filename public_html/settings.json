@@ -1077,7 +1077,7 @@
       "name": "sandboxed_plugins_enabled",
       "default": "0",
       "group": "diagnostics",
-      "label": "Allow sandboxed (WebAssembly) plugins",
+      "label": "Allow sandboxed plugins",
       "type": "select",
       "options": {
         "1": "Yes",

@@ -39,7 +39,7 @@ class SandboxPages {
 	}
 
 	/**
-	 * What a UI call came to, as plain text. A module answers {message,
+	 * What a UI call came to, as plain text. A plugin answers {message,
 	 * errors, status}; anything else it returns is shown as nothing more than
 	 * done or not done.
 	 *

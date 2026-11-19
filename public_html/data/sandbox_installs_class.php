@@ -6,7 +6,7 @@
  *
  *   - its API credential: the scoped machine key minted for exactly what its
  *     manifest declares (door 1), and that key's secret, sealed with
- *     SecretBox, because core hands it to the plugin host with every call;
+ *     SecretBox, because core hands it to the plugin's runner with every call;
  *   - what the admin consented to when it was installed or last upgraded
  *     (permissions, signals, schedules, outbound hosts), so an upgrade that
  *     asks for more stops and asks again.
@@ -61,7 +61,7 @@ class SandboxInstall extends SystemBase {
 	}
 
 	/**
-	 * The plugin's API credential as the host needs it, or null when it has
+	 * The plugin's API credential as a call's envelope carries it, or null when it has
 	 * none (not yet activated, revoked) or its secret can no longer be opened.
 	 *
 	 * @return array{public_key:string,secret_key:string}|null

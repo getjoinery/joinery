@@ -191,7 +191,8 @@ if ($sideloaded === array()) {
 			htmlspecialchars($item['name']),
 			htmlspecialchars(ucfirst($item['type'])),
 			htmlspecialchars($item['version']),
-			$item['trust'] === 'unlogged' ? 'Signed by Joinery, but not in the public log' : 'Not signed by Joinery',
+			$item['trust'] === 'unlogged' ? 'Signed by Joinery, but not in the public log'
+				: ($item['trust'] === 'sandboxed' ? 'Not verified as Joinery\'s (a sandboxed plugin)' : 'Not signed by Joinery'),
 			htmlspecialchars($item['approval']['who'] ?? 'not recorded'),
 			htmlspecialchars($item['approval']['when'] ?? ''),
 		));

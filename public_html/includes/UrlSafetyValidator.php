@@ -57,9 +57,9 @@ class UrlSafetyValidator {
      * platform consults this one list — this is the divergence that T13/T21
      * closed. PHP's filter flags in checkIp() cover the private and reserved
      * ranges they know; these tables are what they do not reliably catch. The
-     * addresses each guard must refuse, this one and the Go guards in the
-     * sandboxed plugin host and the relay alike, are listed once in
-     * tests/fixtures/outbound_address_cases.json, which all three tests read.
+     * addresses each guard must refuse, this one and the Go guard in the
+     * relay alike, are listed once in
+     * tests/fixtures/outbound_address_cases.json, which both tests read.
      *
      * @var string[]
      */
@@ -243,7 +243,7 @@ class UrlSafetyValidator {
      * 6to4 2002::/16); false for one refused outright (IPv4-compatible ::/96,
      * IPv4-translated ::ffff:0:0:0/96, the rest of 64:ff9b::/32, the local-use
      * 64:ff9b:1::/48 among it); null for an ordinary IPv6 address. The Go
-     * guards in the sandboxed plugin host and the relay judge the same way.
+     * guard in the relay judges the same way.
      *
      * @return string|false|null
      */

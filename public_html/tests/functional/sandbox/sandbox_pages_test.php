@@ -9,20 +9,20 @@
 /**
  * Manifest-rendered UI (plugin_tiers.md WP4): a sandboxed plugin's admin
  * and profile pages, its menus, its settings, and door 4 (a form the plugin
- * answers through the host), against a stand-in host.
+ * answers through SandboxHost), against a stand-in runner.
  *
  * What is pinned here:
  *  - activation adds the plugin's admin menu (one entry per admin page) and a
  *    member menu entry per profile page, and seeds its declared settings;
  *  - its settings are declarations like any (named sbx_{plugin}__{name}),
  *    pass the declaration schema, save through SettingsWriter on its page,
- *    are validated as declared, and reach the module by their manifest names;
+ *    are validated as declared, and reach the plugin by their manifest names;
  *  - a table section shows the plugin's own rows;
- *  - a form section is sent to the host with exactly the declared fields, the
+ *  - a form section is sent to the runner with exactly the declared fields, the
  *    user who asked, the plugin's limits, settings and declared hosts, and
- *    what the module answers is shown; a module error is shown as one;
- *  - with no host, a slow host, or both UI slots taken, the page says the
- *    plugin did not respond, and the call is logged;
+ *    what the plugin answers is shown; a plugin error is shown as one;
+ *  - with no runner the page says so and the call is logged as unavailable;
+ *    a plugin that ran out of time, or both UI slots taken, is said too;
  *  - a profile form is answered for the member who submitted it.
  *
  * Run: php tests/run.php db --filter=sandbox_pages
@@ -129,7 +129,7 @@ try {
 	$row->execute(array($channel));
 	check($row->fetchColumn() === 'general', 'Defaults are seeded on activation');
 	check(SandboxSettings::values($name) === array('channel' => 'general', 'webhook_url' => '', 'enabled' => '1'),
-		'The module is handed them by their manifest names', json_encode(SandboxSettings::values($name)));
+		'The plugin is handed them by their manifest names', json_encode(SandboxSettings::values($name)));
 
 	$admin = make_user('SbxAdmin', 8);
 	$sign_in($admin);
@@ -142,7 +142,7 @@ try {
 	$forget_settings($name);
 	$values = SandboxSettings::values($name);
 	check($values['channel'] === 'random' && $values['webhook_url'] === 'https://hooks.example.com/abc',
-		'and the module sees the new values', json_encode($values));
+		'and the plugin sees the new values', json_encode($values));
 	$_SESSION['saved_messages'] = array();
 	harness_call_logic($page_logic, 'admin_sandbox_page_logic', array(
 		'plugin' => $name, 'page' => 'main', 'action' => 'settings', $channel => 'x', $secret => 'not a url',
@@ -177,21 +177,23 @@ try {
 	$result = harness_call_logic($page_logic, 'admin_sandbox_page_logic', array('plugin' => $name, 'page' => 'nope'), 'GET');
 	check((bool)$result->error, 'A page it does not declare is refused');
 
-	section('A form with no host');
-	SandboxHost::$socket_override = sys_get_temp_dir() . '/sbx_absent_' . getmypid() . '.sock';
+	section('A form with no runner');
+	check(SandboxHost::$runner === null, 'The platform sets no runner');
 	$_SESSION['saved_messages'] = array();
 	harness_call_logic($page_logic, 'admin_sandbox_page_logic', array(
 		'plugin' => $name, 'page' => 'main', 'action' => 'form', 'section' => 2, 'sbx_who' => 'Ann',
 	), 'POST');
 	$m = $last_message();
-	check($m['type'] === DisplayMessage::MESSAGE_WARNING && stripos($m['text'], 'did not respond') !== false,
-		'The page says the plugin did not respond', $m['text']);
+	check($m['type'] === DisplayMessage::MESSAGE_WARNING && strpos($m['text'], SandboxHost::NO_RUNNER_MESSAGE) !== false,
+		'The page says nothing can run the plugin', $m['text']);
 	$l = $logs($name);
-	check(count($l) === 1 && $l[0]['sbl_status'] === 'unavailable' && $l[0]['sbl_kind'] === 'ui' && $l[0]['sbl_name'] === 'greet',
-		'and the call is logged as unavailable', json_encode($l));
+	check(count($l) === 1 && $l[0]['sbl_status'] === 'unavailable' && $l[0]['sbl_kind'] === 'ui' && $l[0]['sbl_name'] === 'greet'
+		&& $l[0]['sbl_message'] === SandboxHost::NO_RUNNER_MESSAGE,
+		'and the call is logged as unavailable, saying why', json_encode($l));
+
 
 	section('A form the plugin answers');
-	$host = fake_sandbox_host_start(array('on_ui' => array('ok' => true, 'output' => array('message' => 'Hello, Ann!'),
+	$host = sandbox_stand_in_runner(array('on_ui' => array('ok' => true, 'output' => array('message' => 'Hello, Ann!'),
 		'calls' => array(array('door' => 'log', 'target' => 'info', 'status' => 'ok', 'detail' => 'greeted')), 'duration_ms' => 3)));
 	$_SESSION['saved_messages'] = array();
 	harness_call_logic($page_logic, 'admin_sandbox_page_logic', array(
@@ -199,10 +201,10 @@ try {
 		'sbx_who' => '  Ann ', 'sbx_loud' => '1', 'sbx_mood' => 'calm', 'sbx_extra' => 'not declared',
 	), 'POST');
 	$m = $last_message();
-	check($m['type'] === DisplayMessage::MESSAGE_ANNOUNCEMENT && $m['text'] === 'Hello, Ann!', 'The module\'s answer is shown', $m['text']);
+	check($m['type'] === DisplayMessage::MESSAGE_ANNOUNCEMENT && $m['text'] === 'Hello, Ann!', 'The plugin\'s answer is shown', $m['text']);
 	$sent = $host['requests']();
 	$req = end($sent) ?: array();
-	check(($req['plugin'] ?? '') === $name && ($req['export'] ?? '') === 'on_ui', 'The host is asked to run on_ui for this plugin');
+	check(($req['plugin'] ?? '') === $name && ($req['export'] ?? '') === 'on_ui', 'The runner is asked to run on_ui for this plugin');
 	check(($req['input']['handler'] ?? '') === 'greet', 'with the handler');
 	check(($req['input']['values'] ?? null) === array('who' => 'Ann', 'loud' => true, 'mood' => 'calm'),
 		'only the declared fields, trimmed and typed', json_encode($req['input']['values'] ?? null));
@@ -211,11 +213,11 @@ try {
 	check(($req['settings']['channel'] ?? '') === 'random' && ($req['settings']['webhook_url'] ?? '') === 'https://hooks.example.com/abc',
 		'its settings, the secret opened');
 	check(($req['outbound_hosts'] ?? null) === array('hooks.example.com'), 'its declared hosts');
-	check(substr((string)($req['module'] ?? ''), -12) === '/module.wasm' && is_file($req['module']), 'and its module file');
+	check(!array_key_exists('module', $req), 'and no file path: the runner finds the plugin by its name');
 	$l = $logs($name);
 	$last = end($l);
 	check($last['sbl_status'] === 'ok' && strpos((string)$last['sbl_calls'], 'greeted') !== false && (int)$last['sbl_usr_user_id'] === (int)$admin->key,
-		'The call is logged with what the module did', json_encode($last));
+		'The call is logged with what the plugin did', json_encode($last));
 
 	$host['set_replies'](array('on_ui' => array('ok' => true, 'output' => array('status' => 'error', 'errors' => array('who' => 'Too short')))));
 	$_SESSION['saved_messages'] = array();
@@ -223,7 +225,7 @@ try {
 		'plugin' => $name, 'page' => 'main', 'action' => 'form', 'section' => 2, 'sbx_who' => 'A',
 	), 'POST');
 	$m = $last_message();
-	check($m['type'] === DisplayMessage::MESSAGE_WARNING && strpos($m['text'], 'who: Too short') !== false, 'A module error is shown as one', $m['text']);
+	check($m['type'] === DisplayMessage::MESSAGE_WARNING && strpos($m['text'], 'who: Too short') !== false, 'A plugin error is shown as one', $m['text']);
 
 	// The admin renderer escapes a message, so an admin's carries plain text.
 	$host['set_replies'](array('on_ui' => array('ok' => true, 'output' => array('message' => "Tom's <b>list</b>"))));
@@ -231,18 +233,26 @@ try {
 	harness_call_logic($page_logic, 'admin_sandbox_page_logic', array(
 		'plugin' => $name, 'page' => 'main', 'action' => 'form', 'section' => 2, 'sbx_who' => 'Tom',
 	), 'POST');
-	check($last_message()['text'] === "Tom's <b>list</b>", 'An admin\'s message is the module\'s plain text, escaped once by its renderer', $last_message()['text']);
+	check($last_message()['text'] === "Tom's <b>list</b>", 'An admin\'s message is the plugin\'s plain text, escaped once by its renderer', $last_message()['text']);
 
-	$host['set_replies'](array('on_ui' => array('ok' => true, 'output' => array('message' => 'late'), 'sleep_ms' => 2800)));
+	$host['set_replies'](array('on_ui' => array('ok' => false, 'timed_out' => true, 'duration_ms' => 400)));
 	$_SESSION['saved_messages'] = array();
-	$started = microtime(true);
 	harness_call_logic($page_logic, 'admin_sandbox_page_logic', array(
 		'plugin' => $name, 'page' => 'main', 'action' => 'form', 'section' => 2, 'sbx_who' => 'Ann',
 	), 'POST');
-	$waited = microtime(true) - $started;
 	$m = $last_message();
-	check(stripos($m['text'], 'did not respond in time') !== false, 'A plugin slower than its limit is cut off', $m['text']);
-	check($waited < 2.8, 'within its limit plus the margin, not however long it takes', sprintf('%.2fs', $waited));
+	check(stripos($m['text'], 'did not respond in time') !== false, 'A plugin its runner cut off for time is said to have not responded in time', $m['text']);
+	$l = $logs($name);
+	check(end($l)['sbl_status'] === 'timeout', 'and logged as a timeout', json_encode(end($l)));
+
+	$host['set_replies'](array('on_ui' => 'not an answer'));
+	$result = SandboxHost::ui($name, 'greet', array(), $admin);
+	check($result['status'] === SandboxLog::STATUS_ERROR, 'A runner that returns no answer is an error, not a success', json_encode($result));
+	SandboxHost::$runner = function () { throw new RuntimeException('boom'); };
+	$result = SandboxHost::ui($name, 'greet', array(), $admin);
+	check($result['status'] === SandboxLog::STATUS_ERROR && strpos($result['message'], 'boom') === false,
+		'nor is one that throws, and what it threw is not shown', json_encode($result));
+	$host = sandbox_stand_in_runner(array('on_ui' => array('ok' => true, 'output' => array('message' => 'Noted.'))));
 
 	section('Two UI calls at once, and no more');
 	$dir = rtrim(PathHelper::getSiteRoot(), '/') . '/cache/sandbox';

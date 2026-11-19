@@ -6,7 +6,7 @@
  * native plugins use (SettingsDeclarations), stored as rows in stg_settings
  * named sbx_{plugin}__{name}. So the settings form (SettingsFieldRenderer), the
  * one writer (SettingsWriter), Setting::put() and the sealing of secrets all
- * apply to them unchanged. The module never reads the table: core hands it the
+ * apply to them unchanged. The plugin never reads the table: core hands it the
  * values it declared, per call (values()).
  *
  * @version 1.0
@@ -109,7 +109,7 @@ class SandboxSettings {
 	}
 
 	/**
-	 * The values a module is handed with each call: every setting its
+	 * The values a plugin is handed with each call: every setting its
 	 * manifest declares, by its manifest name, secrets opened. A secret that
 	 * cannot be opened is handed as empty.
 	 *

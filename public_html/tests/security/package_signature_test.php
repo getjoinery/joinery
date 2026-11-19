@@ -25,6 +25,7 @@
  *                an edit (reviewer2 F1, F4)
  * @version 1.2 - editedSinceInstall(): a changed, added or removed file is an edit and is named; unsigned
  *                and a stranger's key are not; one answer per request (specs/local_edits_detected.md)
+ * @version 1.5 - verifyTree() counts an unsigned sandboxed plugin as unsigned code
  * @version 1.4 - verifyTree(): a core manifest of another release than the code is wrong_release; a changed
  *                file beside this release's manifest stays tampered
  * @version 1.3 - verifyTree() hands back the core package's verdict
@@ -267,22 +268,21 @@ exec('cp -a ' . escapeshellarg($tree . '/public_html/plugins/good') . ' ' . esca
 $put($tree . '/public_html/theme/looks', array('theme.json' => '{"name":"looks","styles":["css/a.css"]}', 'css/a.css' => "body{}\n"));
 // Data folders and config/ are never walked: whatever is in them is not code the check owns.
 $put($tree, array('uploads/x.php' => "<?php evil();\n", 'config/anything.php' => "<?php\n", 'static_files/y.php' => "<?php\n"));
-// A sandboxed plugin: exactly a manifest and one module, nothing that runs in PHP.
-$put($tree . '/public_html/plugins/notify', array('manifest.json' => '{"name":"notify"}', 'notify.wasm' => "\0asm\x01\0\0\0"));
 $style = null;
-$sandboxed = null;
 $core_verdict = null;
-$f = PackageSignature::verifyTree($tree, $keys_file, $style, $sandboxed, $core_verdict);
+$passed_over = null;
+$f = PackageSignature::verifyTree($tree, $keys_file, $style, $passed_over, $core_verdict);
 check($core_verdict instanceof PackageVerdict && $core_verdict->signed() && $core_verdict->root === '',
 	'the core package\'s verdict is handed back, for the code check to write the set it leaves');
 check($f === array(), 'a node-shaped tree of signed packages verifies, data folders and config/ never walked',
 	json_encode(array_map(function ($x) { return $x['what'] . ': ' . $x['verdict']->line(); }, $f)));
+check($passed_over === array(), 'the fourth argument keeps its place for the code check of the release before, and is handed back empty');
 check($style === array('looks'), 'an unsigned style theme is not a failure, and is named as passed over', json_encode($style));
-check($sandboxed === array('notify'), 'nor is a sandboxed plugin, named as passed over', json_encode($sandboxed));
 
 $put($tree . '/public_html/plugins/evil', array('plugin.json' => '{"name":"evil"}'));
-// One file more than a sandboxed plugin holds makes it a native one, judged as one.
-$put($tree . '/public_html/plugins/notmod', array('manifest.json' => '{"name":"notmod"}', 'notmod.wasm' => "\0asm", 'run.php' => "<?php\n"));
+// A sandboxed plugin (manifest.json and src/) is code like any other: unsigned, it is a failure.
+$put($tree . '/public_html/plugins/notify', array('manifest.json' => '{"name":"notify"}', 'src/main.php' => "<?php\n"));
+check(SandboxPlugins::isSandboxedDir($tree . '/public_html/plugins/notify'), 'the fixture folder is a sandboxed plugin');
 $put($tree . '/public_html/theme/pagey', array('theme.json' => '{"name":"pagey"}', 'index.php' => "<?php\n"));
 file_put_contents($tree . '/public_html/plugins/loose.php', "<?php\n");
 file_put_contents($tree . '/public_html/plugins/good/includes/G.php', "<?php class G { /* x */ }\n");
@@ -296,9 +296,9 @@ check($got === array(
 		'plugin evil' => 'unsigned',
 		'plugin good' => 'tampered includes/G.php',
 		'plugin loose.php' => 'extra_file',
-		'plugin notmod' => 'unsigned',
+		'plugin notify' => 'unsigned',
 		'theme pagey' => 'unsigned',
-	), 'every failure is listed, one per package: an added core file, an unsigned plugin and page theme, a module folder with PHP in it, an edited plugin, a loose file',
+	), 'every failure is listed, one per package: an added core file, an unsigned plugin and page theme, an unsigned sandboxed plugin, an edited plugin, a loose file',
 	json_encode($got));
 
 // A container recreated from an older image: upgraded code beside the older
@@ -310,7 +310,7 @@ $put($older, array('public_html/VERSION' => "0.8.492\n", 'public_html/RELEASE_ST
 TreeManifestPublisher::write($older, $older, $keys);
 $put($older, array('public_html/VERSION' => "0.8.494\n", 'public_html/RELEASE_STATEMENT' => "{\"new\":1}\n"));
 $core_verdict = null;
-$f = PackageSignature::verifyTree($older, $keys_file, $style, $sandboxed, $core_verdict);
+$f = PackageSignature::verifyTree($older, $keys_file, $style, $passed_over, $core_verdict);
 check(count($f) === 1 && $f[0]['kind'] === 'core' && $f[0]['verdict']->verdict === PackageSignature::WRONG_RELEASE
 	&& $f[0]['verdict']->file === 'public_html/VERSION' && strpos($f[0]['verdict']->detail, 'release 0.8.494') !== false
 	&& $core_verdict->verdict === PackageSignature::WRONG_RELEASE && !$core_verdict->signed(),

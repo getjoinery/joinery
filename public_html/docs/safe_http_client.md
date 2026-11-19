@@ -15,9 +15,9 @@ the default so that safety is not a per-callsite discipline nobody keeps.
   6to4) is judged as that address; IPv4-compatible, IPv4-translated, Teredo
   and site-local addresses are refused outright. The addresses it must refuse
   and the public ones it must allow are listed once in
-  `tests/fixtures/outbound_address_cases.json`; the Go guards in the sandboxed
-  plugin host and the mail relay are tested against the same list, so a range
-  one learns cannot stay open in another.
+  `tests/fixtures/outbound_address_cases.json`; the Go guard in the mail relay
+  is tested against the same list, so a range one learns cannot stay open in
+  the other.
 - **Connection pinned to the validated IPs** via `CURLOPT_RESOLVE` — the real
   hostname is still used for SNI, Host and certificate verification, but the
   socket cannot be re-resolved to a rebinding target between the check and the

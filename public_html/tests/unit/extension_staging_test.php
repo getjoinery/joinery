@@ -187,6 +187,22 @@ check($staged_pub !== false && $staged_pub > $staged_restr && $staged_pub < strp
 $disk_restr = strpos($byname_branch, $restricted);
 check($disk_restr !== false && $disk_restr < strpos($byname_branch, "in_array((string)\$existing->get(\$trust_column), array('unsigned', 'unlogged'), true)"),
 	'from disk: the restriction is asked before a row saying unsigned is taken as an acknowledgement');
+// A row saying 'sandboxed' may be one written with no warning answered, so it is no acknowledgement.
+check(strpos($byname_branch, "array('unsigned', 'unlogged', 'sandboxed')") === false,
+	'from disk: a row saying sandboxed is not taken as an acknowledgement');
+// A sandboxed plugin (manifest.json and src/) is code: the kind decides how it
+// is recorded, never whether the warning or the host's restriction applies.
+// The only kind that goes ahead of the restriction is a style theme.
+foreach (array('staged' => array($staged_branch, $staged_restr), 'from disk' => array($byname_branch, $disk_restr)) as $form => $pair) {
+	$ahead = substr($pair[0], 0, (int)$pair[1]);
+	$ahead = substr($ahead, (int)strrpos($ahead, 'if (!$verdict->signed()) {'));
+	check($pair[1] !== false && strpos($ahead, "'sandboxed'") === false && substr_count($ahead, '$kind ===') === 1,
+		"$form: an unsigned sandboxed plugin has no way ahead of the host's restriction or the warning");
+}
+check(strpos($staged_branch, "\$trust = \$kind === 'sandboxed' ? 'sandboxed' : \$restricted;") > strpos($staged_branch, '} elseif (!$acknowledged) {'),
+	'staged: it is recorded sandboxed only on the branch the owner\'s acknowledgement reaches');
+check(strpos($installer, "\$quiet = \$kind === 'style';") !== false,
+	'and its install is told to every superadmin: only a style theme installs quietly');
 $refusal_exits = 0;
 foreach (explode('HostRestrictions::unsignedRefusal()', $installer) as $n => $after) {
 	if ($n > 0 && strpos(substr($after, 0, 120), 'exit(EXIT_UNVERIFIED);') !== false) { $refusal_exits++; }

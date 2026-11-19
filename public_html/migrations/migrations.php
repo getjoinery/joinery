@@ -2058,3 +2058,14 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE pac_page_contents SET pac_config = jsonb_set(pac_config::jsonb, '{html}', to_jsonb('<h2>Your email address is confirmed.</h2><p>Thank you. You can sign in now and carry on where you left off.</p><p><a href=\"/login\">Sign in</a></p>'::text)) WHERE pac_config::text LIKE '%retreats happening all around the world%';";
 	$migrations[] = $migration;
+
+	// A sandboxed plugin is a folder of manifest.json and src/. One installed
+	// in any earlier shape is no longer recognised, so it is uninstalled here
+	// while its row still says what it owned (specs/wasm_plugins_removal.md
+	// WP3). A site with none does nothing. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '241';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'sandboxed_plugins_old_shape_removed.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

@@ -12,11 +12,11 @@
  *   - activation refuses while the manifest asks for anything not approved
  *     (needsApproval()), naming it.
  *
- * Grants (grantsOf()) are what a module can reach beyond itself: API actions
+ * Grants (grantsOf()) are what a plugin can reach beyond itself: API actions
  * and other plugins' or core records (door 1), signals (door 2), scheduled
  * runs (door 3), outbound hosts (door 5), and pages it adds to members' menus
  * (door 4: a member page's form asks members for whatever it likes, and the
- * answers go to the module). Its own models, admin pages and settings are its
+ * answers go to the plugin). Its own models, admin pages and settings are its
  * own, shown but not separately granted.
  *
  * An approval stands while the admin who gave it can: a superadmin, not

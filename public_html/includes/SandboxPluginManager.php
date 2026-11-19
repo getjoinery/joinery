@@ -73,13 +73,6 @@ class SandboxPluginManager {
 			return array('valid' => false, 'errors' => array($e->getMessage()), 'warnings' => array());
 		}
 		$errors = array_merge($errors, self::modelCollisions($manifest), SandboxCompatibility::problems($manifest));
-		// The module answers what the manifest says it will, and asks the
-		// host for nothing it does not give (SandboxModule).
-		try {
-			$errors = array_merge($errors, SandboxModule::fromFile(SandboxPlugins::wasmPath($name))->problems($manifest));
-		} catch (SandboxModuleException $e) {
-			$errors[] = $e->getMessage();
-		}
 		return array('valid' => empty($errors), 'errors' => $errors, 'warnings' => array());
 	}
 

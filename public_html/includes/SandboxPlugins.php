@@ -2,16 +2,18 @@
 /**
  * SandboxPlugins — which plugins in plugins/ are sandboxed, and their manifests.
  *
- * A folder is a sandboxed plugin when it holds exactly two files, the manifest
- * (manifest.json) and one WebAssembly module (*.wasm), and nothing else: no
- * other file, no folder. Anything else is a native plugin and is judged as
- * one (plugin_tiers.md Q11). The kind is always read from the folder,
- * never from what a package or a row says about itself, so a sandboxed plugin
- * cannot become PHP without being judged as PHP.
+ * A folder is a sandboxed plugin when it holds exactly two entries, the
+ * manifest (manifest.json, a regular file) and the plugin's code folder (src/,
+ * a real directory), and nothing else at the top level. Neither may be a
+ * link. Anything else is a native plugin and is judged as one
+ * (plugin_tiers.md Q11). The kind is always read from the folder, never from
+ * what a package or a row says about itself.
  *
  * Native plugin loading skips sandboxed folders (PluginHelper), so nothing in
  * one is ever included; this class is how the sandboxed tier finds them.
+ * Nothing here reads what src/ holds.
  *
+ * @version 1.2 - the shape is manifest.json and src/
  * @version 1.1 - enabled(): the sandboxed_plugins_enabled setting, off by default, gates upload, install,
  *               approval and activation
  * @version 1.0
@@ -24,7 +26,7 @@ class SandboxPlugins {
 
 	/** What a refused upload, install, approval or activation says. */
 	const OFF_MESSAGE = 'Sandboxed plugins are switched off on this site. They are experimental; '
-		. 'a superadmin can allow them under Settings ("Allow sandboxed (WebAssembly) plugins").';
+		. 'a superadmin can allow them under Settings ("Allow sandboxed plugins").';
 
 	/**
 	 * Whether this site allows a sandboxed plugin to be uploaded, installed,
@@ -48,6 +50,9 @@ class SandboxPlugins {
 	private static $active_cache = null;
 	private static $installed_cache = null;
 
+	/** The folder that holds a sandboxed plugin's code. */
+	const SOURCE_DIR = 'src';
+
 	/** The plugins/ directory. */
 	public static function baseDir(): string {
 		return rtrim(PathHelper::getIncludePath('plugins'), '/');
@@ -58,8 +63,9 @@ class SandboxPlugins {
 	}
 
 	/**
-	 * Whether a folder is a sandboxed plugin: exactly manifest.json and one
-	 * *.wasm file, both regular files (not links), and nothing else.
+	 * Whether a folder is a sandboxed plugin: exactly manifest.json (a
+	 * regular file) and src/ (a real directory), neither a link, and nothing
+	 * else.
 	 */
 	public static function isSandboxedDir(string $path): bool {
 		$path = rtrim($path, '/');
@@ -81,40 +87,29 @@ class SandboxPlugins {
 		$entries = array_values(array_diff($entries, array('.', '..')));
 		return self::namesAreSandboxed($entries, function ($entry) use ($path) {
 			$full = $path . '/' . $entry;
-			return is_file($full) && !is_link($full);
+			if (is_link($full)) {
+				return 'link';
+			}
+			return is_file($full) ? 'file' : (is_dir($full) ? 'dir' : 'other');
 		});
 	}
 
 	/**
-	 * The contents rule on a list of names, for a folder or a package's file
-	 * list. $is_plain_file says whether a name is a regular file.
+	 * The contents rule on a list of top-level names, for a folder or a
+	 * package's file list. $kind_of says what a name is: 'file' for a regular
+	 * file, 'dir' for a real directory, anything else for a link or a thing
+	 * that is neither.
 	 */
-	public static function namesAreSandboxed(array $names, callable $is_plain_file): bool {
-		if (count($names) !== 2 || !in_array(SandboxManifest::FILE, $names, true)) {
+	public static function namesAreSandboxed(array $names, callable $kind_of): bool {
+		sort($names);
+		if ($names !== array(SandboxManifest::FILE, self::SOURCE_DIR)) {
 			return false;
 		}
-		$wasm = array_values(array_diff($names, array(SandboxManifest::FILE)));
-		if (!preg_match('~^[A-Za-z0-9_-]{1,60}\.wasm$~D', $wasm[0])) {
-			return false;
-		}
-		return $is_plain_file(SandboxManifest::FILE) && $is_plain_file($wasm[0]);
+		return $kind_of(SandboxManifest::FILE) === 'file' && $kind_of(self::SOURCE_DIR) === 'dir';
 	}
 
 	public static function isSandboxed(string $name): bool {
 		return preg_match(SandboxManifest::NAME_PATTERN, $name) === 1 && self::isSandboxedDir(self::dirFor($name));
-	}
-
-	/** The module file of a sandboxed plugin, or null. */
-	public static function wasmPath(string $name): ?string {
-		if (!self::isSandboxed($name)) {
-			return null;
-		}
-		foreach (scandir(self::dirFor($name)) as $entry) {
-			if (substr($entry, -5) === '.wasm') {
-				return self::dirFor($name) . '/' . $entry;
-			}
-		}
-		return null;
 	}
 
 	/**

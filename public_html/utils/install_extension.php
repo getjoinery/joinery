@@ -68,6 +68,10 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.15 - a sandboxed plugin (manifest.json and src/) is code like any other: unsigned, it is refused
+ *                 on a host that refuses unsigned packages and needs the owner's acknowledgement elsewhere,
+ *                 and every superadmin is told; it is still recorded plg_trust = 'sandboxed'. From disk, a row
+ *                 saying 'sandboxed' is no acknowledgement (earlier ones were written with no warning answered)
  * @version 1.14 - a sandboxed plugin is refused while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.13 - the publishing box refuses an unverified staged plugin or page theme, acknowledged or not:
  *                 it runs host installers without asking who built them (specs/shell_command_audit_wp2_results.md D6)
@@ -76,7 +80,7 @@
  *                 (specs/shell_command_audit.md A8, A9)
  * @version 1.11 - the trusted set a package's release leaves is written once the package is in place, the log
  *                keys before (specs/release_key_rotation.md R1)
- * @version 1.10 - a sandboxed plugin (exactly manifest.json and one .wasm, SandboxPlugins) is its own kind:
+ * @version 1.10 - a sandboxed plugin (SandboxPlugins) is its own kind:
  *                like a style theme it installs without the warning, on any host; its manifest is
  *                validated on root's copy; it is recorded plg_trust = 'sandboxed' with a
  *                sandboxed_package_installed event and no email; it carries no fork mark; a
@@ -467,13 +471,13 @@ function install_extension_approver(int $approved_by, string $approved_ip, int $
  */
 function install_extension_kind(string $type, string $dir): string {
 	if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($dir)) {
-		// Exactly a manifest and one WebAssembly module: nothing in it runs in
-		// the site's PHP, so like a style theme it has nothing to warn about.
+		// Exactly a manifest and a src folder. It is code, so unsigned it is
+		// warned about like any plugin; the kind only says how it is recorded.
 		if (!SandboxPlugins::enabled()) {
 			fwrite(STDERR, 'install_extension: refusing to install a sandboxed plugin. ' . SandboxPlugins::OFF_MESSAGE . "\n");
 			exit(1);
 		}
-		echo "kind: sandboxed (a WebAssembly module and its manifest; nothing in it runs in the site's PHP)\n";
+		echo "kind: sandboxed (a manifest and its src folder; it reaches the site only through what the manifest declares)\n";
 		return 'sandboxed';
 	}
 	if ($type !== 'theme') {
@@ -519,7 +523,7 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 	}
 
 	$site = (string)Globalvars::get_instance()->get_setting('webDir');
-	$quiet = $kind === 'style' || $kind === 'sandboxed';
+	$quiet = $kind === 'style';
 	$note = "type=$type kind=$kind name=$name version=$version trust=$trust"
 		. ($quiet ? ' installed_without_warning=yes' : ' approved_by=' . $approver['who']
 			. ' ip=' . $approver['ip'] . ' at=' . $approver['at'])
@@ -546,7 +550,7 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 		. "\nhow: " . $approver['how'] . "\nwhen: " . $approver['at'] . "\nfrom: " . $approver['ip']
 		. "\nverdict: $verdict_line\n\n"
 		. PackageAcknowledgement::warning($trust === 'unlogged' ? PackageSignature::UNLOGGED : '') . "\n\n"
-		. "It is listed with an " . ($trust === 'unlogged' ? 'Unlogged' : 'Unsigned') . " badge on the admin " . ($type === 'plugin' ? 'Plugins' : 'Themes')
+		. "It is listed with " . ($trust === 'unlogged' ? 'an Unlogged' : ($trust === 'sandboxed' ? 'a Sandboxed' : 'an Unsigned')) . " badge on the admin " . ($type === 'plugin' ? 'Plugins' : 'Themes')
 		. " page. If nobody you know approved this, deactivate it and change every superadmin's password.\n";
 	$sent = 0;
 	foreach (new MultiUser(array('permission_range' => array(10, 10), 'deleted' => FALSE)) as $admin) {
@@ -691,12 +695,7 @@ try {
 			$manifest_file = $dir . '/' . SandboxManifest::FILE;
 			try {
 				SandboxManifest::fromFile($manifest_file, $staged_name);
-				// The module's bytes, read as bytes: exports and imports the
-				// host gives, and no larger than the host will load.
-				foreach (glob($dir . '/*.wasm') ?: array() as $module) {
-					SandboxModule::fromFile($module);
-				}
-			} catch (SandboxManifestException | SandboxModuleException $e) {
+			} catch (SandboxManifestException $e) {
 				fwrite(STDERR, "install_extension: " . $e->getMessage() . "\n");
 				install_extension_rmtree($work);
 				exit(2);
@@ -736,10 +735,7 @@ try {
 			// Signed by us but not shown to be logged is no better than
 			// unsigned: handled the same, recorded as what it is (D6).
 			$restricted = install_extension_restricted_trust($verdict);
-			if ($kind === 'sandboxed') {
-				$trust = 'sandboxed';
-				echo "sandboxed plugin: it reaches the site only through what its manifest declares, so it installs without the warning\n";
-			} elseif ($kind === 'style') {
+			if ($kind === 'style') {
 				$trust = $restricted;
 				echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
 			} elseif (HostRestrictions::has('unsigned_packages')) {
@@ -765,7 +761,8 @@ try {
 				install_extension_rmtree($work);
 				exit(EXIT_UNVERIFIED);
 			} else {
-				$trust = $restricted;
+				// A sandboxed plugin's row says so, whichever of the two it was.
+				$trust = $kind === 'sandboxed' ? 'sandboxed' : $restricted;
 				echo "$restricted $type: installing on the owner's acknowledgement, under the unsigned restrictions\n";
 			}
 		} else {
@@ -925,10 +922,7 @@ try {
 						$existing = $type === 'plugin' ? Plugin::get_by_plugin_name($name) : Theme::get_by_theme_name($name);
 						$trust_column = $type === 'plugin' ? 'plg_trust' : 'thm_trust';
 						$restricted = install_extension_restricted_trust($verdict);
-						if ($kind === 'sandboxed') {
-							$trust = 'sandboxed';
-							echo "sandboxed plugin: it reaches the site only through what its manifest declares, so it installs without the warning\n";
-						} elseif ($kind === 'style') {
+						if ($kind === 'style') {
 							$trust = $restricted;
 							echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
 						} elseif (HostRestrictions::has('unsigned_packages')) {

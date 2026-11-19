@@ -72,7 +72,7 @@
  * @version 1.9 - publish's own code is held: publish_upgrade.php, ReleaseCommit and every *Publisher class run
  *               from this disk, and an uncommitted support bundle list named scripts the commit did not have,
  *               so 0.8.496 shipped with no bundle at all (B70)
- * @version 1.8 - the sandboxed plugin host's source is held and its bin/ is publish's to commit, like the parser jail's
+ * @version 1.8 - a second compiled helper's source is held and its bin/ is publish's to commit, like the parser jail's
  * @version 1.7 - the site container engine's source is held and its ENGINE record is publish's to commit
  *                (specs/site_container_engine.md D1, D2)
  * @version 1.6 - blockerNotes(): what each refusing file is, when it was written, and which session prepared it
@@ -271,7 +271,6 @@ class ReleaseCommit {
 		'public_html/migrations/',                                 // likewise
 		'maintenance_scripts/install_tools/release_keys/',         // copied into the agent bundle from this disk
 		'maintenance_scripts/install_tools/joinery_jail/',         // ParserJailPublisher::SOURCE_SUBDIR, compiled here
-		'maintenance_scripts/install_tools/sandbox_host/',         // SandboxHostPublisher::SOURCE_SUBDIR, compiled here
 		'maintenance_scripts/install_tools/joinery_unseal/',       // UnsealDaemonPublisher::SOURCE_SUBDIR, compiled here
 		'maintenance_scripts/install_tools/site_engine/',          // SiteEnginePublisher::SOURCE_SUBDIR, built here
 		'public_html/plugins/mailbox/provisioning/relay-sealer/',  // RelaySealerPublisher::SOURCE_SUBDIR, compiled here
@@ -664,7 +663,6 @@ class ReleaseCommit {
 	public static function publishWrite($repo_root, $rel) {
 		$rel = ltrim(str_replace('\\', '/', $rel), '/');
 		if (in_array($rel, self::JOINERY_RELEASE_FILES, true) || strpos($rel, ParserJailPublisher::BIN_SUBDIR . '/') === 0
-			|| strpos($rel, SandboxHostPublisher::BIN_SUBDIR . '/') === 0
 			|| strpos($rel, UnsealDaemonPublisher::BIN_SUBDIR . '/') === 0
 			|| $rel === SiteEnginePublisher::SOURCE_SUBDIR . '/' . SiteEnginePublisher::STAMP_FILE) {
 			return true;

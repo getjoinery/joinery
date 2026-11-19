@@ -2,7 +2,7 @@
 /**
  * Manifest-declared data (plugin_tiers.md WP3), over real requests.
  *
- * A throwaway sandboxed plugin — a folder holding manifest.json and one .wasm —
+ * A throwaway sandboxed plugin — a folder holding manifest.json and src/ —
  * goes through the same lifecycle as any plugin (PluginManager install,
  * activate, deactivate, uninstall), and its declared model is used through
  * the record endpoints with a key scoped to it.
@@ -46,9 +46,8 @@ harness_defer(function () use ($name, $dir, $db, $table, $prefix) {
 	$db->exec('DROP SEQUENCE IF EXISTS ' . $table . '_' . $prefix . '_id_seq');
 	$db->prepare('DELETE FROM amu_admin_menus WHERE amu_slug LIKE ?')->execute(array('sbx-' . $name . '%'));
 	$db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($name));
-	foreach (glob($dir . '/*') ?: array() as $file) {
-		@unlink($file);
-	}
+	@unlink($dir . '/manifest.json');
+	@rmdir($dir . '/src');
 	@rmdir($dir);
 });
 
@@ -71,7 +70,7 @@ try {
 		))),
 		'menu' => array('title' => 'HarnessTest items'),
 	), JSON_PRETTY_PRINT));
-	file_put_contents($dir . '/module.wasm', "\0asm\x01\0\0\0");
+	mkdir($dir . '/src', 0755);
 	SandboxPlugins::reset();
 
 	check(SandboxPlugins::isSandboxed($name), 'The folder is a sandboxed plugin');
@@ -135,7 +134,7 @@ try {
 	$r = api_request('PUT', '/api/v1/' . $class . '/' . $id . '?' . $prefix . '_title=Renamed', $h);
 	check($r['status'] === 200 && ($r['json']['data'][$prefix . '_title'] ?? '') === 'Renamed', 'An update saves', substr($r['raw'], 0, 200));
 	check(($r['json']['data'][$prefix . '_update_time'] ?? null) !== null, 'and stamps update_time');
-	// As a module writes through its API door: fields as a JSON object body.
+	// As a plugin writes through its API door: fields as a JSON object body.
 	$r = api_request('POST', '/api/v1/' . $class, $h, array($prefix . '_title' => 'As JSON', $prefix . '_qty' => 11));
 	$json_id = (int)($r['json']['data'][$prefix . '_id'] ?? 0);
 	check($r['status'] === 200 && $json_id > 0 && ($r['json']['data'][$prefix . '_title'] ?? '') === 'As JSON'
@@ -198,9 +197,8 @@ try {
 		$db->exec('DROP TABLE IF EXISTS ' . $long_table . ' CASCADE');
 		$db->exec('DROP SEQUENCE IF EXISTS ' . $long_table . '_' . $long_prefix . '_id_seq');
 		$db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($long));
-		foreach (glob($long_dir . '/*') ?: array() as $file) {
-			@unlink($file);
-		}
+		@unlink($long_dir . '/manifest.json');
+		@rmdir($long_dir . '/src');
 		@rmdir($long_dir);
 	});
 	mkdir($long_dir, 0755);
@@ -217,7 +215,7 @@ try {
 	harness_defer(function () use ($db, $long) {
 		$db->prepare('DELETE FROM amu_admin_menus WHERE amu_slug LIKE ?')->execute(array('sbx-' . $long . '%'));
 	});
-	file_put_contents($long_dir . '/module.wasm', "\0asm\x01\0\0\0");
+	mkdir($long_dir . '/src', 0755);
 	SandboxPlugins::reset();
 	check(strlen($long_table . '_' . $long_prefix . '_id_seq') <= 63, 'Its sequence name fits (' . strlen($long_table . '_' . $long_prefix . '_id_seq') . ' characters)');
 	$pm->install($long, false);

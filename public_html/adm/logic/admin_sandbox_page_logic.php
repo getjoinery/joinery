@@ -7,7 +7,7 @@
  *   text      words from the manifest
  *   table     rows of one of the plugin's own models, read here as staff
  *   form      fields from the manifest; a submission is the plugin's to
- *             answer, through the host, waiting at most a few seconds
+ *             answer, through SandboxHost, waiting at most a few seconds
  *   settings  the plugin's declared settings, saved by the one settings writer
  *
  * @version 1.0

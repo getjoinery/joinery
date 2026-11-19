@@ -177,7 +177,7 @@ section('The page\'s lists');
 $sideloaded = admin_updates_sideloaded();
 check(is_array($sideloaded), 'Installed with Install anyway lists', count($sideloaded) . ' item(s)');
 foreach ($sideloaded as $item) {
-	check(in_array($item['trust'], array('unsigned', 'unlogged'), true), $item['type'] . ' ' . $item['name'] . ' is listed for its trust');
+	check(in_array($item['trust'], array('unsigned', 'unlogged', 'sandboxed'), true), $item['type'] . ' ' . $item['name'] . ' is listed for its trust');
 }
 $forks = admin_updates_forks(true);
 check(is_array($forks), 'Kept out of updates lists', count($forks) . ' item(s)');

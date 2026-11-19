@@ -222,7 +222,7 @@ start_detached() {
     local -a args
     mapfile -t args < <(daemon_args)
     # Every descriptor above stdio is closed before runuser starts, as
-    # install_sandbox_host.sh's keepalive does: runuser stays alive as the
+    # install_agent.sh's launch does: runuser stays alive as the
     # daemon's parent, and whatever it inherited it would hold. The memory-lock
     # limit is raised as the last hop; the daemon refuses to start under a
     # bounded one.

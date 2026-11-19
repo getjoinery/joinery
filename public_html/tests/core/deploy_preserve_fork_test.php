@@ -83,7 +83,8 @@ check(DeploymentHelper::preserveReason("$live/plugins/plain", "$stage/plugins/pl
 // someone else's, and the live one stays.
 @mkdir("$live/plugins/sbxmod", 0770, true);
 file_put_contents("$live/plugins/sbxmod/manifest.json", '{"name":"sbxmod"}');
-file_put_contents("$live/plugins/sbxmod/sbxmod.wasm", "\0asm\x01\0\0\0");
+@mkdir("$live/plugins/sbxmod/src", 0770, true);
+file_put_contents("$live/plugins/sbxmod/src/main.php", "<?php\n");
 $put($stage, 'plugins', 'sbxmod', array('receives_upgrades' => true), 'incoming');
 $reason = DeploymentHelper::preserveReason("$live/plugins/sbxmod", "$stage/plugins/sbxmod", 'plugin.json');
 check(strpos($reason, 'sandboxed plugin') === 0, 'a live sandboxed plugin is kept, whatever the release carries', $reason);

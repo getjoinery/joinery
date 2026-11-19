@@ -5,10 +5,11 @@
  * A sandboxed plugin declares its schedules in its manifest; once an admin
  * approves them, SandboxPluginManager makes one row of this task per
  * schedule, tagged with the plugin's name (so it is suspended, resumed and
- * removed with the plugin) and configured {plugin, schedule}. Each run asks
- * the plugin host to call the module's on_schedule (SandboxHost::schedule()),
- * which records what happened in the plugin's call log.
+ * removed with the plugin) and configured {plugin, schedule}. Each run makes
+ * the plugin's on_schedule call (SandboxHost::schedule()), which records what
+ * happened in the plugin's call log. A call nothing could run is an error.
  *
+ * @version 1.2 - a run takes the call's answer; there is no host to wait for
  * @version 1.1 - with the plugin host not answering yet (it starts within a minute of activation),
  *                a run is retried on the next tick instead of being spent as an error
  */
@@ -25,11 +26,6 @@ class SandboxScheduledRun implements ScheduledTaskInterface {
 		}
 		if (!isset(SandboxConsent::effective($plugin)['schedules'][$schedule])) {
 			return array('status' => 'skipped', 'message' => "The schedule $schedule is not approved.");
-		}
-		// The host starts within a minute of the first sandboxed plugin; a run
-		// due before then waits for it rather than being spent.
-		if (!SandboxHost::isRunning()) {
-			return array('status' => 'retry', 'message' => "The plugin host is not running yet; $plugin: $schedule runs once it is.");
 		}
 		$result = SandboxHost::schedule($plugin, $schedule);
 		if ($result['status'] === SandboxLog::STATUS_OK) {

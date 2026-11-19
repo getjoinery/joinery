@@ -9,7 +9,7 @@
  *
  * Two kinds: `webhook`, an operator-configured HTTPS URL that receives a
  * signed POST (docs/webhooks.md), and `sandbox`, a sandboxed plugin, whose
- * signals core hands to the plugin host (sgr_plugin names it, and its signals
+ * signals core hands to the plugin through SandboxHost (sgr_plugin names it, and its signals
  * are what its admin approved; docs/sandboxed_plugins.md).
  *
  * @version 1.1 - the sandbox kind and sgr_plugin

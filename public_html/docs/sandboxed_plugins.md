@@ -2,31 +2,40 @@
 
 > **Experimental, under active development.** Use sandboxed plugins for
 > experiments only, never for anything a site depends on: the manifest, the
-> module contract and what a plugin can reach may all change without a
+> call contract and what a plugin can reach may all change without a
 > compatible path. They are switched off on every site until a superadmin
-> turns on **Allow sandboxed (WebAssembly) plugins** (`sandboxed_plugins_enabled`,
-> on the Settings page); see [The switch](#the-switch).
+> turns on **Allow sandboxed plugins** (`sandboxed_plugins_enabled`, on the
+> Settings page); see [The switch](#the-switch).
 
-A sandboxed plugin is a WebAssembly module that reaches the platform only
-through the doors its manifest declares. It ships no PHP, runs outside the
-PHP pool, and can do nothing its manifest does not say. Native plugins (PHP,
-`plugin.json`) are described in the [Plugin Developer Guide](plugin_developer_guide.md);
-this page is the other kind. The design and its decisions are in the spec
+A sandboxed plugin reaches the platform only through the doors its manifest
+declares: nothing in its folder is ever included by the site's PHP, and it
+can do nothing its manifest does not say. Native plugins (PHP, `plugin.json`)
+are described in the [Plugin Developer Guide](plugin_developer_guide.md); this
+page is the other kind. The design and its decisions are in the spec
 `plugin_tiers.md`.
+
+**Nothing runs a sandboxed plugin's code.** A plugin can be installed,
+reviewed, approved and activated, and everything the platform does from its
+manifest works: its tables and their API, its settings, its menus and pages,
+its key, its signal receiver and its scheduled runs. Each call to its code is
+answered "No runner for this plugin." and logged as unavailable; see
+[Calls](#calls).
 
 ## What one is
 
-A folder in `plugins/` holding exactly two files and nothing else:
+A folder in `plugins/` holding exactly two entries and nothing else:
 
 ```
 plugins/notifier/
   manifest.json      what the plugin is and may do
-  notifier.wasm      the module (any one *.wasm name)
+  src/               the plugin's code
 ```
 
-The kind is always read from the folder's contents (`SandboxPlugins::isSandboxedDir()`),
-never from what a package or a row says about itself: one more file, a
-folder, or a `plugin.json` makes it a native plugin, judged as one. Native
+`manifest.json` is a regular file and `src/` a real directory; neither may be
+a link. The platform reads nothing from `src/`. The kind is always read from
+the folder's contents (`SandboxPlugins::isSandboxedDir()`), never from what a
+package or a row says about itself: a third entry, or a `plugin.json` in place
+of the manifest, makes it a native plugin, judged as one. Native
 plugin loading skips a sandboxed folder (`PluginHelper::getAvailablePlugins()`),
 so nothing in it is ever included.
 
@@ -93,7 +102,7 @@ manifest says can be code.
 | `name` | yes | The folder's name. 2-20 characters of `a-z` and `0-9`, starting with a letter, words joined by a single `_` (no `__`, none at the end); not one of `PluginManager::RESERVED_NAMES` (`core` and the system's URL segments) |
 | `title` | yes | At most 80 characters |
 | `version` | yes | `x.y.z` |
-| `platform` | yes | The platform API version the module was built for (`SandboxManifest::PLATFORM_VERSION` is this site's) |
+| `platform` | yes | The platform API version the plugin was built for (`SandboxManifest::PLATFORM_VERSION` is this site's) |
 | `description`, `author` | no | Text, at most 1000 and 120 characters |
 | `permissions` | no | `actions`: action names it may call. `records`: model class → verbs (`read`, `create`, `update`, `delete`) it may use on models outside the plugin |
 | `signals` | no | Signal names delivered to it |
@@ -174,7 +183,7 @@ every table the manifest names or the row recorded, with each one's id
 sequence (made without `OWNED BY`, so `CASCADE` would leave it), and the
 deletion rules that named them.
 
-**How the classes exist.** A sandboxed plugin ships no PHP, so
+**How the classes exist.** No file of a sandboxed plugin is included, so
 `SandboxModels` declares each model's class and its `Multi` collection at run
 time from one fixed template, with only the class name inserted, after it has
 been held to `SandboxModels::CLASS_PATTERN` twice. This is the one `eval` in
@@ -189,19 +198,24 @@ refuses a filter that names no field of the model, rather than ignoring it.
 ## Installing
 
 A sandboxed plugin is uploaded as a zip on the Plugins page, exactly as a
-native one is. The zip holds the two files, at its top or in one folder.
-`PluginManager` and the root installer (`utils/install_extension.php`) read the
-kind from the contents (`SandboxPlugins::isSandboxedDir()`):
+native one is. The zip holds `manifest.json` and `src/`, at its top or in one
+folder. `PluginManager` and the root installer (`utils/install_extension.php`)
+read the kind from the contents (`SandboxPlugins::isSandboxedDir()`):
 
 - the manifest is validated on root's own copy before anything moves, and its
   `name` must be the folder's;
-- it installs with no warning and on a host that refuses unsigned packages,
-  since nothing in it runs in the site's PHP; the row records
-  `plg_trust = 'sandboxed'` and the event log `sandboxed_package_installed`;
+- it is handled as code. A package our release key did not sign is refused on
+  a host that refuses unsigned packages (`HostRestrictions`), and elsewhere
+  installs only on the owner's acknowledgement of the unsigned warning, with
+  every superadmin emailed. Its row records `plg_trust = 'sandboxed'` and the
+  event log `sandboxed_package_installed`, naming who approved it;
+- it is listed as code that is not ours: on the Updates page under
+  **Installed with Install anyway**, and in the vault health row for unsigned
+  plugins and themes (`VaultHealth::checkUnsignedExtensions()`);
 - it carries no fork mark: no release ships a sandboxed plugin, so a deploy
-  always keeps one (`DeploymentHelper::preserveReason()`), and the code check
-  passes over it (`PackageSignature::verifyTree()`, reported by
-  `utils/verify_package.php --tree` as `sandboxed plugin: <name>`).
+  always keeps one (`DeploymentHelper::preserveReason()`);
+- the code check counts an unsigned one as unsigned code
+  (`PackageSignature::verifyTree()`, `utils/verify_package.php --tree`).
 
 Uploading a new version of an installed plugin replaces it like any package.
 When the plugin is active, everything it owns follows the new manifest at
@@ -278,7 +292,7 @@ to exactly the approved actions and record verbs plus every verb on its own
 models, owned by the approving admin and acting as them, usable from this
 machine only (`127.0.0.1`, `::1`). Its secret is sealed on the
 `SandboxInstall` row (`sbi_sandbox_installs.sbi_api_secret`, a regenerable
-sealed secret whose recipe mints a new key) and handed to the host with every
+sealed secret whose recipe mints a new key) and put in the envelope of every
 call. Each approval mints a new key and deletes the old. Deactivation
 switches it off; uninstall deletes it. The key pages show it as the plugin's
 and refuse to delete it or reset its secret.
@@ -286,12 +300,16 @@ and refuse to delete it or reset its secret.
 **Its signals (door 2).** One `SignalReceiver` of kind `sandbox` naming the
 plugin (`sgr_plugin`) carries the approved signals. Signals queue and retry on
 the same delivery queue as webhooks (`SignalDeliveryQueue`), and the drain
-hands each to the host as an `on_signal` call.
+makes each an `on_signal` call. A call that comes back unavailable, busy or
+timed out is retried on the queue's backoff, and the plugin is not tried again
+in the same pass.
 
 **Its schedules (door 3).** One `SandboxScheduledRun` row per approved
 schedule, tagged with the plugin's name (so it is suspended and resumed with
 the plugin and removed at uninstall), at the manifest's frequency and time in
-the site's time zone, configured `{plugin, schedule}`. The task is never
+the site's time zone, configured `{plugin, schedule}`. Each run is an
+`on_schedule` call; one that does not come back `ok` is the run's error. The
+task is never
 offered for activation on the Scheduled Tasks page (`"activated_by_hand":
 false` in its `.json`).
 
@@ -323,27 +341,26 @@ errors}`. Sections:
 seeded on activation and removed at uninstall. Only an installed plugin's
 manifest declares settings; a folder alone declares nothing. `url` and `email` settings are
 validated as such, `number` as a number, and a `secret` one is a credential
-field. The module is handed them by their manifest names.
+field. They go in each call's envelope by their manifest names, secrets opened.
 
 **Forms.** A form posts its fields as `sbx_<field>`; only the declared fields
-are sent. The module's `on_ui` answers `{message, errors: {field: message},
-status}`; the page shows the message, or the errors, as text. A page waits
-on a module at most `SandboxHost::UI_TIMEOUT_MS` (5 s, or less if the
+are sent, as an `on_ui` call. Its answer is `{message, errors: {field:
+message}, status}`; the page shows the message, or the errors, as text. A UI
+call is given at most `SandboxHost::UI_TIMEOUT_MS` (5 s, or less if the
 manifest's limit is lower); at most `SandboxHost::UI_SLOTS` (2) such calls
-run at once per site, and one per person. Past any of those, or with no
-host, the page says the plugin did not respond.
+run at once per site, and one per person (locks in
+`{site root}/cache/sandbox/`). Past any of those the page says the plugin is
+busy or did not respond; a call that could not be run shows why.
 
-## The plugin host
+## Calls
 
-Core never runs a module. It sends the plugin host, a separate process on the
-site, one request per call over a Unix socket
-(`{site root}/run/sandbox-host/host.sock`) and waits for the answer, bounded
-(`SandboxHost`). Each request carries everything the call may use, so the host
-keeps no configuration and reads no database:
+Core never includes a sandboxed plugin's code. `SandboxHost` builds one
+envelope per call, carrying everything the call may use, hands it to the
+runner, and records the answer:
 
 ```json
 {
-  "call_id": "c_…", "plugin": "notifier", "module": "/…/plugins/notifier/notifier.wasm",
+  "call_id": "c_…", "plugin": "notifier",
   "export": "on_ui | on_signal | on_schedule",
   "input": {},
   "limits": {"memory_mb": 16, "timeout_ms": 5000},
@@ -356,108 +373,28 @@ keeps no configuration and reads no database:
 `outbound_hosts` are the approved ones; `api` is null when the plugin has no
 credential. `input` per export: `on_ui` `{handler, values, user: {id,
 permission}}`; `on_signal` `{signal, message_id, timestamp, data}`;
-`on_schedule` `{schedule, time}`. The host answers `{ok, output, error,
-timed_out, duration_ms, calls: [{door, target, status, detail}]}`. Core reads
-at most `SandboxHost::MAX_ANSWER_BYTES` (1 MB) of an answer; a larger one
-fails the call.
+`on_schedule` `{schedule, time}`.
 
-**The program.** The host is `sandbox-host`
-(`maintenance_scripts/install_tools/sandbox_host`, Go on wazero through
-Extism's Go library), shipped prebuilt for x86_64 and aarch64 in `bin/`
-(`SandboxHostPublisher` builds them at publish, like the parser jail's
-launcher). It keeps no configuration, no queue and no clock: core's signal
-drain and scheduler call it, and it reads no database. Each call gets a fresh
-instance of the module, compiled once per module version and memory cap,
-under the call's memory cap and deadline, in wazero's interpreter (never its
-compiler, so the process runs with `MemoryDenyWriteExecute`). At most 4 calls
-run at once (`-max-calls`); another is refused as busy. It refuses an
-envelope whose module is outside the plugin's own folder, whose export is not
-one of the three, whose outbound hosts are not host names, or whose API
-address is not this machine's loopback. `GET /health` answers `{ok, version,
-calls_running}`.
+**The runner.** `SandboxHost::$runner` is a callable that takes the envelope
+and returns `{ok, output, error, timed_out, duration_ms, calls: [{door,
+target, status, detail}]}`. The platform sets none. With none, `call()`
+returns status `unavailable` with the message "No runner for this plugin."
+(`SandboxHost::NO_RUNNER_MESSAGE`) and writes the call's log row; it never
+does anything else in the plugin's name. A runner that throws or returns
+something that is not an answer is an `error`. Tests set a stand-in
+(`sandbox_stand_in_runner()` in `tests/lib/sandbox.php`).
 
-**Where it runs.** `install_sandbox_host.sh`, a core host installer, runs on
-every converge. While the site has a sandboxed plugin on disk it keeps the
-host running as the system user `joinery-sbx` (no shell, no home, no groups),
-its socket in `{site root}/run/sandbox-host/` (owned by that user, group
-`www-data`, mode 0750, so only the host and the web server can reach the
-socket inside, which is 0666): under a systemd unit `joinery-sandbox-host-{site}` where systemd
-is PID 1 (no new privileges, no capabilities, a read-only system, the site's
-`config/`, `uploads/`, `backups/`, `storage/`, `static_files/`, `logs/` and
-`cache/` hidden, 512 MB), a cron keepalive otherwise (a site container). With
-no sandboxed plugin left it stops the host and removes its supervision. A
-sandboxed plugin's `manifest.json` is part of what the converger watches, so
-one arriving or leaving converges at the next tick.
-
-## Writing a module
-
-A module is any WebAssembly module built with an Extism plugin development kit
-(Rust, Go, JavaScript, C, Zig and others). It exports the calls it answers, by
-name, each returning 0 for success (set an error and return 1 to fail):
-
-| Export | Called for |
-|---|---|
-| `on_ui` | a form on one of its pages |
-| `on_signal` | a signal it was approved for |
-| `on_schedule` | one of its approved schedules |
-
-Its input is one JSON object, `{"input": …, "settings": {name: value}}`, with
-`input` as in the table above (The plugin host) and its settings by their
-manifest names, secrets opened. Its output is JSON (or text, which is passed on
-as a string); for `on_ui`, `{message, errors, status}`. For `on_signal` the
-answer decides whether the site tries the signal again: an export that fails
-(returns 1 with an error) or does not finish in time is retried on the
-delivery queue's backoff, and one that answers is done with it. So a module
-fails a signal it could not act on for a reason that may pass (a service it
-posts to was down) and answers one it never can (an address that refused
-it). WASI is available
-without files, arguments or environment; Extism's own HTTP and file functions
-are shut. The module reaches out only through three host functions in the
-`extism:host/user` namespace, each taking and returning one JSON value in
-Extism memory:
-
-| Function | Request | Answer |
-|---|---|---|
-| `joinery_api` | `{method, path, body}`: GET, POST, PUT or DELETE on an `/api/v1/` path | `{status, body}`, or `{error}` |
-| `joinery_http` | `{method, url, headers, body}`: `https://` on port 443 to an approved host | `{status, headers, body}`, or `{error}` |
-| `joinery_log` | `{level, message}`: `debug`, `info`, `warn` or `error` | `{}` |
-
-`joinery_api` calls the site as the plugin (its credential is added by the
-host; the module never sees it). `joinery_http` goes only to a public address,
-checked at the moment it is dialled (the addresses refused are the platform's,
-listed once in `tests/fixtures/outbound_address_cases.json`, which the host's
-tests, `SafeHttpClient`'s and the relay's all read), never follows a redirect, and drops
-headers that steer the connection. Requests and answers are capped at 1 MB,
-and every door honours the call's deadline. What a module asked of a door, and
-whether it was done, refused or failed, is in the call log. An API call the
-plugin's approval does not cover is refused naming the entry it lacked and the
-manifest line that asks for it (`permissions.records {"Event": ["read"]}`,
-or an action under `permissions.actions`); a version asking for it then waits
-on an admin's approval like any other.
-
-**The author kit** is `sandbox_sdk/` at the top of the repository: a Rust
-crate (`rust/joinery-plugin`) and a JavaScript kit (`js/`) wrapping the calls
-and the doors, a real plugin in each (`examples/notifier`, Rust;
-`examples/greeter-js`), and a README on writing, building and packaging one.
-`utils/sandbox_plugin.php` is the author's command: `validate` (the manifest,
-the module against it, and this site's compatibility, from a folder, a
+**The author's command.** `utils/sandbox_plugin.php`: `validate` (the
+folder's shape, the manifest, and this site's compatibility, from a folder, a
 manifest or a zip, on any site), and on a dev site (`debug` on) `load` (copy a
 folder into `plugins/`, install or update it, approve it as a superadmin,
-activate it), `call` (one `ui`, `signal` or `schedule` call through the host,
-printing the answer and each door's use) and `log`.
-
-**The module is checked at install.** `SandboxModule` reads a module's export
-and import sections from its bytes: a manifest whose pages have forms needs
-`on_ui`, one asking for signals `on_signal`, one with schedules
-`on_schedule`; a module importing anything but Extism's runtime functions,
-the three doors and WASI is refused, naming the import; a module larger than
-32 MB is refused (the host refuses one too). The root installer reads it the
-same way on its own copy.
+activate it), `call` (one `ui`, `signal` or `schedule` call, printing the
+answer and each door's use) and `log`.
 
 **The call log.** Every call is a `SandboxLog` row: the plugin, the kind (`ui`,
 `signal`, `schedule`, `test`), the handler, signal or schedule, the outcome
 (`ok`, `error`, `timeout`, `unavailable`, `busy`), its message, how long it
-took, who asked (for a UI call) and what the module reached (`calls`, at
+took, who asked (for a UI call) and what the plugin reached (`calls`, at
 most 200, each field cut to a set length). Rows are kept
 `sandbox_log_retention_days` days (default 14). An admin reads them on the
 plugin's call log page (`/admin/admin_sandbox_log?plugin=<name>`, permission

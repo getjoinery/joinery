@@ -26,6 +26,7 @@
  * trusts its own tree) is the converger's decision, not this tool's: this
  * answers the question about bytes and nothing else.
  *
+ * @version 1.6 - --tree judges a sandboxed plugin as any plugin
  * @version 1.5 - --tree, run by root against the node's own keys, writes the trusted set the live core's verdict
  *                leaves (specs/release_key_rotation.md F15)
  * @version 1.4 - --tree names each sandboxed plugin it passes over (`sandboxed plugin:`, TSV `sandboxed\tplugin`)
@@ -67,8 +68,7 @@ if ($dir === '') {
 if ($tree) {
 	// Every package in a site root (PackageSignature::verifyTree()): one
 	// `fail: <what>: <verdict line>` per failure, one `style theme: <name>`
-	// per unsigned style theme and one `sandboxed plugin: <name>` per
-	// sandboxed plugin passed over, `tree: ok` when nothing failed.
+	// per unsigned style theme, `tree: ok` when nothing failed.
 	// --tsv prints each failure as `fail<TAB>kind<TAB>name<TAB>verdict<TAB>file`
 	// instead, for config/code_check (site_housekeeping.sh), which the host
 	// report reads. Run by root against the node's own keys, it writes the
@@ -76,9 +76,9 @@ if ($tree) {
 	// put the code in place did not (specs/release_key_rotation.md F15);
 	// nothing else, and what it writes goes to stderr, out of the report.
 	$style = array();
-	$sandboxed = array();
+	$passed_over = array();
 	$core_verdict = null;
-	$failures = PackageSignature::verifyTree($dir, $keys_file, $style, $sandboxed, $core_verdict);
+	$failures = PackageSignature::verifyTree($dir, $keys_file, $style, $passed_over, $core_verdict);
 	if ($core_verdict !== null && $core_verdict->signed() && $core_verdict->keys_proven && $keys_file === null
 			&& method_exists('PackageSignature', 'trustOf') && PackageSignature::trustOf($core_verdict->keys_proven)
 			&& function_exists('posix_geteuid') && posix_geteuid() === 0) {
@@ -92,9 +92,6 @@ if ($tree) {
 	}
 	foreach ($style as $name) {
 		echo ($tsv ? "style\ttheme\t" . $name : 'style theme: ' . $name . ' (unsigned; nothing in it runs)') . "\n";
-	}
-	foreach ($sandboxed as $name) {
-		echo ($tsv ? "sandboxed\tplugin\t" . $name : 'sandboxed plugin: ' . $name . ' (a WebAssembly module; nothing in it runs in the site\'s PHP)') . "\n";
 	}
 	foreach ($failures as $f) {
 		if ($tsv) {

@@ -71,7 +71,7 @@ class SignalDeliveryQueue {
 
 	/**
 	 * Send what is due: to webhook receivers as signed POSTs, and to
-	 * sandboxed plugins through the plugin host (SandboxHost::signal()).
+	 * sandboxed plugins through SandboxHost::signal().
 	 *
 	 * @param object|null $client anything with post($url, $body, $headers)
 	 *        returning a SafeHttpResponse; tests pass a stand-in. Null builds
@@ -201,10 +201,10 @@ class SignalDeliveryQueue {
 	}
 
 	/**
-	 * Hand one delivery to a sandboxed plugin through the host. Its payload
+	 * Hand one delivery to a sandboxed plugin. Its payload
 	 * goes as it was raised; what the plugin did is in its call log.
 	 *
-	 * @return array{0:?string,1:bool} the error, or null, and whether the host was unreachable
+	 * @return array{0:?string,1:bool} the error, or null, and whether the plugin was unreachable
 	 */
 	private static function toSandbox(SignalDelivery $delivery, SignalReceiver $receiver): array {
 		$plugin = (string)$receiver->get('sgr_plugin');
@@ -216,7 +216,7 @@ class SignalDeliveryQueue {
 			return array(null, false);
 		}
 		// A plugin that did not answer, or not in time, is not tried again this
-		// pass: one slow module must not spend the drain's budget for everyone.
+		// pass: one slow plugin must not spend the drain's budget for everyone.
 		$unreachable = in_array($result['status'], array(SandboxLog::STATUS_UNAVAILABLE, SandboxLog::STATUS_BUSY, SandboxLog::STATUS_TIMEOUT), true);
 		return array('The plugin ' . ($result['status'] === SandboxLog::STATUS_TIMEOUT ? 'timed out' : 'failed') . ': '
 			. ($result['message'] !== '' ? $result['message'] : $result['status']), $unreachable);

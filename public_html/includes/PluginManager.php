@@ -131,7 +131,7 @@ class PluginManager extends AbstractExtensionManager {
         $plugin_root = null;
 
         // A sandboxed package, judged by its contents alone (exactly
-        // manifest.json and one .wasm), at the top or in one folder: named by
+        // manifest.json and src/), at the top or in one folder: named by
         // its validated manifest, never by anything else in it.
         $candidates = array($temp_dir);
         foreach (scandir($temp_dir) as $entry) {

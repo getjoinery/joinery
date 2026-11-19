@@ -24,6 +24,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.23 - checkUnsignedExtensions() lists a sandboxed plugin our key did not sign
  * @version 1.22 - a swap device a container cannot see is found by its device-mapper name, else unknown, not plain
  * @version 1.21 - header names where the rows show (VaultHostHealth); no row is shown at vault setup
  * @version 1.20 - the stalled-queue reason names RootState::requestLogDir() (specs/shell_command_audit.md D1)
@@ -277,10 +278,14 @@ class VaultHealth {
 			try {
 				// 'unlogged' is signed by us but not in the public release log:
 				// installed on the same acknowledgement, listed the same way.
-				foreach (array('unsigned', 'unlogged') as $trust) {
+				// 'sandboxed' is a plugin of that kind that our key did not
+				// sign: someone else's code on the box, so listed too. No
+				// theme carries it.
+				foreach (array('unsigned', 'unlogged', 'sandboxed') as $trust) {
 					foreach (new MultiPlugin(['plg_trust' => $trust]) as $p) {
 						$unsigned['plugins'][] = (string)$p->get('plg_name');
 					}
+					if ($trust === 'sandboxed') { continue; }
 					foreach (new MultiTheme(['thm_trust' => $trust]) as $t) {
 						if ($t->is_style()) { continue; }
 						$unsigned['themes'][] = (string)$t->get('thm_name');

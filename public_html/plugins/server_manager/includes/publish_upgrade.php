@@ -727,18 +727,6 @@
 				exit(1);
 			}
 
-			// The sandboxed plugin host (plugin_tiers.md WP7): the same
-			// shape, run by install_sandbox_host.sh on a site with a
-			// sandboxed plugin. A stale host must not ship either.
-			publish_output("Building sandboxed plugin host binaries...");
-			$sandbox_host = SandboxHostPublisher::publish($full_site_dir, 'publish_output');
-			if ($sandbox_host['status'] === SandboxHostPublisher::STATUS_FAILED) {
-				publish_output("\nRefusing to publish {$version} — the sandboxed plugin host "
-					. "(maintenance_scripts/install_tools/sandbox_host/bin) is stale and the build failed.");
-				publish_output("Fix the host build and publish again. Nothing has been written.");
-				exit(1);
-			}
-
 			// The unseal daemon (specs/unseal_daemon.md): the same shape, run
 			// on every node by its installer. A stale daemon must not ship.
 			publish_output("Building unseal daemon binaries...");

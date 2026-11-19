@@ -6,7 +6,7 @@
  * for exactly what was approved (SandboxConsent::effective()) plus every verb
  * on its own models. The key belongs to the admin who approved it and acts as
  * them; its secret is kept sealed on the plugin's SandboxInstall row, because
- * core hands it to the plugin host with every call (SandboxHost).
+ * core hands it to the plugin's runner with every call (SandboxHost).
  *
  *   mint()      on activation and on each approval: a fresh key, the old one
  *               deleted, so the scope always matches the current approval
@@ -84,7 +84,7 @@ class SandboxCredentials {
 			$key->set('apk_type', ApiKey::TYPE_MACHINE);
 			$key->set('apk_scope', implode(',', $entries));
 			$key->set('apk_permission', ApiKey::permission_for_scope($entries, $capabilities));
-			// Only from this machine: the host calls over loopback.
+			// Only from this machine: the plugin's runner calls over loopback.
 			$key->set('apk_ip_restriction', '127.0.0.1,::1');
 			$key->set('apk_is_active', true);
 			$key->save();
@@ -158,7 +158,7 @@ class SandboxCredentials {
 	/**
 	 * The sealed-secret reconciler's recipe (settings.json sealed_secrets,
 	 * kind regenerable): mint again for every active plugin whose key secret
-	 * can no longer be opened. Nothing depends on the old secret but the host,
+	 * can no longer be opened. Nothing depends on the old secret but the plugin's runner,
 	 * which is handed the new one with its next call.
 	 */
 	public static function reprovision(): bool {

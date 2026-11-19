@@ -37,6 +37,8 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.10 - verifyTree() judges a sandboxed plugin as it does any plugin: unsigned, it is a failure;
+ *                 its argument positions are unchanged (the fourth is always handed back empty)
  * @version 1.9 - verifyTree(): a core manifest that lists another release's VERSION than the code's is
  *                `wrong_release`, the release mismatch a container recreated from an older image shows,
  *                not `tampered` on whichever file the walk reached first
@@ -780,21 +782,20 @@ class PackageSignature {
 	 * An unsigned STYLE theme is not a failure: it holds nothing that runs
 	 * (ThemeHelper::styleThemeRefusal()), which is why it installs without
 	 * the warning. It is returned in $style_themes so a caller can say so.
-	 * Nor is a SANDBOXED plugin (exactly a manifest and one WebAssembly
-	 * module, SandboxPlugins): nothing in it runs in the site's PHP. It is
-	 * returned in $sandboxed.
 	 *
 	 * @param string      $site_root    The site root (the directory holding public_html)
 	 * @param string|null $keys_file    The key file; the node's own when null
 	 * @param array       $style_themes Out: names of unsigned style themes passed over
-	 * @param array       $sandboxed    Out: names of sandboxed plugins passed over
+	 * @param array       $passed_over  Out: always empty. This file reaches a site ahead of the rest of a
+	 *                                  release (upgrade.php's self-update), where the code check still in
+	 *                                  place passes five arguments; the positions never change.
 	 * @param PackageVerdict|null $core_verdict Out: the core package's verdict
 	 * @return array<int, array{what:string, kind:string, name:string, verdict:PackageVerdict}>
 	 */
-	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null, ?array &$sandboxed = null, ?PackageVerdict &$core_verdict = null): array {
+	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null, ?array &$passed_over = null, ?PackageVerdict &$core_verdict = null): array {
 		$site_root = rtrim($site_root, '/');
 		$style_themes = array();
-		$sandboxed = array();
+		$passed_over = array();
 		$failures = array();
 
 		// The keys and the log rules are this machine's (null: the running
@@ -837,12 +838,6 @@ class PackageSignature {
 				}
 				if ($type === 'theme' && ThemeHelper::styleThemeRefusal($path) === null) {
 					$style_themes[] = $entry;
-					continue;
-				}
-				// Guarded: this file self-updates ahead of core, and a core
-				// from before SandboxPlugins has no sandboxed plugin.
-				if ($type === 'plugin' && class_exists('SandboxPlugins') && SandboxPlugins::isSandboxedDir($path)) {
-					$sandboxed[] = $entry;
 					continue;
 				}
 				$failures[] = array('what' => $type . ' ' . $entry, 'kind' => $type, 'name' => $entry, 'verdict' => $verdict);

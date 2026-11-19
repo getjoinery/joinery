@@ -444,7 +444,7 @@ check(strpos($ie, 'persistProvenKeys(PackageSignature::withoutTrust($verdict->ke
 	&& strpos($ie, 'echo "installed $type files: $staged_name\\n";' . "\n\t\tinstall_extension_persist_trust(\$verdict);") !== false,
 	'install_extension.php does the same: the set once the files are installed');
 $vp = (string)file_get_contents(PathHelper::getRootDir() . '/utils/verify_package.php');
-check(strpos($vp, 'PackageSignature::verifyTree($dir, $keys_file, $style, $sandboxed, $core_verdict)') !== false
+check(strpos($vp, 'PackageSignature::verifyTree($dir, $keys_file, $style, $passed_over, $core_verdict)') !== false
 	&& strpos($vp, 'persistProvenKeys(PackageSignature::trustOf($core_verdict->keys_proven))') !== false
 	&& strpos($vp, '$keys_file === null') !== false && strpos($vp, 'posix_geteuid() === 0') !== false,
 	'the code check (verify_package.php --tree), run by root against the node\'s own keys, writes the live core\'s set: a missed write heals');

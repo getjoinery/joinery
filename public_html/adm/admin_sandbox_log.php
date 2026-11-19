@@ -35,8 +35,8 @@ foreach ($page_vars['statuses'] as $status) {
 }
 
 $page->begin_box(array('title' => $page_vars['title'] . ': what it was asked, and what it did'));
-echo '<p>Every call the plugin host made for this plugin: a form on its pages, a signal, a scheduled run. '
-	. 'Under each, what the module asked of each door (the site\'s API, the web, its log), and whether that was done, '
+echo '<p>Every call made to this plugin: a form on its pages, a signal, a scheduled run. '
+	. 'Under each, what the plugin asked of each door (the site\'s API, the web, its log), and whether that was done, '
 	. 'refused or failed. ' . (int)$page_vars['total'] . ' kept; see '
 	. '<a href="' . $e(SandboxPluginManager::approvalUrl($page_vars['plugin'])) . '">what it may do</a>.</p>';
 echo '<p>' . implode(' · ', $links) . '</p>';

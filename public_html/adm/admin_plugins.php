@@ -144,7 +144,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                         <input type="file" name="plugin_zip" class="form-control" accept=".zip" required>
                         <div class="form-text">
                             <?php echo SandboxPlugins::enabled()
-                                ? 'Upload a ZIP of a plugin: a native one (with plugin.json), or an experimental sandboxed one (manifest.json and one .wasm module).'
+                                ? 'Upload a ZIP of a plugin: a native one (with plugin.json), or an experimental sandboxed one (manifest.json and a src folder).'
                                 : 'Upload a ZIP of a plugin (with plugin.json).'; ?>
                         </div>
                     </div>
@@ -240,7 +240,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     : ($plugin['plugin'] && !empty(json_decode((string)$plugin['plugin']->get('plg_metadata'), true)['sandboxed']));
                 $waits_on_approval = false;
                 if ($is_sandboxed) {
-                    $status_cell .= ' <span class="badge bg-info" title="A WebAssembly module that reaches the site only in the ways an admin approved.">Sandboxed</span>';
+                    $status_cell .= ' <span class="badge bg-info" title="A plugin that reaches the site only in the ways an admin approved.">Sandboxed</span>';
                     if ($plugin['directory_exists'] && $plugin['plugin'] && !$plugin['plugin']->is_uninstalled()) {
                         try {
                             $waits_on_approval = SandboxConsent::needsApproval($plugin['name']);
