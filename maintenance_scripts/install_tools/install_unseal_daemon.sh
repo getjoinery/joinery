@@ -3,6 +3,8 @@
 # install_unseal_daemon.sh - install or converge one site's unseal daemon
 # (specs/unseal_daemon.md § Installing and supervising, docs/sealed_vault.md).
 #
+# Version: 1.3 - the launcher is installed before the build, so the stop that precedes a new build is
+#               the new launcher's (the old one could not find a container's running daemon)
 # Version: 1.2 - a site container whose memory-lock limit cannot be raised installs when swap never reaches
 #               a disk (zram with no backing device, dm-crypt, or none: the daemon's own swapcheck), and
 #               the daemon serves unlocked under its guard; it is refused when swap can reach a disk
@@ -181,6 +183,13 @@ fi
 # --- 2. the binary, the previous build, the launcher ---------------------------
 install -d -o root -g root -m 0755 /etc/joinery-unseal "${CONF_DIR}" /var/lib/joinery-unseal "${STATE_DIR}"
 CHANGED=0
+# The launcher first: the stop below must be the new launcher's, which finds a
+# running daemon the old one could not (launch.sh 1.4: a container's daemon).
+if ! cmp -s "${LAUNCH_SRC}" "${LAUNCH}" 2>/dev/null; then
+    install -o root -g root -m 0755 "${LAUNCH_SRC}" "${LAUNCH}.new.$$" && mv -f "${LAUNCH}.new.$$" "${LAUNCH}"
+    say "installed ${LAUNCH}"
+    CHANGED=1
+fi
 if ! cmp -s "${SRC}" "${DEST}" 2>/dev/null; then
     TMP_DEST="${DEST}.new.$$"
     if ! { cp "${SRC}" "${TMP_DEST}" && chown root:root "${TMP_DEST}" && chmod 755 "${TMP_DEST}"; }; then
@@ -206,11 +215,6 @@ if ! cmp -s "${SRC}" "${DEST}" 2>/dev/null; then
     fi
     mv -f "${TMP_DEST}" "${DEST}"
     say "installed ${DEST} ($(runuser -u "${DAEMON_USER}" -- "${DEST}" --version 2>/dev/null || echo "?"))"
-    CHANGED=1
-fi
-if ! cmp -s "${LAUNCH_SRC}" "${LAUNCH}" 2>/dev/null; then
-    install -o root -g root -m 0755 "${LAUNCH_SRC}" "${LAUNCH}.new.$$" && mv -f "${LAUNCH}.new.$$" "${LAUNCH}"
-    say "installed ${LAUNCH}"
     CHANGED=1
 fi
 # The host-wide builds and launcher of installer 1.0, once nothing uses them.

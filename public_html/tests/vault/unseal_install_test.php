@@ -179,7 +179,9 @@ if (!is_file($shipped)) {
 	$events = $ev();
 	check($rc === 0 && file_exists($s2 . '/swap_refused') && strpos((string)file_get_contents($s2 . '/swap_refused'), '/swapfile') !== false,
 		'five keepalives on a disk swap leave swap_refused naming the device', $out);
-	check($events === array('swap_refused'), 'one swap_refused event, and no crash or start, however many keepalives', json_encode($events));
+	check($events === array('swap_exit', 'swap_refused'),
+		'the serving daemon its guard ended is recorded swap_exit, then one swap_refused, and no crash or start, however many keepalives',
+		json_encode($events));
 	check(trim((string)@file_get_contents($s2 . '/starts')) === '' && trim((string)@file_get_contents($s2 . '/binary') ?: 'current') === 'current',
 		'no start is counted, so the site never moves to its previous build');
 	check(!file_exists($s2 . '/running'), 'and it is no longer marked running, so its stop is not read as found dead');
@@ -217,6 +219,55 @@ if (!is_file($shipped)) {
 	ui_launch($launch, $root, 'keepalive ' . $k2, $env);
 	$events = $ev();
 	check(end($events) === 'crash', 'any other death found is still a crash', json_encode($events));
+}
+
+section('The launcher: a running daemon whose /proc/PID/exe does not resolve (a site container)');
+
+// Root in a site container holds no CAP_SYS_PTRACE, so the daemon's exe link
+// does not resolve for it. The launcher must still find the daemon by its
+// command line: a keepalive that missed it started a second one every 5 s and
+// counted each as a crash, and the sentinel's hold never reached it.
+$python = trim((string)shell_exec('command -v python3 2>/dev/null'));
+if ($python === '') {
+	check(true, 'no python3 here: the stand-in that hides its exe is not exercised');
+} else {
+	$k3 = 'site_three';
+	$s3 = $root . '/var/lib/joinery-unseal/' . $k3;
+	mkdir($root . '/etc/joinery-unseal/' . $k3, 0755, true);
+	mkdir($s3, 0755, true);
+	$sock3 = '/run/joinery-unseal/' . $k3 . '/unseal.sock';
+	file_put_contents($root . '/etc/joinery-unseal/' . $k3 . '/installed',
+		"socket={$sock3}\nallow_uid=" . posix_geteuid() . "\npool_user=www-data\ninit=cron\n");
+	$me = (string)(posix_getpwuid(posix_geteuid())['name'] ?? '');
+	$sig = $root . '/site_three_signals';
+	$fixture = PathHelper::getIncludePath('tests/fixtures/unseal/nondumpable_standin.py');
+	$start = function (string $argv0) use ($python, $fixture, $sig, $sock3) {
+		$p = proc_open(array('bash', '-c', 'exec -a "$0" "$1" "$2" "$3" --socket "$4"', $argv0, $python, $fixture, $sig, $sock3),
+			array(0 => array('file', '/dev/null', 'r'), 1 => array('file', '/dev/null', 'w'), 2 => array('file', '/dev/null', 'w')), $pipes);
+		usleep(600000);
+		return $p;
+	};
+	$env3 = array('JOINERY_UNSEAL_TEST_DAEMON_USER' => $me);
+
+	$p = $start($s3 . '/active');
+	$pid = (int)proc_get_status($p)['pid'];
+	check(@readlink('/proc/' . $pid . '/exe') === false, 'the stand-in hides its exe, as a container daemon does from root', (string)$pid);
+	@unlink($sig);
+	ui_launch($launch, $root, 'hold ' . $k3, $env3);
+	ui_launch($launch, $root, 'lift ' . $k3, $env3);
+	usleep(300000);
+	check(trim((string)@file_get_contents($sig)) === "USR1\nUSR2", 'the hold and the lift reach it, found by its command line', (string)@file_get_contents($sig));
+	proc_terminate($p, 9);
+	proc_close($p);
+
+	$p = $start($root . '/somewhere_else/active');
+	@unlink($sig);
+	ui_launch($launch, $root, 'hold ' . $k3, $env3);
+	usleep(300000);
+	check(!file_exists($sig), 'a process naming another program is never taken for the daemon', (string)@file_get_contents($sig));
+	proc_terminate($p, 9);
+	proc_close($p);
+	@unlink($root . '/run/joinery-unseal/' . $k3 . '.hold');
 }
 
 // ---------------------------------------------------------------------------
@@ -306,9 +357,15 @@ if ($shipped && posix_geteuid() !== 0) {
 	UnsealDaemon::$root_override = $root;
 	check($f['installed'] && $f['answering'] === true && $f['memory_locked'] === false && $f['daemon'] !== '',
 		'facts() asks the daemon: answering, its version, and that its memory is not locked here', json_encode($f));
-	$row = VaultHealth::checkUnsealDaemon($f);
+	// The live daemon reports whether this machine's swap stays in RAM, which
+	// differs by box (localdev has a disk swap file, dev only zram). Each
+	// branch is checked with the fact stated, whatever this machine has.
+	$row = VaultHealth::checkUnsealDaemon(array_merge($f, array('swap_ram_only' => false)));
 	check($row['state'] === 'unmet' && strpos($row['reason'], 'locked memory') !== false,
-		'a daemon run without locked memory is not verified');
+		'a daemon run without locked memory, where swap can reach a disk, is not verified', json_encode($row));
+	$row = VaultHealth::checkUnsealDaemon(array_merge($f, array('swap_ram_only' => true)));
+	check($row['state'] === 'verified' && strpos($row['reason'], 'swap never reaches a disk') !== false,
+		'and one run unlocked because swap stays in RAM is verified, saying why', json_encode($row));
 	touch($root . '/run/joinery-unseal/' . $mine . '.hold');
 	check(UnsealDaemon::facts(true, 1.0)['held'] === true, 'the hold file reads as held');
 	unlink($root . '/run/joinery-unseal/' . $mine . '.hold');

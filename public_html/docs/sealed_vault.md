@@ -670,7 +670,10 @@ current build's `swapcheck`; on a disk swap it starts nothing, writes
 `swap_refused` event, never a crash or a counted start, so a swap refusal
 never moves the site to its previous build. When swap is RAM-only again it
 removes the file, records `swap_cleared` and starts the daemon; a daemon its
-guard ended is recorded as `swap_exit`. Where the limit can be raised (a
+guard ended is recorded as `swap_exit`, and the starts are cleared with it. The
+keepalive, the hold and the lift find the running daemon by its executable, or,
+where root cannot read that link (a site container holds no `CAP_SYS_PTRACE`),
+by its command line among the daemon user's processes. Where the limit can be raised (a
 container rebuilt with a memory budget) the daemon locks, and the keepalive
 clears an old `swap_refused` the same way. The agent reports `swap_refused` as
 its own word, an incident on the fleet dashboard. A site container with a memory budget runs with

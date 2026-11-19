@@ -171,6 +171,7 @@ func TestFenceRefusesEveryRow(t *testing.T) {
 		"list a php grant folder (names only)":             true,
 		"write the run scratch folder":                     true,
 		"read own limits (prlimit pid 0)":                  true,
+		"signal itself (signal 0)":                         true,
 		"fcntl F_GETFL (allowed)":                          true,
 		"stat the secret file (accepted: names and sizes)": true,
 		"php://temp in memory":                             true,

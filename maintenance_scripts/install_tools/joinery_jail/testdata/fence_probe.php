@@ -109,6 +109,7 @@ sc('Unix socket (database socket file, abstract socket)', $N['socket'], 1, 1, 0)
 
 // ---- other processes ----------------------------------------------------------
 sc('signal a process outside the fence', $N['kill'], $cfg['helper'], 18);
+sc('signal itself (signal 0)', $N['kill'], getmypid(), 0);
 sc('lower another process CPU limit (prlimit)', $N['prlimit64'], $cfg['helper'], 0, $c->new('long[2]', false), null);
 sc('read own limits (prlimit pid 0)', $N['prlimit64'], 0, 7, null, $c->new('long[2]', false));
 sc('prlimit 2^32 then pid', $N['prlimit64'], (1 << 32) | (int)$cfg['helper'], 7, null, $c->new('long[2]', false));

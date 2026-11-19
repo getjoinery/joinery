@@ -26,7 +26,7 @@ const (
 // and xattr families; setpriority, sched_setaffinity, sched_setscheduler,
 // ioprio_set, kcmp; ptrace, process_vm_readv/writev, pidfd_*; io_uring; the
 // whole fork family, setsid and setpgid; unlink and unlinkat (a file
-// unlinked while open grows out of the scratch sum's sight); kill and tgkill; every setuid and
+// unlinked while open grows out of the scratch sum's sight); every setuid and
 // namespace call; mount, keyctl, bpf, perf and module calls.
 var allowedCalls = []uint32{
 	0, 1, 3, // read, write, close (open: an argument rule)
@@ -40,6 +40,11 @@ var allowedCalls = []uint32{
 	32, 33, 35, // dup, dup2, nanosleep
 	36, 38, // getitimer, setitimer (max_execution_time)
 	39, 59, 60, // getpid, execve, exit
+	// kill, tkill, tgkill: Landlock's signal scope refuses every process outside
+	// the run, and the run is one process, so only signals to itself pass. Without
+	// them abort() cannot raise SIGABRT and ends in a trap the kernel logs as a
+	// general protection fault, which monitoring reads as an attack on the kernel.
+	62, 200, 234,
 	63, 73, 74, 75, // uname, flock, fsync, fdatasync
 	78, 79, 80, 81, // getdents, getcwd, chdir, fchdir
 	89, 95, // readlink, umask

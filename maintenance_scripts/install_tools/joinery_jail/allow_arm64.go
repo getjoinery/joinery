@@ -34,6 +34,7 @@ var allowedCalls = []uint32{
 	101, 102, 103, // nanosleep, getitimer, setitimer
 	113, 114, 115, // clock_gettime, clock_getres, clock_nanosleep
 	123, 124, 132, // sched_getaffinity, sched_yield, sigaltstack
+	129, 130, 131, // kill, tkill, tgkill (scoped to the run by Landlock; see allow_amd64.go)
 	134, 135, 139, // rt_sigaction, rt_sigprocmask, rt_sigreturn
 	153, 158, 160, // times, getgroups, uname
 	163, 165, 166, // getrlimit, getrusage, umask

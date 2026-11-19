@@ -6,7 +6,6 @@ package main
 var forbiddenForTest = map[string]uint32{
 	"socket": 198, "socketpair": 199, "connect": 203, "bind": 200, "sendto": 206,
 	"clone": 220, "clone3": 435, "setsid": 157, "setpgid": 154,
-	"kill": 129, "tgkill": 131, "tkill": 130,
 	"inotify_init1": 26, "inotify_add_watch": 27, "fanotify_init": 262,
 	"shmget": 194, "shmat": 196, "shmctl": 195, "msgget": 186, "semget": 190,
 	"memfd_create": 279, "execveat": 281,

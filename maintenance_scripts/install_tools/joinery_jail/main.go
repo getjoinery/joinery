@@ -38,6 +38,10 @@
 // discarded and replaced: a setuid binary that honours the caller's
 // environment is a privilege bug waiting for a library that reads one.
 //
+// Version 2.0.2 - kill, tkill and tgkill are allowed, scoped by Landlock to the run itself: without
+// them abort() could not raise SIGABRT and ended in a trap the kernel logs as a general protection
+// fault, which the fleet's monitoring raises as a possible attack on the kernel (seen on se1).
+//
 // Version 2.0.1 - reviewer2's code review (D1-D7): no unlink and no O_TMPFILE
 // inside the fence, so every scratch byte is in a file the sum sees; the
 // supervisor makes its real uid root and stage 2 requires it, so no caller

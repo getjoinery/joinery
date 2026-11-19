@@ -6,6 +6,10 @@
 # the unit and the keepalive call it there, and the agent's unseal_hold runs the
 # tree's own copy, verified against the signed release manifest.
 #
+# Version: 1.4 - a daemon that ended itself for a disk swap is recorded swap_exit (and the starts cleared)
+#               when the keepalive refuses, so the start after swap_cleared is not a crash; daemon_pid falls back to the process's command line where /proc/PID/exe does not
+#               resolve (root in a site container has no CAP_SYS_PTRACE): a serving daemon read as dead,
+#               and the keepalive started a second one every 5 s, each recorded as a crash
 # Version: 1.3 - the memory-lock limit is raised only where it can be: a site container's cannot, and its
 #               daemon serves unlocked while swap never reaches a disk (the daemon's own check). Where
 #               swap can reach a disk the keepalive starts nothing and records swap_refused once (the
@@ -75,6 +79,8 @@ if [[ "$(id -u)" != "0" ]]; then
     [[ -n "${JOINERY_UNSEAL_TEST_ROOT:-}" && -d "${JOINERY_UNSEAL_TEST_ROOT}" ]] || die "must run as root"
     TEST_ROOT="${JOINERY_UNSEAL_TEST_ROOT%/}"
     CONF_ROOT="${TEST_ROOT}${CONF_ROOT}" RUN_ROOT="${TEST_ROOT}${RUN_ROOT}" STATE_ROOT="${TEST_ROOT}${STATE_ROOT}"
+    # A stand-in daemon is the test's own user's process.
+    [[ -z "${JOINERY_UNSEAL_TEST_DAEMON_USER:-}" ]] || DAEMON_USER="${JOINERY_UNSEAL_TEST_DAEMON_USER}"
 fi
 # The swap rule's fixtures, and a keepalive that decides but starts nothing:
 # the test hook's only (an unprivileged run cannot start the daemon's user).
@@ -150,6 +156,7 @@ daemon_pid() {
         [[ "${pid}" =~ ^[1-9][0-9]*$ ]] && echo "${pid}"
         return 0
     fi
+    local argv0
     for pid in $(pgrep -u "${DAEMON_USER}" -f -- "--socket ${SOCKET}( |$)" 2>/dev/null); do
         exe="$(readlink "/proc/${pid}/exe" 2>/dev/null)"
         # A daemon whose build an install replaced still runs the old bytes.
@@ -157,6 +164,19 @@ daemon_pid() {
         if [[ "${exe}" == "${CURRENT}" || "${exe}" == "${PREVIOUS}" ]]; then
             echo "${pid}"
             return 0
+        fi
+        # Root in a site container holds no CAP_SYS_PTRACE, so another user's
+        # /proc/PID/exe does not resolve, and a serving daemon read as dead:
+        # the keepalive started a second one every 5 s, each a counted crash.
+        # Its command line is readable by anyone; the program it names is root's
+        # own path in this state folder, and pgrep -u already holds it to the
+        # daemon's user.
+        if [[ -z "${exe}" ]]; then
+            argv0="$(tr '\0' '\n' < "/proc/${pid}/cmdline" 2>/dev/null | head -n 1)"
+            if [[ "${argv0}" == "${STATE_DIR}/active" || "${argv0}" == "${CURRENT}" || "${argv0}" == "${PREVIOUS}" ]]; then
+                echo "${pid}"
+                return 0
+            fi
         fi
     done
 }
@@ -199,7 +219,7 @@ prepare() {
     # killed with it (systemctl kill reaches the whole unit), the machine lost
     # power, or the hook failed. Recorded now, so the crash report the agent
     # reads never misses a death.
-    if [[ "$(grep -E '"event":"(start|stop|crash)"' "${STATE_DIR}/events" 2>/dev/null | tail -n 1)" == *'"event":"start"'* ]]; then
+    if [[ "$(grep -E '"event":"(start|stop|crash|swap_exit)"' "${STATE_DIR}/events" 2>/dev/null | tail -n 1)" == *'"event":"start"'* ]]; then
         event "crash" ",\"result\":\"unrecorded\""
     fi
     # Every start since the last run that stayed up: a crash, a hang the
@@ -297,13 +317,22 @@ swap_gate() {
     why="$("${CURRENT}" swapcheck ${SWAPCHECK_ARGS[@]+"${SWAPCHECK_ARGS[@]}"} 2>&1)"
     rc=$?
     if [[ "${rc}" == "${EXIT_DISK_SWAP}" ]]; then
+        # A daemon that was serving ended itself for the swap (its guard): that
+        # end is recorded as what it is, so the next start is not read as
+        # following a crash, and the start count is cleared, so swap coming
+        # and going never moves the site to its previous build.
+        if [[ -f "${STATE_DIR}/running" ]] && [[ -z "$(daemon_pid)" ]]; then
+            event "swap_exit"
+            : > "${STATE_DIR}/starts"
+        fi
         if [[ ! -f "${SWAP_REFUSED}" ]]; then
             printf '%s\n' "${why}" > "${SWAP_REFUSED}.tmp" && chmod 644 "${SWAP_REFUSED}.tmp" \
                 && mv -f "${SWAP_REFUSED}.tmp" "${SWAP_REFUSED}"
             event "swap_refused" ",\"reason\":\"${why//[^A-Za-z0-9 ._\/()-]/}\""
             echo "joinery-unseal-launch: ${KEY}: not started - this container cannot lock memory and ${why}" >&2
         fi
-        rm -f "${STATE_DIR}/running"
+        # Kept while the daemon is still ending, so the next check records it.
+        [[ -n "$(daemon_pid)" ]] || rm -f "${STATE_DIR}/running"
         return 1
     fi
     swap_clear
