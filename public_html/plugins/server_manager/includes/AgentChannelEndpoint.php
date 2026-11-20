@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.63 - the claim accepts every unseal daemon word the incident source reads (swap_refused was refused,
+ *                 and the whole claim with it): the pattern is built from IncidentSourceUnsealDaemon::STATES
  * @version 1.62 - approveContainerSiteJoin(): a Starter site's join, approved for its own node after the host check (hosting_launch S4)
  * @version 1.61 - a site_create job's admin password slot (__SM_ADMIN_PASSWORD_<provision>__) is opened from the
  *                 provision's sealed column at hand-out, never stored in the job (specs/starter_tier.md)
@@ -1298,7 +1300,7 @@ class AgentChannelEndpoint {
 			// root left and the process table. A closed set; absent for an agent
 			// before 1.112.0 and on a machine with no site.
 			'unseal_daemon'  => ['type' => 'string', 'max' => 16,
-				'pattern' => '/^(absent|running|restarting|down|previous|held|unlocked)$/'],
+				'pattern' => '/^(' . implode('|', IncidentSourceUnsealDaemon::STATES) . ')$/'],
 			// Where the agent's own self-update stands: its verdict on the
 			// version on offer, and that version. A closed set of verdicts;
 			// absent for an agent before 1.65.0 and before its first check.
