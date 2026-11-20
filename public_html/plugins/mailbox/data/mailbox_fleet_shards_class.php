@@ -12,6 +12,7 @@
  * Capacity is the blast-radius dial: a compromise is bounded to a shard's
  * tenant list, so shard size is policy, not architecture.
  *
+ * @version 1.3 - leavingCount(); retire() refuses while a tenant moved off this shard is still collecting from it
  * @version 1.2 - retire(): the shard and its managed node leave together
  * @version 1.1 - mfs_provisioned_version (the operator's view of shard code age)
  */
@@ -82,6 +83,17 @@ class MailboxFleetShard extends SystemBase {
 		return intval($stmt->fetchColumn());
 	}
 
+	/** Slots moved to another shard whose tenant, and waiting mail, this shard still holds. */
+	public function leavingCount(): int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT COUNT(*) FROM mft_mailbox_fleet_slots
+			  WHERE mft_moved_from_shard_id = ? AND mft_delete_time IS NULL"
+		);
+		$stmt->execute(array($this->key));
+		return intval($stmt->fetchColumn());
+	}
+
 	/**
 	 * Retire this shard: its managed node is hidden from the dashboard (so
 	 * nothing goes on probing or reporting on a server that is going away)
@@ -90,7 +102,7 @@ class MailboxFleetShard extends SystemBase {
 	 * restored from the dashboard.
 	 *
 	 * Refused while a tenant still holds a slot here (tenants move to another
-	 * shard first) or while the shard's birth run is still in flight.
+	 * shard first), while one that moved is still collecting from it, or while the shard's birth run is still in flight.
 	 * Re-runnable: a node already hidden is left as it is.
 	 *
 	 * @return string[] what retiring it also did, in plain words
@@ -104,6 +116,12 @@ class MailboxFleetShard extends SystemBase {
 		if ($slots > 0) {
 			throw new MailboxFleetShardException($slots . ' tenant' . ($slots === 1 ? ' still has a slot' : 's still have slots')
 				. ' on this shard. Move them to another shard before retiring it.');
+		}
+		$leaving = $this->leavingCount();
+		if ($leaving > 0) {
+			throw new MailboxFleetShardException($leaving . ' tenant' . ($leaving === 1 ? '' : 's')
+				. ' moved off this shard ' . ($leaving === 1 ? 'is' : 'are') . ' still collecting mail from it. '
+				. 'It can be retired once Moves in progress is empty.');
 		}
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		$runs = new MultiRelayCloudProvision(array('live' => true, 'deleted' => false,

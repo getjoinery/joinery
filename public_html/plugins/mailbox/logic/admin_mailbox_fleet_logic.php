@@ -9,6 +9,7 @@
  * never show it. The console's own functions live here; what it shares with
  * the tenant surfaces (flash, settings writes) stays in includes/relay_admin.php.
  *
+ * @version 1.4 - move_shard_tenants: move a shard's tenants to another; the moves in progress
  * @version 1.3 - shard_capacity: change how many tenants a shard takes
  * @version 1.2 - retire_shard: a shard and its managed node leave together
  * @version 1.1 - the console's functions moved here from relay_admin.php
@@ -89,6 +90,34 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 			$held = $shard->slotCount();
 			admin_mailbox_relay_flash($session, 'Shard ' . (string)$shard->get('mfs_name') . ' now takes ' . $capacity . ' tenant(s); it holds '
 				. $held . '.' . ($capacity < $held ? ' Nobody is moved off: it takes no new tenant until it is under that number.' : ''));
+		}
+		return LogicResult::redirect($self_url);
+	}
+
+	// Renewing a shard: a new one is born and the tenants move to it. Nothing
+	// is lost on the way: the shard left keeps each tenant until its site has
+	// collected what arrived there.
+	if ($action === 'move_shard_tenants') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
+		$from = new MailboxFleetShard(intval($input['mfs_mailbox_fleet_shard_id'] ?? 0), TRUE);
+		$to = new MailboxFleetShard(intval($input['move_to_shard_id'] ?? 0), TRUE);
+		if (!$from->key || !$to->key) {
+			admin_mailbox_relay_flash($session, 'There is no such shard.', 'Cannot move tenants');
+			return LogicResult::redirect($self_url);
+		}
+		try {
+			$from->assert_can_write($session);
+			$to->assert_can_write($session);
+			$moved = FleetService::moveShardTenants($from, $to);
+			admin_mailbox_relay_flash($session,
+				$moved['moved'] . ' tenant(s) moved from ' . $from->get('mfs_name') . ' to ' . $to->get('mfs_name') . '; '
+				. $moved['registered'] . ' registered there already. ' . $from->get('mfs_name') . ' takes no new tenant. '
+				. 'Each site picks up its new shard within the hour. Then point its mail name at '
+				. $to->get('mfs_public_ip') . ' (DNS to publish, below). ' . $from->get('mfs_name')
+				. ' keeps each tenant until its waiting mail is collected, and can be retired once Moves in progress is empty.',
+				'Tenants moved');
+		} catch (MailboxFleetShardException $e) {
+			admin_mailbox_relay_flash($session, $e->getMessage(), 'Cannot move tenants');
 		}
 		return LogicResult::redirect($self_url);
 	}
@@ -234,15 +263,45 @@ function admin_mailbox_relay_operator_vars(): array {
 
 	$fleet_service_on = ((string)$settings->get_setting('mailbox_fleet_service_enabled') === '1');
 	$fleet_shards = array();
+	$fleet_moves = array();
 	if ($fleet_service_on) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetService.php'));
 		$shard_multi = new MultiMailboxFleetShard(array('deleted' => false));
 		$shard_multi->load();
+		$names = array();
 		foreach ($shard_multi as $shard) {
+			$names[intval($shard->key)] = (string)$shard->get('mfs_name');
+		}
+		foreach ($shard_multi as $shard) {
+			// Where this shard's tenants could move: every other shard that
+			// is taking tenants and has reported in.
+			$targets = array();
+			foreach ($shard_multi as $other) {
+				if (intval($other->key) !== intval($shard->key) && (bool)$other->get('mfs_is_active')
+						&& trim((string)$other->get('mfs_identity_fingerprint')) !== '') {
+					$targets[intval($other->key)] = (string)$other->get('mfs_name');
+				}
+			}
 			$fleet_shards[] = array(
-				'model' => $shard,
-				'slots' => $shard->slotCount(),
-				'dns'   => admin_mailbox_relay_shard_dns_rows($shard),
+				'model'   => $shard,
+				'slots'   => $shard->slotCount(),
+				'leaving' => $shard->leavingCount(),
+				'targets' => $targets,
+				'dns'     => admin_mailbox_relay_shard_dns_rows($shard),
+			);
+		}
+		// Slots part-way through a move, oldest first.
+		foreach (new MultiMailboxFleetSlot(array('deleted' => false), array('mft_move_time' => 'ASC')) as $slot) {
+			$from_id = intval($slot->get('mft_moved_from_shard_id'));
+			if ($from_id <= 0) {
+				continue;
+			}
+			$fleet_moves[] = array(
+				'slug' => (string)$slot->get('mft_slug'),
+				'name' => (string)$slot->get('mft_mx_hostname'),
+				'from' => $names[$from_id] ?? ('#' . $from_id),
+				'to'   => $names[intval($slot->get('mft_mfs_mailbox_fleet_shard_id'))] ?? '',
+				'step' => FleetService::moveStep($slot),
 			);
 		}
 	}
@@ -253,6 +312,7 @@ function admin_mailbox_relay_operator_vars(): array {
 		'fleet_service_on'      => $fleet_service_on,
 		'fleet_mx_zone'         => trim((string)$settings->get_setting('mailbox_fleet_mx_zone')),
 		'fleet_shards'          => $fleet_shards,
+		'fleet_moves'           => $fleet_moves,
 		// A shard is born like any relay: the live run, if one is in flight.
 		'shard_run'             => RelayCloudProvision::live(),
 		'cloud_oauth_configured'=> admin_mailbox_relay_linode_oauth_configured(),

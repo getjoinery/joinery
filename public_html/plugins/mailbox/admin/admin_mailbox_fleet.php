@@ -9,6 +9,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
+ * @version 1.9 - Move tenants to another shard, and the moves in progress; the page shows what its last action did
  * @version 1.8 - each shard's capacity is editable in its row
  * @version 1.7 - the Relay section link opens the Server tab
  * @version 1.6 - per-shard Retire: the shard and its managed node leave together
@@ -33,6 +34,10 @@ $page->admin_header(array(
 	),
 	'session' => $session,
 ));
+
+// What the last action here did or refused, once.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/relay_section.php'));
+echo mailbox_relay_notice_html();
 
 // --- service switch + MX zone -----------------------------------------------
 $page->begin_box(array('title' => 'Relay fleet service'));
@@ -92,6 +97,9 @@ if (!empty($fleet_service_on)) {
 			$cform->textinput('shard_capacity', '', array('value' => (string)intval($shard->get('mfs_capacity')), 'maxlength' => 4));
 			$cform->submitbutton('btn_shard_capacity_' . intval($shard->key), 'Set', array('class' => 'btn btn-sm btn-outline-secondary'));
 			echo $cform->end_form();
+			if (!empty($row['leaving'])) {
+				echo '<div class="text-muted small">' . intval($row['leaving']) . ' moved off, still collecting from here</div>';
+			}
 			echo '</td>';
 			echo '<td>' . ((bool)$shard->get('mfs_is_active') ? 'Yes' : 'No') . '</td>';
 			switch ($standing) {
@@ -122,6 +130,42 @@ if (!empty($fleet_service_on)) {
 			echo '</tr>';
 		}
 		echo '</tbody></table>';
+
+		// Renewing a shard: its tenants move to another, then it retires.
+		$move_sources = array();
+		$move_targets = array();
+		foreach ($fleet_shards as $row) {
+			if (intval($row['slots']) > 0 && !empty($row['targets'])) {
+				$move_sources[intval($row['model']->key)] = (string)$row['model']->get('mfs_name') . ' (' . intval($row['slots']) . ')';
+				$move_targets += $row['targets'];
+			}
+		}
+		if ($move_sources) {
+			echo '<h5>Move tenants to another shard</h5>';
+			echo '<p class="text-muted small">How a shard is renewed: create the new shard, move the tenants to it, then retire the old one. '
+				. 'No mail is lost: the old shard keeps each tenant until its site has collected what arrived there.</p>';
+			$mform = $page->getFormWriter('shard_move');
+			echo $mform->begin_form();
+			$mform->hiddeninput('action', '', array('value' => 'move_shard_tenants'));
+			$mform->dropinput('mfs_mailbox_fleet_shard_id', 'From (tenants)', array('options' => $move_sources));
+			$mform->dropinput('move_to_shard_id', 'To', array('options' => $move_targets));
+			$mform->submitbutton('btn_shard_move', 'Move tenants');
+			echo $mform->end_form();
+		}
+
+		// Tenants part-way to another shard, and what each is waiting for.
+		if (!empty($fleet_moves)) {
+			echo '<h5>Moves in progress</h5>';
+			echo '<p class="text-muted small">A moved tenant\'s site collects from both shards until the old one is empty. '
+				. 'Nothing here needs doing except pointing each mail name at its new shard when its row says so.</p>';
+			echo '<table class="table"><thead><tr><th>Tenant</th><th>Mail name</th><th>From</th><th>To</th><th>Standing</th></tr></thead><tbody>';
+			foreach ($fleet_moves as $move) {
+				echo '<tr><td>' . htmlspecialchars($move['slug']) . '</td><td>' . htmlspecialchars($move['name']) . '</td><td>'
+					. htmlspecialchars($move['from']) . '</td><td>' . htmlspecialchars($move['to']) . '</td><td>'
+					. htmlspecialchars($move['step']) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+		}
 
 		// DNS to publish: the operator's half of the tenants' MX guidance —
 		// every record the fleet zone needs, with a live resolution verdict.

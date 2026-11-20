@@ -21,6 +21,8 @@
  * registration while a slot exists. The Setup tab's ownership row re-verifies
  * them on every check pass — publishing the TXT record is all the user does.
  *
+ * @version 1.10 - refreshCoordinates(): the hourly question; applyCoordinates() keeps the shard a moved slot still
+ *                 collects from, and when the coordinates were last asked for
  * @version 1.9 - applyCoordinates() forgets the last pushed map when the slot's shard address or pin changes, so
  *                the new shard is sent the site's addresses
  * @version 1.8 - autoEnroll() works from the end state each pass (enrolled, relay mode, domain registered,
@@ -285,8 +287,47 @@ class FleetClient extends ServiceClient {
 		}
 		$relay->set('mrl_public_ip', $ip);
 		$relay->set('mrl_identity_fingerprint', $pin);
+		// The shard a moved slot left, while it still holds mail for this site.
+		$drain = is_array($c['drain'] ?? null) ? $c['drain'] : array();
+		$drain_ip = substr(trim((string)($drain['shard_public_ip'] ?? '')), 0, 64);
+		$drain_pin = substr(trim((string)($drain['identity_fingerprint'] ?? '')), 0, 64);
+		$has_drain = $drain_ip !== '' && $drain_pin !== '';
+		$relay->set('mrl_drain_public_ip', $has_drain ? $drain_ip : null);
+		$relay->set('mrl_drain_identity_fingerprint', $has_drain ? $drain_pin : null);
+		$relay->set('mrl_drain_authserv_id', $has_drain ? substr((string)($drain['authserv_id'] ?? ''), 0, 255) : null);
+		$relay->set('mrl_coordinates_check_time', gmdate('Y-m-d H:i:s'));
 		$relay->save();
 		return $relay;
+	}
+
+	/** Seconds between an enrolled site's questions about where its slot is. */
+	const COORDINATES_REFRESH_SECONDS = 3600;
+
+	/**
+	 * Ask where this site's slot is when the last answer is an hour old
+	 * (the reconcile calls this every pass). Returns what changed, in plain
+	 * words, or '' when nothing was asked or nothing moved.
+	 */
+	public function refreshCoordinates(?int $now = null): string {
+		$relay = $this->hostedRelayRow();
+		if ($relay === null || !$this->configured()) {
+			return '';
+		}
+		$last = trim((string)$relay->get('mrl_coordinates_check_time'));
+		if ($last !== '' && strtotime($last . ' UTC') + self::COORDINATES_REFRESH_SECONDS > ($now ?? time())) {
+			return '';
+		}
+		$before = (string)$relay->get('mrl_public_ip') . '|' . (string)$relay->get('mrl_identity_fingerprint');
+		$data = $this->status();
+		if (empty($data['enrolled']) || empty($data['coordinates'])) {
+			// No slot answered: the time is still kept, so this asks hourly.
+			$relay->set('mrl_coordinates_check_time', gmdate('Y-m-d H:i:s'));
+			$relay->save();
+			return '';
+		}
+		$c = $data['coordinates'];
+		return ((string)($c['shard_public_ip'] ?? '') . '|' . trim((string)($c['identity_fingerprint'] ?? ''))) === $before
+			? '' : 'This slot is on another relay shard; mail is collected there from here on.';
 	}
 
 	/** This deployment's hosted relay row (enabled or not), or null. */

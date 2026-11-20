@@ -21,6 +21,7 @@
  * that answered something this code cannot read. MailboxRelay::pollHealth
  * records the class so the Setup tab can say which.
  *
+ * @version 1.6 - forTenant(): a tenant's client for a shard named by address and pin
  * @version 1.5 - tenantRemove() takes force (relay 3.20, hosting_paid_launch B6)
  * @version 1.4.1 - sealTarget() comment: the browser refuses an answer without its challenge
  * @version 1.4 - sealTarget() passes the browser's challenge for the relay to sign (relay 3.18)
@@ -97,6 +98,11 @@ class RelayClient {
 	public static function forRelay(MailboxRelay $relay): RelayClient {
 		return new self((string)$relay->get('mrl_public_ip'), (string)$relay->get('mrl_identity_fingerprint'),
 			$relay->tenantSlug(), RelayClientIdentity::KIND_CLIENT);
+	}
+
+	/** This site's client for a shard other than its relay row's: the one a moved slot left. */
+	public static function forTenant(string $public_ip, string $identity_fingerprint, string $slug): RelayClient {
+		return new self($public_ip, $identity_fingerprint, $slug, RelayClientIdentity::KIND_CLIENT);
 	}
 
 	/** The operator's client for a shard: the tenant routes, and the ping. */

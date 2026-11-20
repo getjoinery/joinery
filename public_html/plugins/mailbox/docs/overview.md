@@ -3593,13 +3593,50 @@ into `mfs_provisioned_version`; a shard that has not reported in reads as
 unknown, never as up to date. A shard holds every tenant's undrained mail, so
 nothing re-images one: a new shard is born and tenants move to it.
 
+**Moving a shard's tenants** (the console's per-shard Move tenants,
+`FleetService::moveShardTenants()`) is how a shard is renewed, and loses no
+mail. Every live slot goes to the chosen shard, which must be taking tenants,
+have reported in and have room; the shard left takes no new tenant
+(`mfs_is_active` off). Each step waits for the one before it:
+
+1. **The new shard registers the tenant** (`add_tenant`, at the press where it
+   answers, by the reconcile otherwise; `mft_needs_shard_add`). A suspended
+   slot is registered too, with an empty allowlist. Until then the site is
+   still given the shard it left.
+2. **The site picks up the new shard.** An enrolled site asks for its
+   coordinates once an hour (`FleetClient::refreshCoordinates()`, the
+   reconcile's Hosted slot phase). The answer names the new shard and, under
+   `drain`, the shard left (`mft_moved_from_shard_id`); the site keeps that on
+   its relay row (`mrl_drain_public_ip`, `mrl_drain_identity_fingerprint`,
+   `mrl_drain_authserv_id`), sends its address map to the new shard, and
+   collects from both each pass (`RelaySpoolConsumer`'s second argument: same
+   tenant and keys, the old shard's address, pin and stamp name, and the relay
+   row's pickup times untouched). The plane records the pick-up
+   (`mft_move_seen_time`).
+3. **The operator points the slot's mail name at the new shard.** The console's
+   Moves in progress table says when, and DNS to publish shows each record's
+   standing.
+4. **The old shard lets the tenant go** (`FleetService::finishMove()`, each
+   fleet reconcile pass): once the mail name has resolved to the new shard and
+   not the old (`mft_move_dns_time`) for `FleetService::MOVE_HOLD_HOURS` (24),
+   an unforced remove, which the shard refuses while mail is waiting; after
+   `mailbox_fleet_release_drain_days` from that time, with what is left, raised
+   as discarded mail. A released slot is taken off without waiting for its name.
+
+A slot still provisioning was never registered on the shard it leaves, so it
+only changes shard. A shard cannot be retired while a slot is still leaving it
+(`MailboxFleetShard::leavingCount()`), and no second move starts from a shard
+holding a slot that is still finishing one. A site running code without the
+hourly question follows when the old shard stops answering for it.
+
 **Retiring a shard** (the console's per-shard Retire, `MailboxFleetShard::retire()`)
 takes the shard and its managed node off together: the shard row is
 soft-deleted and its node is hidden from the Server Manager dashboard
 (`ManagedNode::hide()`, restorable), which clears the node's incidents and ends
 its uptime monitoring. It is refused while any tenant holds a live slot on the
-shard (an evicted or released slot does not count) and while the shard's birth
-run is still in flight. The platform never destroys the server: the operator
+shard (an evicted or released slot does not count), while a slot moved to
+another shard is still leaving it, and while the shard's birth run is still in
+flight. The platform never destroys the server: the operator
 deletes the instance in the cloud account and removes its DNS records.
 
 ### The shrunken main box

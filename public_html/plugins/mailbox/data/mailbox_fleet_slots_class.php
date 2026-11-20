@@ -11,6 +11,8 @@
  * fleet_status can reconcile lazily (server_manager never learns what a
  * tenant is).
  *
+ * @version 1.5 - a slot moved to another shard: mft_moved_from_shard_id, mft_move_time, mft_needs_shard_add,
+ *                mft_move_seen_time, mft_move_dns_time
  * @version 1.4 - mft_release_time, and shardDomains(): a suspended or released slot's shard allowlist is
  *                empty (hosting_paid_launch B6)
  * @version 1.3 - mft_cvp_customer_cloud_provision_id: a slot a hosted site's plan grants belongs to that site;
@@ -97,6 +99,19 @@ class MailboxFleetSlot extends SystemBase {
 		// When the slot was released: a spool its shard still holds this many
 		// days later (mailbox_fleet_release_drain_days) is removed with it.
 		'mft_release_time'          => array('type'=>'timestamp(6)'),
+		// A slot moved to another shard (FleetService::moveShardTenants). The
+		// shard it left still holds its tenant, and whatever mail arrived
+		// there, until FleetService::finishMove() removes it: its site
+		// collects from both meanwhile.
+		'mft_moved_from_shard_id'   => array('type'=>'int8'),
+		'mft_move_time'             => array('type'=>'timestamp(6)'),
+		// The new shard has not registered the tenant yet; until it has, the
+		// site is still given the shard it left.
+		'mft_needs_shard_add'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// When the site was first given the new shard, and when the slot's
+		// mail name was first seen resolving to it.
+		'mft_move_seen_time'        => array('type'=>'timestamp(6)'),
+		'mft_move_dns_time'         => array('type'=>'timestamp(6)'),
 		'mft_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mft_update_time'           => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'mft_delete_time'           => array('type'=>'timestamp(6)'),
@@ -188,6 +203,10 @@ class MultiMailboxFleetSlot extends SystemMultiBase {
 
 		// 'live' = holding a slot: provisioning, active, or suspended (still
 		// occupies capacity and keeps its slug); released/evicted are terminal.
+		if (isset($this->options['moved_from'])) {
+			$filters['mft_moved_from_shard_id'] = [intval($this->options['moved_from']), PDO::PARAM_INT];
+		}
+
 		if (!empty($this->options['live'])) {
 			$filters['mft_status'] = "IN ('provisioning', 'active', 'suspended')";
 		}

@@ -29,6 +29,7 @@
  * pinned to the relay's identity, and the relay scopes every path to this
  * tenant's own spool: ids only, no paths, no root.
  *
+ * @version 1.20 - a second constructor argument collects from the shard a moved hosted slot left
  * @version 1.19 - a transport blob opens with the one (X-Wing) transport secret; nothing tracks a retired one
  * @version 1.18 - a transport blob is opened with the secret its seal version names; a drained pull that met
  *                 no v1 blob forgets the replaced transport secret (specs/post_quantum_sealing.md R7)
@@ -98,8 +99,18 @@ class RelaySpoolConsumer {
 	/** @var InboundEmailRouter */
 	private $router;
 
-	public function __construct(MailboxRelay $relay) {
+	/**
+	 * The shard a moved hosted slot left (MailboxRelay::drainSource()), when
+	 * this consumer collects from it and not from the relay row's own shard:
+	 * same tenant, same keys, another address, pin and stamp name. A pull
+	 * from it leaves the relay row's pickup times alone.
+	 * @var array|null
+	 */
+	private $drain;
+
+	public function __construct(MailboxRelay $relay, ?array $drain = null) {
 		$this->relay = $relay;
+		$this->drain = $drain;
 		$this->router = new InboundEmailRouter();
 	}
 
@@ -114,7 +125,7 @@ class RelaySpoolConsumer {
 			// is accumulating on a machine nobody pulls from. That is an outage.
 			return array('status' => 'error', 'message' => 'relay has no identity pin (it predates the relay API) and cannot be reached — create a new relay and delete this row');
 		}
-		if (trim((string)$this->relay->get('mrl_public_ip')) === '') {
+		if ($this->drain === null && trim((string)$this->relay->get('mrl_public_ip')) === '') {
 			return array('status' => 'skipped', 'message' => 'relay has no public address yet');
 		}
 
@@ -208,14 +219,18 @@ class RelaySpoolConsumer {
 					. 'no vault here holds) — the Setup tab names a sealing mailbox that needs repair.');
 			}
 
-			$this->relay->set('mrl_last_pull_time', gmdate('Y-m-d H:i:s'));
-			// Drained: the listing was read to its end and every entry on it was
-			// stored, acked or held — none left unread behind a cap or an error.
-			if ($exhausted && $errors === 0 && $processed === count($seals)) {
-				$this->relay->set('mrl_last_pull_drained_time', gmdate('Y-m-d H:i:s'));
+			// The pickup times are the relay row's own shard's: a pull from the
+			// shard a moved slot left says nothing about it.
+			if ($this->drain === null) {
+				$this->relay->set('mrl_last_pull_time', gmdate('Y-m-d H:i:s'));
+				// Drained: the listing was read to its end and every entry on it was
+				// stored, acked or held — none left unread behind a cap or an error.
+				if ($exhausted && $errors === 0 && $processed === count($seals)) {
+					$this->relay->set('mrl_last_pull_drained_time', gmdate('Y-m-d H:i:s'));
+				}
+				$this->relay->set('mrl_last_pull_held', $held);
+				$this->relay->save();
 			}
-			$this->relay->set('mrl_last_pull_held', $held);
-			$this->relay->save();
 
 			$status = $errors > 0 && ($stored + $pending) === 0 ? 'error' : 'success';
 			$msg = sprintf('pulled %d entr(y/ies): %d stored, %d pending-parse, %d held, %d acked, %d error(s)',
@@ -534,6 +549,9 @@ class RelaySpoolConsumer {
 	 * relay, where they are the same host.
 	 */
 	private function relayAuthservId(): string {
+		if ($this->drain !== null && (string)($this->drain['authserv_id'] ?? '') !== '') {
+			return (string)$this->drain['authserv_id'];
+		}
 		return $this->relay->authservId();
 	}
 
@@ -614,7 +632,7 @@ class RelaySpoolConsumer {
 		// hosted slot's coordinates once and retries. The fetches below reuse the
 		// client the retry settled on.
 		$client = null;
-		$first = $this->relay->withApi(function (RelayClient $c) use (&$client) {
+		$first = $this->api(function (RelayClient $c) use (&$client) {
 			$client = $c;
 			return $c->spoolList('', 1);
 		});
@@ -687,13 +705,24 @@ class RelaySpoolConsumer {
 		try {
 			$acked = 0;
 			foreach (array_chunk($ids, 400) as $chunk) {
-				$acked += $this->relay->withApi(function (RelayClient $c) use ($chunk) { return $c->spoolAck($chunk); });
+				$acked += $this->api(function (RelayClient $c) use ($chunk) { return $c->spoolAck($chunk); });
 			}
 			return $acked;
 		} catch (RelayClientException $e) {
 			error_log('RelaySpoolConsumer: ack failed (' . $e->failure_class . '): ' . $e->getMessage());
 			return 0;
 		}
+	}
+
+	/**
+	 * One relay call: through the relay row (which follows a moved slot), or
+	 * straight to the shard a moved slot left, which has nowhere to follow to.
+	 */
+	private function api(callable $fn) {
+		if ($this->drain === null) {
+			return $this->relay->withApi($fn);
+		}
+		return $fn(RelayClient::forTenant((string)$this->drain['ip'], (string)$this->drain['pin'], $this->relay->tenantSlug()));
 	}
 
 	private function stageDir(): ?string {

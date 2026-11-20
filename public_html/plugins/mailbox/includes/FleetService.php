@@ -17,6 +17,8 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
+ * @version 1.13 - moving a shard's tenants to another: moveShardTenants(), finishMove(), moveStep(),
+ *                noteCoordinatesServed(); coordinates() carries the shard a moved slot still collects from
  * @version 1.12 - the shard allowlist is shardDomains(): empty for a suspended or released slot; release
  *                empties it before removing the tenant, and a spool still undrained after
  *                mailbox_fleet_release_drain_days goes with a forced remove; set_domains is applied
@@ -411,9 +413,13 @@ class FleetService {
 	 * row - everything RelayClient needs.
 	 */
 	public static function coordinates(MailboxFleetSlot $slot): array {
-		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
+		$moved_from = intval($slot->get('mft_moved_from_shard_id'));
+		// A moved slot's site keeps the shard it left until the new one has
+		// registered it: a shard answers nobody it does not know.
+		$waiting = $moved_from > 0 && (bool)$slot->get('mft_needs_shard_add');
+		$shard = new MailboxFleetShard($waiting ? $moved_from : intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
 		$slug = (string)$slot->get('mft_slug');
-		return array(
+		$coordinates = array(
 			'slot_id'         => intval($slot->key),
 			'status'          => (string)$slot->get('mft_status'),
 			'slug'            => $slug,
@@ -428,6 +434,224 @@ class FleetService {
 			'identity_fingerprint' => (string)$shard->get('mfs_identity_fingerprint'),
 			'spool_path'      => '/var/spool/joinery-relay/' . $slug,
 		);
+		// The shard a moved slot left still holds mail that arrived there: the
+		// site collects from it as well until the plane removes the tenant.
+		if ($moved_from > 0 && !$waiting) {
+			$old = new MailboxFleetShard($moved_from, TRUE);
+			if ($old->key && trim((string)$old->get('mfs_public_ip')) !== '' && trim((string)$old->get('mfs_identity_fingerprint')) !== '') {
+				$coordinates['drain'] = array(
+					'shard_public_ip'      => (string)$old->get('mfs_public_ip'),
+					'identity_fingerprint' => (string)$old->get('mfs_identity_fingerprint'),
+					'authserv_id'          => (string)$old->get('mfs_hostname'),
+				);
+			}
+		}
+		return $coordinates;
+	}
+
+	/** The site was given a moved slot's new shard: kept once, for the console. */
+	public static function noteCoordinatesServed(MailboxFleetSlot $slot): void {
+		if (intval($slot->get('mft_moved_from_shard_id')) > 0 && !(bool)$slot->get('mft_needs_shard_add')
+				&& trim((string)$slot->get('mft_move_seen_time')) === '') {
+			$slot->set('mft_move_seen_time', gmdate('Y-m-d H:i:s'));
+			$slot->save();
+		}
+	}
+
+	// ------------------------------------------------- moving between shards
+
+	/** Hours the shard a slot left keeps its tenant after the slot's mail name resolves to the new one. */
+	const MOVE_HOLD_HOURS = 24;
+
+	/** Test seam: fn(string $host): string[] in place of the A lookup. */
+	public static $dns_lookup = null;
+
+	private static function mailNameAddresses(string $host): array {
+		if (self::$dns_lookup !== null) {
+			return (array)call_user_func(self::$dns_lookup, $host);
+		}
+		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
+		return DnsResolver::getA($host);
+	}
+
+	/**
+	 * Move every tenant on one shard to another (renewing a shard: a new one
+	 * is born and the tenants move to it). The shard left takes no new tenant
+	 * from here on. Each slot is registered on the new shard at once where it
+	 * answers, and by the reconcile otherwise; the shard left keeps each
+	 * tenant, and the mail waiting for it, until finishMove() removes it.
+	 *
+	 * @return array{moved:int,registered:int} how many slots moved, and how many the new shard registered at once
+	 * @throws MailboxFleetShardException when the move may not start
+	 */
+	public static function moveShardTenants(MailboxFleetShard $from, MailboxFleetShard $to): array {
+		if (!$from->key || !$to->key || intval($from->key) === intval($to->key)) {
+			throw new MailboxFleetShardException('Choose another shard to move the tenants to.');
+		}
+		if ($to->get('mfs_delete_time') || !(bool)$to->get('mfs_is_active')) {
+			throw new MailboxFleetShardException('Shard ' . $to->get('mfs_name') . ' is not taking tenants.');
+		}
+		if (trim((string)$to->get('mfs_identity_fingerprint')) === '' || trim((string)$to->get('mfs_public_ip')) === '') {
+			throw new MailboxFleetShardException('Shard ' . $to->get('mfs_name') . ' has not reported in yet.');
+		}
+		$slots = new MultiMailboxFleetSlot(array('shard_id' => intval($from->key), 'live' => true, 'deleted' => false));
+		$moving = array();
+		foreach ($slots as $slot) {
+			if (intval($slot->get('mft_moved_from_shard_id')) > 0) {
+				throw new MailboxFleetShardException('A tenant on this shard is still finishing an earlier move. '
+					. 'Start this one once Moves in progress is empty.');
+			}
+			$moving[] = $slot;
+		}
+		if (!$moving) {
+			throw new MailboxFleetShardException('No tenant holds a slot on this shard.');
+		}
+		$room = intval($to->get('mfs_capacity')) - $to->slotCount();
+		if (count($moving) > $room) {
+			throw new MailboxFleetShardException('Shard ' . $to->get('mfs_name') . ' has room for ' . max(0, $room)
+				. ' more, and ' . count($moving) . ' would move. Raise its capacity first.');
+		}
+
+		$from->set('mfs_is_active', false);
+		$from->save();
+
+		$registered = 0;
+		foreach ($moving as $slot) {
+			// A slot still provisioning was never registered on the shard it
+			// leaves: there is nothing there to collect or remove.
+			$was_registered = (string)$slot->get('mft_status') !== MailboxFleetSlot::STATUS_PROVISIONING;
+			$slot->set('mft_mfs_mailbox_fleet_shard_id', intval($to->key));
+			if ($was_registered) {
+				$slot->set('mft_moved_from_shard_id', intval($from->key));
+				$slot->set('mft_move_time', gmdate('Y-m-d H:i:s'));
+				$slot->set('mft_needs_shard_add', true);
+				$slot->set('mft_move_seen_time', null);
+				$slot->set('mft_move_dns_time', null);
+			}
+			$slot->save();
+			// The move is recorded whatever the new shard answers now: the
+			// reconcile registers what this press could not.
+			try {
+				if (self::applyTenant($slot, 'add_tenant') && !(bool)$slot->get('mft_needs_shard_add')
+						&& (string)$slot->get('mft_status') !== MailboxFleetSlot::STATUS_PROVISIONING) {
+					$registered++;
+				}
+			} catch (\Throwable $e) {
+				error_log('FleetService: registering moved slot ' . $slot->key . ' on shard ' . $to->key . ' failed: ' . $e->getMessage());
+			}
+		}
+		return array('moved' => count($moving), 'registered' => $registered);
+	}
+
+	/**
+	 * Take a moved slot off the shard it left, when that is safe: once the
+	 * new shard has registered it and its mail name has resolved to the new
+	 * shard for MOVE_HOLD_HOURS, so nothing more arrives at the old one. The
+	 * old shard refuses while mail is still waiting, and the next pass asks
+	 * again; after mailbox_fleet_release_drain_days it is removed with what
+	 * is left. A released slot is taken off without waiting for its name.
+	 *
+	 * @return array{done:bool,note:string,discarded:string} discarded carries the shard's reason when mail went with the tenant
+	 */
+	public static function finishMove(MailboxFleetSlot $slot, ?int $now = null): array {
+		$out = array('done' => false, 'note' => '', 'discarded' => '');
+		$from_id = intval($slot->get('mft_moved_from_shard_id'));
+		if ($from_id <= 0) {
+			return $out;
+		}
+		$now = $now ?? time();
+		$status = (string)$slot->get('mft_status');
+		$holding = in_array($status, array(MailboxFleetSlot::STATUS_ACTIVE, MailboxFleetSlot::STATUS_SUSPENDED), true);
+		$clear = function () use ($slot) {
+			$slot->set('mft_moved_from_shard_id', null);
+			$slot->set('mft_needs_shard_add', false);
+			$slot->save();
+		};
+
+		$old = new MailboxFleetShard($from_id, TRUE);
+		if (!$old->key || $old->get('mfs_delete_time')
+				|| trim((string)$old->get('mfs_public_ip')) === '' || trim((string)$old->get('mfs_identity_fingerprint')) === '') {
+			$clear();
+			$out['done'] = true;
+			$out['note'] = 'slot ' . $slot->key . ': the shard it left is gone, so its move is closed';
+			return $out;
+		}
+
+		$force = false;
+		if ($holding) {
+			if ((bool)$slot->get('mft_needs_shard_add')) {
+				return $out; // its site is still on the old shard
+			}
+			$new = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
+			$dns_time = trim((string)$slot->get('mft_move_dns_time'));
+			if ($dns_time === '') {
+				$host = strtolower(trim((string)$slot->get('mft_mx_hostname')));
+				try {
+					$found = $host === '' ? array() : self::mailNameAddresses($host);
+				} catch (\Throwable $e) {
+					return $out;
+				}
+				$new_ip = trim((string)$new->get('mfs_public_ip'));
+				if ($host !== '' && (!in_array($new_ip, $found, true) || in_array(trim((string)$old->get('mfs_public_ip')), $found, true))) {
+					return $out; // mail still arrives at the old shard
+				}
+				$slot->set('mft_move_dns_time', gmdate('Y-m-d H:i:s', $now));
+				$slot->save();
+				return $out;
+			}
+			$since = strtotime($dns_time . ' UTC');
+			if ($since + self::MOVE_HOLD_HOURS * 3600 > $now) {
+				return $out;
+			}
+			$raw = trim((string)Globalvars::get_instance()->get_setting('mailbox_fleet_release_drain_days'));
+			$days = $raw === '' ? 30 : max(1, intval($raw));
+			$force = $since + $days * 86400 <= $now;
+		} else {
+			$force = $status === MailboxFleetSlot::STATUS_EVICTED || self::releaseDrainOver($slot, $now);
+		}
+		if ($force && !RelayVersion::removesWithMailLeft((string)$old->get('mfs_provisioned_version'))) {
+			$force = false;
+		}
+
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
+		try {
+			$verdict = RelayClient::forOperator((string)$old->get('mfs_public_ip'), (string)$old->get('mfs_identity_fingerprint'))
+				->tenantRemove((string)$slot->get('mft_slug'), $force);
+		} catch (RelayClientException $e) {
+			error_log('FleetService: removing moved slot ' . $slot->key . ' from shard ' . $old->key . ' failed ('
+				. $e->failure_class . '): ' . $e->getMessage());
+			return $out;
+		}
+		if (($verdict['status'] ?? '') !== 'ok') {
+			return $out; // mail is still waiting there: the next pass asks again
+		}
+		$clear();
+		$out['done'] = true;
+		$out['note'] = 'slot ' . $slot->key . ' left shard ' . (string)$old->get('mfs_name');
+		$reason = (string)($verdict['reason'] ?? '');
+		if ($force && strpos($reason, 'undrained') !== false) {
+			$out['discarded'] = $reason;
+		}
+		return $out;
+	}
+
+	/** Where a moved slot stands, in plain words, for the console. */
+	public static function moveStep(MailboxFleetSlot $slot): string {
+		if ((bool)$slot->get('mft_needs_shard_add')) {
+			return 'Waiting for the new shard to register it.';
+		}
+		$status = (string)$slot->get('mft_status');
+		if ($status !== MailboxFleetSlot::STATUS_ACTIVE && $status !== MailboxFleetSlot::STATUS_SUSPENDED) {
+			return 'Released: the old shard removes it once its mail is collected.';
+		}
+		if (trim((string)$slot->get('mft_move_dns_time')) !== '') {
+			return 'Its mail name points at the new shard. The old shard removes it ' . self::MOVE_HOLD_HOURS
+				. ' hours after that, once its mail is collected.';
+		}
+		if (trim((string)$slot->get('mft_move_seen_time')) !== '') {
+			return 'Its site uses the new shard. Point its mail name at the new shard now.';
+		}
+		return 'Registered on the new shard. Waiting for its site to pick it up (within the hour).';
 	}
 
 	/**
@@ -628,6 +852,10 @@ class FleetService {
 							&& RelayVersion::passesMailAppsShared((string)$shard->get('mfs_provisioned_version'))
 							&& (string)$slot->get('mft_mx_hostname_applied') !== self::mailNameKey($slot)) {
 						$slot->set('mft_mx_hostname_applied', self::mailNameKey($slot));
+						$slot->save();
+					}
+					if (($verdict['status'] ?? '') === 'ok' && (bool)$slot->get('mft_needs_shard_add')) {
+						$slot->set('mft_needs_shard_add', false);
 						$slot->save();
 					}
 					if (($verdict['status'] ?? '') === 'ok'

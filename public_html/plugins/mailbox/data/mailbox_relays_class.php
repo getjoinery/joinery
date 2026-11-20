@@ -35,6 +35,8 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.15 - mrl_drain_public_ip, mrl_drain_identity_fingerprint, mrl_drain_authserv_id and drainSource(): the shard
+ *                 a moved hosted slot still collects from; mrl_coordinates_check_time
  * @version 1.14 - withApi() re-fetches a hosted slot's coordinates after any failure a moved, replaced or updated
  *                 shard explains (not only a pin mismatch), once per row in a request: recoverCoordinates()
  * @version 1.13 - the cached ping answer and the first transport key save as server-initiated writes: a Setup page view makes both
@@ -105,6 +107,14 @@ class MailboxRelay extends SystemBase {
 		// shard's. Empty falls back to the MX hostname, which is the same host on
 		// a self-hosted relay.
 		'mrl_authserv_id'        => array('type'=>'varchar(255)'),
+		// A hosted slot its operator moved to another shard: the shard it left,
+		// which still holds mail for this site and is collected from too until
+		// the coordinates stop naming it (RelaySpoolConsumer's second argument).
+		'mrl_drain_public_ip'            => array('type'=>'varchar(64)'),
+		'mrl_drain_identity_fingerprint' => array('type'=>'varchar(64)'),
+		'mrl_drain_authserv_id'          => array('type'=>'varchar(255)'),
+		// When a hosted slot's coordinates were last asked for (FleetClient::refreshCoordinates).
+		'mrl_coordinates_check_time'     => array('type'=>'timestamp(6)'),
 		// A relay without a shell (specs/relay_without_a_shell.md): the SPKI
 		// fingerprint the plane pins on every connection, and the Ed25519 key the
 		// birth report was signed with. Every path to the relay goes through
@@ -247,6 +257,20 @@ class MailboxRelay extends SystemBase {
 			}
 		}
 		return '';
+	}
+
+	/**
+	 * The shard a moved hosted slot left, while it still holds mail for this
+	 * site: ['ip', 'pin', 'authserv_id'], or null.
+	 */
+	public function drainSource(): ?array {
+		$ip = trim((string)$this->get('mrl_drain_public_ip'));
+		$pin = trim((string)$this->get('mrl_drain_identity_fingerprint'));
+		if (!(bool)$this->get('mrl_is_hosted') || $ip === '' || $pin === '') {
+			return null;
+		}
+		return array('ip' => $ip, 'pin' => $pin,
+			'authserv_id' => strtolower(trim((string)$this->get('mrl_drain_authserv_id'))));
 	}
 
 	// --- Scanner health (specs/mailbox_relay_scanner_health.md) ----------------
@@ -469,6 +493,9 @@ class MailboxRelay extends SystemBase {
 		$this->set('mrl_identity_fingerprint', $pin);
 		$this->set('mrl_public_ip', $ip);
 		$this->set('mrl_authserv_id', (string)$fresh->get('mrl_authserv_id'));
+		foreach (array('mrl_drain_public_ip', 'mrl_drain_identity_fingerprint', 'mrl_drain_authserv_id') as $field) {
+			$this->set($field, $fresh->get($field));
+		}
 		return true;
 	}
 

@@ -28,6 +28,8 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.12 - a site asks for its hosted slot's coordinates each hour and collects from the shard a moved slot
+ *                 left; the fleet pass registers a moved slot on its new shard and takes it off the old one
  * @version 1.11 - phase 5 empties a released slot's allowlist before removing it, and removes it with its
  *                spool once mailbox_fleet_release_drain_days have passed, telling the operator
  *                (mailbox.fleet_slot_mail_discarded; hosting_paid_launch B6)
@@ -110,8 +112,19 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 		} catch (ServiceClientException $e) {
 			return array('status' => 'error', 'message' => 'Enrolling in the hosted relay failed: ' . $e->getMessage());
 		}
-		return $outcome === '' ? array('status' => 'skipped', 'message' => '')
-			: array('status' => 'success', 'message' => $outcome);
+		if ($outcome !== '') {
+			return array('status' => 'success', 'message' => $outcome);
+		}
+		// An enrolled site asks where its slot is each hour, so a slot its
+		// operator moved to another shard is followed while the shard it
+		// left still answers.
+		try {
+			$moved = (new FleetClient())->refreshCoordinates();
+		} catch (\Throwable $e) {
+			return array('status' => 'error', 'message' => 'Asking the hosted relay where this slot is failed: ' . $e->getMessage());
+		}
+		return $moved === '' ? array('status' => 'skipped', 'message' => '')
+			: array('status' => 'success', 'message' => $moved);
 	}
 
 	/** Phase 1 — rebuild the relay's DB-free routing map and push it if changed. */
@@ -155,6 +168,19 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 
 		$this->announcePickup($relay, (string)($result['status'] ?? 'error'),
 			(string)($result['message'] ?? ''), $last_pull_before);
+
+		// A slot moved to another shard: what arrived at the shard it left is
+		// collected too, until the operator's plane takes the tenant off it.
+		$drain = $relay->drainSource();
+		if ($drain !== null) {
+			$left = (new RelaySpoolConsumer($relay, $drain))->pull($max);
+			if (($left['status'] ?? '') === 'error') {
+				// The shard left may have let go of this slot: ask again next pass.
+				$relay->set('mrl_coordinates_check_time', null);
+				$relay->save();
+			}
+			$result['message'] .= ' Shard left: ' . (string)($left['message'] ?? '');
+		}
 
 		return array(
 			'status' => ($result['status'] === 'error') ? 'error' : 'success',
@@ -353,6 +379,24 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 
 		foreach ($slots as $slot) {
 			$status = (string)$slot->get('mft_status');
+
+			// A slot moved to another shard: registered there first, then
+			// taken off the shard it left once nothing more arrives for it.
+			if (intval($slot->get('mft_moved_from_shard_id')) > 0) {
+				if ((bool)$slot->get('mft_needs_shard_add')
+						&& ($status === MailboxFleetSlot::STATUS_ACTIVE || $status === MailboxFleetSlot::STATUS_SUSPENDED)
+						&& FleetService::applyTenant($slot, 'add_tenant')) {
+					$dispatched++;
+				}
+				$move = FleetService::finishMove($slot);
+				if ($move['note'] !== '') {
+					$notes[] = $move['note'];
+				}
+				if ($move['discarded'] !== '') {
+					$this->announceDiscarded($slot, $move['discarded']);
+				}
+			}
+
 			if ($status === MailboxFleetSlot::STATUS_EVICTED) {
 				continue;
 			}
