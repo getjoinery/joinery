@@ -46,6 +46,9 @@
  * the origin's, so it fetches each archive ACTIVE names from its upstream (the
  * upgrade_source setting), keeps it only when the hash is ACTIVE's, and serves
  * it from its own static_files/fixes/.
+ * @version 1.4 - serveReceived(): a site other sites upgrade from serves the received ACTIVE's archives while it
+ *                applies the release, before its tree (and the support bundle in it) goes live, so a machine
+ *                that takes the new bundle at once never asks for an archive not served yet (B21)
  * @version 1.3 - a build the cache holds for this version and these recipe files is reused: a publish refused
  *                after its builds (origin moved) no longer costs the next one the same hours again
  *
@@ -276,6 +279,22 @@ class PackageFixPublisher {
 		self::place($archive, $static_dir, $name);
 		return array('source' => $source, 'version' => $recipe['version'], 'ubuntu_base' => $recipe['ubuntu_base'], 'archive' => $name,
 			'sha256' => $sha, 'recipe_sha256' => $recipe_hash, 'changelog_from' => $recipe['changelog_from'], 'cves' => $recipe['cves']);
+	}
+
+	/**
+	 * Serve the archives a received ACTIVE names, from upstream, into
+	 * $static_dir: what a republishing publish does, for a site that applies a
+	 * release others upgrade from, called by upgrade.php before the swap with
+	 * the staged tree's fixes/ (B21). Never throws; a result as publish().
+	 */
+	public static function serveReceived($src, $static_dir, $out = null, array $opts = array()) {
+		$say = function ($msg) use ($out) { if ($out) { call_user_func($out, $msg); } };
+		if (!is_dir($src)) {
+			$msg = 'Package fixes: no ' . self::SOURCE_SUBDIR . ' in the release - nothing to serve';
+			$say($msg);
+			return self::result(self::STATUS_ABSENT, $msg);
+		}
+		return self::republish($src, $static_dir, $say, $opts);
 	}
 
 	/**

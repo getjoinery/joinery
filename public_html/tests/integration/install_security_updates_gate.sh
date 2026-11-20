@@ -105,9 +105,16 @@ STUB
 chmod +x "$T/bin/"*
 
 mkdir -p "$T/proc"
+# The package fix converge is a stand-in that records its turn in the calls,
+# so the real one never acts on this box.
+cat > "$T/ipf" <<STUB
+#!/bin/bash
+echo "package_fixes \$*" >> "$T/calls"
+echo "converge chatter that must not reach stdout"
+STUB
 run_script() {
     rm -f "$T/calls" "$T/upgraded"
-    PATH="$T/bin:$PATH" INSTALL_SECURITY_UPDATES_PROC="$T/proc" bash "$SCRIPT" "$@" > "$T/out.json" 2> "$T/err"
+    PATH="$T/bin:$PATH" INSTALL_SECURITY_UPDATES_PROC="$T/proc" INSTALL_SECURITY_UPDATES_PACKAGE_FIXES="$T/ipf" bash "$SCRIPT" "$@" > "$T/out.json" 2> "$T/err"
 }
 
 echo "=== Arguments are refused, and nothing runs ==="
@@ -126,6 +133,8 @@ chk "nothing on stderr" "$(wc -c < "$T/err")" "0"
 chk "every key present, in order" "$(jv "$T/out.json" "" keys)" \
     "outcome,reason,apt_update,upgrade_exit,upgraded,upgraded_count,truncated,reboot_required,services_needing_restart,repaired,reloaded,still_on_old_code"
 chk "outcome installed" "$(jv "$T/out.json" outcome)" "installed"
+chk "package fixes are converged first, before the updater (B22)" \
+    "$(grep -n -E '^(package_fixes|unattended-upgrade)' "$T/calls" | head -2 | cut -d' ' -f1 | sed 's/^[0-9]*://' | paste -sd ' ')" "package_fixes unattended-upgrade"
 chk "lists refreshed" "$(jv "$T/out.json" apt_update)" "ok"
 chk "three packages changed (two upgraded, one new)" "$(jv "$T/out.json" upgraded_count)" "3"
 chk "an upgrade carries both versions" "$(jv "$T/out.json" upgraded.2.package)/$(jv "$T/out.json" upgraded.2.from)/$(jv "$T/out.json" upgraded.2.to)" \
@@ -142,7 +151,7 @@ chk "nothing half done: no repair, nothing reloaded" "$(jv "$T/out.json" repaire
 
 echo "=== A run left half done is finished first, naming no package ==="
 touch "$T/broken"; run_script
-chk "repaired, before the updater ran" "$(jv "$T/out.json" repaired)|$(grep -n -e '-f -o' -e '^unattended' "$T/calls" | cut -d: -f1 | tr '\n' ' ')" "true|1 3 "
+chk "repaired, before the updater ran" "$(jv "$T/out.json" repaired)|$(grep -n -e '-f -o' -e '^unattended' "$T/calls" | cut -d: -f1 | tr '\n' ' ')" "true|1 4 "
 chk "  the repair is apt-get -f install with options only" "$(grep -c -x 'apt-get -q -y -f -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install' "$T/calls")" "1"
 touch "$T/broken"; STUB_REPAIR_FAILS=1 run_script
 chk "a repair that leaves it half done: repaired false, the updater still runs" "$(jv "$T/out.json" repaired)|$(grep -c '^unattended-upgrade' "$T/calls")" "false|1"

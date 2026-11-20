@@ -265,6 +265,29 @@ $r = PackageFixPublisher::publish($rsite, null, $ropts);
 check($r['status'] === PackageFixPublisher::STATUS_FAILED && !is_file($rsite . '/' . PackageFixPublisher::STATIC_SUBDIR . '/' . $rname),
 	'upstream serves other bytes: failed, nothing served', $r['message']);
 
+section('A site applying a release it serves fetches the archives before the swap (B21)');
+
+// The staged tree's fixes/ and the live site's static_files/fixes, apart.
+$stage_src = $work . '/stage/' . PackageFixPublisher::SOURCE_SUBDIR;
+@mkdir($stage_src, 0755, true);
+copy($src . '/ACTIVE', $stage_src . '/ACTIVE');
+$live_static = $work . '/live/' . PackageFixPublisher::STATIC_SUBDIR;
+$fetched = array();
+$fetch_mode = 'good';
+$r = PackageFixPublisher::serveReceived($stage_src, $live_static, null, $ropts);
+check($r['status'] === PackageFixPublisher::STATUS_FETCHED && hash_file('sha256', $live_static . '/' . $rname) === $want['php8.5']['sha256'],
+	'the staged ACTIVE\'s archives are served from the live site\'s static_files, with ACTIVE\'s hash', $r['message']);
+$fetched = array();
+check(PackageFixPublisher::serveReceived($stage_src, $live_static, null, $ropts)['status'] === PackageFixPublisher::STATUS_SKIPPED && $fetched === array(),
+	'the publish after the upgrade finds them served and fetches nothing');
+unlink($live_static . '/' . $rname);
+$fetch_mode = 'bad';
+check(PackageFixPublisher::serveReceived($stage_src, $live_static, null, $ropts)['status'] === PackageFixPublisher::STATUS_FAILED,
+	'an archive upstream does not serve with ACTIVE\'s hash fails, so the upgrade stops before the swap');
+check(PackageFixPublisher::serveReceived($work . '/nowhere', $live_static, null, $ropts)['status'] === PackageFixPublisher::STATUS_ABSENT,
+	'a release with no fixes/: absent, nothing to serve');
+$fetch_mode = 'good';
+
 section('Release rules');
 
 check(ReleaseCommit::heldPath('maintenance_scripts/install_tools/fixes/php8.5/RECIPE'), 'a recipe is held: an uncommitted one refuses the release');

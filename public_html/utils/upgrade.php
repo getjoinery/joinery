@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.41 - a site other sites upgrade from serves its release's package fix archives before the swap
+	 *                (PackageFixPublisher::serveReceived): its new support bundle sent container hosts for them first (B21)
 	 * @version 1.40 - a declared package name may not end in a dash (NAME- is a remove), and only a name
 	 *                 apt-cache knows exactly reaches apt-get, which otherwise reads an unmatched name as a
 	 *                 regular expression over every package (reviewer1 B2)
@@ -1800,6 +1802,25 @@
 				: nl2br(htmlspecialchars(implode("\n", $schema_ahead['changes']))) . '<br>');
 		}
 		$GLOBALS['APPLY_RESULT']['schema_changes'] = array_slice($schema_ahead['changes'], 0, 300);
+
+		// ============================================
+		// PACKAGE FIXES THIS SITE SERVES
+		// ============================================
+		// A site other sites upgrade from serves the package fix archives its
+		// release names before the release goes live here: the support bundle
+		// in the new tree sends container hosts to fetch them at once, and they
+		// must already be here (B21). Fetched from upstream and kept only when
+		// each matches the received ACTIVE's hash; one that cannot be served
+		// stops the upgrade before anything changed.
+		if (method_exists('DeploymentHelper', 'servesReleases') && DeploymentHelper::servesReleases()
+				&& class_exists('PackageFixPublisher') && method_exists('PackageFixPublisher', 'serveReceived')) {
+			out_step('Serving Package Fixes');
+			$pf = PackageFixPublisher::serveReceived(rtrim($stage_location, '/') . '/' . PackageFixPublisher::SOURCE_SUBDIR,
+				$full_site_dir . '/' . PackageFixPublisher::STATIC_SUBDIR, function ($m) use ($verbose) { if ($verbose) { echo htmlspecialchars($m) . '<br>'; } });
+			if ($pf['status'] === PackageFixPublisher::STATUS_FAILED) {
+				upgrade_abort('Package fixes could not be served', htmlspecialchars($pf['message']) . '. Nothing was deployed; upgrade again once upstream serves them.', true);
+			}
+		}
 
 		// ============================================
 		// DEPLOYMENT

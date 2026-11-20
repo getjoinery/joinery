@@ -4,6 +4,10 @@
 # automatic-update policy allows, and say what changed as ONE JSON object on
 # stdout.
 #
+# Version: 1.4 - Package fixes ahead of Ubuntu are converged first (install_package_fixes.sh converge, as
+#                the hourly check does), outside a container: a fix whose download failed is fetched and
+#                pinned, so pressing the button installs it at once rather than after the next hourly
+#                check (B22). What it says goes nowhere; the host report shows each fix's state.
 # Version: 1.3 - After an install that changed something, the downloaded packages are cleared with
 #                apt-get clean, which waits for no lock and takes apt's own: a site container's image
 #                no longer deletes them after every apt run (Dockerfile.template 6.4), so they would
@@ -42,6 +46,10 @@
 #     one, an install) to finish, and reports busy if it never does.
 #   - A package run left half done is finished first with apt-get -f install,
 #     which names no package (repaired: true).
+#   - Outside a container, the release's package fixes ahead of Ubuntu are
+#     converged before the install (install_package_fixes.sh converge): each
+#     is fetched, checked and pinned, so the install takes it. A container's
+#     come with its base.
 #   - Afterwards, every php-fpm master still running a binary an update
 #     replaced is reloaded (USR2: it re-executes, no request dropped);
 #     reloaded and still_on_old_code name the binaries.
@@ -155,6 +163,16 @@ if [[ -n "$(dpkg --audit 2>/dev/null)" ]]; then
             && [[ -z "$(dpkg --audit 2>/dev/null)" ]]; then
         REPAIRED=true
     fi
+fi
+
+# Package fixes ahead of Ubuntu, as the hourly check converges them: a fetch
+# that failed is tried again and pinned, so this install takes the fix. A site
+# container's fixes come with its base, never from here.
+PACKAGE_FIXES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/install_package_fixes.sh"
+# tests only, and never as root: a stand-in for the script.
+[[ "$EUID" -ne 0 && -n "${INSTALL_SECURITY_UPDATES_PACKAGE_FIXES:-}" ]] && PACKAGE_FIXES="$INSTALL_SECURITY_UPDATES_PACKAGE_FIXES"
+if [[ ! -f /.dockerenv && ! -f /run/.containerenv && -f "$PACKAGE_FIXES" ]]; then
+    timeout --kill-after=10 900 bash "$PACKAGE_FIXES" converge >/dev/null 2>&1 < /dev/null || true
 fi
 
 BEFORE="$(installed)"
