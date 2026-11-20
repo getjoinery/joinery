@@ -1,0 +1,7 @@
+{
+  "name": "Watch Upstream Security Fixes",
+  "description": "Every hour, asks Ubuntu's CVE tracker which security fixes are not yet in Ubuntu 26.04 for each package the nodes run (PHP, PostgreSQL, Apache, Postfix, OpenSSL, and any with a package fix of ours), and rates each from the project's own advisory (PHP's), NVD, and Ubuntu once past triage. Reconcile Incidents turns the answer into incidents on this node: a critical or high fix upstream has shipped and Ubuntu has not (build a package fix now), one not rated yet, and a package fix of ours that Ubuntu's newer build has caught up with (retire it, or rebuild it on Ubuntu's build).",
+  "activate_on_install": true,
+  "default_frequency": "hourly",
+  "config_fields": {}
+}

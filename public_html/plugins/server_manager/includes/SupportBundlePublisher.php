@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.41 - carries install_package_fixes.sh and fixes/ACTIVE, so a container host fetches the package
+ *                fixes its base installs (specs/package_fixes_ahead_of_ubuntu.md WP3)
  * @version 1.40 - staged in a private temporary folder: in the site tree the converger changed a copy's mode
  *                mid-tar and the build failed with 'file changed as we read it'
  * @version 1.39 - a bundle whose files are unchanged is built again when another key signed it (a key
@@ -268,6 +270,13 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/site_engine/site_seccomp.source',
 		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.json',
 		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.source',
+		// Package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md
+		// WP3, WP4): host_housekeeping.sh runs install_package_fixes.sh
+		// converge on every machine; a container host fetches the fixes its
+		// base installs and builds the base with them. ACTIVE is the signed
+		// record of what to fetch. Sources nothing.
+		'maintenance_scripts/install_tools/install_package_fixes.sh',
+		'maintenance_scripts/install_tools/fixes/ACTIVE',
 		// The site containers replaced when Ubuntu ships a fix
 		// (specs/multi_tenant_host_hardening.md D9): site_refresh.sh, run by
 		// the timer host_housekeeping.sh installs on a container host, builds the

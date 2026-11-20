@@ -3,6 +3,10 @@
 # security_check.sh - which security fixes this machine is waiting for, looked
 # for every hour (specs/fleet_security_patching.md WP1, Q3).
 #
+# Version: 1.3 - package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md WP3): each run
+#   first converges them (install_package_fixes.sh converge: a fetch that failed is tried again, and a
+#   fix Ubuntu's own build has caught up with is handed back), and a package from the Joinery-Fixes
+#   origin is a security fix, critical and installed at once whatever its name (Postfix included)
 # Version: 1.2 - the check also runs right after the nightly updates finish
 #   (WantedBy= and After= apt-daily-upgrade.service), so the plane judges a fix
 #   from a look taken after the run that should have installed it, never from
@@ -28,13 +32,15 @@
 # A security fix is what this machine's own automatic-update policy takes: a
 # package from a -security pocket (Ubuntu's, or Ubuntu Pro's), or from an
 # outside repository host_housekeeping.sh named in 51joinery-platform-repos
-# (the PHP and PostgreSQL ones). Never a package from -updates alone: the
-# nightly run does not take those either.
+# (the PHP and PostgreSQL ones, and our own builds ahead of Ubuntu: origin
+# Joinery-Fixes, install_package_fixes.sh). Never a package from -updates
+# alone: the nightly run does not take those either.
 #
 # Each package waiting is recorded with its installed and candidate versions,
 # when it was first seen waiting, and marked critical when it is something a
 # site faces the internet with or the machine boots: PHP, Apache, OpenSSL,
-# PostgreSQL, the kernel.
+# PostgreSQL, the kernel; and anything from our own builds, which exist only
+# for an emergency.
 #
 # A critical fix is installed at once (Q2), never waiting for the night:
 # install_security_updates.sh runs then, the run the nightly updates make, and
@@ -63,6 +69,10 @@ PLATFORM_REPOS_CONF="${TROOT}/etc/apt/apt.conf.d/51joinery-platform-repos"
 UNIT_DIR="${TROOT}/etc/systemd/system"
 SITE_REFRESH="${HERE}/../install_tools/site_refresh.sh"
 SITE_REFRESH_STATE="${TROOT}/var/lib/joinery/site-refresh/state"
+PACKAGE_FIXES="${HERE}/../install_tools/install_package_fixes.sh"
+# The origin of our own builds of Ubuntu packages, ahead of Ubuntu: the word
+# before the colon in a simulated Inst line is the repository's Label.
+FIXES_ORIGIN="Joinery-Fixes"
 INSTALL_UPDATES="${HERE}/install_security_updates.sh"
 LISTS_MAX_AGE="${SECURITY_CHECK_LISTS_MAX_AGE:-2700}"   # 45 minutes
 UPDATE_TIMEOUT=300
@@ -98,7 +108,10 @@ if [ "$CMD" = install ]; then
         systemctl disable joinery-security-check.service > /dev/null 2>&1 || true
         die "$1"
     }
-    for p in "$HERE" "${HERE}/security_check.sh" "$SITE_REFRESH" "$INSTALL_UPDATES"; do
+    run_paths=("$HERE" "${HERE}/security_check.sh" "$SITE_REFRESH" "$INSTALL_UPDATES")
+    # Run when present (a tree from before package fixes has none).
+    [ -e "$PACKAGE_FIXES" ] && run_paths+=("$PACKAGE_FIXES")
+    for p in "${run_paths[@]}"; do
         [ -e "$p" ] || refuse_tree "${p} is missing; the timer was not installed"
         read -r owner mode < <(stat -L -c '%u %a' "$p")
         [ "$owner" = "$want_owner" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] \
@@ -200,6 +213,15 @@ lists_mtime() {
 }
 
 S[checked_at]="$(now)"; S[check_error]=""; S[lists_error]=""
+# Package fixes ahead of Ubuntu, before anything is simulated: the ones this
+# release names are placed and pinned (a fetch that failed last hour is tried
+# again), and one Ubuntu's own newer build now carries is handed back. Never
+# under a test root: it would act on the machine.
+if [ -z "$TROOT" ] && [ -f "$PACKAGE_FIXES" ]; then
+    if ! out="$(timeout --kill-after=10 900 bash "$PACKAGE_FIXES" converge 7>&- 2>&1 < /dev/null)"; then
+        say "package fixes: $(tail -1 <<< "$out")"
+    fi
+fi
 # When the lists were last fetched: this check's own last refresh, or the
 # newest list file. A list unchanged on the mirror keeps its old date, so the
 # files alone would make fresh lists look old.
@@ -263,10 +285,13 @@ simulate() {
             suite="${o##*/}" origin="${o%%:*}"
             [[ "$suite" == *-security ]] && fix=1
             [[ "$platform" == *" ${origin} "* ]] && fix=1
+            [ "$origin" = "$FIXES_ORIGIN" ] && fix=2
         done
-        [ "$fix" -eq 1 ] || continue
+        [ "$fix" -ge 1 ] || continue
         c=0
         [[ "$name" =~ ^(php[0-9]|libapache2-mod-php|apache2|libssl|openssl|postgresql|libpq|linux-image|linux-modules) ]] && c=1
+        # Our own build exists only for an emergency: critical, whatever its name.
+        [ "$fix" -eq 2 ] && c=1
         n=$((n + 1)); crit=$((crit + c))
         [ "$c" -eq 1 ] && [[ ! "$name" =~ ^linux-(image|modules) ]] && AT_ONCE+=("$(word "$name")")
         [ "${#entries[@]}" -lt "$MAX_PACKAGES" ] || continue
@@ -287,9 +312,10 @@ fi
 state_save
 say "check: ${S[pending]} security fixes pending (${S[critical]} critical)${S[lists_error]:+; ${S[lists_error]}}"
 
-# A critical fix is installed at once (Q2: PHP, Apache, OpenSSL, PostgreSQL;
-# never the kernel, which needs a reboot a person chooses): the same run the
-# nightly updates make, now. Other fixes wait for the night.
+# A critical fix is installed at once (Q2: PHP, Apache, OpenSSL, PostgreSQL,
+# and anything from our own builds ahead of Ubuntu; never the kernel, which
+# needs a reboot a person chooses): the same run the nightly updates make, now.
+# Other fixes wait for the night.
 if [ "${#AT_ONCE[@]}" -gt 0 ] && [ -f "$INSTALL_UPDATES" ]; then
     say "installing at once, for ${AT_ONCE[*]:0:6}"
     out="$(timeout --kill-after=60 3900 bash "$INSTALL_UPDATES" 7>&- 2>&1 < /dev/null)"

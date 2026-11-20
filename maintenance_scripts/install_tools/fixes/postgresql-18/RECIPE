@@ -1,0 +1,3 @@
+# Package fix recipe for postgresql-18 (see ../build.sh for the format).
+# state=none: Ubuntu's own build is current; nothing is built or shipped.
+state=none

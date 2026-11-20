@@ -104,6 +104,7 @@ case "$1" in
           *.Id*) echo "$id" ;;
           *joinery.base_id*) cat "$S/images/$id/label" 2>/dev/null ;;
           *joinery.install_sh_hash*) cat "$S/images/$id/hash" 2>/dev/null ;;
+          *joinery.package_fixes*) cat "$S/images/$id/fixes" 2>/dev/null ;;
           *Healthcheck*) [ -f "$S/images/$id/nohc" ] || echo CMD-SHELL ;;
           *Created*) echo "2026-10-14 10:00:00 +0000 UTC" ;;
         esac ;;
@@ -123,18 +124,20 @@ case "$1" in
     [ -f "$S/build_leaves" ] && { echo "wc$(date +%N) x-working-container" >> "$S/external"; echo "wd$(date +%N) x-working-container-1" >> "$S/external"; }
     [ -f "$S/build_sleep" ] && sleep "$(cat "$S/build_sleep")"
     [ -f "$S/build_touch" ] && touch "$(cat "$S/build_touch")"
-    tags=(); label=""; hash=""; ctx=""; file=""; prev=""
+    tags=(); label=""; hash=""; fixes=""; ctx=""; file=""; prev=""
     for a in "$@"; do
-      case "$prev" in -t) tags+=("$a") ;; --label) label="${a#joinery.base_id=}" ;; --build-arg) case "$a" in INSTALL_SH_HASH=*) hash="${a#*=}" ;; JOINERY_DECLARED_APT=*) echo "${a#*=}" > "$S/declared_arg" ;; esac ;; -f) file="$a" ;; esac
+      case "$prev" in -t) tags+=("$a") ;; --label) label="${a#joinery.base_id=}" ;; --build-arg) case "$a" in INSTALL_SH_HASH=*) hash="${a#*=}" ;; PACKAGE_FIXES=*) fixes="${a#*=}" ;; JOINERY_DECLARED_APT=*) echo "${a#*=}" > "$S/declared_arg" ;; esac ;; -f) file="$a" ;; esac
       prev="$a"; ctx="$a"
     done
     id="$(newid)"; mkdir -p "$S/images/$id"
     [ -n "$label" ] && echo "$label" > "$S/images/$id/label"
     [ -n "$hash" ] && echo "$hash" > "$S/images/$id/hash"
+    [ -n "$fixes" ] && echo "$fixes" > "$S/images/$id/fixes"
     [ -f "$S/next_build_fails" ] && { touch "$S/images/$id/fail"; rm -f "$S/next_build_fails"; }
     [ -f "$S/build_nohc" ] && [ -z "$file" ] && touch "$S/images/$id/nohc"
     # A fresh base takes every fix that was pending.
-    case "$file" in *Dockerfile.base) [ -f "$S/build_keeps_apt" ] || : > "$S/apt" ;; esac
+    case "$file" in *Dockerfile.base) [ -f "$S/build_keeps_apt" ] || : > "$S/apt"
+        (cd "$ctx/package_fixes" 2>/dev/null && find . -type f | LC_ALL=C sort | tr '\n' ' ') > "$S/base_context" ;; esac
     [ -z "$file" ] && { (cd "$ctx" && find . -type f | LC_ALL=C sort | tr '\n' ' ') > "$S/context_listing"
         cp "$ctx/maintenance_scripts/install_tools/_site_start.sh" "$S/context_start" 2>/dev/null; }
     for t in "${tags[@]}"; do echo "$id" > "$(tagf "$t")"; done
@@ -436,6 +439,43 @@ grep -v security "$STUB/apt" > "$STUB/apt.n"; mv "$STUB/apt.n" "$STUB/apt"
 chk "updates but no security fix: the base is not due" "$(srun check)|$(st base_due)|$(st pending_security)" "0|no|0"
 echo 0000 > "$STUB/images/$BASE/hash"
 chk "a base this tree would build differently is due" "$(srun check)|$(st base_due)" "0|setup_changed"
+echo "$BASE_HASH" > "$STUB/images/$BASE/hash"
+
+echo "=== site_refresh check: package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md WP4) ==="
+export PACKAGE_FIXES_ROOT="$T/pf"
+pfix() {  # SOURCE VERSION SLUG: the host pins our build of SOURCE
+    mkdir -p "$T/pf/var/lib/joinery/package-fixes/$1/$3" "$T/pf/etc/apt/sources.list.d" "$T/pf/etc/apt/preferences.d"
+    printf 'Package: %s-common\n' "$1" > "$T/pf/var/lib/joinery/package-fixes/$1/$3/Packages"
+    echo "deb [trusted=yes] file:/var/lib/joinery/package-fixes/$1/$3/ ./" > "$T/pf/etc/apt/sources.list.d/joinery-fix-$1-$3.list"
+    printf 'Explanation: joinery-fix source=%s\nPackage: %s-common\nPin: version %s\nPin-Priority: 1001\n' "$1" "$1" "$2" > "$T/pf/etc/apt/preferences.d/joinery-fix-$1.pref"
+    mkdir -p "$T/pf/etc/apt/apt.conf.d"
+    printf 'Unattended-Upgrade::Allowed-Origins {\n    "Joinery-Fixes:resolute-joinery";\n};\n' > "$T/pf/etc/apt/apt.conf.d/52joinery-package-fixes"
+}
+: > "$STUB/apt"
+chk "the host pins none, the base took none (no label: a base from before): not due" "$(srun check)|$(st base_due)|$(st package_fixes)" "0|no|none"
+pfix php8.5 8.5.4-0ubuntu1.5+joinery1 8.5.4-0ubuntu1.5-joinery1
+chk "the host pins our php8.5, the base took none: due for a fix, naming php8.5" "$(srun check)|$(st base_due)|$(st security_packages)" "0|fix|php8.5"
+chk "  the state says what a base built now takes" "$(st package_fixes)" "php8.5=8.5.4-0ubuntu1.5+joinery1"
+echo "php8.5=8.5.4-0ubuntu1.5+joinery1" > "$STUB/images/$BASE/fixes"
+chk "the base took the same: not due" "$(srun check)|$(st base_due)" "0|no"
+pfix postfix 3.10.6-4ubuntu2.2+joinery1 3.10.6-4ubuntu2.2-joinery1
+chk "a Postfix fix on the host (the base holds no Postfix): not due, the label leaves it out" "$(srun check)|$(st base_due)|$(st package_fixes)" "0|no|php8.5=8.5.4-0ubuntu1.5+joinery1"
+rm "$T/pf/etc/apt/preferences.d/joinery-fix-php8.5.pref"
+chk "php8.5 handed back on the host (its pin gone, its folder still there): due, naming php8.5" "$(srun check)|$(st base_due)|$(st security_packages)|$(st package_fixes)" "0|fix|php8.5|none"
+pfix php8.5 8.5.4-0ubuntu1.5+joinery2 8.5.4-0ubuntu1.5-joinery2
+rm -rf "$T/pf/var/lib/joinery/package-fixes/php8.5/8.5.4-0ubuntu1.5-joinery1" "$T/pf/etc/apt/sources.list.d/joinery-fix-php8.5-8.5.4-0ubuntu1.5-joinery1.list"
+chk "a rebuilt recipe (+joinery2): due" "$(srun check)|$(st base_due)" "0|fix"
+echo 'evil;$(x)' > "$STUB/images/$BASE/fixes"
+chk "a label not its shape counts as none" "$(srun check)|$(st base_due)|$(st security_packages)" "0|fix|php8.5"
+echo 'Inst curl [1] (2 Ubuntu:26.04/resolute-security [amd64])' > "$STUB/apt"
+echo "php8.5=8.5.4-0ubuntu1.5+joinery1" > "$STUB/images/$BASE/fixes"
+chk "a fix waiting in the base besides: both named" "$(srun check)|$(st security_packages)" "0|php8.5 curl"
+: > "$STUB/apt"; : > "$STUB/calls"
+chk "the run builds a base that takes the host's pinned base sources" "$(srun run)|$(grep -c -- 'PACKAGE_FIXES=php8.5=8.5.4-0ubuntu1.5+joinery2' "$STUB/calls")" "0|1"
+chk "  laid out at their final paths: the fix's folder, its list, its pin and the origin automatic updates need (reviewer2 G1); never Postfix's" "$(cat "$STUB/base_context")" \
+    "./etc/apt/apt.conf.d/52joinery-package-fixes ./etc/apt/preferences.d/joinery-fix-php8.5.pref ./etc/apt/sources.list.d/joinery-fix-php8.5-8.5.4-0ubuntu1.5-joinery2.list ./var/lib/joinery/package-fixes/php8.5/8.5.4-0ubuntu1.5-joinery2/Packages "
+chk "  the new base is checked in turn and is not due" "$(st base_due)" "no"
+rm -rf "$T/pf"; unset PACKAGE_FIXES_ROOT
 
 echo "=== site_refresh run ==="
 reset
@@ -670,6 +710,9 @@ rm -f "$STUB/start_fails" "$STUB/timer_on"
 export JOINERY_SITE_ENGINE_KIND=podman
 
 echo "=== The base and the template ==="
+chk "Dockerfile.base copies the package fixes to their final paths before install.sh server, and keeps them" \
+    "$(awk '/^COPY package_fixes\/ \/$/ { c = NR } /install.sh server --skip-postgres-password/ { r = NR } END { print (c && r && c < r) ? "before" : "no" }' "$TOOLS/Dockerfile.base")|$(grep -c 'rm .*package-fixes\|rm .*sources.list.d\|rm .*preferences.d' "$TOOLS/Dockerfile.base")" "before|0"
+chk "  and labels the image with what it took" "$(grep -c '^LABEL joinery.package_fixes="${PACKAGE_FIXES}"$' "$TOOLS/Dockerfile.base")" "1"
 chk "Dockerfile.base stops PostgreSQL before its build step ends (B8)" \
     "$(grep -A3 'install.sh server --skip-postgres-password' "$TOOLS/Dockerfile.base" | grep -m1 -c 'service postgresql stop')" "1"
 chk "the template takes the extensions from JOINERY_DECLARED_APT when the context has no code" \

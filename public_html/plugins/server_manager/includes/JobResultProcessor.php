@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.140 - a host report's package_fixes (host_report 1.42; specs/package_fixes_ahead_of_ubuntu.md WP3)
  * @version 1.139 - the ready email of a site on its buyer's own domain names one DNS step, on the sites page (walkthrough Q16)
  * @version 1.138 - the ready email of a site whose domain we registered says to expect the registrar's email (walkthrough Q15)
  * @version 1.137 - the ready email is sent from the site's own default sender when no welcome address is set (a fixed
@@ -5232,6 +5233,8 @@ HTML;
 			// The security fixes the machine waits for, from its hourly check, and what still runs code an
 			// upgrade replaced (host_report 1.37); null from an older node.
 			'security_pending'             => (array_key_exists('security_pending', $in) && $in['security_pending'] !== null) ? self::host_report_security_pending($in['security_pending']) : null,
+			// Our own builds of Ubuntu packages the machine takes ahead of Ubuntu (host_report 1.42); null from an older node.
+			'package_fixes'                => (array_key_exists('package_fixes', $in) && $in['package_fixes'] !== null) ? self::host_report_package_fixes($in['package_fixes']) : null,
 			'services_needing_restart'     => (array_key_exists('services_needing_restart', $in) && $in['services_needing_restart'] !== null) ? self::host_report_services_needing_restart($in['services_needing_restart']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
@@ -5899,6 +5902,51 @@ HTML;
 			'critical'      => self::host_report_count($in['critical'] ?? null),
 			'packages'      => $packages,
 			'scheduled'     => ($in['scheduled'] ?? false) === true,
+		);
+	}
+
+	/**
+	 * Our own builds of Ubuntu packages a machine takes ahead of Ubuntu
+	 * (install_package_fixes.sh, host_report 1.42; specs/package_fixes_ahead_of_ubuntu.md
+	 * WP3): "none" where none has been looked at, "unknown" for anything not its shape.
+	 * Each fix: its source and version, whether it is installed, and whether it
+	 * was handed back to Ubuntu's build, Ubuntu's newer build lacks a CVE of it,
+	 * the machine is already on a newer Ubuntu build, or apt refused its source.
+	 */
+	public static function host_report_package_fixes($in) {
+		if ($in === 'none') { return 'none'; }
+		if (!is_array($in)) { return 'unknown'; }
+		$fixes = array();
+		foreach (array_slice(is_array($in['fixes'] ?? null) ? $in['fixes'] : array(), 0, 50) as $f) {
+			if (!is_array($f) || self::package_word($f['source'] ?? null) === '' || self::package_word($f['version'] ?? null) === '') { continue; }
+			$lacks = null;
+			if (is_array($f['ubuntu_lacks'] ?? null) && self::package_word($f['ubuntu_lacks']['version'] ?? null) !== '') {
+				$cves = array();
+				// The node sends them comma-joined; a stored report holds them as a list.
+				$raw = $f['ubuntu_lacks']['cves'] ?? null;
+				foreach (array_slice(is_array($raw) ? $raw : explode(',', is_string($raw) ? $raw : ''), 0, 100) as $c) {
+					if (is_string($c) && preg_match('/^CVE-\d{4}-\d{4,}$/', $c)) { $cves[] = $c; }
+				}
+				$lacks = array('version' => self::package_word($f['ubuntu_lacks']['version']), 'cves' => $cves);
+			}
+			$fixes[] = array(
+				'source'         => self::package_word($f['source']),
+				'version'        => self::package_word($f['version']),
+				'installed'      => ($f['installed'] ?? false) === true,
+				'handed_back'    => self::package_word($f['handed_back'] ?? null) !== '' ? self::package_word($f['handed_back']) : null,
+				'ubuntu_lacks'   => $lacks,
+				'ahead_of_build' => self::package_word($f['ahead_of_build'] ?? null) !== '' ? self::package_word($f['ahead_of_build']) : null,
+				'source_refused' => ($f['source_refused'] ?? false) === true,
+				// A container host taking it only for its site containers' base.
+				'for_base'       => ($f['for_base'] ?? false) === true,
+				// Ubuntu's build whose changelog could not be read; ours stays.
+				'unreadable'     => self::package_word($f['unreadable'] ?? null) !== '' ? self::package_word($f['unreadable']) : null,
+			);
+		}
+		$updated = $in['updated'] ?? null;
+		return array(
+			'updated' => (is_string($updated) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $updated)) ? $updated : '',
+			'fixes'   => $fixes,
 		);
 	}
 

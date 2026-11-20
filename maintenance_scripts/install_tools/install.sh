@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.53 - build-base builds the site containers' base with this host's package fixes ahead of Ubuntu
+#               (install_package_fixes.sh pinned --base): each pinned source's fix, list and pin are copied
+#               into the image at their final paths and stay there, and the image is labelled
+#               joinery.package_fixes with what it took (specs/package_fixes_ahead_of_ubuntu.md WP4)
 #VERSION 3.52 - site --admin-first-name=, --admin-last-name=, --admin-timezone=: the admin account is born with its
 #               owner's name and timezone when whoever ordered the site knows them.
 #VERSION 3.51 - site --no-manager-backups: a managed site whose management node keeps no backup storage for it says so
@@ -3468,6 +3472,48 @@ compute_install_sh_hash() {
         | sha256sum | cut -c1-16
 }
 
+# The package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md
+# WP4) a base built now takes: the sources the base installs that this host
+# pins now, one "<source> <version>" a line. A source handed back still has
+# its directory here while the release names it, but no pin, so it is not
+# taken again.
+package_fixes_for_base() {
+    local ipf="$SCRIPT_DIR/install_package_fixes.sh"
+    [ -f "$ipf" ] || return 0
+    bash "$ipf" pinned --base 2>/dev/null || true
+}
+# A package fix pinned (install_package_fixes.sh, or copied into a site
+# containers' base) whose binary this system already has at a newer Ubuntu
+# version: at priority 1001 apt would have to downgrade it, and apt upgrade -y
+# refuses a downgrade, so every base build would fail. The pin is dropped, and
+# the newer build stays (reviewer2 G6). On a machine the converge already
+# leaves such a pin out; this is for the image, whose Ubuntu base is pulled
+# fresh and may carry a build newer than the host's.
+package_fix_pins_hold_no_downgrade() {
+    local pref pin_v pkg inst
+    for pref in /etc/apt/preferences.d/joinery-fix-*.pref; do
+        [ -f "$pref" ] || continue
+        pin_v="$(sed -n 's/^Pin: version //p' "$pref")"
+        [ -n "$pin_v" ] || continue
+        for pkg in $(sed -n 's/^Package: //p' "$pref"); do
+            inst="$(dpkg-query -W -f '${db:Status-Abbrev} ${Version}' "$pkg" 2>/dev/null | awk '$1 ~ /^.i/ {print $2}')"
+            if [ -n "$inst" ] && dpkg --compare-versions "$inst" gt "$pin_v"; then
+                print_info "package fix pin $(basename "$pref") dropped: ${pkg} ${inst} is installed, newer than ${pin_v}"
+                rm -f "$pref"
+                break
+            fi
+        done
+    done
+}
+
+# What the base's joinery.package_fixes label says for those: the sorted
+# "<source>=<version>" list, comma-joined, or "none".
+package_fixes_label() {
+    local l
+    l="$(package_fixes_for_base | awk 'NF == 2 {print $1 "=" $2}' | sort | paste -sd ',')"
+    printf '%s\n' "${l:-none}"
+}
+
 do_build_base() {
     local arg FRESH=0 MEM_FLAGS=()
     for arg in "$@"; do
@@ -3513,17 +3559,46 @@ do_build_base() {
     cp "$SCRIPT_DIR/_host_files.sh" "$BUILD_DIR/install_tools/_host_files.sh"
     cp "$SCRIPT_DIR/_site_engine.sh" "$BUILD_DIR/install_tools/_site_engine.sh"
     cp "$SCRIPT_DIR/Dockerfile.base" "$BUILD_DIR/install_tools/Dockerfile.base"
+    # The package fixes the base takes, laid out at their final paths: the
+    # fix's directory, its list and its pin. They stay in the image: without
+    # the directory its list breaks every apt run in it, and without the list
+    # and pin the base check would count Ubuntu's next build, which may lack
+    # our fix, as a fix waiting, and replace the sites every hour.
+    # (A test, never root, keeps them under PACKAGE_FIXES_ROOT, as install_package_fixes.sh does.)
+    local PF="$BUILD_DIR/install_tools/package_fixes" pf_src pf_ver pf_slug PACKAGE_FIXES PFR=""
+    [ "$(id -u)" -ne 0 ] && PFR="${PACKAGE_FIXES_ROOT:-}"
+    mkdir -p "$PF/var/lib/joinery/package-fixes" "$PF/etc/apt/sources.list.d" "$PF/etc/apt/preferences.d"
+    while read -r pf_src pf_ver; do
+        [ -n "${pf_src:-}" ] || continue
+        pf_slug="$(printf '%s' "$pf_ver" | sed 's/^[0-9]*://; s/[^A-Za-z0-9._-]/-/g')"
+        mkdir -p "$PF/var/lib/joinery/package-fixes/${pf_src}"
+        cp -a "${PFR}/var/lib/joinery/package-fixes/${pf_src}/${pf_slug}" "$PF/var/lib/joinery/package-fixes/${pf_src}/" \
+            && cp "${PFR}/etc/apt/sources.list.d/joinery-fix-${pf_src}-${pf_slug}.list" "$PF/etc/apt/sources.list.d/" \
+            && cp "${PFR}/etc/apt/preferences.d/joinery-fix-${pf_src}.pref" "$PF/etc/apt/preferences.d/" \
+            || { print_error "the package fix for ${pf_src} ${pf_ver} could not be copied into the base"; rm -rf "${BUILD_DIR:?}"; exit 1; }
+    done < <(package_fixes_for_base)
+    # Automatic updates inside a container (install_security_updates) take our
+    # origin only where it is allowed; without it they set the pin aside and
+    # install Ubuntu's newer build, one lacking our fix included.
+    if [ -n "$(find "$PF/etc/apt/preferences.d" -name 'joinery-fix-*.pref' 2>/dev/null)" ]; then
+        mkdir -p "$PF/etc/apt/apt.conf.d"
+        cp "${PFR}/etc/apt/apt.conf.d/52joinery-package-fixes" "$PF/etc/apt/apt.conf.d/" \
+            || { print_error "the package fixes' automatic-update origin could not be copied into the base"; rm -rf "${BUILD_DIR:?}"; exit 1; }
+    fi
+    PACKAGE_FIXES="$(package_fixes_label)"
 
     INSTALL_SH_HASH=$(compute_install_sh_hash)
 
     print_step "Building joinery-base:${BASE_IMAGE_VERSION} (takes 5-10 minutes)..."
     print_info "install.sh hash: ${INSTALL_SH_HASH}"
+    print_info "package fixes: ${PACKAGE_FIXES}"
 
     local BUILD_STATUS=0
     if [ "$QUIET_MODE" -eq 1 ]; then
         site_engine build -q "${BUILD_FLAGS[@]}" "${FRESH_FLAGS[@]}" "${MEM_FLAGS[@]}" \
             -f "$BUILD_DIR/install_tools/Dockerfile.base" \
             --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
+            --build-arg "PACKAGE_FIXES=${PACKAGE_FIXES}" \
             -t "joinery-base:${BASE_IMAGE_VERSION}" \
             -t "joinery-base:latest" \
             "$BUILD_DIR/install_tools" > /dev/null || BUILD_STATUS=$?
@@ -3531,6 +3606,7 @@ do_build_base() {
         site_engine build "${BUILD_FLAGS[@]}" "${FRESH_FLAGS[@]}" "${MEM_FLAGS[@]}" \
             -f "$BUILD_DIR/install_tools/Dockerfile.base" \
             --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
+            --build-arg "PACKAGE_FIXES=${PACKAGE_FIXES}" \
             -t "joinery-base:${BASE_IMAGE_VERSION}" \
             -t "joinery-base:latest" \
             "$BUILD_DIR/install_tools" || BUILD_STATUS=$?
@@ -3906,6 +3982,7 @@ do_server_setup() {
         fi
     fi
 
+    package_fix_pins_hold_no_downgrade
     apt_update && apt upgrade -y
 
     # Install essential packages

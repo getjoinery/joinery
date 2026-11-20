@@ -33,6 +33,9 @@
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * @version 1.6 - a machine's package fixes ahead of Ubuntu (host report package_fixes): each said in words, and one
+ *                apt refused is red (specs/package_fixes_ahead_of_ubuntu.md WP6); one waiting to install is
+ *                red through the critical list already, since a fix from our origin is critical
  * @version 1.5 - one waiting fix reads '1 other fix waits', not 'wait'
  * @version 1.4 - a node with no agent says so, not 'nothing reported yet' (B27); old code serving is red only for what serves the sites (PHP-FPM, Apache, PostgreSQL), as the
  *                incident counts it; any other service needrestart names is amber until it restarts: getjoinery was
@@ -116,6 +119,29 @@ class FleetSecurityView {
 		return $out;
 	}
 
+	/** One package fix on a machine, in words (host report package_fixes). */
+	public static function package_fix_words(array $f): string {
+		if ($f['source_refused']) {
+			return 'our build of ' . $f['source'] . ' ' . $f['version'] . ': apt refused its package source';
+		}
+		if ($f['handed_back'] !== null) {
+			return $f['source'] . ' handed back to Ubuntu ' . $f['handed_back'];
+		}
+		if ($f['ahead_of_build'] !== null) {
+			return $f['source'] . ': Ubuntu ' . $f['ahead_of_build'] . ' installed, ahead of our build'
+				. ($f['ubuntu_lacks'] !== null ? ', and it lacks ' . implode(', ', $f['ubuntu_lacks']['cves'])
+					: ($f['unreadable'] !== null ? '; its changelog could not be read' : ''));
+		}
+		if ($f['for_base'] ?? false) {
+			return 'our build of ' . $f['source'] . ' ' . $f['version'] . ', for the site containers\' base';
+		}
+		$words = 'our build of ' . $f['source'] . ' ' . $f['version'] . ($f['installed'] ? '' : ', waiting to install');
+		if ($f['ubuntu_lacks'] !== null) {
+			$words .= '; Ubuntu\'s ' . $f['ubuntu_lacks']['version'] . ' lacks ' . implode(', ', $f['ubuntu_lacks']['cves']) . ', held';
+		}
+		return $words;
+	}
+
 	/** The rows, most serious first, then by name. */
 	public static function rows(array $snapshots, int $now): array {
 		$by_id = array();
@@ -153,6 +179,7 @@ class FleetSecurityView {
 			'checked_at'  => '',
 			'updated_at'  => null,
 			'reboot'      => null,
+			'package_fixes' => array(),
 			'verdict'     => 'grey',
 			'reasons'     => array(),
 		);
@@ -212,6 +239,25 @@ class FleetSecurityView {
 					$amber[] = count($others) . ' other service' . (count($others) === 1 ? ' runs' : 's run') . ' replaced code until '
 						. (count($others) === 1 ? 'it restarts' : 'they restart') . ' (' . implode(', ', array_slice($others, 0, 4))
 						. (count($others) > 4 ? ', and ' . (count($others) - 4) . ' more' : '') . ')';
+				}
+			}
+			// Our own builds ahead of Ubuntu: what each machine runs, in words.
+			// One waiting to install is red already (security_check marks our
+			// origin critical); one apt refused is not on any list, so it is
+			// red here, naming the source.
+			$pf = $hr['package_fixes'] ?? null;
+			if (is_array($pf)) {
+				foreach ($pf['fixes'] as $f) {
+					$row['package_fixes'][] = self::package_fix_words($f);
+					if ($f['source_refused']) {
+						$red[] = 'apt refused our build of ' . $f['source'] . ' ' . $f['version'];
+					}
+					// On an Ubuntu build newer than ours that lacks our fix: exposed.
+					if ($f['ahead_of_build'] !== null && $f['ubuntu_lacks'] !== null) {
+						$red[] = 'Ubuntu ' . $f['ahead_of_build'] . ' of ' . $f['source'] . ' is installed and lacks ' . implode(', ', $f['ubuntu_lacks']['cves']);
+					} elseif ($f['unreadable'] !== null) {
+						$amber[] = 'Ubuntu ' . $f['unreadable'] . '\'s changelog for ' . $f['source'] . ' could not be read';
+					}
 				}
 			}
 			$sp = $hr['security_pending'] ?? null;

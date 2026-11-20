@@ -16,6 +16,7 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.4 - a machine's package fixes ahead of Ubuntu are listed under its name (specs/package_fixes_ahead_of_ubuntu.md WP6)
  * @version 1.3 - the key names the amber for a service that does not serve the sites (B25)
  * @version 1.2 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running run
  * @version 1.1 - a container host's step replaces its site containers and names them (Q7); the key says the kernel
@@ -181,7 +182,8 @@ if (!$latest || !$latest->is_running()) {
 			<td><span class="badge bg-<?php echo $badge; ?>" title="<?php echo $h(implode('; ', $r['reasons'])); ?>">&bull;</span></td>
 			<td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$r['id']; ?>"><?php echo $h($r['name']); ?></a>
 				<?php if ($r['kind'] === 'container'): ?><br><small class="text-muted">container<?php echo $r['host_name'] !== '' ? ' on ' . $h($r['host_name']) : ''; ?></small><?php endif; ?>
-				<?php if ($r['reasons'] && $r['verdict'] !== 'green'): ?><br><small class="<?php echo $r['verdict'] === 'red' ? 'text-danger' : 'text-muted'; ?>"><?php echo $h(implode('; ', $r['reasons'])); ?></small><?php endif; ?></td>
+				<?php if ($r['reasons'] && $r['verdict'] !== 'green'): ?><br><small class="<?php echo $r['verdict'] === 'red' ? 'text-danger' : 'text-muted'; ?>"><?php echo $h(implode('; ', $r['reasons'])); ?></small><?php endif; ?>
+				<?php foreach ($r['package_fixes'] as $pf_words): ?><br><small class="text-muted"><?php echo $h($pf_words); ?></small><?php endforeach; ?></td>
 			<td class="small"><?php echo $h($r['os']); ?></td>
 			<td class="small"><?php echo $h(implode(', ', $r['php'])); ?></td>
 			<td><?php if ($r['code'] === 'old'): ?><span class="badge bg-danger">old code</span>

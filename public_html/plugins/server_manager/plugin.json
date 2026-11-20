@@ -643,6 +643,12 @@
       "helptext": "The release-log watch's last conclusion about Sigstore's public log, as JSON. Written by the Watch Release Log task; read by the release-log incidents."
     },
     {
+      "name": "server_manager_upstream_fix_watch",
+      "default": "",
+      "managed": true,
+      "helptext": "Which security fixes upstream has shipped that Ubuntu 26.04 has not, for each package the nodes run, and what Ubuntu has released of each package fix of ours, as JSON. Written by the Watch Upstream Security Fixes task; read by the fix-ahead-of-Ubuntu incidents."
+    },
+    {
       "name": "server_manager_release_log_tail",
       "default": "",
       "managed": true,

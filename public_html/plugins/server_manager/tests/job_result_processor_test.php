@@ -525,12 +525,12 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 36 && array_key_exists('php_workers', $capped) && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
+check(!isset($capped['surprise']) && count($capped) === 37 && array_key_exists('php_workers', $capped) && array_key_exists('security_pending', $capped) && array_key_exists('services_needing_restart', $capped) && array_key_exists('data_root_encryption', $capped) && array_key_exists('sites', $capped) && array_key_exists('site_security', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
 	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped)
 	&& array_key_exists('hardening', $capped) && array_key_exists('site_refresh', $capped)
-	&& array_key_exists('data_root_provider_layer', $capped),
+	&& array_key_exists('data_root_provider_layer', $capped) && array_key_exists('package_fixes', $capped),
 	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, data_root_provider_layer, boot_id, site_engine, hardening, site_refresh, security_pending, services_needing_restart, sites among them)', var_export(array_keys($capped), true));
 check($capped['data_root_provider_layer'] === null, 'a node that sends no data_root_provider_layer: not reported (null), never unknown (B114)');
 $layer_of = function ($v) { return JobResultProcessor::sanitise_host_report(array('data_root_provider_layer' => $v))['data_root_provider_layer']; };
@@ -730,6 +730,21 @@ check($spb['check'] === '' && $spb['checked_at'] === '' && count($spb['packages'
 	'security_pending: a word off its list or a time not its shape is empty; a name not a package\'s is dropped; critical only when literally true', json_encode($spb));
 check($spf('none') === 'none' && $spf(7) === 'unknown' && JobResultProcessor::sanitise_host_report(array())['security_pending'] === null,
 	'security_pending: none where it never ran, unknown for anything not its shape, null from an older node');
+// The package fixes ahead of Ubuntu (host_report 1.42, specs/package_fixes_ahead_of_ubuntu.md WP3).
+$pff = function ($r) { return JobResultProcessor::sanitise_host_report(array('package_fixes' => $r))['package_fixes']; };
+$pf_in = array('updated' => '2026-11-20T03:00:00Z', 'fixes' => array(
+	array('source' => 'php8.5', 'version' => '8.5.4-0ubuntu1.5+joinery1', 'installed' => true, 'handed_back' => null,
+		'ubuntu_lacks' => array('version' => '8.5.4-0ubuntu1.6', 'cves' => 'CVE-2026-129289,CVE-26-1'), 'ahead_of_build' => null, 'source_refused' => false),
+	array('source' => 'postfix', 'version' => '3.10.6-4ubuntu2.2+joinery1', 'installed' => 'yes', 'handed_back' => '3.10.6-4ubuntu2.3',
+		'ubuntu_lacks' => null, 'ahead_of_build' => null, 'source_refused' => true),
+	array('source' => 'a b', 'version' => '1')));
+$pf = $pff($pf_in);
+check(is_array($pf) && count($pf['fixes']) === 2 && $pf['fixes'][0]['ubuntu_lacks'] === array('version' => '8.5.4-0ubuntu1.6', 'cves' => array('CVE-2026-129289'))
+		&& $pf['fixes'][1]['installed'] === false && $pf['fixes'][1]['handed_back'] === '3.10.6-4ubuntu2.3' && $pf['fixes'][1]['source_refused'] === true
+		&& $pf['updated'] === '2026-11-20T03:00:00Z' && $pff($pf) === $pf,
+	'package_fixes keeps each fix; a CVE id not its shape and a source not a package\'s are dropped; installed only when literally true; reads back the same', json_encode($pf));
+check($pff('none') === 'none' && $pff(7) === 'unknown' && JobResultProcessor::sanitise_host_report(array())['package_fixes'] === null,
+	'package_fixes: none where none was looked at, unknown for anything not its shape, null from an older node');
 $nr = JobResultProcessor::sanitise_host_report(array('services_needing_restart' => array('source' => 'needrestart', 'services' => array('php8.3-fpm.service', 'a b;c', 7))))['services_needing_restart'];
 check($nr === array('source' => 'needrestart', 'services' => array('php8.3-fpm.service')), 'services_needing_restart keeps its source and the names that are names', json_encode($nr));
 check(JobResultProcessor::sanitise_host_report(array('services_needing_restart' => 'unknown'))['services_needing_restart'] === 'unknown'

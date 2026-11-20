@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.42 - package_fixes: our own builds of Ubuntu packages this machine takes ahead of Ubuntu
+#                (install_package_fixes.sh), each with its version, whether it is installed, and whether it
+#                was handed back, Ubuntu's build lacks a CVE of it, the machine is ahead of it, or apt
+#                refused it (specs/package_fixes_ahead_of_ubuntu.md WP3)
 # Version: 1.41 - data_root_provider_layer: the provider's own disk encryption under this machine as its
 #                management node last recorded it (joinery_data_root.sh provider-layer), so it can tell
 #                when the record is out of date (specs/site_copy_final_test.md E2, B114)
@@ -1469,6 +1473,36 @@ emit_security_pending() {
     if [[ "$(run systemctl show -p UnitFileState --value joinery-security-check.timer)" == enabled ]]; then printf '"scheduled":true}'; else printf '"scheduled":false}'; fi
 }
 
+# Our own builds of Ubuntu packages this machine takes ahead of Ubuntu
+# (install_package_fixes.sh, specs/package_fixes_ahead_of_ubuntu.md WP3):
+# "none" where none has been looked at. Each line of its state is
+#   fix=<source>|<version>|<installed>|<handed_back>|<ubuntu_lacks>|<ahead_of_build>|<source_refused>|<for_base>|<unreadable>
+# with "-" where a field does not apply; every value is read again here.
+emit_package_fixes() {
+    local f line source version inst handed lacks ahead refused for_base unread sep="" list="" n=0 lv lc
+    f="${HOST_REPORT_PACKAGE_FIXES_DIR:-/var/lib/joinery/package-fixes}/state"  # tests only: another folder
+    [[ -f "$f" && ! -L "$f" ]] || { printf '"none"'; return; }
+    while IFS= read -r line; do
+        [[ "$line" == fix=* ]] || continue
+        (( n < 50 )) || break
+        IFS='|' read -r source version inst handed lacks ahead refused for_base unread <<< "${line#fix=}"
+        [[ -n "$source" && -n "$version" ]] || continue
+        n=$((n+1))
+        lv="${lacks%%:*}"; lc="${lacks#*:}"
+        [[ "$lacks" == - || "$lacks" != *:* ]] && { lv=""; lc=""; }
+        list+="${sep}{\"source\":$(json_version "$source"),\"version\":$(json_version "$version")"
+        list+=",\"installed\":$([[ "$inst" == 1 ]] && echo true || echo false)"
+        list+=",\"handed_back\":$([[ -n "$handed" && "$handed" != - ]] && json_version "$handed" || echo null)"
+        list+=",\"ubuntu_lacks\":$([[ -n "$lv" ]] && printf '{"version":%s,"cves":%s}' "$(json_version "$lv")" "$(json_text "$(printf '%s' "$lc" | tr -cd 'A-Z0-9,-')")" || echo null)"
+        list+=",\"ahead_of_build\":$([[ -n "$ahead" && "$ahead" != - ]] && json_version "$ahead" || echo null)"
+        list+=",\"source_refused\":$([[ "$refused" == 1 ]] && echo true || echo false)"
+        list+=",\"for_base\":$([[ "$for_base" == 1 ]] && echo true || echo false)"
+        list+=",\"unreadable\":$([[ -n "$unread" && "$unread" != - ]] && json_version "$unread" || echo null)}"
+        sep=","
+    done < <(head -n 60 "$f" 2>/dev/null)
+    printf '{"updated":%s,"fixes":[%s]}' "$(json_text "$(sed -n 's/^updated=//p' "$f" | head -n 1 | tr -cd '0-9TZ:-')")" "$list"
+}
+
 # The services still running code an upgrade replaced on disk (WP1): needrestart's
 # own list where it is installed (it also sees a replaced library), else every
 # process of this machine's own whose binary /proc names "(deleted)" (a
@@ -1778,6 +1812,7 @@ printf '"sites":%s,' "$(emit_sites)"
 printf '"site_security":%s,' "$(emit_site_security)"
 printf '"site_refresh":%s,' "$(emit_site_refresh)"
 printf '"security_pending":%s,' "$(emit_security_pending)"
+printf '"package_fixes":%s,' "$(emit_package_fixes)"
 printf '"services_needing_restart":%s,' "$(emit_services_needing_restart)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"

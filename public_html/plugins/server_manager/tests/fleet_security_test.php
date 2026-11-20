@@ -85,6 +85,37 @@ check($row['verdict'] === 'amber' && $row['critical'] === array() && $row['kerne
 $row = FleetSecurityView::row(fs_machine(5, 'night', array_merge($clean_hr, array('security_pending' => fs_pending(array(fs_pkg('curl', false), fs_pkg('tar', false)))))), null, $NOW);
 check($row['verdict'] === 'amber' && $row['reasons'] === array('2 other fixes wait for the next run'), 'other fixes only: amber', json_encode($row));
 
+// Package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md WP6).
+$pfx = function (array $f) { return array_merge(array('source' => 'php8.5', 'version' => '8.5.4-0ubuntu1.5+joinery1', 'installed' => true,
+	'handed_back' => null, 'ubuntu_lacks' => null, 'ahead_of_build' => null, 'source_refused' => false), $f); };
+$row = FleetSecurityView::row(fs_machine(7, 'fixed', array_merge($clean_hr, array('package_fixes' => array('updated' => '2026-10-22T13:50:00Z', 'fixes' => array(
+	$pfx(array()),
+	$pfx(array('source' => 'postfix', 'version' => '3.10.6-4ubuntu2.2+joinery1', 'handed_back' => '3.10.6-4ubuntu2.3')),
+	$pfx(array('source' => 'openssl', 'version' => '3.5.5-1ubuntu3.7+joinery1', 'installed' => false, 'ahead_of_build' => '3.5.5-1ubuntu3.8')),
+	$pfx(array('source' => 'apache2', 'version' => '2.4.66-2ubuntu2.8+joinery1', 'ubuntu_lacks' => array('version' => '2.4.66-2ubuntu2.9', 'cves' => array('CVE-2026-1234')))),
+))))), null, $NOW);
+check($row['verdict'] === 'green' && $row['package_fixes'] === array(
+		'our build of php8.5 8.5.4-0ubuntu1.5+joinery1',
+		'postfix handed back to Ubuntu 3.10.6-4ubuntu2.3',
+		'openssl: Ubuntu 3.5.5-1ubuntu3.8 installed, ahead of our build',
+		'our build of apache2 2.4.66-2ubuntu2.8+joinery1; Ubuntu\'s 2.4.66-2ubuntu2.9 lacks CVE-2026-1234, held'),
+	'each package fix in words: ours installed, handed back, ahead of ours, held because Ubuntu\'s build lacks a CVE; none of them is a fault', json_encode($row));
+$row = FleetSecurityView::row(fs_machine(7, 'exposed', array_merge($clean_hr, array('package_fixes' => array('updated' => '2026-10-22T13:50:00Z', 'fixes' => array(
+	$pfx(array('installed' => false, 'ahead_of_build' => '8.5.4-0ubuntu1.6', 'ubuntu_lacks' => array('version' => '8.5.4-0ubuntu1.6', 'cves' => array('CVE-2026-129289'))))))))), null, $NOW);
+check($row['verdict'] === 'red' && in_array('Ubuntu 8.5.4-0ubuntu1.6 of php8.5 is installed and lacks CVE-2026-129289', $row['reasons'], true),
+	'a newer Ubuntu build installed that lacks our fix is red, not just "ahead" (reviewer2 G5)', json_encode($row['reasons']));
+$row = FleetSecurityView::row(fs_machine(7, 'base', array_merge($clean_hr, array('package_fixes' => array('updated' => '2026-10-22T13:50:00Z', 'fixes' => array(
+	$pfx(array('installed' => false, 'for_base' => true))))))), null, $NOW);
+check($row['verdict'] === 'green' && $row['package_fixes'] === array('our build of php8.5 8.5.4-0ubuntu1.5+joinery1, for the site containers\' base'),
+	'a container host\'s base-only fix: said, never "waiting to install" (reviewer2 G10)', json_encode($row));
+$row = FleetSecurityView::row(fs_machine(7, 'refused', array_merge($clean_hr, array('package_fixes' => array('updated' => '2026-10-22T13:50:00Z', 'fixes' => array(
+	$pfx(array('installed' => false, 'source_refused' => true))))))), null, $NOW);
+check($row['verdict'] === 'red' && in_array('apt refused our build of php8.5 8.5.4-0ubuntu1.5+joinery1', $row['reasons'], true),
+	'a package fix apt refused is red, naming the source', json_encode($row['reasons']));
+$row = FleetSecurityView::row(fs_machine(7, 'waiting', array_merge($clean_hr, array('package_fixes' => array('updated' => '2026-10-22T13:50:00Z', 'fixes' => array($pfx(array('installed' => false)))),
+	'security_pending' => fs_pending(array(fs_pkg('postfix', true)))))), null, $NOW);
+check($row['verdict'] === 'red' && in_array('our build of php8.5 8.5.4-0ubuntu1.5+joinery1, waiting to install', $row['package_fixes'], true),
+	'one waiting to install: red by the critical list (our origin is critical, Postfix included), and named', json_encode($row));
 $row = FleetSecurityView::row(fs_machine(6, 'reboot', array_merge($clean_hr, array('reboot_required' => true, 'reboot_required_since' => $NOW - 2 * 86400))), null, $NOW);
 check($row['verdict'] === 'amber' && $row['reboot'] === $NOW - 2 * 86400 && in_array('a reboot owed for over a day', $row['reasons'], true),
 	'a reboot owed two days: amber', json_encode($row));

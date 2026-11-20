@@ -758,6 +758,25 @@
 			exit(1);
 		}
 
+		// Package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md
+		// WP2): each active recipe under fixes/ whose files changed is built in
+		// the owner-made 26.04 build root, published under static_files/fixes/,
+		// and recorded in fixes/ACTIVE, which this publish commits and the
+		// signed manifest covers. A recipe Ubuntu has already covered is left
+		// out. A republishing site serves the archives its received ACTIVE
+		// names. Either way, a tree naming a fix that is not served would leave
+		// every machine unable to take it.
+		publish_output($republish ? "Serving the package fixes the received release names..." : "Building package fixes whose recipes changed...");
+		$package_fixes = PackageFixPublisher::publish($full_site_dir, 'publish_output', array('republish' => $republish));
+		if ($package_fixes['status'] === PackageFixPublisher::STATUS_FAILED) {
+			publish_output("\nRefusing to publish {$version} — "
+				. ($republish ? 'a package fix its received release names could not be served.' : 'a package fix is owed a build that did not complete.'));
+			publish_output($republish
+				? "Check that upstream serves it under static_files/fixes/, then publish again. No release was published."
+				: "Make the build root once (sudo bash maintenance_scripts/install_tools/fixes/build_root.sh create), or fix the recipe, then publish again. No release was published.");
+			exit(1);
+		}
+
 		// The support bundle rides beside the agent artifact: the signed script
 		// tree a machine with NO SITE resolves its primitives against. Built
 		// here, while the tree is the tree that is about to ship and before the

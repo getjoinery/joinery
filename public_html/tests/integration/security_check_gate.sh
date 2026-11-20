@@ -122,6 +122,15 @@ printf 'NOTE: This is only a simulation!\n' > "$STUB/sim"
 chk "nothing waiting: zero, and no packages" "$(run run)|$(st pending)|$(st critical)|$(st packages)" "0|0|0|"
 printf 'Inst evil;$(reboot) [1] (2 Ubuntu:24.04/noble-security [amd64])\nInst a"b [1<x>] (2 Ubuntu:24.04/noble-security [amd64])\n' > "$STUB/sim"
 chk "a name or version is kept to the characters Debian allows" "$(run run)|$(pk)" "0|evilreboot|1|2|0 ab|1x|2|0"
+printf '%s\n' 'NOTE: This is only a simulation!' \
+    'Inst postfix [3.10.6-4ubuntu2.2] (3.10.6-4ubuntu2.2+joinery1 Joinery-Fixes:resolute-joinery [amd64])' \
+    'Inst postfix-pgsql [3.10.6-4ubuntu2.2] (3.10.6-4ubuntu2.2+joinery1 Joinery-Fixes:resolute-joinery [amd64])' \
+    'Inst tzdata [2026a-0ubuntu0.26.04] (2026c-0ubuntu0.26.04 Ubuntu:26.04/resolute-updates [all])' > "$STUB/sim"
+: > "$STUB/calls"
+chk "our own build (Label Joinery-Fixes), Postfix included, is a security fix and critical whatever its name, with no drop-in naming it" \
+    "$(run run)|$(st pending)|$(st critical)|$(pk)" \
+    "0|2|2|postfix|3.10.6-4ubuntu2.2|3.10.6-4ubuntu2.2+joinery1|1 postfix-pgsql|3.10.6-4ubuntu2.2|3.10.6-4ubuntu2.2+joinery1|1"
+chk "  and installed at once" "$(grep -c '^install_security_updates$' "$STUB/calls")" "1"
 chk "status prints the state" "$(bash "$TS" status | grep -c '^pending=')" "1"
 chk "a second run while one runs: says so, does nothing" \
     "$(exec 9>>"$R/run/joinery/security-check.lock"; flock 9; bash "$TS" run 2>&1 | grep -c 'under way')" "1"

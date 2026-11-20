@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_provider_layer,data_root_script,data_root_stopped,memory,swap,cpus,php_workers,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,services_needing_restart,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_provider_layer,data_root_script,data_root_stopped,memory,swap,cpus,php_workers,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,sites,site_security,site_refresh,security_pending,package_fixes,services_needing_restart,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -795,6 +795,29 @@ printf '#!/bin/bash\nprintf "NEEDRESTART-VER: 3.6\\nNEEDRESTART-KCUR: 6.8.0\\nNE
 PATH="$T/sc/bin:$PATH" emit_services_needing_restart > "$T/nr.json"
 chk "needrestart installed: its services, in its list-only batch mode" "$(jv "$T/nr.json" source)|$(jv "$T/nr.json" services)" 'needrestart|["php8.3-fpm.service","apache2.service"]'
 chk "  asked in list-only batch mode, so it never restarts anything" "$(grep -c 'needrestart -b -r l' "$SCRIPT")" "1"
+
+echo "=== The package fixes ahead of Ubuntu (host_report 1.42) ==="
+eval "$(sed -n -e '/^json_text() {/,/^}/p' -e '/^emit_package_fixes() {/,/^}/p' "$SCRIPT")"
+mkdir -p "$T/pf/state"
+pf() { HOST_REPORT_PACKAGE_FIXES_DIR="$1" emit_package_fixes; }
+chk "never looked at (no state): none" "$(pf "$T/pf/nothing")" '"none"'
+cat > "$T/pf/state/state" <<'STATE'
+updated=2026-11-20T03:00:00Z
+fix=php8.5|8.5.4-0ubuntu1.5+joinery1|1|-|8.5.4-0ubuntu1.6:CVE-2026-129289,CVE-2026-115560|-|0|1|8.5.4-0ubuntu1.7
+fix=postfix|3.10.6-4ubuntu2.2+joinery1|0|3.10.6-4ubuntu2.3|-|-|0
+fix=openssl|3.5.5-1ubuntu3.7+joinery1|0|-|-|3.5.5-1ubuntu3.8|0
+fix=apache2|2.4.66-2ubuntu2.8+joinery1|0|-|-|-|1
+fix=evil;$(x)|1"<b>|1|-|-|-|0
+STATE
+pf "$T/pf/state" > "$T/pf.json"
+chk "when it was looked at" "$(jv "$T/pf.json" updated)" "2026-11-20T03:00:00Z"
+chk "ours installed, Ubuntu's newer build lacking two CVEs, for the base, a changelog unread (a 7-field line from 1.0 reads both as false/null)" "$(jv "$T/pf.json" fixes.0)" \
+    '{"source":"php8.5","version":"8.5.4-0ubuntu1.5+joinery1","installed":true,"handed_back":null,"ubuntu_lacks":{"version":"8.5.4-0ubuntu1.6","cves":"CVE-2026-129289,CVE-2026-115560"},"ahead_of_build":null,"source_refused":false,"for_base":true,"unreadable":"8.5.4-0ubuntu1.7"}'
+chk "handed back, ahead of our build, refused by apt" "$(jv "$T/pf.json" fixes.1.handed_back)|$(jv "$T/pf.json" fixes.2.ahead_of_build)|$(jv "$T/pf.json" fixes.3.source_refused)" \
+    "3.10.6-4ubuntu2.3|3.5.5-1ubuntu3.8|true"
+chk "a hostile name or version is reduced to the characters Debian allows" "$(jv "$T/pf.json" fixes.4.source)|$(jv "$T/pf.json" fixes.4.version)" "evilx|1b"
+ln -s "$T/pf/state/state" "$T/pf/linked" 2>/dev/null; mkdir -p "$T/pf/l"; ln -s "$T/pf/state/state" "$T/pf/l/state"
+chk "a state file that is a link is not read: none" "$(pf "$T/pf/l")" '"none"'
 
 echo "=== The data root's own script, and the boot id (host_report 1.23) ==="
 eval "$(sed -n -e '/^script_version() {/,/^}/p' -e '/^emit_data_root_script() {/,/^}/p' -e '/^emit_boot_id() {/,/^}/p' "$SCRIPT")"

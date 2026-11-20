@@ -4,6 +4,11 @@
 # security fix for something in their image (specs/multi_tenant_host_hardening.md
 # D9, B7), on a site container engine host and on a Docker host alike.
 #
+# Version: 1.5 - a base built from other package fixes ahead of Ubuntu than the host would build it with now
+#                (its joinery.package_fixes label, against install.sh package_fixes_label) is due for a fix,
+#                naming the sources that differ, so the host replaces its sites at once; only sources the
+#                base installs count, so a Postfix fix never replaces a site
+#                (specs/package_fixes_ahead_of_ubuntu.md WP4)
 # Version: 1.4 - a site with a memory budget whose container lacks unbounded memory locking is due
 #                (the run spec's --ulimit memlock=-1:-1, specs/unseal_daemon.md Q1)
 # Version: 1.3 - Docker hosts too (fleet_security_patching.md WP4, B10): host housekeeping installs the
@@ -240,7 +245,7 @@ state_save() {
     local tmp k
     mkdir -p "$STATE_DIR" && chmod 755 "$STATE_DIR"
     tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")" || return 1
-    for k in installed_at checked_at checked_ok_at check check_error pending pending_security security_packages base_version base_id base_built_at base_due \
+    for k in installed_at checked_at checked_ok_at check check_error pending pending_security security_packages package_fixes base_version base_id base_built_at base_due \
              ran_at run run_error replaced passed_over sites sites_due; do
         printf '%s=%s\n' "$k" "$(clean "${S[$k]:-}")" >> "$tmp"
     done
@@ -310,10 +315,26 @@ do_check() {
     sec="$(grep -E '/[a-z0-9]+-security([], ]|$)' <<< "$lines")"
     S[pending_security]="$(grep -c '^Inst ' <<< "$sec")"
     S[security_packages]="$(awk '{print $2}' <<< "$sec" | head -20 | paste -sd ' ')"
-    local label want
+    local label want fixes_have fixes_want fixes_differ
     label="$(site_engine image inspect -f '{{index .Config.Labels "joinery.install_sh_hash"}}' "$BASE_REF" 2>/dev/null)"
     want="$(compute_install_sh_hash)"
-    if [ "${S[pending_security]}" -gt 0 ]; then
+    # Package fixes ahead of Ubuntu: a base built from other fixes than the
+    # host would build it with now (a new fix, one handed back to Ubuntu, one
+    # retired) is due for a fix, and names the sources that differ, which the
+    # hourly check reads as critical. A base from before the label had none.
+    fixes_have="$(site_engine image inspect -f '{{index .Config.Labels "joinery.package_fixes"}}' "$BASE_REF" 2>/dev/null)"
+    [[ "$fixes_have" =~ ^(none|[a-z0-9][a-z0-9.+-]*=[A-Za-z0-9.+:~-]+(,[a-z0-9][a-z0-9.+-]*=[A-Za-z0-9.+:~-]+)*)$ ]] || fixes_have="none"
+    fixes_want="$(package_fixes_label)"
+    fixes_differ=""
+    if [ "$fixes_have" != "$fixes_want" ]; then
+        fixes_differ="$(comm -3 <(tr ',' '\n' <<< "$fixes_have" | grep -v '^none$' | sort) <(tr ',' '\n' <<< "$fixes_want" | grep -v '^none$' | sort) \
+            | tr -d '\t' | cut -d= -f1 | sort -u | paste -sd ' ')"
+    fi
+    S[package_fixes]="$fixes_want"
+    if [ -n "$fixes_differ" ]; then
+        S[base_due]="fix"
+        S[security_packages]="$(printf '%s %s' "$fixes_differ" "${S[security_packages]}" | tr ' ' '\n' | sed '/^$/d' | awk '!seen[$0]++' | head -20 | paste -sd ' ')"
+    elif [ "${S[pending_security]}" -gt 0 ]; then
         S[base_due]="fix"
     elif [ -n "$label" ] && [ "$label" != "unknown" ] && [ "$label" != "$want" ]; then
         S[base_due]="setup_changed"

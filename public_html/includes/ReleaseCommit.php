@@ -61,6 +61,7 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.14 - the package fixes' source (fixes/) is held and their ACTIVE record is publish's to commit
  * @version 1.13 - the unseal daemon's source is held and its prebuilt binaries are publish's to commit
  * @version 1.12 - every git call ignores file modes (core.fileMode=false): the host converger sets them on every
  *               box, so a mode that differs from git is never a local change, never left out of a release,
@@ -273,6 +274,7 @@ class ReleaseCommit {
 		'maintenance_scripts/install_tools/joinery_jail/',         // ParserJailPublisher::SOURCE_SUBDIR, compiled here
 		'maintenance_scripts/install_tools/joinery_unseal/',       // UnsealDaemonPublisher::SOURCE_SUBDIR, compiled here
 		'maintenance_scripts/install_tools/site_engine/',          // SiteEnginePublisher::SOURCE_SUBDIR, built here
+		'maintenance_scripts/install_tools/fixes/',                // PackageFixPublisher::SOURCE_SUBDIR, built here
 		'public_html/plugins/mailbox/provisioning/relay-sealer/',  // RelaySealerPublisher::SOURCE_SUBDIR, compiled here
 		'public_html/plugins/mail_apps/provisioning/mail-gateway/', // MailGatewayPublisher::SOURCE_SUBDIR, compiled here
 	);
@@ -656,7 +658,7 @@ class ReleaseCommit {
 	 * Whether an uncommitted path is one a publish writes, and so one a
 	 * publish may commit: VERSION, the install SQL, a file in the parser
 	 * jail's prebuilt binary directory, the site container engine's ENGINE
-	 * record, or a plugin or theme manifest whose
+	 * record, the package fixes' ACTIVE record, or a plugin or theme manifest whose
 	 * only change from HEAD is its version line. Anything else is the owner's
 	 * work.
 	 */
@@ -664,7 +666,8 @@ class ReleaseCommit {
 		$rel = ltrim(str_replace('\\', '/', $rel), '/');
 		if (in_array($rel, self::JOINERY_RELEASE_FILES, true) || strpos($rel, ParserJailPublisher::BIN_SUBDIR . '/') === 0
 			|| strpos($rel, UnsealDaemonPublisher::BIN_SUBDIR . '/') === 0
-			|| $rel === SiteEnginePublisher::SOURCE_SUBDIR . '/' . SiteEnginePublisher::STAMP_FILE) {
+			|| $rel === SiteEnginePublisher::SOURCE_SUBDIR . '/' . SiteEnginePublisher::STAMP_FILE
+			|| $rel === PackageFixPublisher::SOURCE_SUBDIR . '/' . PackageFixPublisher::STAMP_FILE) {
 			return true;
 		}
 		if (!preg_match('~^public_html/(plugins/[^/]+/plugin|theme/[^/]+/theme)\.json$~', $rel)) {

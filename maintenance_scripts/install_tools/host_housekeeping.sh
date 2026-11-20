@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.42 - Package fixes ahead of Ubuntu (section 6): install_package_fixes.sh converge runs on every
+#                machine, a developer's box included
 # Version: 1.41 - The PHP-FPM pool drop-in sets rlimit_core = 0, so a crashing worker never writes its memory
 #                (an open vault window's key included) to a core file. A site container inherits Docker's
 #                unlimited core limit, which the host's DefaultLimitCORE=0 never reaches.
@@ -1055,8 +1057,27 @@ done
 # origins are named in a drop-in, which unattended-upgrades adds to its own
 # list, while the box carries them. No other outside repository is named: an
 # automatic Docker engine update restarts every site on the box.
+#
+# Our own builds of Ubuntu packages, ahead of Ubuntu (specs/
+# package_fixes_ahead_of_ubuntu.md WP3), are converged here first: the fixes
+# this release's fixes/ACTIVE names are fetched, checked, listed and pinned
+# (install_package_fixes.sh converge), and one Ubuntu's own build has caught up
+# with is handed back. That runs on every machine, a developer's box included,
+# where the hourly check that also runs it is not installed (10d): without it
+# a box's pin would hold off every later Ubuntu build of that source. The
+# script names their origin for automatic updates itself
+# (52joinery-package-fixes), so a container's base carries it too.
 APT_CONF_DIR="${FS_ROOT}/etc/apt/apt.conf.d"
 PLATFORM_REPOS_CONF="${APT_CONF_DIR}/51joinery-platform-repos"
+IPF="${SCRIPT_DIR}/install_package_fixes.sh"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${IPF}" ]]; then
+    if IPF_OUT="$(bash "${IPF}" converge 2>&1)"; then
+        printf '%s\n' "${IPF_OUT}" | sed '/^$/d; s/^/housekeeping: /'
+    else
+        warn "package fixes: $(printf '%s' "${IPF_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    fi
+fi
 if [[ "${IN_CONTAINER}" == 0 && -d "${APT_CONF_DIR}" ]]; then
     apt_sources=("${FS_ROOT}/etc/apt/sources.list" "${FS_ROOT}"/etc/apt/sources.list.d/*.list "${FS_ROOT}"/etc/apt/sources.list.d/*.sources)
     platform_origins=()

@@ -10,7 +10,7 @@
  *   - a php-fpm master runs a binary an update replaced (check_status's php,
  *     running_current false), ten minutes after its package was installed: an
  *     install in progress reloads it on its own;
- *   - needrestart names PHP-FPM, Apache or PostgreSQL as running replaced code
+ *   - needrestart names PHP-FPM, Apache, PostgreSQL or Postfix as running replaced code
  *     (host_report's services_needing_restart: their unit names, or on a
  *     machine without needrestart their binaries' paths), ten minutes after
  *     the automatic updates last ran.
@@ -22,6 +22,9 @@
  *
  * Clears when a report shows neither.
  *
+ * @version 1.2 - Postfix counts beside PHP-FPM, Apache and PostgreSQL: a package fix of ours ahead of Ubuntu
+ *                may be Postfix's, and a mail server on replaced code serves the hole the fix closed
+ *                (specs/package_fixes_ahead_of_ubuntu.md WP6)
  * @version 1.1 - a machine without needrestart reports binaries, which match too (reviewer2 d)
  * @version 1.0
  */
@@ -33,10 +36,10 @@ class IncidentSourceOldCodeServing implements IncidentSource {
 	const GRACE_SECONDS = 600;
 
 	/** The services whose old code a site serves. */
-	const SITE_SERVICES = '/^(php[0-9.]*-fpm|apache2|postgresql)(@[A-Za-z0-9.-]+)?\.service$/';
+	const SITE_SERVICES = '/^(php[0-9.]*-fpm|apache2|postgresql|postfix)(@[A-Za-z0-9.-]+)?\.service$/';
 
 	/** The same, as host_report's /proc fallback names them: binary paths. */
-	const SITE_BINARIES = '#(^|/)(php-fpm[0-9.]*|apache2|postgres)$#';
+	const SITE_BINARIES = '#(^|/)(php-fpm[0-9.]*|apache2|postgres)$|/postfix/sbin/[a-z]+$#';
 
 	public function name(): string {
 		return self::NAME;

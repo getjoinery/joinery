@@ -1,4 +1,9 @@
 # Joinery Base Image
+# VERSION 1.8 - The host's package fixes ahead of Ubuntu (install.sh do_build_base copies them into
+#               package_fixes/ at their final paths) are copied in before install.sh server runs, so
+#               PHP, PostgreSQL, Apache and OpenSSL come from the fixed builds from the start, and
+#               they stay in the image. Labelled joinery.package_fixes with what it took
+#               (specs/package_fixes_ahead_of_ubuntu.md WP4).
 # VERSION 1.7 - The build runs install.sh from /opt/joinery-build, not /tmp: the never-do check
 #               holds any root program running from a scratch directory, and every nightly
 #               base refresh raised it on each container host. The image is the same image.
@@ -42,6 +47,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # (never_do_check.sh), and the build is a program like any other.
 COPY install.sh _host_files.sh _site_engine.sh /opt/joinery-build/
 
+# The host's package fixes ahead of Ubuntu: each fix's directory under
+# /var/lib/joinery/package-fixes, its list and its pin, at their final paths
+# (never under /opt/joinery-build, which the build removes). Empty folders
+# when the host pins none.
+COPY package_fixes/ /
+
 # Install all system dependencies.
 # --skip-postgres-password tells install.sh server not to set a postgres user
 # password during the base build - that is a per-site concern and is handled
@@ -57,5 +68,9 @@ RUN chmod +x /opt/joinery-build/install.sh && \
 # (See "Drift detection" in do_site_docker.)
 ARG INSTALL_SH_HASH=unknown
 LABEL joinery.install_sh_hash="${INSTALL_SH_HASH}"
+# The package fixes the base took ("<source>=<version>,..." or none), which
+# site_refresh.sh check compares with what the host would build now.
+ARG PACKAGE_FIXES=none
+LABEL joinery.package_fixes="${PACKAGE_FIXES}"
 
 EXPOSE 80 5432
