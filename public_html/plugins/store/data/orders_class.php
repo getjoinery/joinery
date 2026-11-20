@@ -235,11 +235,11 @@ class MultiOrder extends SystemMultiBase {
 		}
 
 		if (isset($this->options['created_before'])) {
-			$filters['ord_timestamp'] = '<= \''.$this->options['created_before'].'\'';
+			$filters['ord_timestamp'] = '<= ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['created_before']);
 		}
 
 		if (isset($this->options['created_after'])) {
-			$filters['ord_timestamp'] = '>= \''.$this->options['created_after'].'\'';
+			$filters['ord_timestamp'] = '>= ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['created_after']);
 		}
 
 		if (isset($this->options['test_mode'])) {

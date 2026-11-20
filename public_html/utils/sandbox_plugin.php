@@ -15,10 +15,13 @@
  *
  *   php utils/sandbox_plugin.php call PLUGIN ui HANDLER [VALUES_JSON]     (a dev site only)
  *   php utils/sandbox_plugin.php call PLUGIN signal SIGNAL [PAYLOAD_JSON]
+ *   php utils/sandbox_plugin.php call PLUGIN page SLUG [QUERY_JSON] [--kind=admin|member] [--as=USER_ID]
+ *   php utils/sandbox_plugin.php call PLUGIN ui HANDLER [VALUES_JSON] --from=frame --page=SLUG   as a framed page's script
  *   php utils/sandbox_plugin.php call PLUGIN schedule NAME
- *       Makes one call as core would (SandboxHost), and prints what came
- *       back and what the plugin asked of each door. With nothing to run the
- *       plugin's code, the call comes back unavailable.
+ *       Makes one call as core would (SandboxHost, which runs the plugin in
+ *       the fence), and prints what came back and what the plugin asked of
+ *       each door. Where the fence cannot run it yet, the call comes back
+ *       unavailable and says why.
  *
  *   php utils/sandbox_plugin.php log PLUGIN [COUNT]
  *       The plugin's last calls (SandboxLog), newest first.
@@ -26,6 +29,9 @@
  * "A dev site" is one with the debug setting on: load writes into plugins/,
  * which the installer does everywhere else, and call fires real calls.
  *
+ * @version 1.5 - call ... ui --from=frame --page=SLUG: a framed page's handler, as its script calls it
+ * @version 1.4 - call ... page: a page the plugin's view draws, and its body as core would show it; --as for the viewer
+ * @version 1.3 - load and call say why a call would be unavailable (SandboxRunner::unavailable)
  * @version 1.2 - the folder is manifest.json and src/; load copies src/ whole, links refused
  * @version 1.1 - sbx_fail() is declared never; call picks its host with a match
  * @version 1.0
@@ -228,8 +234,9 @@ switch ($command) {
 		foreach ($manifest->profilePages() as $page) {
 			sbx_out('  member page: ' . SandboxPages::profilePageUrl($name, $page['slug']));
 		}
-		if (SandboxHost::$runner === null) {
-			sbx_out('Nothing on this site runs a sandboxed plugin\'s code: each call to it comes back unavailable.');
+		$why = SandboxRunner::unavailable($name);
+		if ($why !== null) {
+			sbx_out('Calls to it come back unavailable for now: ' . $why);
 		}
 		exit(0);
 
@@ -243,12 +250,45 @@ switch ($command) {
 		if (!SandboxPlugins::isActive($plugin)) {
 			sbx_fail("$plugin is not an active sandboxed plugin.");
 		}
+		$as = isset($options['as']) ? new User((int)$options['as'], TRUE) : null;
+		if ($as !== null && !$as->key) {
+			sbx_fail('--as names no user.', 2);
+		}
+		$page_kind = ($options['kind'] ?? 'member') === 'admin' ? 'admin' : 'member';
+		// As a framed page's script calls (--from=frame --page=SLUG): only a
+		// handler that page lists, as the bridge's action allows.
+		$from = array();
+		if (($options['from'] ?? '') === 'frame') {
+			$framed = null;
+			foreach ($page_kind === 'admin' ? SandboxPlugins::manifest($plugin)->adminPages() : SandboxPlugins::manifest($plugin)->profilePages() as $p) {
+				if ($p['slug'] === ($options['page'] ?? '') && SandboxPages::isFramed($p)) {
+					$framed = $p;
+				}
+			}
+			if ($framed === null) {
+				sbx_fail('--page names no framed ' . $page_kind . ' page of ' . $plugin . '.', 2);
+			}
+			if (!in_array($what, (array)($framed['handlers'] ?? array()), true)) {
+				sbx_fail('The page ' . $framed['slug'] . ' does not list the handler ' . $what . '.', 2);
+			}
+			$from = array('source' => 'frame', 'kind' => $page_kind, 'page' => $framed['slug']);
+		}
 		$result = match ($kind) {
-			'ui'       => SandboxHost::ui($plugin, $what, $json, null),
+			'ui'       => SandboxHost::ui($plugin, $what, $json, $as, $from),
+			'page'     => SandboxHost::page($plugin, $page_kind, $what, 'GET', $json, array(), $as),
 			'signal'   => SandboxHost::signal($plugin, $what, $json, 'msg_dev_' . bin2hex(random_bytes(6)), gmdate('Y-m-d\TH:i:s\Z')),
 			'schedule' => SandboxHost::schedule($plugin, $what),
-			default    => sbx_fail('Usage: sandbox_plugin.php call PLUGIN ui|signal|schedule NAME [JSON]', 2),
+			default    => sbx_fail('Usage: sandbox_plugin.php call PLUGIN ui|page|signal|schedule NAME [JSON] [--as=USER_ID] [--kind=admin|member]', 2),
 		};
+		if ($kind === 'page' && is_array($result['output']) && is_string($result['output']['body'] ?? null)) {
+			// What core would show of a plain page: the body, cleaned.
+			$clean = DocumentText::parseWith('SandboxHtmlCleaner', $result['output']['body'], array(
+				'page_url' => $page_kind === 'admin' ? SandboxPluginManager::adminPageUrl($plugin, $what) : SandboxPages::profilePageUrl($plugin, $what),
+				'asset_url' => SandboxPages::assetUrl($plugin), 'image_hosts' => SandboxConsent::effective($plugin)['outbound_hosts'],
+				'form_hidden' => array('plugin' => $plugin, 'page' => $what)));
+			sbx_out('body, as core shows a plain page (' . $clean['status'] . '):');
+			sbx_out($clean['text'] !== '' ? $clean['text'] : (string)$clean['detail']);
+		}
 		sbx_out('status: ' . $result['status'] . ($result['duration_ms'] !== null ? ' (' . $result['duration_ms'] . ' ms)' : ''));
 		if ($result['message'] !== '') {
 			sbx_out('message: ' . $result['message']);

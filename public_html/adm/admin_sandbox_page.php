@@ -4,6 +4,8 @@
  * Admin: a sandboxed plugin's page, drawn from its manifest.
  * See adm/logic/admin_sandbox_page_logic.php.
  *
+ * @version 1.2 - a framed page: its frame and core's bridge, frame-src naming the framed route alone
+ * @version 1.1 - a page drawn by the plugin's view: its cleaned body under the provenance line
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('adm/logic/admin_sandbox_page_logic.php'));
@@ -17,6 +19,10 @@ $sbx_page = $page_vars['page'];
 $here = $page_vars['here'];
 
 $page = new AdminPage();
+if (!empty($page_vars['framed'])) {
+	// The frame may be navigated nowhere but the framed route.
+	$page->restrict_frames_to(SandboxPages::frameSource());
+}
 $page->admin_header(array(
 	'menu-id'        => 'sbx-' . $plugin . '-' . $sbx_page['slug'],
 	'page_title'     => $manifest->title() . ': ' . $sbx_page['title'],
@@ -51,6 +57,26 @@ $cell = function ($value, ?array $field) use ($tz) {
 	}
 	return nl2br(htmlspecialchars(mb_substr((string)$value, 0, 500)));
 };
+
+// A framed page: the plugin's own document, in a sealed frame.
+if (!empty($page_vars['framed'])) {
+	$page->begin_box(array('title' => $sbx_page['title']));
+	echo SandboxPages::frameMarkup($manifest, 'admin', $sbx_page);
+	$page->end_box();
+}
+
+// A page the plugin's own view drew: its cleaned body under a line naming it.
+if (isset($page_vars['drawn'])) {
+	$drawn = $page_vars['drawn'];
+	$page->begin_box(array('title' => $drawn['title'] ?? $sbx_page['title']));
+	echo SandboxPages::provenance($manifest);
+	if ($drawn['ok']) {
+		echo SandboxPages::bodyOpen() . $drawn['html'] . '</div>';
+	} else {
+		echo '<p>' . htmlspecialchars((string)$drawn['message']) . '</p>';
+	}
+	$page->end_box();
+}
 
 foreach ($page_vars['sections'] as $data) {
 	$section = $data['section'];

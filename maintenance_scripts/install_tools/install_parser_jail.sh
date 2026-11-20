@@ -3,6 +3,8 @@
 # install_parser_jail.sh - install or converge the parser jail's launcher on
 # this machine (specs/parser_jail.md, docs/document_text.md).
 #
+# Version: 2.3 - ships launcher 2.1.0 (--watch-fd, JOINERY_JAIL_FEATURES=watch-fd): core ends a sandboxed
+#              plugin's run by closing a pipe, since it cannot signal the supervisor (reviewer2 E2)
 # Version: 2.2 - the read probe opens the file (head -c 0) instead of test -r, which on Ubuntu
 #              26.04 ignores ACLs: a granted 770 tree read as ungranted and the launcher was
 #              never installed; acl is installed for the plugin users' grant too

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -186,6 +187,23 @@ func TestParseUserAndGrants(t *testing.T) {
 	o, err = parse([]string{"--scratch=1000", "--", "php"})
 	if err != nil || o.rlimitFsize != 1000 || o.runUser() != jailUser {
 		t.Fatalf("scratch lowers the file-size limit to its cap: %+v %v", o, err)
+	}
+}
+
+// --watch-fd names a descriptor above the three the child gets, and the usage
+// line names the feature, which is how SandboxRunner knows it may pass one.
+func TestParseWatchFD(t *testing.T) {
+	o, err := parse([]string{"--user=jpx-ab", "--watch-fd=3", "--", "php"})
+	if err != nil || o.watchFD != 3 {
+		t.Fatalf("--watch-fd=3: %+v %v", o, err)
+	}
+	for _, bad := range []string{"--watch-fd=0", "--watch-fd=2", "--watch-fd=1024", "--watch-fd=x", "--watch-fd=-3"} {
+		if _, err := parse([]string{bad, "--", "php"}); err == nil {
+			t.Fatalf("%s must be refused", bad)
+		}
+	}
+	if _, err := parse([]string{"--watch-fd=3"}); err == nil || !strings.Contains(err.Error(), featuresMark) || !strings.Contains(err.Error(), interfaceMark) {
+		t.Fatalf("the usage line must carry both marks: %v", err)
 	}
 }
 

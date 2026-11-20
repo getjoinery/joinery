@@ -5,8 +5,9 @@
  * Each active sandboxed plugin calls the API with a scoped machine key minted
  * for exactly what was approved (SandboxConsent::effective()) plus every verb
  * on its own models. The key belongs to the admin who approved it and acts as
- * them; its secret is kept sealed on the plugin's SandboxInstall row, because
- * core hands it to the plugin's runner with every call (SandboxHost).
+ * them; its secret is kept sealed on the plugin's SandboxInstall row, and is
+ * opened only by core's relay (SandboxRelay), which signs the plugin's asks
+ * with it. It is never handed to the plugin's code.
  *
  *   mint()      on activation and on each approval: a fresh key, the old one
  *               deleted, so the scope always matches the current approval
@@ -15,6 +16,8 @@
  *   reprovision()  the sealed-secret reconciler's recipe for a secret that
  *               can no longer be opened (the database moved): mint again
  *
+ * @version 1.3 - own_records become Model:verb:own entries
+ * @version 1.2 - the secret is opened by SandboxRelay only; nothing hands it to a runner
  * @version 1.1 - a lapse ends the approval (approver cleared), so restoring the admin leaves the plugin waiting
  *                rather than approved with its key off; reprovision() passes over a plugin waiting on approval
  */
@@ -28,6 +31,11 @@ class SandboxCredentials {
 		foreach ($effective['records'] as $model => $verbs) {
 			foreach ($verbs as $verb) {
 				$entries[] = $model . ':' . $verb;
+			}
+		}
+		foreach ($effective['own_records'] ?? array() as $model => $verbs) {
+			foreach ($verbs as $verb) {
+				$entries[] = $model . ':' . $verb . ':own';
 			}
 		}
 		foreach (SandboxModels::classesFor($plugin) as $class) {
@@ -84,7 +92,7 @@ class SandboxCredentials {
 			$key->set('apk_type', ApiKey::TYPE_MACHINE);
 			$key->set('apk_scope', implode(',', $entries));
 			$key->set('apk_permission', ApiKey::permission_for_scope($entries, $capabilities));
-			// Only from this machine: the plugin's runner calls over loopback.
+			// Only from this machine: core's relay calls over loopback.
 			$key->set('apk_ip_restriction', '127.0.0.1,::1');
 			$key->set('apk_is_active', true);
 			$key->save();
@@ -158,8 +166,8 @@ class SandboxCredentials {
 	/**
 	 * The sealed-secret reconciler's recipe (settings.json sealed_secrets,
 	 * kind regenerable): mint again for every active plugin whose key secret
-	 * can no longer be opened. Nothing depends on the old secret but the plugin's runner,
-	 * which is handed the new one with its next call.
+	 * can no longer be opened. Nothing depends on the old secret but core's relay,
+	 * which opens the new one at the plugin's next call.
 	 */
 	public static function reprovision(): bool {
 		$ok = true;

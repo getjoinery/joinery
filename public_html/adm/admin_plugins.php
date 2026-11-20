@@ -1,5 +1,9 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.15 - an uninstalled plugin whose files are back on disk after its removal finished offers Install; a
+//                not-yet-installed sandboxed plugin shows its manifest's name, description and version
+// @version 1.14 - a sandboxed plugin whose view draws pages says they are not shown without the strict script policy
+// @version 1.13 - on a shared host the upload box says sandboxed plugins are not installed here
 // @version 1.12 - a full-width bar above the list leads to the Marketplace (AdminPage::marketplace_bar)
 // @version 1.11 - the upload box offers a sandboxed plugin only while they are switched on (SandboxPlugins::enabled())
 // @version 1.10 - each action is a single-button POST form or a link; the page's script is assets/js/admin-plugins.js (no inline script)
@@ -145,7 +149,8 @@ $page->begin_box(array('altlinks' => $altlinks));
                         <div class="form-text">
                             <?php echo SandboxPlugins::enabled()
                                 ? 'Upload a ZIP of a plugin: a native one (with plugin.json), or an experimental sandboxed one (manifest.json and a src folder).'
-                                : 'Upload a ZIP of a plugin (with plugin.json).'; ?>
+                                : 'Upload a ZIP of a plugin (with plugin.json).'
+                                    . (SandboxPlugins::hostRefuses() ? ' ' . htmlspecialchars(SandboxPlugins::SHARED_HOST_MESSAGE) : ''); ?>
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -255,6 +260,20 @@ $page->begin_box(array('altlinks' => $altlinks));
                                 : 'A newer version asks for more than was approved; until it is approved it keeps only what was.';
                             $status_cell .= ' <span class="badge bg-warning" title="' . htmlspecialchars($wait_reason) . '">Waiting for approval</span>';
                         }
+                        // Pages its own view draws are shown only under the
+                        // strict script policy (SandboxPages::NO_STRICT_POLICY).
+                        try {
+                            $sbx_manifest = SandboxPlugins::manifest($plugin['name']);
+                            $draws_pages = false;
+                            foreach (array_merge($sbx_manifest->adminPages(), $sbx_manifest->profilePages()) as $sbx_page) {
+                                $draws_pages = $draws_pages || SandboxPages::isPluginDrawn($sbx_page);
+                            }
+                            if ($draws_pages && !SandboxPages::strictScriptsEnforced()) {
+                                $status_cell .= ' <span class="badge bg-warning" title="' . htmlspecialchars(SandboxPages::NO_STRICT_POLICY
+                                    . ' Turn on the strict script policy (enforce) under Settings to show them.') . '">Its pages are not shown</span>';
+                            }
+                        } catch (SandboxManifestException $e) {
+                        }
                     }
                 }
 
@@ -316,6 +335,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                     }
                 }
 
+                // An uninstalled plugin whose removal finished and whose files
+                // are on disk again: they were put back (the publishing box's
+                // own tree), and the one thing to do is install it.
+                $files_back = false;
+                $remove_id = '';
+                $remove_state = null;
+                $removal_kind = '';
                 if ($plugin['plugin'] && $plugin['plugin']->is_uninstalled()) {
                     // The record uninstall leaves. Data is gone; the files are
                     // removed by the host on its next tick, and the request
@@ -327,6 +353,11 @@ $page->begin_box(array('altlinks' => $altlinks));
                         $remove_id = $plugin['plugin']->get_remove_request_id();
                         $remove_state = $remove_id !== '' ? RootRequest::status($remove_id) : null;
                         $removal_kind = $remove_state !== null ? (string)$remove_state['kind'] : '';
+                        $files_back = $remove_state !== null && $remove_state['state'] === 'done';
+                    }
+                    if ($files_back) {
+                        $status_cell .= '<br><small class="text-muted">Data removed; its files were put back after the removal</small>';
+                    } elseif ($plugin['directory_exists']) {
                         $status_cell .= '<br><small class="text-muted">Data removed; '
                             . ($removal_kind === 'run_plugin_remover'
                                 ? 'its machine state and files being removed by the host'
@@ -433,7 +464,9 @@ $page->begin_box(array('altlinks' => $altlinks));
 
                     $uninstall_warning = "This will drop all of this plugin's tables and delete its data now. The host removes the plugin files within a few minutes. This cannot be undone.";
 
-                    if ($plugin_status === Plugin::STATUS_UNINSTALLED) {
+                    if ($plugin_status === Plugin::STATUS_UNINSTALLED && $files_back) {
+                        $actions['Install'] = $act('Install', 'install');
+                    } elseif ($plugin_status === Plugin::STATUS_UNINSTALLED) {
                         // Files still on disk: root is about to remove them, and
                         // an install racing that removal helps nobody. No action
                         // until the directory is gone.
@@ -486,7 +519,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                         }
                     }
 
-                    if ($plugin_status === Plugin::STATUS_UNINSTALLED) {
+                    if ($plugin_status === Plugin::STATUS_UNINSTALLED && !$files_back) {
                         $action_cell = '<span class="text-muted">Files being removed</span>';
                     } elseif (!empty($actions)) {
                         $action_cell = '<div class="dropdown">';

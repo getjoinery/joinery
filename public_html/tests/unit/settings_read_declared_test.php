@@ -35,6 +35,7 @@
  *
  * Run: php tests/unit/settings_read_declared_test.php
  *
+ * @version 1.1 - docs/examples/ (the sandboxed sample plugin) is not scanned
  * @version 1.0
  */
 
@@ -132,7 +133,9 @@ function literal_setting_reads(string $file): array {
 /** Every .php file under public_html worth scanning. */
 function scannable_php_files(): array {
 	$root = rtrim(PathHelper::getIncludePath(''), '/');
-	$skip = array('/vendor/', '/node_modules/', '/specs/', '/.git/', '/uploads/', '/static_files/');
+	// docs/examples/ holds the sandboxed sample plugin: its settings are its
+	// manifest's, read only inside its fence, never by the site.
+	$skip = array('/vendor/', '/node_modules/', '/specs/', '/.git/', '/uploads/', '/static_files/', '/docs/examples/');
 	$files = array();
 	$it = new RecursiveIteratorIterator(
 		new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),

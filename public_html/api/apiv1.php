@@ -2,6 +2,12 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.40 - as the viewer, a row by id only when its owner column is the viewer's (reviewer2 J2)
+ * @version 2.39 - a sandboxed plugin's own-rows request: the relay's viewer header makes it act as that member
+ *   at level 0, admitted by the plugin's own-rows grants only (design 8)
+ * @version 2.38 - a sandboxed plugin's key is metered by plugin (its own api_rate_limit_* budget), its rows
+ *   left out of the loopback address's count (reviewer2 E4)
+ * @version 2.37 - a collection read refuses a filter or sort on a column no API answer shows
  * @version 2.36 - api_error() is declared never
  * @version 2.35 - /api/v1/csp-report: the strict script policy's report channel, its own bucket
  * @version 2.34
@@ -631,6 +637,40 @@ $api_entry = $principal['api_entry'];
 $api_user  = $principal['api_user'];
 $auth_data = $principal['auth_data'];
 
+// A sandboxed plugin's key: core's relay calls from this machine's loopback
+// for every plugin on the site. Each plugin has a budget of its own, and its
+// rows are stamped so the loopback address's count leaves them out
+// (RequestLogger::address_rate_limit_state): one plugin's loop cannot shut out
+// the rest. The pre-authentication address check above saw none of its rows.
+$sandbox_plugin = ($api_entry !== null && $api_entry->get('apk_type') === ApiKey::TYPE_MACHINE) ? $api_entry->sandbox_plugin() : null;
+// A request a sandboxed plugin makes as the member viewing its page (an
+// own-rows grant, design 8): core's relay names the member in a header, the
+// key must be the plugin's and the request from this machine, and the
+// request then acts as that member at member level, whatever their own
+// level, so row checks, list narrowing and the owner stamped on a create are
+// theirs. The plugin's own-rows grants alone admit it (ApiAuth::scopeAdmits).
+$viewer_header = $_SERVER['HTTP_X_JOINERY_SANDBOX_VIEWER'] ?? null;
+if ($viewer_header !== null) {
+	$loopback = in_array((string)($_SERVER['REMOTE_ADDR'] ?? ''), array('127.0.0.1', '::1'), true);
+	if ($sandbox_plugin === null || !$loopback || !ctype_digit((string)$viewer_header)) {
+		api_error('A viewer is named only by core, for a sandboxed plugin.', 'AuthenticationError', 403);
+	}
+	$viewer = new User((int)$viewer_header, TRUE);
+	if (!$viewer->key || $viewer->get('usr_delete_time') || $viewer->get('usr_is_disabled')) {
+		api_error('The member viewing the page is not an active account.', 'AuthenticationError', 403);
+	}
+	ApiAuth::$sandbox_viewer = (int)$viewer->key;
+	$api_user = $viewer;
+	$auth_data = array('current_user_id' => (int)$viewer->key, 'current_user_permission' => 0) + $auth_data;
+}
+if ($sandbox_plugin !== null) {
+	RequestLogger::set_request_key(RequestLogger::SANDBOX_KEY_PREFIX . $sandbox_plugin);
+	$plugin_state = RequestLogger::sandbox_plugin_rate_limit_state('api', $api_rate_limit, $api_rate_window, $sandbox_plugin);
+	if (!$plugin_state['allowed']) {
+		api_rate_limited($plugin_state, 'The sandboxed plugin ' . $sandbox_plugin, $api_rate_limit, $api_rate_window);
+	}
+}
+
 // Rate limiting by person, now that the caller has a name. A signed-in person
 // has one budget per kind of credential, counted on the rows logged under that
 // kind (RequestLogger::person_rate_limit_state), whoever else shares their
@@ -664,7 +704,7 @@ if ($api_user !== null && ($api_entry === null || $api_entry->is_app_credential(
 	if (!$person_state['allowed']) {
 		api_rate_limited($person_state, $person_who, $person_limit, $person_window);
 	}
-} elseif ($api_entry === null || $api_entry->is_app_credential() || $key_shaped) {
+} elseif ($sandbox_plugin === null && ($api_entry === null || $api_entry->is_app_credential() || $key_shaped)) {
 	// No user, or any other key on an action request (which skipped the
 	// address check above).
 	$api_state = RequestLogger::address_rate_limit_state('api', $api_rate_limit, $api_rate_window);
@@ -760,6 +800,22 @@ if (strtolower($url_segments[2] ?? '') === 'drive_upload') {
 	// dispatch() always exits, logging the api_upload outcome as it goes.
 }
 
+/**
+ * As the member viewing a sandboxed plugin's page (ApiAuth::$sandbox_viewer),
+ * a row by id is answered only when it is that member's by its owner column,
+ * whatever wider rule the model's own read check has (a board's viewers, a
+ * forum's readers): an own-rows grant means rows the member owns.
+ */
+function api_refuse_unless_viewer_owns($object, $class_name) {
+	if (ApiAuth::$sandbox_viewer === null) {
+		return;
+	}
+	$owner = api_owner_column($class_name);
+	if ($owner === null || !$object->key || (int)$object->get($owner) !== (int)ApiAuth::$sandbox_viewer) {
+		api_error('Not found', 'NotFound', 404);
+	}
+}
+
 // Discover all model classes, then apply the Layer 1 exposure opt-in. discover_model_classes()
 // must keep returning ALL models (shared with schema/deletion subsystems); the CRUD surface is
 // the filtered subset. An unexposed class is indistinguishable from a nonexistent one (404).
@@ -783,6 +839,7 @@ if (in_array($operation, $classes)) {
 		// Single object GET
 		try {
 			$object = new $class_name($entity_id, TRUE);
+			api_refuse_unless_viewer_owns($object, $class_name);
 			if (!$class_name::$api_public_read) {
 				api_authorize_row($object, 'authenticate_read', $auth_data);
 			}
@@ -828,6 +885,7 @@ if (in_array($operation, $classes)) {
 
 		try {
 			$object = new $class_name($entity_id, TRUE);
+			api_refuse_unless_viewer_owns($object, $class_name);
 			// Authorize the row as it exists in the DB, BEFORE applying input — you may
 			// only update a row you already own (the owner column is unwritable below, so
 			// it cannot be flipped to forge ownership mid-update).
@@ -910,6 +968,7 @@ if (in_array($operation, $classes)) {
 
 		try {
 			$object = new $class_name($entity_id, TRUE);
+			api_refuse_unless_viewer_owns($object, $class_name);
 			api_authorize_row($object, 'authenticate_write', $auth_data);
 			$object->soft_delete();
 			$object = new $class_name($entity_id, TRUE);
@@ -979,6 +1038,23 @@ if (in_array($operation, $classes)) {
 	$sortarray = ($sort && $sdirection) ? array($sort => $sdirection) : NULL;
 
 	$offset = $numperpage * $page;
+
+	// A column no API answer shows (a password, secret, key, token or hash)
+	// is not a filter or a sort either: matching on one tests a guess of its
+	// value, and sorting by one tells the order of rows by it.
+	$model_prefix = isset($class_name::$prefix) ? (string)$class_name::$prefix : '';
+	$asked_columns = array_keys($url_parts);
+	if (is_string($sort) && $sort !== '') {
+		$asked_columns[] = $sort;
+	}
+	foreach ($asked_columns as $asked) {
+		$asked = (string)$asked;
+		foreach (array($asked, $model_prefix . '_' . $asked) as $column) {
+			if (isset($class_name::$field_specifications[$column]) && $class_name::is_unreadable_field($column)) {
+				api_error('Fetch objects: ' . $class_name . ' cannot be filtered or sorted by ' . $asked, 'TransactionError', 400);
+			}
+		}
+	}
 
 	$objects = new $multiclassname($url_parts, $sortarray, $numperpage, $offset);
 

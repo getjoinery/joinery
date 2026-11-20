@@ -65,6 +65,20 @@ class SandboxCompatibility {
 			}
 		}
 
+		foreach ($m->permittedOwnRecords() as $model => $verbs) {
+			$why = self::ownRecordsProblem((string)$model);
+			if ($why !== null) {
+				$problems[] = $why;
+				continue;
+			}
+			foreach ($verbs as $verb) {
+				$kind = $verb === 'read' ? 'read' : 'write';
+				if (!isset($exposed[$kind][$model])) {
+					$problems[] = "It needs to $verb each member's own $model records, which this site's API does not allow.";
+				}
+			}
+		}
+
 		$signals = SignalBus::signals();
 		foreach ($m->signals() as $signal) {
 			if (!isset($signals[$signal])) {
@@ -72,6 +86,33 @@ class SandboxCompatibility {
 			}
 		}
 		return $problems;
+	}
+
+	/**
+	 * Why a model cannot be granted as each member's own rows, or null: it
+	 * must be one, not public (own rows of public content mean nothing), with
+	 * an owner column (so a list of a member's rows is narrowed in the query
+	 * and its count reveals no one else's) and the API's read path.
+	 */
+	public static function ownRecordsProblem(string $model): ?string {
+		if (!ApiKey::is_model_class($model)) {
+			return "It needs each member's own $model records, which this site does not have.";
+		}
+		if ($model::$api_public_read) {
+			return "It asks for each member's own $model records, but $model is public content, which has no owner's rows.";
+		}
+		if (!$model::$api_readable) {
+			return "It asks for each member's own $model records, which this site's API does not show.";
+		}
+		// Credentials and what only the top admins handle (permissions.json
+		// classes keys and restricted): a member's passkeys, sign-in records.
+		if (in_array((string)$model::$access_class, array('keys', 'restricted'), true)) {
+			return "It asks for each member's own $model records, which hold sign-in or key details no plugin is given.";
+		}
+		if ($model::access_owner_column() === null) {
+			return "It asks for each member's own $model records, but $model has no owner column to tell whose a row is.";
+		}
+		return null;
 	}
 
 	/**

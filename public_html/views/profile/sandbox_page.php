@@ -3,6 +3,8 @@
  * A sandboxed plugin's page for a signed-in member, drawn from its manifest:
  * text and forms (door 4). See logic/sandbox_page_logic.php.
  *
+ * @version 1.3 - a framed page: its frame and core's bridge, frame-src naming the framed route alone
+ * @version 1.2 - a page drawn by the plugin's view: its cleaned body under the provenance line
  * @version 1.1 - its logic is logic/sandbox_page_logic.php (also the API action sandbox_page)
  * @version 1.0
  */
@@ -14,6 +16,10 @@
 	$sbx_page = $page_vars['page'];
 
 	$page = new PublicPage();
+	if (!empty($page_vars['framed'])) {
+		// The frame may be navigated nowhere but the framed route.
+		$page->restrict_frames_to(SandboxPages::frameSource());
+	}
 	$page->public_header([
 		'title' => $page_vars['page_title'],
 	]);
@@ -39,7 +45,22 @@
             <?php echo PublicPage::settings_layout_start(); ?>
             <?php echo $page->render_messages(); ?>
 
-            <?php foreach ($sbx_page['sections'] as $i => $section): ?>
+            <?php if (!empty($page_vars['framed'])): ?>
+            <div class="jy-panel"><?php echo SandboxPages::frameMarkup($page_vars['manifest'], 'member', $sbx_page); ?></div>
+            <?php endif; ?>
+
+            <?php if (isset($page_vars['drawn'])): $drawn = $page_vars['drawn']; ?>
+            <div class="jy-panel">
+                <?php echo SandboxPages::provenance($page_vars['manifest']); ?>
+                <?php if ($drawn['ok']): ?>
+                <?php echo SandboxPages::bodyOpen() . $drawn['html'] . '</div>'; ?>
+                <?php else: ?>
+                <p><?php echo htmlspecialchars((string)$drawn['message']); ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+
+            <?php foreach (($sbx_page['sections'] ?? array()) as $i => $section): ?>
             <div class="jy-panel jy-form-actions">
                 <?php if (!empty($section['title'])): ?>
                     <h2><?php echo htmlspecialchars($section['title']); ?></h2>

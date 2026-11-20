@@ -761,13 +761,29 @@ class ApiAuth {
 	 */
 	protected static function scopeAdmits($api_entry, $endpoint, $record): bool {
 		if ($endpoint !== null) {
-			return $api_entry->scope_allows_action((string)$endpoint);
+			// A request made as a viewer is a record request, nothing else.
+			return self::$sandbox_viewer === null && $api_entry->scope_allows_action((string)$endpoint);
 		}
 		if (is_array($record) && isset($record['model'], $record['verb'])) {
-			return $api_entry->scope_allows_record((string)$record['model'], (string)$record['verb']);
+			// As the member viewing a sandboxed plugin's page, only the
+			// plugin's own-rows grants count; otherwise only its all-rows ones.
+			return self::$sandbox_viewer !== null
+				? $api_entry->scope_allows_own_record((string)$record['model'], (string)$record['verb'])
+				: $api_entry->scope_allows_record((string)$record['model'], (string)$record['verb']);
 		}
 		return false;
 	}
+
+	/**
+	 * The member a sandboxed plugin's request is made as (an own-rows grant,
+	 * specs/sandboxed_php_plugins.md design 8), or null. Set by apiv1.php
+	 * only for a sandboxed plugin's key from this machine, from the header
+	 * core's relay sends (SandboxRelay::VIEWER_HEADER); the plugin's code
+	 * never sets it.
+	 *
+	 * @var int|null
+	 */
+	public static $sandbox_viewer = null;
 
 	/**
 	 * Refuse a scoped key on every route family outside its scope, before the
@@ -798,7 +814,7 @@ class ApiAuth {
 		// The name must also be a model this site has: a stored entry naming
 		// a route family ('Auth:read') opens nothing, whatever wrote it.
 		$operation = ucwords($segment);
-		foreach (array_keys($api_entry->scope_records()) as $model) {
+		foreach (array_keys($api_entry->scope_records() + $api_entry->scope_own_records()) as $model) {
 			if (($operation === $model || $operation === $model . 's') && ApiKey::is_model_class($model)) {
 				return;
 			}

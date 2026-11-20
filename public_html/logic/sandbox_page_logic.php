@@ -14,6 +14,9 @@
  * Also the API action `sandbox_page` (the apps submit a plugin's member forms
  * through it), for a person's credential only.
  *
+ * @version 1.4 - a framed page (design 9): the outer page, for a browser only
+ * @version 1.3 - plugin and page from the address only; a drawn page is refused to the API (reviewer2 H1, H6)
+ * @version 1.2 - a page with no sections is drawn by the plugin's own view, cleaned by core (drawn)
  * @version 1.1 - only a member page an admin approved
  * @version 1.0
  */
@@ -22,6 +25,12 @@ function sandbox_page_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(0);
 
+	// Which plugin and page come from the address on a web request, never from
+	// a posted body (a plugin's form posts here).
+	if (isset($_GET['plugin'])) {
+		$input['plugin'] = $_GET['plugin'];
+		$input['page'] = $_GET['page'] ?? null;
+	}
 	$plugin = (string)($input['plugin'] ?? '');
 	if (!preg_match(SandboxManifest::NAME_PATTERN, $plugin) || !SandboxPlugins::isActive($plugin)) {
 		return LogicResult::error('That page does not exist.');
@@ -39,6 +48,41 @@ function sandbox_page_logic(array $input): LogicResult {
 		return LogicResult::error('That page does not exist.');
 	}
 	$here = SandboxPages::profilePageUrl($plugin, $page['slug']);
+
+	// A framed page: the outer page holds the frame (design 9); a browser only.
+	if (SandboxPages::isFramed($page)) {
+		if (SessionControl::get_instance()->is_api_context()) {
+			return LogicResult::error('This page is the plugin\'s own framed page and is shown in a browser only.');
+		}
+		return LogicResult::render(array(
+			'session' => $session, 'plugin' => $plugin, 'manifest' => $manifest, 'page' => $page,
+			'framed' => true, 'here' => $here, 'page_title' => $page['title'],
+		));
+	}
+
+	// A page with no sections is drawn by the plugin's own view (design 6),
+	// for a browser only: an app showing the body would show it without the
+	// site's script policy, which is what drawPluginPage() requires.
+	if (SandboxPages::isPluginDrawn($page)) {
+		if (SessionControl::get_instance()->is_api_context()) {
+			return LogicResult::error('This page is drawn by the plugin and is shown in a browser only.');
+		}
+		list($query, $fields) = SandboxPages::requestValues($_GET, LibraryFunctions::isFormSubmission() ? $_POST : array());
+		$drawn = SandboxPages::drawPluginPage($plugin, 'member', $page, $here, $query, $fields,
+			LibraryFunctions::isFormSubmission() ? 'POST' : 'GET', new User($session->get_user_id(), TRUE));
+		if (!empty($drawn['redirect'])) {
+			return LogicResult::redirect($drawn['redirect']);
+		}
+		return LogicResult::render(array(
+			'session'    => $session,
+			'plugin'     => $plugin,
+			'manifest'   => $manifest,
+			'page'       => $page,
+			'drawn'      => $drawn,
+			'here'       => $here,
+			'page_title' => $drawn['title'] ?? $page['title'],
+		));
+	}
 
 	if (LibraryFunctions::isFormSubmission() && isset($input['section'])) {
 		$section = $page['sections'][(int)$input['section']] ?? null;

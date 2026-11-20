@@ -21,12 +21,14 @@
  *  - a form section is sent to the runner with exactly the declared fields, the
  *    user who asked, the plugin's limits, settings and declared hosts, and
  *    what the plugin answers is shown; a plugin error is shown as one;
- *  - with no runner the page says so and the call is logged as unavailable;
+ *  - where the fence cannot run the plugin the page says why and the call is
+ *    logged as unavailable;
  *    a plugin that ran out of time, or both UI slots taken, is said too;
  *  - a profile form is answered for the member who submitted it.
  *
  * Run: php tests/run.php db --filter=sandbox_pages
  *
+ * @version 1.1 - the platform's runner is the fence; a fixture with no plugin user is unavailable, saying why
  * @version 1.0
  */
 
@@ -177,18 +179,22 @@ try {
 	$result = harness_call_logic($page_logic, 'admin_sandbox_page_logic', array('plugin' => $name, 'page' => 'nope'), 'GET');
 	check((bool)$result->error, 'A page it does not declare is refused');
 
-	section('A form with no runner');
-	check(SandboxHost::$runner === null, 'The platform sets no runner');
+	section('A form the server cannot run yet');
+	// The platform's runner, the fence: this fixture has no plugin user (the
+	// root step has not seen it), so the call is unavailable and says why.
+	check(SandboxHost::$runner === null, 'The platform\'s own runner is in place');
+	$why = SandboxRunner::unavailable($name);
+	check($why !== null, 'The fixture cannot be run here', (string)$why);
 	$_SESSION['saved_messages'] = array();
 	harness_call_logic($page_logic, 'admin_sandbox_page_logic', array(
 		'plugin' => $name, 'page' => 'main', 'action' => 'form', 'section' => 2, 'sbx_who' => 'Ann',
 	), 'POST');
 	$m = $last_message();
-	check($m['type'] === DisplayMessage::MESSAGE_WARNING && strpos($m['text'], SandboxHost::NO_RUNNER_MESSAGE) !== false,
-		'The page says nothing can run the plugin', $m['text']);
+	check($m['type'] === DisplayMessage::MESSAGE_WARNING && strpos($m['text'], (string)$why) !== false,
+		'The page says why the plugin cannot run', $m['text']);
 	$l = $logs($name);
 	check(count($l) === 1 && $l[0]['sbl_status'] === 'unavailable' && $l[0]['sbl_kind'] === 'ui' && $l[0]['sbl_name'] === 'greet'
-		&& $l[0]['sbl_message'] === SandboxHost::NO_RUNNER_MESSAGE,
+		&& $l[0]['sbl_message'] === mb_substr((string)$why, 0, 500),
 		'and the call is logged as unavailable, saying why', json_encode($l));
 
 

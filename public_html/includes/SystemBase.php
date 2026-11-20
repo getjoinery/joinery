@@ -43,10 +43,37 @@ class SystemDisplayablePermanentErrorNoLog extends SystemBaseException implement
 // page answers 422, as /api/v1 answers the same result (ErrorStatus::of()).
 class LogicRefusal extends SystemBaseException implements DisplayableErrorMessageNoLog {}
 
+/**
+ * Where models read and write when the database is not this process's: a
+ * sandboxed plugin's process, inside the fence, where every load, save,
+ * trash and list is an ask to core over the pipe (utils/sandbox_runtime.php,
+ * specs/sandboxed_php_plugins.md design 5). Never set on the site:
+ * SystemBase::$remote_store is null there and nothing below changes.
+ */
+interface SystemBaseRemoteStore {
+	/** One row by id, as column => value, or null when there is none. */
+	public function fetch(string $class, int $id): ?array;
+	/** Before a row is written: the rules of the process's own model code, which may refuse. */
+	public function beforeWrite(SystemBase $row): void;
+	/** Create ($id null) or update a row; the row as saved. */
+	public function write(string $class, ?int $id, array $fields): array;
+	/** Put a row in the trash; the row as it is now. */
+	public function trash(string $class, int $id): array;
+	/** A collection's rows (and the count of all that match), or the count alone. */
+	public function select(SystemMultiBase $multi, bool $count_only): array;
+}
+
 // Single models carry computed fields as properties of their own (a user's,
 // a conversation's): allowed on purpose, so PHP 8.2+ does not deprecate them.
 #[\AllowDynamicProperties]
 abstract class SystemBase {
+
+	/**
+	 * Set only inside a sandboxed plugin's fence (SystemBaseRemoteStore).
+	 *
+	 * @var SystemBaseRemoteStore|null
+	 */
+	public static $remote_store = null;
 	
 	public $key;
 	protected $data;
@@ -2967,6 +2994,17 @@ abstract class SystemBase {
 			return false;
 		}
 
+		if (self::$remote_store !== null) {
+			$row = self::$remote_store->fetch(static::class, (int)$this->key);
+			if ($row === null) {
+				$this->key = NULL;
+				$this->data = new StdClass;
+				return false;
+			}
+			$this->data = (object)$row;
+			return;
+		}
+
 		$this->data = SingleRowFetch(static::$tablename, static::$pkey_column,
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
@@ -3000,6 +3038,15 @@ abstract class SystemBase {
 
 	function soft_delete(){
 		self::assert_not_get_mutation('soft_delete');
+		if (self::$remote_store !== null) {
+			if ($this->key === NULL) {
+				throw new SystemBaseNoKeyError('Cannot delete a ' . static::$tablename . ' row that was never saved.');
+			}
+			$this->data = (object)self::$remote_store->trash(static::class, (int)$this->key);
+			$this->changed = array();
+			$this->original = array();
+			return true;
+		}
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', 'now()');
@@ -3020,6 +3067,9 @@ abstract class SystemBase {
 	
 	function undelete(){
 		self::assert_not_get_mutation('undelete');
+		if (self::$remote_store !== null) {
+			throw new SystemBaseException('Restoring a row from the trash is for an admin, not a sandboxed plugin.');
+		}
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
 			if($field == static::$prefix.'_delete_time'){
 				$this->set(static::$prefix.'_delete_time', NULL);
@@ -3176,6 +3226,9 @@ abstract class SystemBase {
 	 */
 	public function permanent_delete($debug=false) {
 		self::assert_not_get_mutation('permanent_delete');
+		if (self::$remote_store !== null) {
+			throw new SystemBaseException('A sandboxed plugin deletes a row to the trash (soft_delete()); it never removes one.');
+		}
 		$this->enforce_access('permanent_delete');
 		$db = DbConnector::get_instance()->get_db_link();
 
@@ -3452,10 +3505,39 @@ abstract class SystemBase {
 		}
 	}
 
+	/**
+	 * save() inside a sandboxed plugin's fence: the row's written columns go
+	 * to core as one create or update ask, and the row comes back as saved.
+	 * Core runs the save, with every check a save has there; the create,
+	 * update and delete times are core's to set.
+	 */
+	private function save_remote(): void {
+		self::$remote_store->beforeWrite($this);
+		$fields = array();
+		$columns = $this->key === NULL ? array_keys((array)$this->data) : array_keys($this->changed);
+		foreach ($columns as $column) {
+			if ($column === static::$pkey_column || !isset(static::$field_specifications[$column])
+					|| in_array($column, array(static::$prefix . '_create_time', static::$prefix . '_update_time', static::$prefix . '_delete_time'), true)) {
+				continue;
+			}
+			$fields[$column] = $this->data->$column ?? null;
+		}
+		$row = self::$remote_store->write(static::class, $this->key === NULL ? null : (int)$this->key, $fields);
+		$this->data = (object)$row;
+		$this->key = $row[static::$pkey_column] ?? $this->key;
+		$this->changed = array();
+		$this->original = array();
+		$this->loaded = TRUE;
+	}
+
 	function save($debug=false) {
 		self::assert_not_get_mutation('save');
 		if ($this->data === NULL) {
 			throw new SystemBaseException('This '.static::$tablename.' object has no data.');
+		}
+		if (self::$remote_store !== null) {
+			$this->save_remote();
+			return;
 		}
 		if (!$this->access_checked) {
 			$this->enforce_access('write');
@@ -4998,6 +5080,18 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		} else {
 			throw new SystemBaseException('This MultiBase was explicitly set unloaded with $options === NULL');
 		}
+
+		if (SystemBase::$remote_store !== null) {
+			$childClassName = static::$model_class;
+			$pkey_column = $childClassName::$pkey_column;
+			foreach (SystemBase::$remote_store->select($this, false)['rows'] as $row) {
+				$child = new $childClassName($row[$pkey_column] ?? null);
+				$child->load_from_data($row + array_fill_keys(array_keys($childClassName::$field_specifications), null),
+					array_keys($childClassName::$field_specifications));
+				$this->add($child);
+			}
+			return;
+		}
 		
 		// Generic implementation for all Multi classes
 		if (!isset(static::$model_class)) {
@@ -5040,7 +5134,15 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	 * Generic count_all implementation for Multi classes
 	 */
 	function count_all($debug = false) {
+		if (SystemBase::$remote_store !== null) {
+			return (int)SystemBase::$remote_store->select($this, true)['total'];
+		}
 		return $this->getMultiResults(TRUE, $debug);
+	}
+
+	/** The model class this collection holds (for SystemBaseRemoteStore). */
+	public static function remote_model_class(): string {
+		return static::$model_class;
 	}
 	
 	/**

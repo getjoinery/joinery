@@ -20,6 +20,7 @@
  *
  * Run: php tests/unit/extension_staging_test.php
  *
+ * @version 1.6 - on the publishing box a sandboxed plugin from disk is checked against the switch and recorded sandboxed
  * @version 1.5 - the publishing box refuses an unverified staged package ahead of the acknowledgement (D6);
  *                declares the installer it reads as covered
  * @version 1.4 - on a host that refuses unsigned packages the installer refuses before any acknowledgement,
@@ -187,6 +188,16 @@ check($staged_pub !== false && $staged_pub > $staged_restr && $staged_pub < strp
 $disk_restr = strpos($byname_branch, $restricted);
 check($disk_restr !== false && $disk_restr < strpos($byname_branch, "in_array((string)\$existing->get(\$trust_column), array('unsigned', 'unlogged'), true)"),
 	'from disk: the restriction is asked before a row saying unsigned is taken as an acknowledgement');
+// The publishing box trusts its own tree for who wrote it, not for what it is:
+// a sandboxed plugin from disk there is still refused while they are off
+// (install_extension_kind() exits) and recorded 'sandboxed', without the email.
+$disk_pub = strpos($byname_branch, "this is the publishing box, which trusts its own tree';");
+$disk_pub_tail = $disk_pub !== false ? substr($byname_branch, $disk_pub, 900) : '';
+check(strpos($disk_pub_tail, '$kind = install_extension_kind($type, $dest_parent') !== false
+	&& strpos($disk_pub_tail, "\$trust = 'sandboxed';") !== false
+	&& strpos($disk_pub_tail, '$tell_admins = false;') !== false
+	&& strpos($installer, 'if ($quiet || !$tell_admins) {') !== false,
+	'from disk on the publishing box: a sandboxed plugin is checked against the switch and recorded sandboxed, with no email');
 // A row saying 'sandboxed' may be one written with no warning answered, so it is no acknowledgement.
 check(strpos($byname_branch, "array('unsigned', 'unlogged', 'sandboxed')") === false,
 	'from disk: a row saying sandboxed is not taken as an acknowledgement');

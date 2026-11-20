@@ -1,0 +1,26 @@
+{
+  "name": "notes_sample",
+  "title": "Notes (sample)",
+  "version": "1.0.0",
+  "platform": 1,
+  "description": "The sample sandboxed PHP plugin of docs/sandboxed_plugins.md: notes kept in a table of its own, an admin page that lists and adds them, a member page, a framed board, a signal and a schedule.",
+  "author": "Joinery",
+  "models": [
+    {"name": "Note", "label": "Note", "fields": [
+      {"name": "text", "type": "string", "max_length": 200, "required": true},
+      {"name": "author", "type": "integer", "index": true},
+      {"name": "pinned", "type": "boolean"}
+    ]}
+  ],
+  "permissions": {"own_records": {"Notification": ["read"]}},
+  "signals": ["account.signup"],
+  "schedules": [{"name": "tidy", "frequency": "daily", "time": "04:00"}],
+  "settings": [{"name": "greeting", "label": "Greeting on the member page", "type": "text", "default": "Hello"}],
+  "admin_pages": [{"slug": "notes", "title": "Notes"}],
+  "profile_pages": [
+    {"slug": "mine", "title": "My notes"},
+    {"slug": "board", "title": "Notes board", "frame": true, "handlers": ["pin"]}
+  ],
+  "menu": {"title": "Notes (sample)"},
+  "limits": {"memory_mb": 32, "timeout_ms": 5000}
+}

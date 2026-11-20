@@ -29,6 +29,8 @@
  * many plugins, those installed here (a folder merely sitting in plugins/
  * declares nothing).
  *
+ * @version 1.1 - declareExtendable() and declareFenceCollection(): the fenced runtime's declarations, not final,
+ *                fields by manifest name (specs/sandboxed_php_plugins.md WP4)
  * @version 1.0
  */
 
@@ -103,12 +105,40 @@ class SandboxModels {
 	}
 
 	/**
+	 * Inside a sandboxed plugin's fence only (utils/sandbox_runtime_models.php):
+	 * declare the plugin's model as on the site but not final, so the plugin
+	 * may extend it with methods of its own, and with set()/get() taking a
+	 * field's manifest name as well as its column name.
+	 */
+	public static function declareExtendable(string $plugin, array $model): ?string {
+		if (SystemBase::$remote_store === null) {
+			throw new LogicException('SandboxModels::declareExtendable() is for the fence only.');
+		}
+		return self::declare($plugin, $model, false);
+	}
+
+	/**
+	 * Inside the fence only: the collection of a plugin's own class that
+	 * extends its model ($short extends $core), so the collection yields it.
+	 */
+	public static function declareFenceCollection(string $short, string $core): void {
+		if (SystemBase::$remote_store === null) {
+			throw new LogicException('SandboxModels::declareFenceCollection() is for the fence only.');
+		}
+		if (!preg_match(SandboxManifest::MODEL_PATTERN, $short) || !preg_match(self::CLASS_PATTERN, $core)
+				|| class_exists('Multi' . $short, false)) {
+			return;
+		}
+		eval('class Multi' . $short . ' extends Multi' . $core . ' { protected static $model_class = \'' . $short . '\'; }');
+	}
+
+	/**
 	 * Declare the two classes for one manifest model, once per process.
 	 * Returns the model class, or null when the name is taken by a class that
 	 * is not this model's (the install refuses such a manifest; on a site
 	 * where it happens anyway, the model is left out rather than shadowing).
 	 */
-	private static function declare(string $plugin, array $model): ?string {
+	private static function declare(string $plugin, array $model, bool $final = true): ?string {
 		$class = SandboxManifest::classFor($plugin, $model['name']);
 		if (isset(self::$declared[strtolower($class)])) {
 			return $class;
@@ -123,14 +153,18 @@ class SandboxModels {
 		}
 
 		// The fixed template. $class has just been held to CLASS_PATTERN.
-		eval('final class ' . $class . ' extends SandboxRecord {'
+		$final_word = $final ? 'final ' : '';
+		$by_name = $final ? '' : ' function set($key, $value, $check_existance = TRUE) { return parent::set(static::columnFor($key), $value, $check_existance); }'
+			. ' function get($key) { return parent::get(static::columnFor($key)); }';
+		eval($final_word . 'class ' . $class . ' extends SandboxRecord {'
 			. ' public static $prefix; public static $tablename; public static $pkey_column;'
 			. ' public static $field_specifications = array();'
 			. ' public static $api_readable = true; public static $api_writable = true;'
 			. ' protected static $foreign_key_actions = array();'
 			. ' public static $sandbox_plugin; public static $sandbox_model;'
+			. $by_name
 			. ' }'
-			. ' final class Multi' . $class . ' extends SandboxRecordCollection {'
+			. ' ' . $final_word . 'class Multi' . $class . ' extends SandboxRecordCollection {'
 			. ' protected static $model_class = \'' . $class . '\';'
 			. ' }');
 

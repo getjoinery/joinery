@@ -22,7 +22,8 @@
  *     "platform": 1,                        the platform API version it was built for
  *     "permissions": {                      door 1: what its API credential may do
  *       "actions": ["notification_unread_count"],
- *       "records": {"EventRegistrant": ["read"]}
+ *       "records": {"EventRegistrant": ["read"]},
+ *       "own_records": {"Order": ["read"]}    each member's own rows, as the member viewing
  *     },
  *     "signals": ["event.registered"],      door 2: signals delivered to it
  *     "schedules": [                        door 3: scheduled runs
@@ -31,12 +32,17 @@
  *     "outbound_hosts": ["hooks.slack.com"],door 5: hosts it may call over HTTPS
  *     "settings": [ {"name", "label", "type", "secret", "default", "required", "options", "help"} ],
  *     "models": [ {"name": "SentLog", "label": "…", "fields": [ {"name", "type", "label", "required", "max_length", "index"} ]} ],
- *     "admin_pages":   [ {"slug", "title", "sections": [ … ]} ],   door 4
+ *     "admin_pages":   [ {"slug", "title", "sections": [ … ]} ],   door 4; with no sections the
+ *                                           plugin's own view draws the page (a plain page, cleaned by core)
  *     "profile_pages": [ {"slug", "title", "sections": [ … ]} ],
  *     "menu": {"title": "Notifier"},
  *     "limits": {"memory_mb": 16, "timeout_ms": 5000}
  *   }
  *
+ * @version 1.4 - a framed page's handlers: the only ones its frame may call (reviewer2 K1)
+ * @version 1.3 - a page may be framed ("frame": true, design 9)
+ * @version 1.2 - permissions.own_records (design 8)
+ * @version 1.1 - a page may have no sections: its own view draws it (a plain page)
  * @version 1.0
  */
 
@@ -224,8 +230,23 @@ class SandboxManifest {
 			$e[] = 'permissions must be an object';
 			return;
 		}
-		if (array_diff(array_keys($p), array('actions', 'records'))) {
-			$e[] = 'permissions may hold only actions and records';
+		if (array_diff(array_keys($p), array('actions', 'records', 'own_records'))) {
+			$e[] = 'permissions may hold only actions, records and own_records';
+		}
+		// own_records: each member's own rows of a model, read as the member
+		// who is viewing (design 8), checked as records are.
+		$own = $p['own_records'] ?? array();
+		if (!is_array($own) || (self::isList($own) && !empty($own))) {
+			$e[] = 'permissions.own_records must map a model to its verbs, e.g. {"Order": ["read"]}';
+		} else {
+			foreach ($own as $model => $verbs) {
+				if (!is_string($model) || !preg_match('~^[A-Z][A-Za-z0-9_]*$~D', $model)) {
+					$e[] = "permissions.own_records: '" . self::show($model) . "' is not a model name";
+				}
+				if (!is_array($verbs) || !self::isList($verbs) || empty($verbs) || array_diff($verbs, ApiKey::RECORD_VERBS)) {
+					$e[] = "permissions.own_records.$model must be a list of " . implode(', ', ApiKey::RECORD_VERBS);
+				}
+			}
 		}
 		foreach ((array)($p['actions'] ?? array()) as $action) {
 			if (!is_string($action) || !preg_match(self::ACTION_PATTERN, $action)) {
@@ -467,14 +488,43 @@ class SandboxManifest {
 				$e[] = "$label: the slug '$slug' is used twice";
 			}
 			$slugs[$key][$slug] = true;
-			if (array_diff(array_keys($page), array('slug', 'title', 'sections'))) {
-				$e[] = "$key.$slug may hold only slug, title and sections";
+			if (array_diff(array_keys($page), array('slug', 'title', 'sections', 'frame', 'handlers'))) {
+				$e[] = "$key.$slug may hold only slug, title, sections, frame and handlers";
+			}
+			// The handlers a framed page's script may call through core's
+			// bridge; no other (an admin form's handler stays the admin's).
+			if (array_key_exists('handlers', $page)) {
+				if (empty($page['frame'])) {
+					$e[] = "$key.$slug: handlers belong to a framed page";
+				} elseif (!is_array($page['handlers']) || !self::isList($page['handlers'])) {
+					$e[] = "$key.$slug: handlers is a list of handler names";
+				} else {
+					foreach ($page['handlers'] as $h) {
+						if (!is_string($h) || !preg_match('~^[a-z][a-z0-9_]{0,39}$~D', $h)) {
+							$e[] = "$key.$slug: '" . self::show($h) . "' is not a handler name";
+						}
+					}
+				}
+			}
+			if (array_key_exists('frame', $page)) {
+				// A framed page (design 9): the plugin's own document, script and
+				// styles, served in a sealed frame. Drawn by its view, so no sections.
+				if (!is_bool($page['frame'])) {
+					$e[] = "$key.$slug: frame is true or false";
+				} elseif ($page['frame'] && array_key_exists('sections', $page)) {
+					$e[] = "$key.$slug: a framed page is drawn by its own view, so it has no sections";
+				}
 			}
 			if (!self::isText($page['title'] ?? null, 80, true)) {
 				$e[] = "$key.$slug needs a title of at most 80 characters";
 			}
-			if (!is_array($page['sections'] ?? null) || !self::isList($page['sections']) || empty($page['sections'])) {
-				$e[] = "$key.$slug needs a list of sections";
+			// No sections: the page is drawn by the plugin's own view
+			// (src/admin/{slug}.php or src/views/{slug}.php), cleaned by core.
+			if (!array_key_exists('sections', $page)) {
+				continue;
+			}
+			if (!is_array($page['sections']) || !self::isList($page['sections']) || empty($page['sections'])) {
+				$e[] = "$key.$slug: sections, when given, is a list of at least one section";
 				continue;
 			}
 			foreach ($page['sections'] as $j => $section) {
@@ -613,6 +663,9 @@ class SandboxManifest {
 
 	/** @return array<string,string[]> model class => verbs, for models outside the plugin */
 	public function permittedRecords(): array { return $this->data['permissions']['records'] ?? array(); }
+
+	/** @return array<string,string[]> model class => verbs on each member's own rows (design 8) */
+	public function permittedOwnRecords(): array { return $this->data['permissions']['own_records'] ?? array(); }
 
 	/** @return string[] */
 	public function signals(): array { return array_values($this->data['signals'] ?? array()); }

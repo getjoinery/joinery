@@ -63,6 +63,8 @@ $expected = array(
 	// A sandboxed plugin's member page form (docs/sandboxed_plugins.md): a
 	// machine key, a plugin's own among them, must never submit it as its admin.
 	'sandbox_page',
+	// The bridge of a sandboxed plugin's framed page: the viewer's browser only.
+	'sandbox_frame_call',
 );
 $declared = array();
 $roots = array('logic' => '');

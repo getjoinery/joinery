@@ -286,11 +286,11 @@ class MultiPost extends SystemMultiBase {
 
 
 		if (isset($this->options['after_date'])) {
-			$filters['pst_published_time'] = "> '" . $this->options['after_date'] . "'";
+			$filters['pst_published_time'] = '> ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['after_date']);
 		}
 
 		if (isset($this->options['before_date'])) {
-			$filters['pst_published_time'] = "< '" . $this->options['before_date'] . "'";
+			$filters['pst_published_time'] = '< ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['before_date']);
 		}
 
 		if (isset($this->options['max_visible_tier_level'])) {

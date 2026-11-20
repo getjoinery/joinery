@@ -17,7 +17,7 @@
  *    approval page lists it in plain words and approves and activates in one;
  *  - activation mints a key scoped to exactly what was approved plus every
  *    verb on its own models, owned by the approver, loopback only, whose
- *    sealed secret the runner is handed and which authenticates;
+ *    sealed secret opens and authenticates, and is never in an envelope;
  *  - a receiver carries the approved signals, and a raised signal reaches the
  *    plugin through the queue with its payload; a plugin failure is retried;
  *  - each approved schedule is a scheduled run, never offered for activation
@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_consent
  *
+ * @version 1.1 - the envelope carries no credential
  * @version 1.0
  */
 
@@ -250,8 +251,8 @@ try {
 	check($outcome['result'] === 'delivered', 'and handed to the plugin', json_encode($outcome));
 	check(($sent['export'] ?? '') === 'on_signal' && ($sent['input']['signal'] ?? '') === $signal
 		&& ($sent['input']['data']['user_id'] ?? null) === 7, 'as on_signal, with its payload', json_encode($sent['input'] ?? null));
-	check(($sent['outbound_hosts'] ?? null) === array('hooks.example.com') && !empty($sent['api']['secret_key'])
-		&& $sent['api']['secret_key'] === $credential['secret_key'], 'with the approved hosts and its credential');
+	check(($sent['outbound_hosts'] ?? null) === array('hooks.example.com') && !array_key_exists('api', $sent)
+		&& strpos(json_encode($sent), $credential['secret_key']) === false, 'with the approved hosts, and no credential in it');
 
 	$host['set_replies'](array('on_signal' => array('ok' => false, 'error' => 'plugin trapped', 'duration_ms' => 2, 'calls' => array())));
 	SignalDeliveryQueue::handle_signal($signal, array('user_id' => 8));
@@ -287,9 +288,9 @@ try {
 	$run = (new SandboxScheduledRun())->run(array('plugin' => $name, 'schedule' => 'not_approved'));
 	check($run['status'] === 'skipped', 'and runs nothing it was not approved for');
 
-	section('With no runner');
+	section('With nothing to run it');
 	$stand_in = SandboxHost::$runner;
-	SandboxHost::$runner = null;
+	SandboxHost::$runner = function () { return array('unavailable' => SandboxHost::NO_RUNNER_MESSAGE); };
 	$run = (new SandboxScheduledRun())->run($tasks[0]->get_task_config());
 	check($run['status'] === 'error' && strpos($run['message'], SandboxHost::NO_RUNNER_MESSAGE) !== false,
 		'A scheduled run is an error that says nothing can run the plugin', json_encode($run));
@@ -363,7 +364,7 @@ try {
 	$task = new ScheduledTask((int)$tasks[0]->key, TRUE);
 	check(!$key->get('apk_is_active') && !$receiver->get('sgr_is_active') && !$task->get('sct_is_active'),
 		'Deactivating switches its key, receiver and run off');
-	check(SandboxInstall::credentialFor($name) === null, 'and the runner gets no credential');
+	check(SandboxInstall::credentialFor($name) === null, 'and the relay has no credential to sign with');
 	$pm->activate($name);
 	$reset();
 	$receiver = new SignalReceiver((int)$receivers[0]->key, TRUE);

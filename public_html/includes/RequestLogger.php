@@ -16,7 +16,10 @@
  * other node's allowance. The call site's choice of method says which kind
  * of limit it is.
  *
- * @version 1.11
+ * @version 1.12
+ * @changelog 1.12 - sandbox_plugin_rate_limit_state() and set_request_key(): every later row of the request carries one rql_key (a sandboxed
+ *   plugin's key: 'sandbox:NAME'); address_rate_limit_state() leaves a sandboxed plugin's rows out, since
+ *   they are metered by plugin (specs/sandboxed_php_plugins.md, reviewer2 E4)
  * @changelog 1.11 - log() fills response_ms from REQUEST_TIME_FLOAT when the caller passes none (web requests
  *   only, never the CLI): the API's action path read a start time that never reached it, so every action row
  *   had no duration (specs/slow_request_diagnosis_words.md WP1 B5)
@@ -47,6 +50,17 @@ require_once(PathHelper::getIncludePath('data/request_logs_class.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 
 class RequestLogger {
+
+	/** @var string|null The rql_key every later row of this request carries, unless log() is given one */
+	private static $request_key = null;
+
+	/** The prefix of a sandboxed plugin's rows' rql_key. */
+	const SANDBOX_KEY_PREFIX = 'sandbox:';
+
+	/** Stamp every later row of this request with one rql_key (null stops it). */
+	public static function set_request_key(?string $key): void {
+		self::$request_key = $key;
+	}
 
 	/** @var string|null Authenticated API key type ('machine'/'session') stamped onto every log row for the rest of the request */
 	private static $api_key_type = null;
@@ -101,6 +115,7 @@ class RequestLogger {
 		$response_ms = isset($options['response_ms']) ? $options['response_ms'] : self::elapsed_ms();
 		if ($response_ms !== null)          $log->set('rql_response_ms', $response_ms);
 		if (isset($options['key']))         $log->set('rql_key', substr((string)$options['key'], 0, 64));
+		elseif (self::$request_key !== null) $log->set('rql_key', substr(self::$request_key, 0, 64));
 		if (self::$api_key_type !== null)   $log->set('rql_api_key_type', self::$api_key_type);
 		// A page_probe request is logged as a probe, never as the throwaway
 		// viewer's own activity: the viewer is deleted when the probe returns.
@@ -161,9 +176,13 @@ class RequestLogger {
 	 * @return array{allowed:bool,count:int,retry_after:int}
 	 */
 	public static function address_rate_limit_state($feature, $max_requests, $window_seconds) {
+		// A sandboxed plugin's calls come from this machine's loopback, beside
+		// every other caller there; they are metered by plugin instead, so one
+		// plugin cannot spend the address's budget for the rest.
 		return self::count_state($feature, $max_requests, $window_seconds, null,
 			"rql_ip_address = ? AND (rql_api_key_type IS NULL OR rql_api_key_type NOT IN ('"
-				. implode("', '", ApiKey::PER_PERSON_TYPES) . "'))",
+				. implode("', '", ApiKey::PER_PERSON_TYPES) . "'))"
+				. " AND (rql_key IS NULL OR rql_key NOT LIKE '" . self::SANDBOX_KEY_PREFIX . "%')",
 			isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
 	}
 
@@ -194,6 +213,18 @@ class RequestLogger {
 		}
 		return self::count_state($feature, $max_requests, $window_seconds, $success_filter,
 			'rql_ip_address = ?', isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
+	}
+
+	/**
+	 * rate_limit_state() for one sandboxed plugin: the rows its key's requests
+	 * were stamped with (set_request_key(), 'sandbox:NAME'), wherever they
+	 * came from. Core's relay calls for every plugin from this machine's
+	 * loopback, so each plugin is its own caller.
+	 *
+	 * @return array{allowed:bool,count:int,retry_after:int}
+	 */
+	public static function sandbox_plugin_rate_limit_state($feature, $max_requests, $window_seconds, string $plugin) {
+		return self::rate_limit_state($feature, $max_requests, $window_seconds, null, null, self::SANDBOX_KEY_PREFIX . $plugin);
 	}
 
 	/**

@@ -130,6 +130,12 @@ class AgentFile extends SystemBase {
 	}
 
 	public function prepare() {
+		// A browser form sends a textarea's line breaks as CRLF; the agent
+		// files on disk are plain LF text, so the content is stored that way.
+		$content = $this->get('agf_content');
+		if (is_string($content) && strpos($content, "\r") !== false) {
+			$this->set('agf_content', str_replace(array("\r\n", "\r"), "\n", $content));
+		}
 		$targets = $this->get_target_filenames_array();
 		foreach ($targets as $filename) {
 			self::validate_target_filename($filename);

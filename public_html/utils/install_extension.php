@@ -68,6 +68,9 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.17 - on the publishing box a sandboxed plugin from disk is refused while they are off and recorded
+ *                 plg_trust = 'sandboxed' (no email: the box's tree is its source), not 'signed'
+ * @version 1.16 - a refused sandboxed plugin is told why: switched off, or a shared host (SandboxPlugins::offMessage())
  * @version 1.15 - a sandboxed plugin (manifest.json and src/) is code like any other: unsigned, it is refused
  *                 on a host that refuses unsigned packages and needs the owner's acknowledgement elsewhere,
  *                 and every superadmin is told; it is still recorded plg_trust = 'sandboxed'. From disk, a row
@@ -474,7 +477,7 @@ function install_extension_kind(string $type, string $dir): string {
 		// Exactly a manifest and a src folder. It is code, so unsigned it is
 		// warned about like any plugin; the kind only says how it is recorded.
 		if (!SandboxPlugins::enabled()) {
-			fwrite(STDERR, 'install_extension: refusing to install a sandboxed plugin. ' . SandboxPlugins::OFF_MESSAGE . "\n");
+			fwrite(STDERR, 'install_extension: refusing to install a sandboxed plugin. ' . SandboxPlugins::offMessage() . "\n");
 			exit(1);
 		}
 		echo "kind: sandboxed (a manifest and its src folder; it reaches the site only through what the manifest declares)\n";
@@ -503,7 +506,7 @@ function install_extension_kind(string $type, string $dir): string {
  * whole record. There is nothing in it to deactivate.
  */
 function install_extension_record_unsigned(string $type, string $name, string $version, string $verdict_line,
-		array $approver, string $trust, string $kind = 'page'): void {
+		array $approver, string $trust, string $kind = 'page', bool $tell_admins = true): void {
 	if ($type === 'plugin') {
 		$row = Plugin::get_by_plugin_name($name);
 		$column = 'plg_trust';
@@ -539,7 +542,7 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 	} catch (Throwable $e) {
 		fwrite(STDERR, 'warning: could not write the event log row: ' . $e->getMessage() . "\n");
 	}
-	if ($quiet) {
+	if ($quiet || !$tell_admins) {
 		return;
 	}
 
@@ -619,6 +622,8 @@ try {
 	$trust = 'signed';
 	$verdict_line = '';
 	$kind = 'page';
+	// Whether every superadmin is emailed about a package that is not signed.
+	$tell_admins = true;
 	// Set when --replace set an installed copy aside: what it was, where it is.
 	$replaced = null;
 
@@ -943,6 +948,16 @@ try {
 				} else {
 					echo "verdict: signed: this is the publishing box, which trusts its own tree\n";
 					$verdict_line = 'signed: this is the publishing box, which trusts its own tree';
+					// Trusting the tree says who wrote the files, not what they
+					// are: a sandboxed plugin is still refused while sandboxed
+					// plugins are off, and still recorded as sandboxed, so it is
+					// listed and counted as one. Nobody is emailed: the box's own
+					// tree is its source.
+					$kind = install_extension_kind($type, $dest_parent . '/' . $name);
+					if ($kind === 'sandboxed') {
+						$trust = 'sandboxed';
+						$tell_admins = false;
+					}
 				}
 			}
 		}
@@ -967,7 +982,7 @@ try {
 	$manifest = json_decode((string)@file_get_contents($manifest_path), true);
 	$version = is_array($manifest) ? (string)($manifest['version'] ?? '') : '';
 	$approver = install_extension_approver($approved_by, $approved_ip, $approved_at);
-	install_extension_record_unsigned($type, $name, $version, $verdict_line, $approver, $trust, $kind);
+	install_extension_record_unsigned($type, $name, $version, $verdict_line, $approver, $trust, $kind, $tell_admins);
 	if ($replaced !== null) {
 		install_extension_record_replaced($type, $name, $replaced['old_version'], $version, $replaced['kept'], $trust, $approver);
 	}

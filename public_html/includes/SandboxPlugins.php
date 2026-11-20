@@ -13,6 +13,8 @@
  * one is ever included; this class is how the sandboxed tier finds them.
  * Nothing here reads what src/ holds.
  *
+ * @version 1.3 - off on a host that refuses unsigned packages (a shared host, HostRestrictions), whatever the
+ *               setting says: offMessage() says why (specs/sandboxed_php_plugins.md design 10)
  * @version 1.2 - the shape is manifest.json and src/
  * @version 1.1 - enabled(): the sandboxed_plugins_enabled setting, off by default, gates upload, install,
  *               approval and activation
@@ -28,19 +30,40 @@ class SandboxPlugins {
 	const OFF_MESSAGE = 'Sandboxed plugins are switched off on this site. They are experimental; '
 		. 'a superadmin can allow them under Settings ("Allow sandboxed plugins").';
 
+	/** What a refused upload, install, approval, activation or call says on a shared host. */
+	const SHARED_HOST_MESSAGE = 'This server is shared with other sites, so it does not install or run sandboxed plugins: '
+		. 'code we did not build never runs here.';
+
 	/**
 	 * Whether this site allows a sandboxed plugin to be uploaded, installed,
 	 * approved or activated. One already active is not stopped by turning
-	 * this off: it runs until it is deactivated.
+	 * the setting off: it runs until it is deactivated. On a host that
+	 * refuses unsigned packages the answer is no, and nothing runs at all
+	 * (SandboxRunner refuses every call there).
 	 */
 	public static function enabled(): bool {
-		return (string)Globalvars::get_instance()->get_setting(self::ENABLED_SETTING) === '1';
+		return !self::hostRefuses()
+			&& (string)Globalvars::get_instance()->get_setting(self::ENABLED_SETTING) === '1';
+	}
+
+	/**
+	 * Whether this host refuses sandboxed plugins outright: a host that
+	 * refuses unsigned packages (a shared host; design 10). Every sandboxed
+	 * plugin is unsigned. The host's own file, which no tenant can change.
+	 */
+	public static function hostRefuses(): bool {
+		return HostRestrictions::has('unsigned_packages');
+	}
+
+	/** Why enabled() says no. */
+	public static function offMessage(): string {
+		return self::hostRefuses() ? self::SHARED_HOST_MESSAGE : self::OFF_MESSAGE;
 	}
 
 	/** @throws Exception when sandboxed plugins are switched off here */
 	public static function demandEnabled(): void {
 		if (!self::enabled()) {
-			throw new Exception(self::OFF_MESSAGE);
+			throw new Exception(self::offMessage());
 		}
 	}
 

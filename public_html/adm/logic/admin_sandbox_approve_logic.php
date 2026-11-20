@@ -10,6 +10,7 @@
  * activates the plugin, or, when it is already active, brings what it owns up
  * to the new approval (SandboxPluginManager::reconcile).
  *
+ * @version 1.3 - on a shared host the refusal says so (SandboxPlugins::offMessage())
  * @version 1.2 - nothing is approved while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.1 - the approval is of what was shown (reviewDigest), in one transaction with the activation
  * @version 1.0
@@ -37,7 +38,7 @@ function admin_sandbox_approve_logic(array $input): LogicResult {
 	// Switched off: nothing is approved or activated. An active plugin keeps
 	// what it has, and is not given more.
 	if (!SandboxPlugins::enabled()) {
-		array_unshift($problems, SandboxPlugins::OFF_MESSAGE);
+		array_unshift($problems, SandboxPlugins::offMessage());
 	}
 
 	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'approve') {

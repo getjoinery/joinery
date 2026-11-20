@@ -143,6 +143,8 @@
         "/report_problem",
         "/robots",
         "/rss20_feed",
+        "/sandbox_asset",
+        "/sandbox_frame",
         "/services_connected",
         "/setup",
         "/sitemap",

@@ -11,6 +11,7 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.8 - the list reads a not-yet-installed sandboxed plugin's manifest for its name, description and version
  * @version 1.7 - get_plugin_metadata() reads a sandboxed plugin's manifest.json (SandboxPluginManager)
  * @version 1.6 - get_status_badge() no longer asks plg_status whether a plugin is active: a row left at
  *               'active' that is switched off reaches the default branch, which says Inactive from is_active()
@@ -372,6 +373,9 @@ class MultiPlugin extends SystemMultiBase {
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     $metadata = null;
                 }
+            } elseif (SandboxPlugins::isSandboxedDir($plugin_path)) {
+                // A sandboxed plugin's manifest.json, in the same keys.
+                $metadata = SandboxPluginManager::metadata($plugin_name);
             }
 
             if ($metadata) {

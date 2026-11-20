@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php --only=tests/unit/shell_call_sites_test.php
  *
+ * @version 1.1 - SandboxRunner's proc_open read: an argv array, no shell
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -43,6 +44,8 @@ $read = array(
 	'includes/ImageDecoder.php'                                     => 1,
 	'includes/ReleaseCommit.php'                                    => 2,
 	'includes/ReleaseVerifier.php'                                  => 8,
+	// proc_open of an argv array (no shell): the launcher and PHP by fixed path, the plugin's name checked by NAME_PATTERN.
+	'includes/SandboxRunner.php'                                    => 1,
 	'includes/TestDatabaseHelper.php'                               => 6,
 	'logic/tests_run_logic.php'                                     => 1,
 	'plugins/joinery_ai/includes/ChatWorkerSpawner.php'             => 1,

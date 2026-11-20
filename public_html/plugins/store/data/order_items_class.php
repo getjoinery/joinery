@@ -20,6 +20,7 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.9 - the order_date_after filter's value is quoted, never joined into the condition
  * @version 1.8 - cancel_notice() (the provider's words on what a cancel does), can_resume() and
  *                resume_subscription_order_item() (take back a cancel at period end) (hosting_after_purchase S2, S4)
  * @version 1.7 - buyer_label(): the product and the site a line is for, as its buyer names it
@@ -736,7 +737,7 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 
 		if (isset($this->options['order_date_after'])) {
-			$filters['odi_status_change_time'] = '> \''.$this->options['order_date_after'].'\'';
+			$filters['odi_status_change_time'] = '> ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['order_date_after']);
 		}
 
 		if (isset($this->options['is_subscription'])) {

@@ -27,6 +27,7 @@
  * what was approved: on activation, on a new approval, and when an active
  * plugin's files are replaced.
  *
+ * @version 1.3 - modelCollisions() refuses a model name a core or native class already has (its short name in the fence)
  * @version 1.2 - install() and activate() refuse while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.1 - approval before activation, compatibility (Q13), credential, receiver, scheduled runs
  * @version 1.0
@@ -89,6 +90,16 @@ class SandboxPluginManager {
 			$class = SandboxManifest::classFor($manifest->name(), $model['name']);
 			if (class_exists($class) && !(is_subclass_of($class, 'SandboxRecord') && $class::sandboxPlugin() === $manifest->name())) {
 				$errors[] = "The model {$model['name']} would be the class $class, which this site already has.";
+			}
+			// The plugin's code reaches its models by their short names too
+			// (Note, MultiNote). One a core or native class already has would
+			// mean the site's model in the plugin's code, a write to the
+			// site's rows the author meant for its own table.
+			foreach (array($model['name'], 'Multi' . $model['name']) as $short) {
+				if (class_exists($short)) {
+					$errors[] = "The model name {$model['name']} is taken by the site's own $short; name the model something else.";
+					break;
+				}
 			}
 		}
 		return $errors;

@@ -9,6 +9,7 @@
  * each one refused with the reason. It is the per-plugin log an author reads
  * (plugin_tiers.md WP8) and an admin checks when a plugin misbehaves.
  *
+ * @version 1.1 - KIND_PAGE: a page drawn by the plugin's own view
  * @version 1.0
  */
 
@@ -21,6 +22,7 @@ class SandboxLog extends SystemBase {
 	public static $pkey_column = 'sbl_sandbox_log_id';
 
 	const KIND_UI       = 'ui';
+	const KIND_PAGE     = 'page';
 	const KIND_SIGNAL   = 'signal';
 	const KIND_SCHEDULE = 'schedule';
 	const KIND_TEST     = 'test';
@@ -49,7 +51,7 @@ class SandboxLog extends SystemBase {
 		'sbl_plugin'         => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
 			'index_with' => array('sbl_create_time')),
 		'sbl_kind'           => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
-			'allowed_values' => array(self::KIND_UI, self::KIND_SIGNAL, self::KIND_SCHEDULE, self::KIND_TEST)),
+			'allowed_values' => array(self::KIND_UI, self::KIND_PAGE, self::KIND_SIGNAL, self::KIND_SCHEDULE, self::KIND_TEST)),
 		'sbl_name'           => array('type' => 'varchar(100)'),
 		'sbl_status'         => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
 			'allowed_values' => array(self::STATUS_OK, self::STATUS_ERROR, self::STATUS_TIMEOUT, self::STATUS_UNAVAILABLE, self::STATUS_BUSY)),

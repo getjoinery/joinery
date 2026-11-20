@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.9 - the name_like filter's value is quoted and product_id_is_not is a whole number, never joined into the condition
  * @version 1.8 - OWNERSHIP_EACH: every purchase records one more ownership and none refuses a repeat (ownership_repeats())
  * @version 1.7 - seo_public_records(): none while the store is switched off
  * @version 1.6 - seo_public_records(): the sitemap lists active products only
@@ -989,7 +990,7 @@ class MultiProduct extends SystemMultiBase {
 		}
 
 		if (isset($this->options['name_like'])) {
-			$filters['pro_name'] = 'ILIKE \'%'.$this->options['name_like'].'%\'';
+			$filters['pro_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['name_like'] . '%');
 		}
 
 		if (isset($this->options['is_active'])) {
@@ -1021,7 +1022,7 @@ class MultiProduct extends SystemMultiBase {
 		}
 
 		if (isset($this->options['product_id_is_not'])) {
-			$filters['pro_product_id'] = '!= '.$this->options['product_id_is_not'];
+			$filters['pro_product_id'] = '!= ' . (int)$this->options['product_id_is_not'];
 		}
 
 		if (isset($this->options['pro_sbt_subscription_tier_id'])) {

@@ -45,6 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.22.3 - the filename_like filter's value is quoted, never joined into the condition
  * @version 1.22.2 - provisionSigningKey() forgets the remembered key first, so a re-mint makes a new one
  * @version 1.22.1 - get_by_name() answers FALSE for a name that is not UTF-8 (was a database error and a 500)
  * @version 1.22.0 - a served file is named by get_name() (a renamed file's title), inline types too
@@ -2255,7 +2256,7 @@ class MultiFile extends SystemMultiBase {
 		}
 
 		if (isset($this->options['filename_like'])) {
-			$filters['fil_name'] = 'ILIKE \'%'.$this->options['filename_like'].'%\'';
+			$filters['fil_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['filename_like'] . '%');
 		}
 
 		// Origin filter: match exactly one source.

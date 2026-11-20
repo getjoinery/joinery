@@ -38,6 +38,11 @@
 // discarded and replaced: a setuid binary that honours the caller's
 // environment is a privilege bug waiting for a library that reads one.
 //
+// Version 2.1.0 - --watch-fd=N: the supervisor kills the run when that descriptor, which the caller
+// keeps the other end of, reaches end of file. The caller cannot signal the supervisor (it holds the
+// run's uid, then root's), so closing its end is how it ends a run before the deadline, and a caller
+// that dies ends the run the same moment. The usage line carries JOINERY_JAIL_FEATURES=watch-fd.
+//
 // Version 2.0.2 - kill, tkill and tgkill are allowed, scoped by Landlock to the run itself: without
 // them abort() could not raise SIGABRT and ended in a trap the kernel logs as a general protection
 // fault, which the fleet's monitoring raises as a possible attack on the kernel (seen on se1).
@@ -117,6 +122,11 @@ const (
 	// deny-list launcher refuses --read and --scratch, so a caller must know
 	// which one is installed before it builds a command line.
 	interfaceMark = "JOINERY_JAIL_INTERFACE=2"
+
+	// featuresMark names what this launcher has beyond interface 2, for a
+	// caller that needs it (SandboxRunner::FEATURES_MARK): an older
+	// interface-2 launcher refuses the option.
+	featuresMark = "JOINERY_JAIL_FEATURES=watch-fd"
 )
 
 // A plugin user's name: jpx- and the manifest's name pattern
@@ -145,6 +155,7 @@ type options struct {
 	scratch     uint64
 	reads       []string
 	readPHP     []string
+	watchFD     int
 	argv        []string
 }
 
@@ -220,13 +231,18 @@ func parse(args []string) (options, error) {
 			o.rlimitCPU = int(n)
 		case "scratch":
 			o.scratch = n
+		case "watch-fd":
+			if n < 3 || n > 1023 {
+				return o, fmt.Errorf("option --watch-fd: %d is not a descriptor above 2", n)
+			}
+			o.watchFD = int(n)
 		default:
 			return o, fmt.Errorf("unknown option --%s", name)
 		}
 	}
 	o.argv = args[i:]
 	if !sawDashes || len(o.argv) == 0 {
-		return o, errors.New(interfaceMark + " usage: joinery-jail [--user=jpx-NAME] [--timeout=S] [--rlimit-as=B] [--rlimit-fsize=B] [--rlimit-cpu=S] [--scratch=B] [--read=PATH]... [--read-php=DIR]... -- command [args]")
+		return o, errors.New(interfaceMark + " " + featuresMark + " usage: joinery-jail [--user=jpx-NAME] [--watch-fd=N] [--timeout=S] [--rlimit-as=B] [--rlimit-fsize=B] [--rlimit-cpu=S] [--scratch=B] [--read=PATH]... [--read-php=DIR]... -- command [args]")
 	}
 	if o.user != "" && o.scratch > 0 {
 		// A plugin writes nothing: a writable folder would need a total-size
@@ -337,6 +353,12 @@ func supervise() {
 	}
 	uid, gid := userIDs(o.runUser())
 	caller := os.Getppid()
+	if o.watchFD > 0 {
+		var st syscall.Stat_t
+		if err := syscall.Fstat(o.watchFD, &st); err != nil || st.Mode&syscall.S_IFMT != syscall.S_IFIFO {
+			fail(exitUsage, "--watch-fd=%d is not an open pipe", o.watchFD)
+		}
+	}
 
 	// Real, effective and saved uid all become root (euid is root, so this is
 	// allowed). Stage 2 refuses unless its REAL uid is root, which no caller
@@ -420,6 +442,27 @@ func supervise() {
 		}
 	}()
 
+	// The caller's watch pipe: end of file (the caller closed its end, or
+	// died) ends the run. Read as the run's uid; the descriptor is open
+	// already, and never reaches the child (only 0, 1 and 2 do).
+	gone := make(chan struct{})
+	if o.watchFD > 0 {
+		syscall.CloseOnExec(o.watchFD)
+		go func() {
+			buf := make([]byte, 512)
+			for {
+				n, err := syscall.Read(o.watchFD, buf)
+				if err == syscall.EINTR {
+					continue
+				}
+				if n <= 0 || err != nil {
+					close(gone)
+					return
+				}
+			}
+		}()
+	}
+
 	t := time.NewTicker(scratchPoll)
 	defer t.Stop()
 	finish := func(code int) {
@@ -439,6 +482,10 @@ func supervise() {
 			<-done
 			finish(exitTimeout)
 		case <-sigs:
+			killGroup(pid)
+			ws := <-done
+			finish(exitFor(ws))
+		case <-gone:
 			killGroup(pid)
 			ws := <-done
 			finish(exitFor(ws))

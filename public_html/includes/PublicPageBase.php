@@ -1195,7 +1195,7 @@ abstract class PublicPageBase {
 		// policies, and both are kept.
 		header_remove('Content-Security-Policy');
 		header_remove('Content-Security-Policy-Report-Only');
-		foreach ($csp_headers as $csp) {
+		foreach (self::csp_headers_with_frame_only($csp_headers, $this->csp_frame_only) as $csp) {
 			header($csp[0] . ': ' . $csp[1], false);
 		}
 	}
@@ -1362,6 +1362,48 @@ abstract class PublicPageBase {
 
 	/** Origins this render adds to connect-src (allow_connect_origin()). */
 	protected $csp_connect_origins = array();
+
+	/** The one frame source this render allows, in place of the site's list (restrict_frames_to()). */
+	protected $csp_frame_only = null;
+
+	/**
+	 * The CSP headers of a render that holds frames from $source alone: each
+	 * policy's frame-src narrowed to it, and one more policy of its own,
+	 * enforced whatever the site's settings say (enable_csp off, report-only
+	 * on): frame-src $source. A second policy can only narrow, so a site with
+	 * no policy still keeps the frame on its route.
+	 *
+	 * @param array<int, array{0:string, 1:string}> $headers as csp_headers() returns them
+	 * @return array<int, array{0:string, 1:string}>
+	 */
+	public static function csp_headers_with_frame_only(array $headers, ?string $source): array {
+		if ($source === null) {
+			return $headers;
+		}
+		foreach ($headers as $i => $csp) {
+			$headers[$i][1] = self::with_frame_only($csp[1], $source);
+		}
+		$headers[] = array('Content-Security-Policy', 'frame-src ' . $source);
+		return $headers;
+	}
+
+	/** A policy value with its frame-src naming $source alone (restrict_frames_to()). */
+	public static function with_frame_only(string $policy, string $source): string {
+		return (string)preg_replace('~(^|;\s*)frame-src [^;]*~', '$1frame-src ' . $source, $policy);
+	}
+
+	/**
+	 * Let this page hold frames from $source alone (a full https URL with a
+	 * path, e.g. the framed route of a sandboxed plugin's page), before the
+	 * headers are sent: frame-src names only it, so a frame on the page can
+	 * be navigated nowhere else (specs/sandboxed_php_plugins.md design 9). Any
+	 * other shape is ignored.
+	 */
+	public function restrict_frames_to(string $source): void {
+		if (preg_match('~^https://[A-Za-z0-9.\-]+(:[0-9]{1,5})?/[A-Za-z0-9_/\-]*$~D', $source)) {
+			$this->csp_frame_only = $source;
+		}
+	}
 
 	/** Origins this render adds to form-action (allow_form_action_origin()). */
 	protected $csp_form_origins = array();

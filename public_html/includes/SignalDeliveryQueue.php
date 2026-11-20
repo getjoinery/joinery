@@ -22,6 +22,8 @@
  *
  * See docs/webhooks.md.
  *
+ * @version 1.2 - a sandboxed plugin: a signal no longer approved ends unsent; one plugin gets $sandbox_share_seconds of
+ *                a pass; busy or unavailable is not counted as an attempt; delivered says to the plugin (reviewer2 L1-L4)
  * @version 1.1 - drain() also delivers to sandboxed plugins through the plugin host
  * @version 1.0
  */
@@ -33,6 +35,13 @@ class SignalDeliveryQueue {
 
 	/** Rows looked at per run; the rest wait for the next. */
 	const DRAIN_BATCH = 500;
+
+	/**
+	 * The most of one drain's time a sandboxed plugin's calls may use: past it
+	 * its remaining rows wait for the next pass, so a plugin that answers
+	 * slowly but in time cannot hold the queue for every other receiver.
+	 */
+	public static $sandbox_share_seconds = 10;
 
 	/** Per-request cache: receiver id => signal names it wants. */
 	private static $receivers_cache = null;
@@ -101,6 +110,8 @@ class SignalDeliveryQueue {
 		// A receiver that could not be reached this run is not tried again
 		// until the next, so one dead endpoint cannot spend the whole budget.
 		$unreachable = array();
+		// The time each sandboxed plugin's calls have used this pass.
+		$spent = array();
 
 		foreach ($ids as $i => $id) {
 			if (microtime(true) - $started > $budget_seconds) {
@@ -120,11 +131,18 @@ class SignalDeliveryQueue {
 				$receivers[$receiver_id] = new SignalReceiver($receiver_id, TRUE);
 			}
 
+			$call_started = microtime(true);
 			$outcome = self::attempt($delivery, $receivers[$receiver_id], $client);
 			$counts['attempted']++;
 			$counts[$outcome['result']]++;
 			if (!empty($outcome['unreachable'])) {
 				$unreachable[$receiver_id] = true;
+			}
+			if ($receivers[$receiver_id]->get('sgr_kind') === SignalReceiver::KIND_SANDBOX) {
+				$spent[$receiver_id] = ($spent[$receiver_id] ?? 0) + (microtime(true) - $call_started);
+				if ($spent[$receiver_id] >= self::$sandbox_share_seconds) {
+					$unreachable[$receiver_id] = true;
+				}
 			}
 		}
 
@@ -160,8 +178,8 @@ class SignalDeliveryQueue {
 		$unreachable = false;
 
 		if ($receiver->get('sgr_kind') === SignalReceiver::KIND_SANDBOX) {
-			list($error, $unreachable) = self::toSandbox($delivery, $receiver);
-			return self::record($delivery, $code, $error, $unreachable);
+			list($error, $unreachable, $how) = self::toSandbox($delivery, $receiver);
+			return self::record($delivery, $code, $error, $unreachable, $how);
 		}
 
 		$secret = $receiver->signing_secret();
@@ -204,22 +222,31 @@ class SignalDeliveryQueue {
 	 * Hand one delivery to a sandboxed plugin. Its payload
 	 * goes as it was raised; what the plugin did is in its call log.
 	 *
-	 * @return array{0:?string,1:bool} the error, or null, and whether the plugin was unreachable
+	 * A signal the plugin is no longer approved for ends unsent: a row queued
+	 * before the approval changed must not reach it after.
+	 *
+	 * @return array{0:?string,1:bool,2:array} the error, or null; whether the plugin was unreachable; how to record it
 	 */
 	private static function toSandbox(SignalDelivery $delivery, SignalReceiver $receiver): array {
 		$plugin = (string)$receiver->get('sgr_plugin');
+		if (!in_array((string)$delivery->get('sgd_signal'), SandboxConsent::effective($plugin)['signals'], true)) {
+			return array('The plugin is no longer approved for this signal, so it was not sent.', false, array('final' => true));
+		}
 		$payload = $delivery->get_json_decoded('sgd_payload');
 		$created = strtotime((string)$delivery->get('sgd_create_time') . ' UTC');
 		$result = SandboxHost::signal($plugin, (string)$delivery->get('sgd_signal'), is_array($payload) ? $payload : array(),
 			(string)$delivery->get('sgd_message_id'), gmdate('Y-m-d\TH:i:s\Z', $created ?: time()));
 		if ($result['status'] === SandboxLog::STATUS_OK) {
-			return array(null, false);
+			return array(null, false, array('to_plugin' => true));
 		}
 		// A plugin that did not answer, or not in time, is not tried again this
 		// pass: one slow plugin must not spend the drain's budget for everyone.
 		$unreachable = in_array($result['status'], array(SandboxLog::STATUS_UNAVAILABLE, SandboxLog::STATUS_BUSY, SandboxLog::STATUS_TIMEOUT), true);
+		// Busy or unavailable: its code never ran, so the try is not counted
+		// against the delivery's attempts.
+		$uncounted = in_array($result['status'], array(SandboxLog::STATUS_UNAVAILABLE, SandboxLog::STATUS_BUSY), true);
 		return array('The plugin ' . ($result['status'] === SandboxLog::STATUS_TIMEOUT ? 'timed out' : 'failed') . ': '
-			. ($result['message'] !== '' ? $result['message'] : $result['status']), $unreachable);
+			. ($result['message'] !== '' ? $result['message'] : $result['status']), $unreachable, array('uncounted' => $uncounted));
 	}
 
 	/**
@@ -228,8 +255,8 @@ class SignalDeliveryQueue {
 	 *
 	 * @return array result (delivered|retrying|given_up), message, unreachable
 	 */
-	private static function record(SignalDelivery $delivery, ?int $code, ?string $error, bool $unreachable): array {
-		$attempts = (int)$delivery->get('sgd_attempts') + 1;
+	private static function record(SignalDelivery $delivery, ?int $code, ?string $error, bool $unreachable, array $how = array()): array {
+		$attempts = (int)$delivery->get('sgd_attempts') + (empty($how['uncounted']) ? 1 : 0);
 		$columns = array(
 			'sgd_attempts'           => $attempts,
 			'sgd_last_attempt_time'  => gmdate('Y-m-d H:i:s'),
@@ -242,14 +269,24 @@ class SignalDeliveryQueue {
 			$columns['sgd_delivered_time'] = gmdate('Y-m-d H:i:s');
 			$columns['sgd_next_attempt_time'] = null;
 			$result = 'delivered';
-			$message = 'Delivered (HTTP ' . $code . ').';
+			$message = !empty($how['to_plugin']) ? 'Delivered to the plugin.' : 'Delivered (HTTP ' . $code . ').';
 		} else {
-			$delay = SignalDelivery::retry_delay($attempts);
+			$delay = !empty($how['final']) ? null : SignalDelivery::retry_delay(max(1, $attempts));
+			// A try that was not counted (the plugin could not be run) still
+			// ends: once the row is older than the whole counted schedule.
+			if (!empty($how['uncounted']) && $delay !== null) {
+				$created = strtotime((string)$delivery->get('sgd_create_time') . ' UTC');
+				if ($created && time() - $created > array_sum(SignalDelivery::RETRY_DELAYS)) {
+					$delay = null;
+					$how['final'] = true;
+					$error .= ' The plugin could not be run here for as long as a delivery is tried, so it was given up.';
+				}
+			}
 			if ($delay === null) {
 				$columns['sgd_status'] = SignalDelivery::STATUS_FAILED;
 				$columns['sgd_next_attempt_time'] = null;
 				$result = 'given_up';
-				$message = $error . ' Gave up after ' . $attempts . ' attempts.';
+				$message = !empty($how['final']) ? $error : $error . ' Gave up after ' . $attempts . ' attempts.';
 			} else {
 				$columns['sgd_next_attempt_time'] = gmdate('Y-m-d H:i:s', time() + $delay);
 				$result = 'retrying';

@@ -4,7 +4,7 @@ The fence's launcher: a setuid-root binary that runs one command inside an
 allowlist fence (`specs/parser_jail.md`, `specs/sandboxed_php_plugins.md`
 design 2, `docs/document_text.md`).
 
-    joinery-jail [--user=jpx-NAME] [--timeout=S] [--rlimit-as=BYTES] [--rlimit-fsize=BYTES]
+    joinery-jail [--user=jpx-NAME] [--watch-fd=N] [--timeout=S] [--rlimit-as=BYTES] [--rlimit-fsize=BYTES]
                  [--rlimit-cpu=S] [--scratch=BYTES] [--read=PATH]... [--read-php=DIR]...
                  -- command [args]
 
@@ -28,6 +28,10 @@ a sandboxed plugin's own `jpx-NAME` user. It may touch only what is listed:
   size, CPU, 256 descriptors, no core files, only descriptors 0, 1 and 2.
 - **Lifetime:** a wall-clock deadline kept by a supervisor outside the fence,
   and a parent-death signal, so the command never outlives the supervisor.
+  With `--watch-fd=N` (a pipe the caller holds the other end of; it never
+  reaches the command) the supervisor also ends the run when that pipe
+  reaches end of file: the caller cannot signal the supervisor, so closing
+  its end is how it stops a run early, and a caller that dies stops it too.
 
 It refuses to run below Landlock ABI 6 and checks on the exec thread that the
 ruleset and the filter took.
@@ -35,7 +39,8 @@ ruleset and the filter took.
 Exit codes follow `timeout(1)`: the command's own, 124 on the deadline,
 128+signal when it died of one, 125 when the launcher refused. Its usage line
 carries `JOINERY_JAIL_INTERFACE=2`, which is how `DocumentText` tells it from
-the deny-list launcher before it.
+the deny-list launcher before it, and `JOINERY_JAIL_FEATURES=watch-fd`, which
+is how `SandboxRunner` knows it may pass `--watch-fd`.
 
 Built by `ParserJailPublisher` at publish time into `bin/joinery-jail-<uname -m>`;
 installed by `install_parser_jail.sh` (a core host installer) at the platform's

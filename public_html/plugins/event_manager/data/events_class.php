@@ -1144,7 +1144,7 @@ class MultiEvent extends SystemMultiBase {
         }
         
         if (isset($this->options['name_like'])) {
-            $filters['evt_name'] = 'ILIKE \'%'.$this->options['name_like'].'%\'';
+            $filters['evt_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['name_like'] . '%');
         }
         
         if (isset($this->options['user_id_leader'])) {
@@ -1181,7 +1181,7 @@ class MultiEvent extends SystemMultiBase {
         }
         
         if (isset($this->options['name'])) {
-            $filters['evt_name'] = 'ILIKE \'%'.$this->options['name'].'%\'';
+            $filters['evt_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['name'] . '%');
         }
     
         if (isset($this->options['visibility'])) {

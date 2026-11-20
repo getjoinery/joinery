@@ -312,6 +312,7 @@ $permitted = array(
 	'includes/joinery_direct/DirectIdentity.php' => 'the site\'s own signing key, minted the first time anything needs it and moved when its domain\'s custody changes',
 	'data/content_versions_class.php' => 'the oldest content versions pruned to the cap, after whoever\'s save added the newest',
 	'plugins/event_manager/data/event_sessions_class.php' => 'a course session visit counted as the page is shown: the view\'s bookkeeping, not the viewer\'s change',
+	'includes/SandboxHost.php' => 'a sandboxed plugin call\'s log row, written for a page the plugin draws on a GET too: the platform\'s record of the call',
 	'plugins/mailbox/data/mailbox_relays_class.php' => 'the relay\'s ping answer cached as the Setup page checks it, and its transport key minted the first time the address list needs it',
 );
 

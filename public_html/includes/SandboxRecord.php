@@ -17,6 +17,7 @@
  * {prefix}_delete_time (soft delete) beside its declared fields, each stored
  * as {prefix}_{field}.
  *
+ * @version 1.2 - columnFor(): a field by its manifest name or its column (the fenced runtime's set/get)
  * @version 1.1 - every sandboxed model is content (permissions.json)
  * @version 1.0
  */
@@ -64,6 +65,16 @@ abstract class SandboxRecord extends SystemBase {
 			$this->set(static::$prefix . '_update_time', gmdate('Y-m-d H:i:s'));
 		}
 		return parent::save($debug);
+	}
+
+	/** A field's column: the full column name, or the column of its manifest name. */
+	public static function columnFor($key): string {
+		$key = (string)$key;
+		if (isset(static::$field_specifications[$key])) {
+			return $key;
+		}
+		$full = static::$prefix . '_' . $key;
+		return isset(static::$field_specifications[$full]) ? $full : $key;
 	}
 
 	/** The plugin this model belongs to. */

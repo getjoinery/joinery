@@ -23,6 +23,13 @@
  * disabled or deleted. Once they cannot, the plugin's credential is switched
  * off (User::save()) and the plugin waits on another admin's approval.
  *
+ * @version 1.6 - an own-rows line reads "each member's own notifications", not "own All notifications"
+ * @version 1.5 - framed pages: a framed member page is its own ask; a framed admin page is a grant (design 12)
+ * @version 1.4 - own_records, its own kind in grantsOf(), additions() and effective(); the approval screen warns
+ *                when personal records and outside websites go together (design 8)
+ * @version 1.3 - a member page drawn by the plugin's view says so on the approval screen
+ * @version 1.2 - a record grant on a native plugin's model also names that plugin's program code, which the
+ *                fence lets the plugin read (reviewer2 G5)
  * @version 1.1 - member pages are a grant; approve() takes the digest of what the admin was shown;
  *                an approval lapses when its admin is no longer a superadmin
  * @version 1.0
@@ -47,6 +54,13 @@ class SandboxConsent {
 			$records[$model] = $verbs;
 		}
 		ksort($records);
+		$own_records = array();
+		foreach ($m->permittedOwnRecords() as $model => $verbs) {
+			$verbs = array_values(array_unique($verbs));
+			sort($verbs);
+			$own_records[$model] = $verbs;
+		}
+		ksort($own_records);
 		$signals = $m->signals();
 		sort($signals);
 		$schedules = array();
@@ -58,6 +72,15 @@ class SandboxConsent {
 		sort($hosts);
 		$member_pages = array();
 		foreach ($m->profilePages() as $page) {
+			if (!empty($page['frame'])) {
+				$member_pages[$page['slug']] = $page['title'] . ' (a framed page running the plugin\'s own script, walled off from the site)';
+				continue;
+			}
+			if (!isset($page['sections'])) {
+				// Drawn by its own code: it may show what it reads and ask anything.
+				$member_pages[$page['slug']] = $page['title'] . ' (drawn by the plugin, which may show what it can read and ask members for anything)';
+				continue;
+			}
 			$has_form = false;
 			foreach ($page['sections'] as $section) {
 				$has_form = $has_form || $section['type'] === 'form';
@@ -65,13 +88,24 @@ class SandboxConsent {
 			$member_pages[$page['slug']] = $page['title'] . ($has_form ? ' (with a form members fill in)' : '');
 		}
 		ksort($member_pages);
+		// A framed admin page runs the plugin's script in an admin's browser:
+		// a grant, unlike a plain admin page (design 12).
+		$framed_admin_pages = array();
+		foreach ($m->adminPages() as $page) {
+			if (!empty($page['frame'])) {
+				$framed_admin_pages[$page['slug']] = $page['title'];
+			}
+		}
+		ksort($framed_admin_pages);
 		return array(
 			'actions'        => $actions,
 			'records'        => $records,
+			'own_records'    => $own_records,
 			'signals'        => $signals,
 			'schedules'      => $schedules,
 			'outbound_hosts' => $hosts,
 			'member_pages'   => $member_pages,
+			'framed_admin_pages' => $framed_admin_pages,
 		);
 	}
 
@@ -96,10 +130,12 @@ class SandboxConsent {
 				$out[$kind] = $more;
 			}
 		}
-		foreach ($asked['records'] ?? array() as $model => $verbs) {
-			$more = array_values(array_diff($verbs, $approved['records'][$model] ?? array()));
-			if ($more) {
-				$out['records'][$model] = $more;
+		foreach (array('records', 'own_records') as $kind) {
+			foreach ($asked[$kind] ?? array() as $model => $verbs) {
+				$more = array_values(array_diff($verbs, $approved[$kind][$model] ?? array()));
+				if ($more) {
+					$out[$kind][$model] = $more;
+				}
 			}
 		}
 		foreach ($asked['schedules'] ?? array() as $name => $words) {
@@ -109,10 +145,12 @@ class SandboxConsent {
 				$out['schedules'][$name] = $words;
 			}
 		}
-		foreach ($asked['member_pages'] ?? array() as $slug => $title) {
-			// A page that gains a form asks members for more than it did.
-			if (($approved['member_pages'][$slug] ?? null) !== $title) {
-				$out['member_pages'][$slug] = $title;
+		foreach (array('member_pages', 'framed_admin_pages') as $kind) {
+			foreach ($asked[$kind] ?? array() as $slug => $title) {
+				// A page that gains a form, or becomes framed, asks for more than it did.
+				if (($approved[$kind][$slug] ?? null) !== $title) {
+					$out[$kind][$slug] = $title;
+				}
 			}
 		}
 		return $out;
@@ -123,7 +161,7 @@ class SandboxConsent {
 	 * approval covers. Nothing at all with no approval.
 	 */
 	public static function effective(string $plugin): array {
-		$none = array('actions' => array(), 'records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'member_pages' => array());
+		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'member_pages' => array(), 'framed_admin_pages' => array());
 		try {
 			$asked = self::grantsOf(SandboxPlugins::manifest($plugin));
 		} catch (SandboxManifestException $e) {
@@ -138,10 +176,12 @@ class SandboxConsent {
 		foreach (array('actions', 'signals', 'outbound_hosts') as $kind) {
 			$out[$kind] = array_values(array_intersect($asked[$kind], $approved[$kind] ?? array()));
 		}
-		foreach ($asked['records'] as $model => $verbs) {
-			$kept = array_values(array_intersect($verbs, $approved['records'][$model] ?? array()));
-			if ($kept) {
-				$out['records'][$model] = $kept;
+		foreach (array('records', 'own_records') as $kind) {
+			foreach ($asked[$kind] ?? array() as $model => $verbs) {
+				$kept = array_values(array_intersect($verbs, $approved[$kind][$model] ?? array()));
+				if ($kept) {
+					$out[$kind][$model] = $kept;
+				}
 			}
 		}
 		foreach ($asked['schedules'] as $name => $words) {
@@ -149,9 +189,11 @@ class SandboxConsent {
 				$out['schedules'][$name] = $words;
 			}
 		}
-		foreach ($asked['member_pages'] as $slug => $title) {
-			if (($approved['member_pages'][$slug] ?? null) === $title) {
-				$out['member_pages'][$slug] = $title;
+		foreach (array('member_pages', 'framed_admin_pages') as $kind) {
+			foreach ($asked[$kind] ?? array() as $slug => $title) {
+				if (($approved[$kind][$slug] ?? null) === $title) {
+					$out[$kind][$slug] = $title;
+				}
 			}
 		}
 		return $out;
@@ -243,6 +285,36 @@ class SandboxConsent {
 			foreach ($groups as $feature => $lines) {
 				$out['Records it may use: ' . $feature] = $lines;
 			}
+			// Its code needs the model classes of each native plugin it reads
+			// through, so it can read that plugin's program code too.
+			$code = array();
+			foreach (array_keys($grants['records']) as $model) {
+				$owner = class_exists('SandboxRunner') ? SandboxRunner::nativeOwnerOf((string)$model) : null;
+				if ($owner !== null) {
+					$code[$owner] = 'The program code of the ' . self::featureOf((string)$model) . ' plugin (its includes and data folders)';
+				}
+			}
+			if ($code) {
+				ksort($code);
+				$out['Read this program code'] = array_values($code);
+			}
+		}
+		if (!empty($grants['own_records'])) {
+			$lines = array();
+			foreach ($grants['own_records'] as $model => $verbs) {
+				$lines[] = "Each member's own " . self::pluralWords((string)$model) . ': ' . self::verbWords($verbs)
+					. ' (only the rows of the member viewing the page)';
+			}
+			$out["Each member's own records"] = $lines;
+		}
+		// The combination to say out loud (design 8): personal records it may
+		// read, and websites it may send data to.
+		$personal = false;
+		foreach (array_keys($grants['records'] ?? array()) as $model) {
+			$personal = $personal || (class_exists((string)$model) && is_subclass_of((string)$model, 'SystemBase') && !$model::$api_public_read);
+		}
+		if (($personal || !empty($grants['own_records'])) && !empty($grants['outbound_hosts'])) {
+			$out['Warning'] = array('It can read personal records and send data to outside websites, so it could send those records there.');
 		}
 		if (!empty($grants['actions'])) {
 			$catalog = ApiLogicEndpoint::actionCatalog();
@@ -274,6 +346,9 @@ class SandboxConsent {
 		}
 		if (!empty($grants['outbound_hosts'])) {
 			$out['Send data to these websites'] = $grants['outbound_hosts'];
+		}
+		if (!empty($grants['framed_admin_pages'])) {
+			$out["Run its own script in admins' browsers, on these framed admin pages"] = array_values($grants['framed_admin_pages']);
 		}
 		if (!empty($grants['member_pages'])) {
 			$out["Add these pages to members' menus"] = array_values($grants['member_pages']);
@@ -315,8 +390,12 @@ class SandboxConsent {
 		if (ApiKey::is_model_class($model) && is_subclass_of($model, 'SandboxRecord')) {
 			$model = substr($model, strrpos($model, '_') + 1);
 		}
-		$words = strtolower(preg_replace('~(?<!^)[A-Z]~', ' $0', $model));
-		return 'All ' . $words . 's';
+		return 'All ' . self::pluralWords($model);
+	}
+
+	/** A model class's name as plain plural words: 'EventRegistration' => 'event registrations'. */
+	private static function pluralWords(string $model): string {
+		return strtolower(preg_replace('~(?<!^)[A-Z]~', ' $0', $model)) . 's';
 	}
 
 	/** The feature a model belongs to: its plugin's title, or the site core. */

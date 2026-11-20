@@ -254,6 +254,13 @@ public static function GenerateKey($key) {
 	const SCOPE_RECORD_PATTERN = '~^([A-Z][A-Za-z0-9_]*):(read|create|update|delete)$~D';
 
 	/**
+	 * An own-rows entry: '{ModelClass}:{verb}:own'. Only a sandboxed plugin's
+	 * key carries one, and it admits a request only when core's relay names
+	 * the member viewing the plugin's page (ApiAuth::$sandbox_viewer).
+	 */
+	const SCOPE_OWN_PATTERN = '~^([A-Z][A-Za-z0-9_]*):(read|create|update|delete):own$~D';
+
+	/**
 	 * The entries of apk_scope (comma separated). Empty means unscoped: the
 	 * key reaches whatever its permission and its user allow. A scoped key
 	 * reaches only what its entries name — see ApiAuth::authorize(). Two
@@ -310,6 +317,22 @@ public static function GenerateKey($key) {
 		return $records;
 	}
 
+	/** @return array<string,string[]> model class => the verbs the scope gives it on each member's own rows */
+	function scope_own_records(): array {
+		$records = array();
+		foreach ($this->scope() as $entry) {
+			if (preg_match(self::SCOPE_OWN_PATTERN, $entry, $m)) {
+				$records[$m[1]][] = $m[2];
+			}
+		}
+		return $records;
+	}
+
+	function scope_allows_own_record(string $model, string $verb): bool {
+		$records = $this->scope_own_records();
+		return isset($records[$model]) && in_array($verb, $records[$model], true);
+	}
+
 	function scope_allows_action(string $action): bool {
 		return in_array($action, $this->scope_actions(), true);
 	}
@@ -330,7 +353,7 @@ public static function GenerateKey($key) {
 		if (preg_match(self::SCOPE_ACTION_PATTERN, $entry)) {
 			return null;
 		}
-		if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m)) {
+		if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m) || preg_match(self::SCOPE_OWN_PATTERN, $entry, $m)) {
 			return self::is_model_class($m[1]) ? null : "'" . $m[1] . "' in '" . $entry . "' is not a model on this site.";
 		}
 		return "'" . $entry . "' is neither an action name nor Model:" . implode('|', self::RECORD_VERBS) . '.';
@@ -352,7 +375,7 @@ public static function GenerateKey($key) {
 	public static function permission_for_scope(array $entries, array $action_capabilities): int {
 		$needs = array('read' => false, 'write' => false, 'delete' => false);
 		foreach ($entries as $entry) {
-			if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m)) {
+			if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m) || preg_match(self::SCOPE_OWN_PATTERN, $entry, $m)) {
 				$capability = $m[2] === 'read' ? 'read' : ($m[2] === 'delete' ? 'delete' : 'write');
 			} else {
 				// An action declaring capability null gates on no permission.

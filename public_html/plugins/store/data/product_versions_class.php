@@ -119,8 +119,18 @@ class MultiProductVersion extends SystemMultiBase {
 			}
 		}
 
+		// A comparison with a whole number ('> 0'), or a bare number for
+		// equality. Anything else is not a priority filter and is refused: the
+		// value becomes part of the condition.
 		if (isset($this->options['prv_display_priority'])) {
-			$filters['prv_display_priority'] = $this->options['prv_display_priority'];
+			$priority = trim((string)$this->options['prv_display_priority']);
+			if (preg_match('/^-?\d+$/D', $priority)) {
+				$filters['prv_display_priority'] = [(int)$priority, PDO::PARAM_INT];
+			} elseif (preg_match('/^(=|!=|<>|>=|<=|>|<)\s*(-?\d+)$/D', $priority, $m)) {
+				$filters['prv_display_priority'] = $m[1] . ' ' . (int)$m[2];
+			} else {
+				throw new UnknownMultiOptionException("MultiProductVersion: prv_display_priority takes a whole number or a comparison with one, such as '> 0'.");
+			}
 		}
 
 		return $this->_get_resultsv2('prv_product_versions', $filters, $this->order_by, $only_count, $debug);
