@@ -61,6 +61,9 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.15 - overlayGenerated() also copies the records publish writes before the support bundle is cut
+ *                (fixes/ACTIVE, site_engine/ENGINE): the bundle carried the commit's old ACTIVE, so a container
+ *                host was told no fix was active (B20)
  * @version 1.14 - the package fixes' source (fixes/) is held and their ACTIVE record is publish's to commit
  * @version 1.13 - the unseal daemon's source is held and its prebuilt binaries are publish's to commit
  * @version 1.12 - every git call ignores file modes (core.fileMode=false): the host converger sets them on every
@@ -398,6 +401,10 @@ class ReleaseCommit {
 	 * Copy the directories publish builds (JOINERY_GENERATED_DIRS) from the
 	 * working tree into a build directory, replacing what is there: called by
 	 * exportTree(), and again by a publish whose builds ran after its export.
+	 * The records publish writes beside them (the package fixes' ACTIVE, the
+	 * site engine's ENGINE) are copied too, so what is cut from the build
+	 * directory before the release commit (the support bundle) names this
+	 * release's fixes and engine, not the last commit's.
 	 *
 	 * @return array{ok:bool, reason:string}
 	 */
@@ -421,6 +428,18 @@ class ReleaseCommit {
 			exec('cp -a ' . escapeshellarg($from) . ' ' . escapeshellarg($to) . ' && chmod -R go-w ' . escapeshellarg($to) . ' 2>&1', $out, $exit);
 			if ($exit !== 0) {
 				return array('ok' => false, 'reason' => 'could not copy ' . $dir . ' into the build: ' . trim(implode(' | ', array_slice($out, -3))));
+			}
+		}
+		foreach (array(PackageFixPublisher::SOURCE_SUBDIR . '/' . PackageFixPublisher::STAMP_FILE,
+				SiteEnginePublisher::SOURCE_SUBDIR . '/' . SiteEnginePublisher::STAMP_FILE) as $rel) {
+			$from = $repo_root . '/' . $rel;
+			$to = $to_dir . '/' . $rel;
+			if (!is_file($from) || !is_dir(dirname($to))) {
+				continue;
+			}
+			if (!copy($from, $to . '.overlay') || !chmod($to . '.overlay', 0644) || !rename($to . '.overlay', $to)) {
+				@unlink($to . '.overlay');
+				return array('ok' => false, 'reason' => 'could not copy ' . $rel . ' into the build');
 			}
 		}
 		return array('ok' => true, 'reason' => '');

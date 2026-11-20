@@ -360,6 +360,17 @@ file_put_contents($buildr . '/public_html/agent_dist/manifest.json', '{"built":2
 $again = ReleaseCommit::overlayGenerated($buildr, $out);
 check($again['ok'] && (string)@file_get_contents($out . '/public_html/agent_dist/manifest.json') === '{"built":2}',
 	'overlayGenerated() refreshes it after a later build');
+foreach (array('maintenance_scripts/install_tools/fixes/ACTIVE', 'maintenance_scripts/install_tools/site_engine/ENGINE') as $rec) {
+	@mkdir(dirname($buildr . '/' . $rec), 0755, true);
+	@mkdir(dirname($out . '/' . $rec), 0755, true);
+	file_put_contents($out . '/' . $rec, "the commit's\n");
+	file_put_contents($buildr . '/' . $rec, "written by this publish\n");
+}
+$again = ReleaseCommit::overlayGenerated($buildr, $out);
+check($again['ok'] && (string)@file_get_contents($out . '/maintenance_scripts/install_tools/fixes/ACTIVE') === "written by this publish\n"
+	&& (string)@file_get_contents($out . '/maintenance_scripts/install_tools/site_engine/ENGINE') === "written by this publish\n",
+	'the ACTIVE and ENGINE this publish wrote are copied in, so the support bundle names them (B20)', $again['reason']);
+check((fileperms($out . '/maintenance_scripts/install_tools/fixes/ACTIVE') & 0777) === 0644, 'copied 0644, like the export');
 check(!ReleaseCommit::exportTree($buildr, $commit, $out)['ok'], 'exportTree() refuses a directory that is not empty');
 $empty = $tmp . '/build2';
 mkdir($empty, 0755);
