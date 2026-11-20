@@ -3039,8 +3039,11 @@ A relay is **a relay without a shell** (`provision_relay.sh`,
   map push, the health ping and Direct egress for such a row. A failure is
   classed - refused, unreachable, timeout, pin mismatch, signature refused -
   and the class is recorded on the row (`mrl_last_health_failure`) because it
-  is the diagnosis. A hosted slot whose shard was updated sees a pin mismatch,
-  re-fetches its coordinates from the fleet once, and heals on the same pull.
+  is the diagnosis. A hosted slot whose shard was updated, replaced or
+  changed sees a pin mismatch, a refused signature or no answer; it re-fetches
+  its coordinates from the fleet once in the request, retries on the same pull
+  when they differ, and sends its address map to the new shard on the next
+  push (`MailboxRelay::withApi()`, `FleetClient::applyCoordinates()`).
 
   **Birth.** The plane renders `relay_first_boot.sh` (`RelayFirstBoot`) into
   the provider's user-data (Linode Metadata; a StackScript with the same

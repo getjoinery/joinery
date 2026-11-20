@@ -21,6 +21,8 @@
  * registration while a slot exists. The Setup tab's ownership row re-verifies
  * them on every check pass — publishing the TXT record is all the user does.
  *
+ * @version 1.9 - applyCoordinates() forgets the last pushed map when the slot's shard address or pin changes, so
+ *                the new shard is sent the site's addresses
  * @version 1.8 - autoEnroll() works from the end state each pass (enrolled, relay mode, domain registered,
  *                ownership proven) and finishes whatever is missing, so a step that failed is taken again
  * @version 1.7 - autoEnroll(): a site that can receive only through a relay and was seeded by its operator
@@ -270,11 +272,19 @@ class FleetClient extends ServiceClient {
 		$relay->set('mrl_mx_hostname', substr((string)($c['mx_hostname'] ?? ''), 0, 255));
 		$relay->set('mrl_authserv_id', substr((string)($c['authserv_id'] ?? ''), 0, 255));
 		$relay->set('mrl_fleet_slot_id', intval($c['slot_id'] ?? 0) ?: null);
-		$relay->set('mrl_public_ip', substr((string)($c['shard_public_ip'] ?? ''), 0, 64));
+		$ip = substr((string)($c['shard_public_ip'] ?? ''), 0, 64);
 		// The shard's identity pin is the whole coordinate set: the tenant
 		// reaches it over its API at the public address. A changed pin (the shard
 		// was updated) is simply written - the next pull uses it.
-		$relay->set('mrl_identity_fingerprint', substr(trim((string)($c['identity_fingerprint'] ?? '')), 0, 64));
+		$pin = substr(trim((string)($c['identity_fingerprint'] ?? '')), 0, 64);
+		// A different machine answers for the slot (its shard was updated,
+		// replaced or changed): it holds none of this site's addresses, so
+		// the next map push sends them whatever was last pushed.
+		if (!$is_new && ($pin !== (string)$relay->get('mrl_identity_fingerprint') || $ip !== (string)$relay->get('mrl_public_ip'))) {
+			$relay->set('mrl_map_content_hash', null);
+		}
+		$relay->set('mrl_public_ip', $ip);
+		$relay->set('mrl_identity_fingerprint', $pin);
 		$relay->save();
 		return $relay;
 	}

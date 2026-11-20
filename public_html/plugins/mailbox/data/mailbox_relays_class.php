@@ -35,6 +35,8 @@
  * coordinates the fleet service returned at enrollment. Either way this row
  * remains the deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.14 - withApi() re-fetches a hosted slot's coordinates after any failure a moved, replaced or updated
+ *                 shard explains (not only a pin mismatch), once per row in a request: recoverCoordinates()
  * @version 1.13 - the cached ping answer and the first transport key save as server-initiated writes: a Setup page view makes both
  * @version 1.12 - the transport key is X-Wing only: mrl_transport_secret_retired_sealed, mrl_transport_replaced_time, transportKeyIsOld(),
  *                 retiredTransportSecretMayGo() and transportSecretFor() are gone
@@ -421,16 +423,32 @@ class MailboxRelay extends SystemBase {
 	}
 
 	/**
-	 * A pin mismatch on a HOSTED relay usually means the shard was updated and
-	 * carries a new identity: re-fetch the slot's coordinates from the fleet
-	 * once, which rewrites the pin, and say whether it changed. A self-hosted
-	 * relay has nobody to ask - its pin changes only through its own update run.
+	 * Failures that can mean a HOSTED slot's shard is no longer the one on
+	 * this row: a different identity answering (the shard was updated), nothing
+	 * answering at its address (the shard was replaced and taken away), or the
+	 * shard not knowing this site's key (the slot was moved to another shard).
 	 */
-	public function recoverIdentityPin(): bool {
-		if (!(bool)$this->get('mrl_is_hosted')) {
+	const STALE_COORDINATE_FAILURES = array(
+		RelayClient::FAIL_PIN_MISMATCH, RelayClient::FAIL_SIGNATURE_REFUSED,
+		RelayClient::FAIL_UNREACHABLE, RelayClient::FAIL_REFUSED, RelayClient::FAIL_TIMEOUT,
+	);
+
+	/** @var array<int,bool> Rows whose coordinates were already re-fetched in this request. */
+	private static $coordinates_refetched = array();
+
+	/**
+	 * Re-fetch a HOSTED slot's coordinates from the fleet, which rewrites this
+	 * row's address and pin, and say whether either changed. Asked at most once
+	 * per row in a request, so a shard that is simply down costs one question,
+	 * not one per call. A self-hosted relay has nobody to ask - its pin changes
+	 * only through its own update run.
+	 */
+	public function recoverCoordinates(): bool {
+		if (!(bool)$this->get('mrl_is_hosted') || !empty(self::$coordinates_refetched[intval($this->key)])) {
 			return false;
 		}
-		$before = (string)$this->get('mrl_identity_fingerprint');
+		self::$coordinates_refetched[intval($this->key)] = true;
+		$before = (string)$this->get('mrl_identity_fingerprint') . '|' . (string)$this->get('mrl_public_ip');
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
 			$fleet = new FleetClient();
@@ -439,29 +457,37 @@ class MailboxRelay extends SystemBase {
 			}
 			$fleet->status(); // applies the coordinates to this row
 		} catch (\Throwable $e) {
-			error_log('MailboxRelay: coordinate re-fetch after a pin mismatch failed: ' . $e->getMessage());
+			error_log('MailboxRelay: coordinate re-fetch after a failed relay call did not work: ' . $e->getMessage());
 			return false;
 		}
 		$fresh = new MailboxRelay(intval($this->key), TRUE);
-		$after = (string)$fresh->get('mrl_identity_fingerprint');
-		if ($after !== '' && $after !== $before) {
-			$this->set('mrl_identity_fingerprint', $after);
-			$this->set('mrl_public_ip', (string)$fresh->get('mrl_public_ip'));
-			return true;
+		$pin = (string)$fresh->get('mrl_identity_fingerprint');
+		$ip = (string)$fresh->get('mrl_public_ip');
+		if ($pin === '' || $pin . '|' . $ip === $before) {
+			return false;
 		}
-		return false;
+		$this->set('mrl_identity_fingerprint', $pin);
+		$this->set('mrl_public_ip', $ip);
+		$this->set('mrl_authserv_id', (string)$fresh->get('mrl_authserv_id'));
+		return true;
+	}
+
+	/** Forget which rows were re-fetched: for a long-running worker between passes, and tests. */
+	public static function resetCoordinateRefetch(): void {
+		self::$coordinates_refetched = array();
 	}
 
 	/**
-	 * Run one relay API call, retrying ONCE after a pin mismatch that a
-	 * coordinate re-fetch resolved. Every consumer goes through this so a slot
-	 * whose shard was updated heals on its next pull without a push.
+	 * Run one relay API call, retrying ONCE when it failed in a way a moved or
+	 * updated shard explains and a coordinate re-fetch found the slot somewhere
+	 * new. Every consumer goes through this, so a slot whose shard was updated,
+	 * replaced or changed heals on its next call without a push.
 	 */
 	public function withApi(callable $fn) {
 		try {
 			return $fn($this->client());
 		} catch (RelayClientException $e) {
-			if ($e->failure_class !== RelayClient::FAIL_PIN_MISMATCH || !$this->recoverIdentityPin()) {
+			if (!in_array($e->failure_class, self::STALE_COORDINATE_FAILURES, true) || !$this->recoverCoordinates()) {
 				throw $e;
 			}
 			return $fn($this->client());
