@@ -54,6 +54,7 @@ Site-wide title format is hardcoded as `{title} | {site_name}` inside `SeoPageMe
 | `preview_image_url` | OG/Twitter image override |
 | `entity_type` | A registered entity type: core's `post`, `page`, `video`, `mailing_list`, or one a plugin registers (`event`, `location`, `product`, `forum_topic`) — drives `og_type` inference and surfaces in admin UI |
 | `entity_body_html` | Body content (HTML) for description/image inference when `meta_description` and `preview_image_url` aren't already set |
+| `entity_body_untrusted_html` | The same, for a body someone other than the site's staff wrote (a member's forum post). It is summarized by stripping tags as text (`SeoPageMetadata::summarize_untrusted_html()`), never parsed, and no image is inferred from it. `entity_body_html` is for staff-written content only: a test lists every view that passes it |
 | `is_valid_page` | When `false`, auto-emits `<meta name="robots" content="noindex">` |
 | `noindex` | Explicit noindex flag |
 

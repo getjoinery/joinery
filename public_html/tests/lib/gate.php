@@ -43,6 +43,7 @@
  * while the real gate is held; JOINERY_GATE_CUTOFF (same gating) lowers the
  * queue cutoff so such a test can exercise the wait.
  *
+ * @version 1.4 - the tree id survives a cone directory the repository no longer has
  * @version 1.3 - the tree id survives an untracked path outside a sparse checkout's cone (the add names the cone)
  * @version 1.2 - a difference inside function bodies blocks reuse only for a suite that ran one of them
  * @version 1.1 - a comment-only difference in a PHP file does not block reuse through what loads it
@@ -249,6 +250,14 @@ function gate_tree_id($site_root) {
 		foreach ($cone as $dir) {
 			$dir = trim($dir, " \t/");
 			if ($dir === '') continue;
+			// A cone directory with nothing on disk and nothing in the index
+			// (one the repository has since dropped) matches no file, and a
+			// pathspec matching nothing makes the add fail outright.
+			if (!file_exists($site_root . '/' . $dir)) {
+				$tracked = array();
+				exec($env . $git . ' ls-files -- ' . escapeshellarg(':(top)' . $dir) . ' 2>/dev/null', $tracked);
+				if (!$tracked) continue;
+			}
 			$specs[':(top)' . $dir] = true;
 			for ($up = dirname($dir); $up !== '.' && $up !== '/' && $up !== ''; $up = dirname($up)) {
 				$specs[':(top,glob)' . $up . '/*'] = true;

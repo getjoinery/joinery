@@ -297,6 +297,9 @@ class SeoPageMetadata extends SystemBase {
 		if (!empty($options['entity_body_html'])) {
 			return self::summarize_html($options['entity_body_html'], 160);
 		}
+		if (!empty($options['entity_body_untrusted_html'])) {
+			return self::summarize_untrusted_html($options['entity_body_untrusted_html'], 160);
+		}
 		return null;
 	}
 
@@ -353,7 +356,26 @@ class SeoPageMetadata extends SystemBase {
 		if (!$html) return null;
 		$body = self::visible_dom($html);
 		if (!$body) return null;
-		$text = preg_replace('/\s+/u', ' ', self::visible_text($body));
+		return self::clip_summary(self::visible_text($body), $max_length);
+	}
+
+	/**
+	 * The same summary for HTML someone other than the site's own staff wrote
+	 * (a member's forum post): tags stripped as text, never handed to the HTML
+	 * parser, which is a C library kept away from strangers' bytes
+	 * (tests/security/parser_surfaces_test.php). No image is inferred from it.
+	 */
+	public static function summarize_untrusted_html($html, $max_length = 160) {
+		$html = (string)$html;
+		if (trim($html) === '') return null;
+		$html = preg_replace('#<(style|script|noscript|template)\b[^>]*>.*?</\1\s*>#is', ' ', $html) ?? $html;
+		$html = preg_replace('#<(?:' . implode('|', self::BLOCK_ELEMENTS) . ')\b#i', ' $0', $html) ?? $html;
+		return self::clip_summary(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'), $max_length);
+	}
+
+	/** $text as one line of at most $max_length characters, cut at a word; null when empty. */
+	private static function clip_summary($text, $max_length) {
+		$text = preg_replace('/\s+/u', ' ', (string)$text) ?? '';
 		$text = trim($text);
 		if ($text === '') return null;
 		if (mb_strlen($text, 'UTF-8') <= $max_length) {

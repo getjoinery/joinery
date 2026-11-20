@@ -22,6 +22,7 @@
  * Every apcu_fetch() in production code goes through here; a test fails on
  * any other (tests/security/stored_object_guards_test.php).
  *
+ * @version 1.1 - enabled() and store(), so a caller that caches a value names no APCu function itself
  * @version 1.0
  */
 final class ApcuStore {
@@ -57,6 +58,23 @@ final class ApcuStore {
 			return false;
 		}
 		return $success ? $value : false;
+	}
+
+	/** Is APCu there and switched on for this process? */
+	public static function enabled(): bool {
+		return function_exists('apcu_enabled') && apcu_enabled();
+	}
+
+	/**
+	 * Store a scalar or an array of them for $ttl seconds. False, storing
+	 * nothing, when APCu is off or the value holds an object (fetch() would
+	 * only refuse it).
+	 */
+	public static function store(string $key, $value, int $ttl = 0): bool {
+		if (!self::enabled() || self::holdsObject($value)) {
+			return false;
+		}
+		return (bool)@apcu_store($key, $value, $ttl);
 	}
 
 	private static function holdsObject($value, int $depth = 0): bool {

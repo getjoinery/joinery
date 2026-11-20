@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php --only=tests/unit/host_restrictions_test.php
  *
+ * @version 1.2 - a fixture that was not written stops the run, and the shell's off check reports the file it read
  * @version 1.1 - the publishing box refuses as a restricted host does (specs/shell_command_audit_wp2_results.md D6)
  * @version 1.0
  */
@@ -48,8 +49,11 @@ harness_defer(function () use ($work) {
 });
 $write = function (string $body, int $mode = 0644) use ($file) {
 	@unlink($file);
-	file_put_contents($file, $body);
-	chmod($file, $mode);
+	// A fixture that was not written reads as whatever was there before, and
+	// the check after it then fails for a reason it cannot name.
+	if (file_put_contents($file, $body) !== strlen($body) || !chmod($file, $mode)) {
+		throw new RuntimeException('fixture not written: ' . $file . ' (' . json_encode(error_get_last()) . ')');
+	}
 	HostRestrictions::useFile($file);
 };
 
@@ -140,8 +144,11 @@ check($ask($file) === 0, 'the shell asks the PHP reader: on');
 file_put_contents($file, "not a line\n");
 check($ask($file) === 0, 'a broken file: the shell says on too');
 check($ask($work . '/absent/restrictions') === 1, 'no file and no directory: the shell says off without asking');
-file_put_contents($file, "# empty\n");
-check($ask($file) === 1, 'a file restricting nothing: off');
+$wrote = file_put_contents($file, "# empty\n");
+clearstatcache();
+check($ask($file) === 1, 'a file restricting nothing: off', json_encode(array('wrote' => $wrote, 'body' => @file_get_contents($file),
+	'file' => @substr(sprintf('%o', fileperms($file)), -4) . ' uid ' . @fileowner($file),
+	'dir' => @substr(sprintf('%o', fileperms(dirname($file))), -4) . ' uid ' . @fileowner(dirname($file)), 'me' => posix_geteuid())));
 
 section('On a restricted host the acknowledgement is never minted');
 

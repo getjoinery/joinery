@@ -26,6 +26,7 @@
  * an hour; an unmet one for five minutes, so an operator who fixes the host
  * sees the notice go soon after.
  *
+ * @version 1.2 - the cache is read and written through ApcuStore
  * @version 1.1 - unmet answers cached for five minutes, apcu_enabled(), one run per request, relevant(),
  *                fromWebProcess(), unknown check names in forStats() (reviewer2 B12-B16)
  * @version 1.0 (specs/security_weak_spots_2026_11.md WP3)
@@ -92,7 +93,7 @@ class VaultHostHealth {
 		if (self::$memo !== null) {
 			return self::$memo;
 		}
-		$cacheable = self::fromWebProcess() && function_exists('apcu_enabled') && apcu_enabled();
+		$cacheable = self::fromWebProcess() && ApcuStore::enabled();
 		$key = self::CACHE_KEY . ':' . md5(PathHelper::getSiteRoot());
 		if ($cacheable) {
 			$hit = false;
@@ -103,7 +104,7 @@ class VaultHostHealth {
 		}
 		$summary = self::summarize(self::rows());
 		if ($cacheable) {
-			apcu_store($key, $summary, $summary['unmet'] ? self::CACHE_TTL_UNMET : self::CACHE_TTL);
+			ApcuStore::store($key, $summary, $summary['unmet'] ? self::CACHE_TTL_UNMET : self::CACHE_TTL);
 		}
 		return self::$memo = $summary;
 	}

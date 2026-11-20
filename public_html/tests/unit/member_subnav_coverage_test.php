@@ -18,6 +18,7 @@
  * This test asserts every renderer that owns a public_header() also emits the
  * nav — by calling render_member_subnav() or by overriding it.
  *
+ * @version 1.1 - the inventory check asks for renderers in both places, not for a fixed number of themes
  * @version 1.0
  */
 
@@ -40,9 +41,13 @@ $candidates = array_merge(
 section('The renderer inventory is intact');
 // ---------------------------------------------------------------------------
 
-check(count($candidates) >= 15,
-	'found the PublicPage renderers to check',
-	'only ' . count($candidates) . ' found — has the theme layout moved?');
+// Not a count: themes come and go. What must hold is that both globs still
+// find renderers where renderers live.
+$core_found = count(glob($root . '/includes/PublicPage*.php') ?: []);
+$theme_found = count(glob($root . '/theme/*/includes/PublicPage.php') ?: []);
+check(is_file($root . '/includes/PublicPageBase.php') && $core_found >= 2 && $theme_found >= 1,
+	'found the PublicPage renderers to check, in core and in the themes',
+	$core_found . ' in includes/, ' . $theme_found . ' in theme/*/includes/: has the theme layout moved?');
 
 // ---------------------------------------------------------------------------
 section('render_member_subnav() is defined on the base');

@@ -47,4 +47,14 @@ check(SeoPageMetadata::infer_preview_image('/', array('entity_body_html' => $emb
 check(SeoPageMetadata::infer_preview_image('/', array('entity_body_html' => $embed . '<img src="/uploads/hero.jpg">')) === '/uploads/hero.jpg',
 	'the first image a reader sees is');
 
+section('A body a member wrote is summarized without the parser');
+$member = '<p>Hello <b>all</b></p><script>alert(1)</script><style>p{color:red}</style><ul><li>one</li><li>two &amp; three</li></ul>';
+check(SeoPageMetadata::summarize_untrusted_html($member) === 'Hello all one two & three', 'tags, script and style go; block edges keep words apart',
+	(string)SeoPageMetadata::summarize_untrusted_html($member));
+check(SeoPageMetadata::summarize_untrusted_html('<style>a{}</style>  ') === null, 'nothing visible is no description');
+check(SeoPageMetadata::infer_description('/', array('entity_body_untrusted_html' => $member)) === 'Hello all one two & three'
+	&& SeoPageMetadata::infer_preview_image('/', array('entity_body_untrusted_html' => $member . '<img src="/x.jpg">')) === null,
+	'it reaches the description, and no image is taken from it');
+check(mb_strlen((string)SeoPageMetadata::summarize_untrusted_html(str_repeat('word ', 80))) <= 161, 'a long one is cut to length');
+
 harness_finish();

@@ -23,6 +23,7 @@
  *
  * Run: php tests/security/parser_surfaces_test.php
  *
+ * @version 1.3 - SeoPageMetadata parses staff-written bodies only; no view outside the listed ones hands it a body
  * @version 1.2 - ReleaseVerifier: verify_release.php's CLI unzips the agent binaries of the release it checks
  * @version 1.1 - BackupObjects reads this site's own gzipped objects index back off its backup storage
  * @version 1.0
@@ -54,6 +55,7 @@ $allowed = array(
 	'plugins/mailbox/includes/import/TarReader.php'      => 'an archive the owner uploaded to import, once, under their eye',
 	'includes/ContentPack.php'                           => 'a content pack a superadmin uploaded and reads the plan of before anything applies, at most 2 MB and each member size-checked before it is read',
 	'utils/sandbox_plugin.php'                           => 'a CLI never in a request: the zip a plugin author validates on their own site',
+	'data/seo_page_metadata_class.php'                   => 'page, post, product and event bodies the site\'s own staff wrote, read to write a search description; a member\'s forum post goes to summarize_untrusted_html(), which never parses',
 	'includes/BackupObjects.php'                         => 'this site\'s own objects index, read back off its own backup storage (site credential, or a link its management node signed), size-capped',
 );
 
@@ -107,6 +109,36 @@ foreach (array('plugins/mailbox/includes/DeliverabilityReportParser.php', 'plugi
 		'plugins/dns_filtering/includes/ScanUrlPageResources.php', 'plugins/persona_browser/includes/FacebookFeedExtractor.php') as $rel) {
 	check(in_array($rel, $sandbox_parsers, true), $rel . ' is a sandbox parser');
 }
+
+// SeoPageMetadata parses what it is handed as entity_body_html in the pool, so
+// only a view of staff-written content may hand it one. A body a member wrote
+// goes in as entity_body_untrusted_html, which is never parsed.
+$staff_bodies = array(
+	'adm/logic/admin_seo_page_edit_logic.php', 'plugins/email_lists/views/list.php', 'plugins/event_manager/views/event.php',
+	'plugins/event_manager/views/location.php', 'plugins/store/views/product.php', 'theme/getjoinery/views/page_marketing.php',
+	'theme/xandyliberato-html5/views/page.php', 'views/page.php', 'views/post.php', 'views/video.php',
+);
+$passes_body = array();
+foreach ($dirs as $dir) {
+	if (!is_dir($root . '/' . $dir)) continue;
+	$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $dir, FilesystemIterator::SKIP_DOTS));
+	foreach ($it as $f) {
+		if (substr($f->getFilename(), -4) !== '.php' || strpos($f->getPathname(), '/tests/') !== false) continue;
+		$rel = substr($f->getPathname(), strlen($root) + 1);
+		if ($rel === 'data/seo_page_metadata_class.php') continue;
+		if (preg_match('/[\'"]entity_body_html[\'"]/', (string)file_get_contents($f->getPathname()))) $passes_body[] = $rel;
+	}
+}
+sort($passes_body);
+sort($staff_bodies);
+check($passes_body === $staff_bodies, 'entity_body_html is passed only by the listed views of staff-written content',
+	implode(', ', array_merge(array_diff($passes_body, $staff_bodies), array_diff($staff_bodies, $passes_body))));
+check(strpos((string)file_get_contents($root . '/plugins/forum/views/topic.php'), 'entity_body_untrusted_html') !== false,
+	'a forum topic hands its opening post over as untrusted');
+$src = (string)file_get_contents($root . '/data/seo_page_metadata_class.php');
+preg_match('/function summarize_untrusted_html.*?\n\t}\n/s', $src, $fn);
+check(!empty($fn[0]) && strpos($fn[0], 'visible_dom') === false && strpos($fn[0], 'DOMDocument') === false,
+	'summarize_untrusted_html() never reaches the parser');
 
 // ---------------------------------------------------------------------------
 section('The one XML door');

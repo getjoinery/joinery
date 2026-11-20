@@ -36,6 +36,7 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.5.2 - jailFenced() caches through ApcuStore
  * @version 1.5.1 - inside the fence a staged container is emptied, not unlinked (the run
  *   has no unlink: reviewer2 D1); stage(), stagedIsOpen() and unstage() are public, the one
  *   staging door for a SandboxParserInterface class
@@ -442,13 +443,13 @@ class DocumentText {
 		$key = $st['ino'] . ':' . $st['size'] . ':' . $st['mtime'];
 		if (isset($known[$key])) return $known[$key];
 		$apcu = 'joinery_jail_fenced_' . $key;
-		if (function_exists('apcu_fetch')) {
-			$hit = apcu_fetch($apcu, $ok);
+		if (ApcuStore::enabled()) {
+			$hit = ApcuStore::fetch($apcu, $ok);
 			if ($ok) return $known[$key] = (bool)$hit;
 		}
 		$bin = @file_get_contents(self::JAIL_LAUNCHER);
 		$fenced = is_string($bin) && strpos($bin, self::JAIL_INTERFACE_MARK) !== false;
-		if (function_exists('apcu_store')) apcu_store($apcu, $fenced, 86400);
+		ApcuStore::store($apcu, $fenced, 86400);
 		return $known[$key] = $fenced;
 	}
 

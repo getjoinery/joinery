@@ -8,6 +8,7 @@
  * unread post (ForumPages::landing). The page itself writes nothing: once it
  * is shown, forum.js tells the server how far the member has read.
  *
+ * @version 1.0.1 - the opening post reaches the description as untrusted HTML
  * @version 1.0.0
  */
 
@@ -78,7 +79,8 @@ $header = array(
 	'title'            => (string)$topic->get('ftp_title'),
 	'og_type'          => 'article',
 	'entity_type'      => 'forum_topic',
-	'entity_body_html' => $opening ? $opening['html'] : '',
+	// A member wrote it: summarized as text, never parsed (SeoPageMetadata::summarize_untrusted_html).
+	'entity_body_untrusted_html' => $opening ? $opening['html'] : '',
 );
 if (!$category->isPublic() || !$topic->get('ftp_is_approved')) {
 	$header['noindex'] = true;
