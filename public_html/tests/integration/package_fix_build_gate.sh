@@ -37,7 +37,7 @@ chk() {
 # --- The fixture source: jfixture 1.0-0ubuntu1 --------------------------------
 mkdir -p "$T/pkg/jfixture-1.0"
 P="$T/pkg/jfixture-1.0"
-printf 'greeting=hello\nflaw=present\n' > "$P/hello.txt"
+printf 'greeting=hello\nflaw=present\n' > "$P/hello.cfg"
 tar -C "$T/pkg" -czf "$T/pkg/jfixture_1.0.orig.tar.gz" jfixture-1.0
 mkdir -p "$P/debian/source" "$P/debian/patches"
 echo '3.0 (quilt)' > "$P/debian/source/format"
@@ -61,10 +61,10 @@ Depends: jfixture (= ${binary:Version}), ${misc:Depends}
 Description: fixture extra package
  A fixture that depends on its sibling at the exact version.
 EOF
-printf '%s\n' '#!/usr/bin/make -f' '%:' '	dh $@' 'override_dh_auto_test:' '	grep -q "^greeting=hello, Ubuntu" hello.txt' > "$P/debian/rules"
+printf '%s\n' '#!/usr/bin/make -f' '%:' '	dh $@' 'override_dh_auto_test:' '	grep -q "^greeting=hello, Ubuntu" hello.cfg' > "$P/debian/rules"
 chmod 755 "$P/debian/rules"
-echo 'hello.txt usr/share/jfixture/' > "$P/debian/jfixture.install"
-echo 'hello.txt usr/share/jfixture-extra/' > "$P/debian/jfixture-extra.install"
+echo 'hello.cfg usr/share/jfixture/' > "$P/debian/jfixture.install"
+echo 'hello.cfg usr/share/jfixture-extra/' > "$P/debian/jfixture-extra.install"
 cat > "$P/debian/changelog" <<'EOF'
 jfixture (1.0-0ubuntu1) resolute-security; urgency=medium
 
@@ -75,8 +75,8 @@ jfixture (1.0-0ubuntu1) resolute-security; urgency=medium
 EOF
 cat > "$P/debian/patches/CVE-2026-1000.patch" <<'EOF'
 Description: Ubuntu's own patch
---- a/hello.txt
-+++ b/hello.txt
+--- a/hello.cfg
++++ b/hello.cfg
 @@ -1,2 +1,2 @@
 -greeting=hello
 +greeting=hello, Ubuntu
@@ -90,12 +90,13 @@ cp "$T/pkg/jfixture_1.0.orig.tar.gz" "$T/pkg/jfixture_1.0-0ubuntu1.debian.tar.xz
 DSC_SHA="$(sha256sum "$SRCDIR/jfixture_1.0-0ubuntu1.dsc" | awk '{print $1}')"
 
 # --- A recipe -------------------------------------------------------------------
-fix_patch() {  # PATH [ORIGIN] [TEST]
+fix_patch() {  # PATH [ORIGIN] [TEST] [FINGERPRINT]
     {
         echo "Description: remove the flaw"
         [ -n "${2:-}" ] && echo "Origin: $2"
         [ -n "${3:-}" ] && echo "Joinery-Test: $3"
-        printf '%s\n' '--- a/hello.txt' '+++ b/hello.txt' '@@ -1,2 +1,2 @@' ' greeting=hello, Ubuntu' '-flaw=present' '+flaw=fixed'
+        [ -n "${4:-}" ] && echo "Joinery-Fingerprint: $4"
+        printf '%s\n' '--- a/hello.cfg' '+++ b/hello.cfg' '@@ -1,2 +1,3 @@' ' greeting=hello, Ubuntu' '-flaw=present' '+bounds_checked=yes, by upstream' '+flaw=fixed'
     } > "$1"
 }
 recipe() {  # DIR (writes a good recipe; callers spoil it)
@@ -110,7 +111,7 @@ changelog_from=jfixture
 date=2026-11-20
 test=default
 EOF
-    fix_patch "$1/patches/0001-CVE-2026-2000.patch" "https://example.invalid/upstream/commit/abc123" "grep -q '^flaw=fixed' hello.txt"
+    fix_patch "$1/patches/0001-CVE-2026-2000.patch" "https://example.invalid/upstream/commit/abc123" "grep -q '^flaw=fixed' hello.cfg"
 }
 build() {  # RECIPE_DIR OUT_DIR -> exit code; output in $T/out
     FIX_BUILD_TEST=1 FIX_BUILD_SOURCE_DIR="$SRCDIR" FIX_BUILD_WORK_BASE="$T" bash "$BUILD" "$1" "$2" > "$T/out" 2>&1
@@ -132,8 +133,10 @@ chk "every binary of the source ships" "$(ls "$X"/*.deb | xargs -n1 basename | p
 chk "FIXINFO names the binaries" "$(sed -n 's/^binaries=//p' "$X/FIXINFO")" "jfixture jfixture-extra"
 chk "FIXINFO names the version" "$(sed -n 's/^version=//p' "$X/FIXINFO")" "1.0-0ubuntu1+joinery1"
 chk "FIXINFO names the Ubuntu base" "$(sed -n 's/^ubuntu_base=//p' "$X/FIXINFO")" "1.0-0ubuntu1"
+chk "FIXINFO holds the patch's fingerprint: its added line Ubuntu's base lacks, not one too short to tell apart (owner Q6)" \
+    "$(sed -n 's/^fingerprint=0001-CVE-2026-2000.patch //p' "$X/FIXINFO" | base64 -d | paste -sd '|')" "bounds_checked=yes, by upstream"
 chk "the sibling depends on the new version" "$(dpkg-deb -f "$X/jfixture-extra_1.0-0ubuntu1+joinery1_all.deb" Depends)" "jfixture (= 1.0-0ubuntu1+joinery1)"
-chk "the fix is in the package" "$(dpkg-deb --fsys-tarfile "$X/jfixture_1.0-0ubuntu1+joinery1_all.deb" | tar -xOf - ./usr/share/jfixture/hello.txt | paste -sd ' ')" "greeting=hello, Ubuntu flaw=fixed"
+chk "the fix is in the package" "$(dpkg-deb --fsys-tarfile "$X/jfixture_1.0-0ubuntu1+joinery1_all.deb" | tar -xOf - ./usr/share/jfixture/hello.cfg | paste -sd ' ')" "greeting=hello, Ubuntu bounds_checked=yes, by upstream flaw=fixed"
 cl="$(dpkg-deb --fsys-tarfile "$X/jfixture_1.0-0ubuntu1+joinery1_all.deb" | tar -xOf - ./usr/share/doc/jfixture/changelog.Debian.gz | gzip -dc)"
 chk "the changelog's newest entry is ours" "$(head -n 1 <<< "$cl")" "jfixture (1.0-0ubuntu1+joinery1) resolute-joinery; urgency=high"
 chk "the changelog entry names the CVE" "$(grep -c '^    - CVE-2026-2000$' <<< "$cl")" "1"
@@ -179,13 +182,20 @@ set_key "$R" revision 1
 
 echo "Two patches, the second on top of the first"
 recipe "$R"
-printf '%s\n' 'Origin: https://example.invalid/c/2' '--- a/hello.txt' '+++ b/hello.txt' '@@ -1,2 +1,2 @@' ' greeting=hello, Ubuntu' '-flaw=fixed' '+flaw=fixed twice' \
+printf '%s\n' 'Origin: https://example.invalid/c/2' '--- a/hello.cfg' '+++ b/hello.cfg' '@@ -2,2 +2,2 @@' ' bounds_checked=yes, by upstream' '-flaw=fixed' '+flaw=fixed twice, by a second commit' \
     > "$R/patches/0002-CVE-2026-2001.patch"
 set_key "$R" cves "CVE-2026-2000 CVE-2026-2001"
 chk "builds" "$(build "$R" "$T/o4")" "0"
 mkdir "$T/x4"; tar -C "$T/x4" -xJf "$T/o4/${NAME}.tar.xz"
-chk "both are in the package, in order" "$(dpkg-deb --fsys-tarfile "$T/x4/$NAME/jfixture_1.0-0ubuntu1+joinery1_all.deb" | tar -xOf - ./usr/share/jfixture/hello.txt | tail -n 1)" "flaw=fixed twice"
+chk "both are in the package, in order" "$(dpkg-deb --fsys-tarfile "$T/x4/$NAME/jfixture_1.0-0ubuntu1+joinery1_all.deb" | tar -xOf - ./usr/share/jfixture/hello.cfg | tail -n 1)" "flaw=fixed twice, by a second commit"
 chk "FIXINFO names both CVEs" "$(sed -n 's/^cves=//p' "$T/x4/$NAME/FIXINFO")" "CVE-2026-2000 CVE-2026-2001"
+chk "each patch has its own fingerprint" "$(sed -n 's/^fingerprint=\([^ ]*\) .*/\1/p' "$T/x4/$NAME/FIXINFO" | sort -u | paste -sd ' ')" "0001-CVE-2026-2000.patch 0002-CVE-2026-2001.patch"
+
+echo "A fingerprint named by hand"
+recipe "$R"; fix_patch "$R/patches/0001-CVE-2026-2000.patch" "https://example.invalid/c/1" "" "flaw=fixed"
+chk "builds" "$(build "$R" "$T/o5")" "0"
+mkdir "$T/x5"; tar -C "$T/x5" -xJf "$T/o5/${NAME}.tar.xz"
+chk "the named line is the fingerprint, and only it" "$(sed -n 's/^fingerprint=0001-CVE-2026-2000.patch //p' "$T/x5/$NAME/FIXINFO" | base64 -d | paste -sd '|')" "flaw=fixed"
 
 echo "What build.sh refuses"
 refuse() {  # LABEL RECIPE_DIR WANT_IN_OUTPUT
@@ -202,7 +212,7 @@ recipe "$R"; fix_patch "$R/patches/0001-CVE-2026-2000.patch" ""
 refuse "a patch with no Origin" "$R" "names no 'Origin:'"
 recipe "$R"; sed -i 's/^-flaw=present/-flaw=missing/' "$R/patches/0001-CVE-2026-2000.patch"
 refuse "a patch that does not apply" "$R" "does not apply cleanly"
-recipe "$R"; fix_patch "$R/patches/0001-CVE-2026-2000.patch" "https://example.invalid/c/1" "grep -q '^flaw=gone' hello.txt"
+recipe "$R"; fix_patch "$R/patches/0001-CVE-2026-2000.patch" "https://example.invalid/c/1" "grep -q '^flaw=gone' hello.cfg"
 refuse "a patch whose own test fails" "$R" "test failed"
 recipe "$R"; set_key "$R" changelog_from jfixture-docs
 refuse "changelog_from naming no built package" "$R" "made no jfixture-docs package"
@@ -210,6 +220,14 @@ recipe "$R"; set_key "$R" test "false"
 refuse "a recipe test command that fails" "$R" "the recipe's test failed"
 recipe "$R"; set_key "$R" cves "CVE-26-1"
 refuse "a malformed CVE id" "$R" "is not a CVE id"
+recipe "$R"; fix_patch "$R/patches/0001-CVE-2026-2000.patch" "https://example.invalid/c/1" "" "flaw=present"
+refuse "a named fingerprint the patch does not add" "$R" "is not a line the patch adds"
+recipe "$R"; printf '%s\n' 'Origin: https://example.invalid/c/1' 'Joinery-Fingerprint: greeting=hello, Ubuntu' '--- a/hello.cfg' '+++ b/hello.cfg' '@@ -1,2 +1,3 @@' \
+    ' greeting=hello, Ubuntu' '+greeting=hello, Ubuntu' '-flaw=present' '+flaw=fixed' > "$R/patches/0001-CVE-2026-2000.patch"
+refuse "a named fingerprint Ubuntu's base already has" "$R" "is already in Ubuntu's"
+recipe "$R"; printf '%s\n' 'Origin: https://example.invalid/c/1' '--- a/hello.cfg' '+++ b/hello.cfg' '@@ -1,2 +1,2 @@' \
+    ' greeting=hello, Ubuntu' '-flaw=present' '+flaw=fixed' > "$R/patches/0001-CVE-2026-2000.patch"
+refuse "a patch with nothing to tell it apart" "$R" "adds no code found nowhere in Ubuntu's"
 recipe "$R"; rm "$R/patches/0001-CVE-2026-2000.patch"
 refuse "no patches" "$R" "has no patches"
 recipe "$R"; mv "$R/patches/0001-CVE-2026-2000.patch" "$R/patches/fix.patch"

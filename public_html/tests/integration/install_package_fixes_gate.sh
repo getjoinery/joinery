@@ -43,6 +43,7 @@ R="$T/root"; STUB="$T/s"; SRV="$T/srv/static_files/fixes"
 export PACKAGE_FIXES_ROOT="$R" STUB
 mkdir -p "$T/bin" "$STUB/debs" "$R/etc/apt/sources.list.d" "$R/etc/apt/preferences.d" "$SRV"
 # apt-get: update records the list it was given and fails when told to;
+# source hands over Ubuntu's source files from $STUB/src/<source>_<version>/;
 # download hands over a real .deb from $STUB/debs.
 cat > "$T/bin/apt-get" <<'EOF'
 #!/bin/bash
@@ -53,7 +54,12 @@ case "$*" in
     uri="$(sed -n 's/^deb \[trusted=yes\] \(file:[^ ]*\) .*/\1/p' "$list")"
     [ -f "$STUB/refuse_$(basename "$list")" ] && { echo "E: Repository '${uri} ./ Release' changed its 'Label' value"; exit 100; }
     [ -f "$STUB/apt_busy" ] && { echo "E: Could not get lock /var/lib/apt/lists/lock. It is held by process 4242 (apt-get)"; exit 100; }
+    grep -h '^deb-src' "$list" >> "$STUB/debsrc" 2>/dev/null
     exit 0 ;;
+  source*|*" source "*)
+    want="${@: -1}"; d="$STUB/src/${want%%=*}_${want#*=}"
+    [ -d "$d" ] || { echo "E: Unable to find a source package for $want"; exit 100; }
+    cp "$d"/* . ;;
   *download*)
     want="${@: -1}"; f="$(ls "$STUB/debs/${want%%=*}_${want#*=}"{.deb,_all.deb} 2>/dev/null | head -n 1)"
     [ -n "$f" ] || { echo "E: no $want"; exit 100; }
@@ -101,6 +107,28 @@ mkdeb() {  # SOURCE BINARY VERSION OUTDIR CHANGELOG_TEXT [BASE]
     } | gzip -9n > "$d/usr/share/doc/$2/changelog.Debian.gz"
     dpkg-deb --root-owner-group -b "$d" "$4/${2}_${3}_all.deb" > /dev/null
 }
+fix_line() { printf 'fixed_%s(ctx, len);' "${1//-/_}"; }  # CVE
+# Ubuntu's source for SOURCE at VERSION, as apt would fetch it: each CVE's fix
+# line in a patch under debian/patches (patch), only as a removed line there
+# (removed), or in upstream's tarball (orig).
+mksrc() {  # SOURCE VERSION patch|removed|orig CVES...
+    local s="$1" v="$2" kind="$3" c up; shift 3
+    local d="$STUB/src/${s}_${v}" w="$T/build/src-$s-$v"
+    up="${v%-*}"
+    rm -rf "$d" "$w"; mkdir -p "$d" "$w/debian/patches" "$w/orig/${s}-${up}/src"
+    printf 'Format: 3.0 (quilt)\nSource: %s\nVersion: %s\n' "$s" "$v" > "$d/${s}_${v}.dsc"
+    printf -- '--- a/src/f.c\n+++ b/src/f.c\n@@ -1,2 +1,2 @@\n int f(void)\n' > "$w/debian/patches/fix.patch"
+    printf 'int f(void)\n' > "$w/orig/${s}-${up}/src/f.c"
+    for c; do
+        case "$kind" in
+            patch)   printf '+\t%s\n' "$(fix_line "$c")" >> "$w/debian/patches/fix.patch" ;;
+            removed) printf -- '-\t%s\n' "$(fix_line "$c")" >> "$w/debian/patches/fix.patch" ;;
+            orig)    printf '\t%s\n' "$(fix_line "$c")" >> "$w/orig/${s}-${up}/src/f.c" ;;
+        esac
+    done
+    tar -C "$w" -cJf "$d/${s}_${v}.debian.tar.xz" debian
+    tar -C "$w/orig" -cJf "$d/${s}_${up}.orig.tar.xz" "${s}-${up}"
+}
 # A fix archive for SOURCE at VERSION with BINARIES, published in $SRV; echoes its ACTIVE line.
 mkfix() {  # SOURCE VERSION BASE CVES BINARIES...
     local source="$1" version="$2" base="$3" cves="$4"; shift 4
@@ -111,6 +139,12 @@ mkfix() {  # SOURCE VERSION BASE CVES BINARIES...
     printf 'Origin: Joinery-Fixes\nLabel: Joinery-Fixes\nSuite: resolute-joinery\nSHA256:\n %s %s Packages\n' \
         "$(sha256sum "$st/$name/Packages" | awk '{print $1}')" "$(stat -c %s "$st/$name/Packages")" > "$st/$name/Release"
     printf 'source=%s\nversion=%s\nubuntu_base=%s\ncves=%s\nchangelog_from=%s\nbinaries=%s\n' "$source" "$version" "$base" "$cves" "$1" "$*" > "$st/$name/FIXINFO"
+    # One patch per CVE, its fingerprint one line (fix_line), as build.sh writes it.
+    local c n=0
+    for c in $cves; do
+        n=$((n + 1))
+        [ -n "${NOFP:-}" ] || printf 'fingerprint=%04d-%s.patch %s\n' "$n" "$c" "$(fix_line "$c" | base64 -w0)" >> "$st/$name/FIXINFO"
+    done
     tar -C "$st" --sort=name --owner=0 --group=0 --numeric-owner --mtime='@0' -cJf "$SRV/$name.tar.xz" "$name"
     echo "source=${source} version=${version} ubuntu_base=${base} archive=${name}.tar.xz sha256=$(sha256sum "$SRV/$name.tar.xz" | awk '{print $1}') recipe_sha256=$(printf 'c%.0s' $(seq 64)) changelog_from=${1} cves=${cves}"
 }
@@ -212,9 +246,11 @@ chk "no pin (apt would downgrade it)" "$(ls "$PREF" | grep -c jfa)" "0"
 chk "state: ahead_of_build names the installed version" "$(st jfa 6)" "1.0-0ubuntu2"
 chk "  its changelog could not be read: said (reviewer2 G13)" "$(st jfa 9)" "1.0-0ubuntu2"
 mkdeb jfa jfa 1.0-0ubuntu2 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 and CVE-2026-109619"
+mksrc jfa 1.0-0ubuntu2 patch CVE-2026-109618 CVE-2026-109619
+echo " jfa | 1.0-0ubuntu2 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
 rm -f "$LIB/verdicts/"*
 run converge "$SERVER" > /dev/null
-chk "a newer Ubuntu build whose changelog names every CVE: handed back, not ahead (reviewer2 G5)" "$(st jfa 4)|$(st jfa 6)" "1.0-0ubuntu2|-"
+chk "a newer Ubuntu build whose changelog names every CVE and whose source carries each fix: handed back, not ahead (reviewer2 G5)" "$(st jfa 4)|$(st jfa 6)" "1.0-0ubuntu2|-"
 mkdeb jfa jfa 1.0-0ubuntu2 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 only"
 rm -f "$LIB/verdicts/"*
 run converge "$SERVER" > /dev/null
@@ -223,6 +259,7 @@ rm -f "$STUB/debs/jfa_1.0-0ubuntu2"*; rm -f "$LIB/verdicts/"*
 printf 'jfa jfa 1.0-0ubuntu1\n' > "$STUB/dpkg"
 run converge "$SERVER" > /dev/null
 chk "back on Ubuntu's base: pinned again" "$(ls "$PREF" | grep -c jfa)" "1"
+rm -f "$STUB/madison_jfa"
 
 echo "A container host takes a base source it does not have installed"
 touch "$R/container_host"
@@ -247,6 +284,7 @@ run converge "$SERVER" > /dev/null
 
 echo "Hand-back: Ubuntu's newer build names every CVE"
 mkdeb jfa jfa 1.0-0ubuntu1.1 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618_109619-pre1.patch and CVE-2026-109618.patch"
+mksrc jfa 1.0-0ubuntu1.1 patch CVE-2026-109618 CVE-2026-109619
 echo " jfa | 1.0-0ubuntu1.1 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
 echo " jfa | 1.0-0ubuntu1+joinery2 | file:/var/lib/joinery/package-fixes/jfa/1.0-0ubuntu1-joinery2 ./ Packages" >> "$STUB/madison_jfa"
 : > "$STUB/calls"
@@ -293,7 +331,54 @@ echo "Hand-back: Ubuntu's .deb cannot be read"
 echo " jfa | 1.0-0ubuntu1.9 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
 chk "handback succeeds" "$(run handback)" "0"
 chk "the pin stays" "$(ls "$PREF" | grep -c jfa)" "1"
-chk "says so" "$(grep -c "could not read Ubuntu 1.0-0ubuntu1.9's changelog; ours stays" "$T/out")" "1"
+chk "says so" "$(grep -c "could not read Ubuntu 1.0-0ubuntu1.9's changelog or source; ours stays" "$T/out")" "1"
+
+echo "Hand-back: Ubuntu's source must carry each fix, not only its changelog name it (owner Q6, reviewer2 H1)"
+mkdeb jfa jfa 1.0-0ubuntu1.5 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 and CVE-2026-109619"
+mksrc jfa 1.0-0ubuntu1.5 patch CVE-2026-109618
+echo " jfa | 1.0-0ubuntu1.5 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
+: > "$STUB/calls"; : > "$STUB/debsrc"
+chk "handback succeeds" "$(run handback)" "0"
+chk "the changelog names both, the source carries one: the pin stays" "$(ls "$PREF" | grep -c jfa)" "1"
+chk "state: lacks the one whose code is missing" "$(st jfa 5)" "1.0-0ubuntu1.5:CVE-2026-109619"
+chk "says the changelog named it but the source lacks it" "$(grep -c "Ubuntu 1.0-0ubuntu1.5's changelog names every CVE ours carries, but its source lacks the fix for CVE-2026-109619" "$T/out")" "1"
+chk "the source came from the -security pocket the binary did, checked against Ubuntu's key" "$(sort -u "$STUB/debsrc")" \
+    "deb-src [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu resolute-security main"
+chk "the named version's source was fetched, into private lists" "$(grep -c 'source -qq --download-only .*Dir::State::Lists=.*package-fix-source.* jfa=1.0-0ubuntu1.5$' "$STUB/calls")" "1"
+chk "the machine's own package lists were not touched" "$(grep 'update -qq' "$STUB/calls" | grep -vc 'Dir::State::Lists=')" "0"
+mkdeb jfa jfa 1.0-0ubuntu1.6 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 and CVE-2026-109619"
+mksrc jfa 1.0-0ubuntu1.6 removed CVE-2026-109618 CVE-2026-109619
+echo " jfa | 1.0-0ubuntu1.6 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
+run handback > /dev/null
+chk "the fix's line only as a line a patch removes does not count" "$(st jfa 5)" "1.0-0ubuntu1.6:CVE-2026-109618,CVE-2026-109619"
+mkdeb jfa jfa 1.0-0ubuntu1.10 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 and CVE-2026-109619"
+echo " jfa | 1.0-0ubuntu1.10 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
+run handback > /dev/null
+chk "the source cannot be fetched: the pin stays, unreadable" "$(ls "$PREF" | grep -c jfa)|$(st jfa 9)" "1|1.0-0ubuntu1.10"
+chk "and nothing is kept, so the next run tries again" "$(ls "$LIB/verdicts" | grep -c '1.0-0ubuntu1.10')" "0"
+mkdeb jfa jfa 1.0-0ubuntu1.11 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 and CVE-2026-109619"
+mksrc jfa 1.0-0ubuntu1.11 patch CVE-2026-109618 CVE-2026-109619
+echo " jfa | 1.0-0ubuntu1.11 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
+LA3="$(NOFP=1 mkfix jfa 1.0-0ubuntu1+joinery3 1.0-0ubuntu1 'CVE-2026-109618 CVE-2026-109619' jfa jfa-extra)"
+printf '%s\n' "$header" "$LA3" > "$ACTIVE"
+run converge "$SERVER" > /dev/null
+chk "a build with no fingerprint proves nothing: it lacks every CVE" "$(st jfa 5)" "1.0-0ubuntu1.11:CVE-2026-109618,CVE-2026-109619"
+printf '%s\n' "$header" "$LA2" > "$ACTIVE"
+run converge "$SERVER" > /dev/null
+chk "the same Ubuntu build, a fix with fingerprints: judged again, not from the kept verdict" "$(st jfa 4)|$(ls "$PREF" | grep -c jfa)" "1.0-0ubuntu1.11|0"
+mkdeb jfa jfa 1.1-0ubuntu1 "$STUB/debs" "New upstream release 1.1, fixes CVE-2026-109618 and CVE-2026-109619"
+mksrc jfa 1.1-0ubuntu1 orig CVE-2026-109618 CVE-2026-109619
+echo " jfa | 1.1-0ubuntu1 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
+run handback > /dev/null
+chk "a new upstream version: its tarball is read, and carries both" "$(st jfa 4)" "1.1-0ubuntu1"
+mksrc jfa 1.0-0ubuntu1.12 orig CVE-2026-109618 CVE-2026-109619
+mkdeb jfa jfa 1.0-0ubuntu1.12 "$STUB/debs" "SECURITY UPDATE: CVE-2026-109618 and CVE-2026-109619"
+echo " jfa | 1.0-0ubuntu1.12 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfa"
+run handback > /dev/null
+chk "the same upstream version: its tarball is Ubuntu's base, so not read" "$(st jfa 5)|$(ls "$PREF" | grep -c jfa)" "1.0-0ubuntu1.12:CVE-2026-109618,CVE-2026-109619|1"
+chk "build.sh picks fingerprints in the form this script reads them" \
+    "$(grep -E '^(normal_form|units)\(\)' "$ROOT/maintenance_scripts/install_tools/fixes/build.sh")" \
+    "$(grep -E '^(normal_form|units)\(\)' "$SCRIPT")"
 
 echo "An ACTIVE line that is not whole"
 before="$(ls "$PREF" "$LISTS" "$LIB" | paste -sd ' ')"

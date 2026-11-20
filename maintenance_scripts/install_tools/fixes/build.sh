@@ -4,6 +4,9 @@
 # plus upstream's security patches, as every binary package that source makes
 # (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.2 - each patch's fingerprint (owner Q6, reviewer2 H1): a few of its added code lines found
+#                nowhere in Ubuntu's base source, written into FIXINFO; a machine hands a fix back only
+#                when Ubuntu's newer source carries every one
 # Version: 1.1 - reviewer2's build review: the package builds and its tests run as an unprivileged
 #                user under fakeroot, as on Ubuntu's builders (G3: PostgreSQL's initdb refuses root,
 #                and upstream test code never runs as root on the publishing box); build
@@ -42,7 +45,19 @@
 #                 Origin: <upstream fix commit URL>
 #               and may carry
 #                 Joinery-Test: <command>
-#               run in the built source tree after the build; it must exit 0.
+#               run in the built source tree after the build; it must exit 0, and
+#                 Joinery-Fingerprint: <one added line of the patch>
+#               (repeatable) naming the patch's fingerprint by hand, where the
+#               automatic pick (below) is poor.
+#
+# A patch's fingerprint is up to three pieces of its code, from files that are
+# not tests or docs, with runs of white space made one space, that appear
+# nowhere in Ubuntu's base source: its longest added lines, or only where none
+# is distinctive (a short fix of common lines), three lines in a row of the
+# patched code holding an added one. A machine hands the fix back to
+# a newer Ubuntu build only when that build's source carries every fingerprint
+# line of every patch: a changelog that names a CVE is Ubuntu's claim, its
+# source is what it ships.
 #
 # Leaves in OUT_DIR, and nothing else:
 #   joinery-fix-<source>-<version>-<arch>.tar.xz
@@ -52,14 +67,16 @@
 #           Packages   the flat repository index
 #           Release    Origin and Label Joinery-Fixes, Suite resolute-joinery,
 #                      and the SHA256 of Packages
-#           FIXINFO    source, version, ubuntu_base, cves, changelog_from, binaries
+#           FIXINFO    source, version, ubuntu_base, cves, changelog_from, binaries,
+#                      and per patch, one line per fingerprint line:
+#                        fingerprint=<patch file name> <the line or lines, base64>
 #   joinery-fix-<source>-<version>-<arch>.tar.xz.sha256
 #
 # <version> drops any epoch, as .deb file names do.
 #
 # Refuses (exit 1, OUT_DIR left as it was) when the recipe is not whole, the
 # fetched .dsc is not the recipe's, the source is not 3.0 (quilt), a patch does
-# not apply cleanly or names no Origin, the build or a test fails, a binary does
+# not apply cleanly or names no Origin, a patch has no fingerprint, the build or a test fails, a binary does
 # not carry the new version, the new version does not sort above Ubuntu's, or
 # changelog_from's .deb lacks the new entry.
 #
@@ -166,7 +183,65 @@ SRC="$WORK/src"
 [[ "$(dpkg-parsechangelog -l "$SRC/debian/changelog" -S Version)" == "$BASE_VERSION" ]] \
     || die "the unpacked source's changelog is not at ${BASE_VERSION}"
 
-# --- 2. The patches -----------------------------------------------------------
+# --- 2. Each patch's fingerprint ----------------------------------------------
+# The same normal form and units as install_package_fixes.sh reads Ubuntu's
+# newer source with (the gate checks the two definitions match): a removed
+# patch line is dropped, a kept or added one loses its leading '+' or ' ', and
+# white space becomes one space; a unit is one line, or three in a row joined
+# by \036. Three in a row tell a short fix apart whose every line is common.
+normal_form() { sed -E '/^-/d; s/^[+ ]//; s/[[:space:]]+/ /g; s/^ //; s/ $//'; }
+units() { awk '{ print; if (NR > 2) print a "\036" b "\036" $0; a = b; b = $0 }'; }
+# Every unit of Ubuntu's base source, as unpacked (its own patches applied).
+find "$SRC" -type f -size -8M -not -path '*/.pc/*' -print0 | xargs -0 -r grep -hIs '' \
+    | normal_form | units > "$WORK/base.units"
+declare -A FINGERPRINT=()
+for p in "${PATCHES[@]}"; do
+    pb="$(basename "$p")"
+    # The patch's candidates, outside tests and docs: each added line of 20
+    # characters or more, and each run of three lines of the patched code
+    # holding an added one; code before comments, the longest first.
+    awk '
+        function norm(x) { sub(/^[+ ]/, "", x); gsub(/[[:space:]]+/, " ", x); sub(/^ /, "", x); sub(/ $/, "", x); return x }
+        # A comment ranks after code: a backport may word it differently.
+        # Ranks: 1 a code line, 2 three code lines, 3 a comment, 4 three lines with a comment.
+        function cmt(x) { return x ~ /^(\/\/|\/\*|\*|#)/ }
+        function flush() { for (i = 1; i <= n; i++) { if (add[i] && length(line[i]) >= 20) print (cmt(line[i]) ? 3 : 1) "\t" length(line[i]) "\t" line[i] }
+                           for (i = 3; i <= n; i++) if (add[i] || add[i-1] || add[i-2]) { w = line[i-2] "\036" line[i-1] "\036" line[i]
+                               print ((cmt(line[i-2]) || cmt(line[i-1]) || cmt(line[i])) ? 4 : 2) "\t" length(w) "\t" w }
+                           n = 0 }
+        /^\+\+\+ / { flush(); f = $2; sub(/^[ab]\//, "", f); skip = (f ~ /(^|\/)(tests?|testsuite|t)\/|\.phpt$|(^|\/)(NEWS|ChangeLog|CHANGES|README)[^\/]*$|\.(md|txt|rst|po|pot)$|^debian\//); next }
+        /^(--- |diff |index |@@)/ { flush(); next }
+        skip { next }
+        /^-/ { next }
+        /^[+ ]/ || /^$/ { n++; line[n] = norm($0); add[n] = ($0 ~ /^\+/); next }
+        { flush() }
+        END { flush() }
+    ' "$p" | LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2nr -k3 | cut -f3- | awk '!seen[$0]++' > "$WORK/candidates"
+    manual="$(awk '/^(--- |diff |Index: )/ {exit} /^Joinery-Fingerprint: / {sub(/^Joinery-Fingerprint: +/, ""); print}' "$p" | normal_form)"
+    if [[ -n "$manual" ]]; then
+        picked="$manual"
+        while IFS= read -r line; do
+            # A line named by hand must be one the patch adds, and one Ubuntu's base does not have.
+            grep -qxF -- "$line" <(grep '^+' "$p" | grep -v '^+++ ' | normal_form) \
+                || die "${pb}: its Joinery-Fingerprint '${line}' is not a line the patch adds"
+            ! grep -qxF -- "$line" "$WORK/base.units" || die "${pb}: its Joinery-Fingerprint '${line}' is already in Ubuntu's ${BASE_VERSION}"
+        done <<< "$manual"
+    else
+        # The patch's few candidates are the patterns, Ubuntu's base the text:
+        # those found there are not distinctive. (Not comm: 26.04's uutils comm
+        # ignores LC_ALL=C and calls C-sorted input unsorted.)
+        { [[ -s "$WORK/candidates" ]] && grep -xFf "$WORK/candidates" "$WORK/base.units" || true; } > "$WORK/common"
+        # Lines alone where there are any: a run of three holds context lines a
+        # backport may differ in.
+        picked="$({ grep -vxFf "$WORK/common" "$WORK/candidates" || true; } | head -n 3 \
+            | awk 'NR == 1 { runs = index($0, "\036") > 0 } runs || index($0, "\036") == 0')"
+    fi
+    [[ -n "$picked" ]] || die "${pb} adds no code found nowhere in Ubuntu's ${BASE_VERSION}, alone or three lines in a row; name a line with a Joinery-Fingerprint: line above its diff"
+    FINGERPRINT[$pb]="$picked"
+done
+rm -f "$WORK/base.units" "$WORK/candidates" "$WORK/common"
+
+# --- 3. The patches -----------------------------------------------------------
 mkdir -p "$SRC/debian/patches"
 touch "$SRC/debian/patches/series"
 [[ -z "$(tail -c 1 "$SRC/debian/patches/series")" ]] || echo >> "$SRC/debian/patches/series"
@@ -188,7 +263,7 @@ done
 # tree is what the tests below read, so the patches stay applied.
 rm -f "$SRC/.pc/.dpkg-source-unapply"
 
-# --- 3. The changelog entry ---------------------------------------------------
+# --- 4. The changelog entry ---------------------------------------------------
 {
     echo "${SOURCE} (${VERSION}) resolute-joinery; urgency=high"
     echo
@@ -206,7 +281,7 @@ rm -f "$SRC/.pc/.dpkg-source-unapply"
 mv "$WORK/changelog.new" "$SRC/debian/changelog"
 [[ "$(dpkg-parsechangelog -l "$SRC/debian/changelog" -S Version)" == "$VERSION" ]] || die "the changelog entry did not parse"
 
-# --- 4. Build -----------------------------------------------------------------
+# --- 5. Build -----------------------------------------------------------------
 if [[ "$TEST_MODE" != "1" ]]; then
     say "installing ${SOURCE}'s build dependencies"
     apt-get build-dep -y -qq "$SRC" > "$WORK/build-dep.log" 2>&1 \
@@ -246,7 +321,7 @@ for p in "${PATCHES[@]}"; do
         || { tail -n 40 "$WORK/ptest.log" >&2; die "$(basename "$p")'s test failed: ${ptest}"; }
 done
 
-# --- 5. Check what was built --------------------------------------------------
+# --- 6. Check what was built --------------------------------------------------
 STAGE="$WORK/stage/$NAME"
 mkdir -p "$STAGE"
 BINARIES=()
@@ -267,7 +342,7 @@ cl_deb="$(find "$STAGE" -maxdepth 1 -name "${CHANGELOG_FROM}_*.deb" | head -n 1)
 top="$(dpkg-deb --fsys-tarfile "$cl_deb" | tar -xOf - "./usr/share/doc/${CHANGELOG_FROM}/changelog.Debian.gz" 2>/dev/null | gzip -dc 2>/dev/null | head -n 1 || true)"
 [[ "$top" == "${SOURCE} (${VERSION})"* ]] || die "${CHANGELOG_FROM}'s .deb does not carry the ${VERSION} changelog entry (its newest entry: ${top:-none})"
 
-# --- 6. The flat repository ---------------------------------------------------
+# --- 7. The flat repository ---------------------------------------------------
 (cd "$STAGE" && dpkg-scanpackages -m . /dev/null 2>/dev/null) > "$STAGE/Packages"
 [[ -s "$STAGE/Packages" ]] || die "the Packages index is empty"
 {
@@ -294,6 +369,11 @@ grep -qE '^ [0-9a-f]{64} [0-9]+ Packages$' "$STAGE/Release" || die "the Release 
     echo "cves=${CVES}"
     echo "changelog_from=${CHANGELOG_FROM}"
     echo "binaries=$(printf '%s\n' "${BINARIES[@]}" | sort -u | paste -sd ' ')"
+    for p in "${PATCHES[@]}"; do
+        while IFS= read -r line; do
+            printf 'fingerprint=%s %s\n' "$(basename "$p")" "$(printf '%s' "$line" | base64 -w0)"
+        done <<< "${FINGERPRINT[$(basename "$p")]}"
+    done
 } > "$STAGE/FIXINFO"
 
 # A deterministic archive: names sorted, owner root, one timestamp.

@@ -173,10 +173,15 @@ $nodes = array(
 );
 $state = $look($recipe, $nodes);
 $inc = IncidentSourcePackageFixUbuntuNewer::from_state($state, $now);
-check(strpos($inc['title'] ?? '', 'retire the package fix for php8.5') !== false, 'both released: retire it', $inc['title'] ?? 'none');
-check(strpos($inc['detail']['Recipes'], '1 machine handed back, 1 holding at ours') !== false
-	&& strpos($inc['detail']['Recipes'], 'retiring the recipe releases them') !== false,
-	'with what the machines say, and that retiring releases the one whose changelog check disagrees', $inc['detail']['Recipes']);
+check(strpos($inc['title'] ?? '', 'rebuild the package fix for php8.5') !== false && strpos($inc['title'], 'retire') === false,
+	'both released by the tracker, but a machine read Ubuntu\'s build lacking one: rebuild, never retire (owner Q6)', $inc['title'] ?? 'none');
+check(strpos($inc['detail']['Recipes'], 'Ubuntu\'s 8.5.4-0ubuntu1.6 lacks CVE-2026-115560') !== false
+	&& strpos($inc['detail']['Recipes'], '1 machine handed back, 1 holding at ours') !== false,
+	'naming the CVE the machine found missing, and what the machines say', $inc['detail']['Recipes']);
+$state = $look($recipe, array($nodes[0]));
+$inc = IncidentSourcePackageFixUbuntuNewer::from_state($state, $now);
+check(strpos($inc['title'] ?? '', 'retire the package fix for php8.5') !== false, 'both released and no machine holding: retire it', $inc['title'] ?? 'none');
+check(strpos($inc['detail']['Recipes'], '1 machine handed back, 0 holding at ours.') !== false, 'with what the machines say', $inc['detail']['Recipes']);
 $cve_status['CVE-2026-115560'] = array('php8.5' => array('needs-triage', ''));
 $cve_status['CVE-2026-129289'] = array('php8.5' => array('needs-triage', ''));
 $state = $look($recipe, array($nodes[1]));
@@ -240,8 +245,8 @@ $open['php8.5'] = array();
 
 section('What is watched, and the task');
 
-$state = $look(array('curl' => array('source' => 'curl', 'version' => '8.18.0-1ubuntu2.8+joinery1', 'ubuntu_base' => '8.18.0-1ubuntu2.8', 'cves' => 'CVE-2026-9000')));
-check(array_keys($state['sources']) === array('apache2', 'curl', 'openssh', 'openssl', 'php8.5', 'postfix', 'postgresql-18'),
+$state = $look(array('libpng1.6' => array('source' => 'libpng1.6', 'version' => '1.6.50-1ubuntu1+joinery1', 'ubuntu_base' => '1.6.50-1ubuntu1', 'cves' => 'CVE-2026-9000')));
+check(array_keys($state['sources']) === array('apache2', 'curl', 'glibc', 'imagemagick', 'libpng1.6', 'libxml2', 'openssh', 'openssl', 'php8.5', 'postfix', 'postgresql-18'),
 	'every source the nodes run, and any with an active recipe', implode(',', array_keys($state['sources'])));
 $r = UpstreamFixWatch::run(array('tracker' => $tracker, 'drivers' => array($php), 'recipes' => array(), 'nodes' => array(), 'now' => $now, 'save' => false));
 check($r['status'] === 'success' && strpos($r['message'], 'CVEs to build ahead of Ubuntu') !== false, 'the task\'s run reports what it found', $r['message']);

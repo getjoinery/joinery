@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/fixes/**, maintenance_scripts/install_tools/install_package_fixes.sh]
  */
 /**
  * Package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md WP2):
@@ -156,7 +157,7 @@ $r = PackageFixPublisher::publish($site, null, $opts);
 $lines = PackageFixPublisher::readStamp($src);
 check($built === array() && array_keys($lines) === array('php8.5'), 'postfix at state=none: gone from ACTIVE, nothing built');
 
-section('A recipe Ubuntu has already covered is left out (Q2)');
+section('A recipe Ubuntu\'s tracker shows covered stays in: the machines judge by Ubuntu\'s source (Q6)');
 
 $ubuntu['php8.5']['CVE-2026-129289'] = array('released', '8.5.4-0ubuntu1.6');
 $built = array();
@@ -165,8 +166,8 @@ check(isset(PackageFixPublisher::readStamp($src)['php8.5']), 'one of its two CVE
 $ubuntu['php8.5']['CVE-2026-115560'] = array('released', '8.5.4-0ubuntu1.6');
 $said = array();
 $r = PackageFixPublisher::publish($site, function ($m) use (&$said) { $said[] = $m; }, $opts);
-check(PackageFixPublisher::readStamp($src) === array() && $built === array(), 'both released: left out of ACTIVE, nothing built');
-check(count(preg_grep('/php8\.5 left out - Ubuntu has released every CVE.*8\.5\.4-0ubuntu1\.6/', $said)) === 1, 'with a line saying so and naming Ubuntu\'s version', implode(' | ', $said));
+check(isset(PackageFixPublisher::readStamp($src)['php8.5']) && $built === array(), 'both released: still in ACTIVE, nothing rebuilt');
+check(count(preg_grep('/php8\.5 kept - Ubuntu\'s tracker shows every CVE it carries released.*8\.5\.4-0ubuntu1\.6/', $said)) === 1, 'with a line saying so and naming Ubuntu\'s version', implode(' | ', $said));
 $tracker_down = true;
 $r = PackageFixPublisher::publish($site, null, $opts);
 check(isset(PackageFixPublisher::readStamp($src)['php8.5']), 'the tracker cannot be read: the recipe stays in');

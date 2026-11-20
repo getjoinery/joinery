@@ -6,18 +6,21 @@
  * on this management node's own node, saying which of two things to do:
  *
  *   - retire the recipe: Ubuntu's tracker shows every CVE it carries released
- *     on 26.04. Machines whose changelog check agrees have handed it back
- *     already; setting the recipe to state=none and publishing releases any
- *     still holding (a "New upstream version" entry names no CVE, so a
- *     machine's check and the tracker can disagree, and the machine's check
- *     never lifts its pin on the tracker's word);
+ *     on 26.04 and no machine reports Ubuntu's build lacking one. Machines
+ *     hand it back by themselves, once Ubuntu's changelog names each CVE and
+ *     its source carries each patch's code; setting the recipe to state=none
+ *     and publishing removes it;
  *   - rebuild the recipe on Ubuntu's newer build: some of its CVEs are not in
- *     it, and machines hold at our build, missing whatever else Ubuntu fixed.
+ *     it, by the tracker or by a machine that read the build (its changelog
+ *     does not name one, or its source does not carry the fix: CVE-2026-129291
+ *     in php8.5 8.5.4-0ubuntu1.6, which the tracker shows released), and
+ *     machines hold at our build, missing whatever else Ubuntu fixed.
  *
  * Either way it shows what the machines report (handed back, or holding
  * because Ubuntu's build lacks a CVE). Clears when the recipe is retired or
  * rebuilt on the newest Ubuntu build.
  *
+ * @version 1.1 - a machine reporting Ubuntu's build lacking a CVE makes the recipe one to rebuild, never to retire (owner Q6)
  * @version 1.0
  */
 class IncidentSourcePackageFixUbuntuNewer implements IncidentSource {
@@ -53,8 +56,7 @@ class IncidentSourcePackageFixUbuntuNewer implements IncidentSource {
 			if ($r['action'] === 'retire') {
 				$retire[] = $r['source'];
 				$lines[] = $r['source'] . ': Ubuntu has released every CVE ours carries (' . implode(', ', array_unique(array_values($r['released']))) . '). '
-					. 'Set fixes/' . $r['source'] . '/RECIPE to state=none and publish; ' . $nodes
-					. ($r['holding'] > 0 ? '. The machines still holding read no CVE in Ubuntu\'s changelog; retiring the recipe releases them.' : '.');
+					. 'Set fixes/' . $r['source'] . '/RECIPE to state=none and publish; ' . $nodes . '.';
 			} else {
 				$rebuild[] = $r['source'];
 				$lines[] = $r['source'] . ': Ubuntu\'s ' . $r['newest'] . ' lacks ' . implode(', ', $r['missing']) . '. Rebuild the recipe on '
@@ -70,7 +72,7 @@ class IncidentSourcePackageFixUbuntuNewer implements IncidentSource {
 			'severity' => IncidentRecord::SEVERITY_WARNING,
 			'detail'   => array(
 				'Recipes' => implode("\n", $lines),
-				'Why'     => 'A machine lifts our pin only when Ubuntu\'s own changelog names every CVE the fix carries.',
+				'Why'     => 'A machine lifts our pin only when Ubuntu\'s own changelog names every CVE the fix carries and Ubuntu\'s source carries each patch\'s code.',
 			),
 		);
 	}

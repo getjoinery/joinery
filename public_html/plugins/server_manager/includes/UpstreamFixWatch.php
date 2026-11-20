@@ -25,6 +25,9 @@
  * A source the tracker could not be read for keeps its last answer, and says
  * since when.
  *
+ * @version 1.2 - curl, libxml2, glibc and imagemagick are watched too (owner Q4); a CVE a machine finds
+ *                missing from Ubuntu's newer build is missing whatever the tracker says, so the recipe is
+ *                to rebuild, never to retire (owner Q6)
  * @version 1.1 - reviewer2's build review: a driver's advisories that cannot be read keep its last good answer,
  *                and a CVE with no advisory is "not known", never "not fixed" (G4); a CVE raised stays raised
  *                past the 30 days until it is released or covered (G8); openssh is watched (G9)
@@ -40,7 +43,7 @@ class UpstreamFixWatch {
 	 * database, 2026-11-20): what a site serves with, and what a container
 	 * host's site containers' base holds.
 	 */
-	const WATCHED_SOURCES = array('php8.5', 'postgresql-18', 'apache2', 'postfix', 'openssl', 'openssh');
+	const WATCHED_SOURCES = array('php8.5', 'postgresql-18', 'apache2', 'postfix', 'openssl', 'openssh', 'curl', 'libxml2', 'glibc', 'imagemagick');
 
 	/** Q1: the ratings that get a recipe. Lower ones wait for Ubuntu. */
 	const BUILD_RATINGS = array('critical', 'high');
@@ -233,7 +236,16 @@ class UpstreamFixWatch {
 				foreach ($n['fixes'] ?? array() as $f) {
 					if ($f['source'] !== $source) { continue; }
 					if ($f['handed_back'] !== null) { $handed++; }
-					if ($f['ubuntu_lacks'] !== null) { $holding++; $lacks[$f['ubuntu_lacks']['version']] = true; }
+					if ($f['ubuntu_lacks'] !== null) {
+						$holding++;
+						$lacks[$f['ubuntu_lacks']['version']] = true;
+						// A machine read Ubuntu's build itself: a CVE it found missing
+						// (unnamed in the changelog, or its fix not in the source) is
+						// missing, whatever the tracker says (owner Q6).
+						foreach ((array)($f['ubuntu_lacks']['cves'] ?? array()) as $cve) {
+							if (is_string($cve) && !in_array($cve, $missing, true)) { $missing[] = $cve; }
+						}
+					}
 				}
 			}
 			// Only a build newer than the one the recipe is made on: a recipe

@@ -4,6 +4,9 @@
 # names, and gives each back to Ubuntu once Ubuntu's own build carries the same
 # fixes (specs/package_fixes_ahead_of_ubuntu.md WP3).
 #
+# Version: 1.2 - a fix is handed back only when Ubuntu's newer source carries every fingerprint of every
+#                patch, not only when its changelog names every CVE (owner Q6, reviewer2 H1): a
+#                changelog is Ubuntu's claim, the source is what it ships
 # Version: 1.1 - reviewer2's build review: the fixes' origin is allowed for automatic updates by a
 #                drop-in of this script's own (52joinery-package-fixes), which a container's base
 #                carries too (G1); apt busy is not apt refusing (G2); a machine on a newer Ubuntu build
@@ -48,9 +51,14 @@
 #       a version newer than the fix's Ubuntu base, that .deb is downloaded
 #       and its changelog read, the entries newer than the base. Every CVE of
 #       the fix named there (by id, or by number in a combined form such as
-#       CVE-2026-109618_109619): the pin is removed and Ubuntu's build
-#       installs (handed_back). Any missing: the pin stays (ubuntu_lacks). The
-#       verdict is kept per source and Ubuntu version, so a .deb is read once.
+#       CVE-2026-109618_109619), and every fingerprint of every patch (FIXINFO,
+#       written by fixes/build.sh) found in Ubuntu's source for that version
+#       (fetched by apt from the -security pocket, its signature checked: the
+#       packaging, and upstream's tarball when the upstream version moved):
+#       the pin is removed and Ubuntu's build installs (handed_back). Any CVE
+#       missing from either: the pin stays (ubuntu_lacks). A changelog or a
+#       source that cannot be read: the pin stays (unreadable). The verdict is
+#       kept per source and Ubuntu version, so each is read once.
 #   install_package_fixes.sh status
 #       Print the state host_report.sh reads.
 #   install_package_fixes.sh pinned [--base]
@@ -94,6 +102,8 @@ LOCAL_STATIC="$(cd "$HERE/../.." 2>/dev/null && pwd)/static_files/fixes"
 # (Dockerfile.base): a container host takes a fix for one of these though it
 # runs none of them itself. Never Postfix: the base holds none.
 BASE_SOURCES="php8.5 postgresql-18 apache2 openssl"
+# What a deb-src line for Ubuntu's archive is checked against.
+UBUNTU_KEYRING=/usr/share/keyrings/ubuntu-archive-keyring.gpg
 
 say() { echo "package fixes: $*"; }
 die() { echo "package fixes: $*" >&2; exit 1; }
@@ -287,11 +297,77 @@ ubuntu_newest() {  # BINARY
             done; echo "$best"; }
 }
 
+# The same normal form and units as fixes/build.sh picks a patch's fingerprint
+# with (the gate checks the two definitions match).
+normal_form() { sed -E '/^-/d; s/^[+ ]//; s/[[:space:]]+/ /g; s/^ //; s/ $//'; }
+units() { awk '{ print; if (NR > 2) print a "\036" b "\036" $0; a = b; b = $0 }'; }
+
+upstream_of() { local v="${1#*:}"; [[ "$v" == *-* ]] && v="${v%-*}"; echo "$v"; }  # VERSION
+
+# Every unit of Ubuntu's VERSION of SOURCE, as apt fetches it from the
+# -security pocket BINARY comes from, Ubuntu's signature checked, into FILE:
+# its packaging (the patches it adds), and upstream's tarball when the upstream
+# version is not BASE's. Uses private apt lists; the machine's own are untouched.
+ubuntu_source_units() {  # SOURCE BINARY BASE UBUNTU_VERSION FILE
+    local source="$1" bin="$2" base="$3" uver="$4" out="$5" repo uri suite comp dl f
+    repo="$(apt-cache madison "$bin" 2>/dev/null | awk -F'|' -v v="$uver" '{gsub(/ /, "", $2)} $2 == v {print $3}' \
+        | { grep -E -- '-security/' || true; } | head -n 1)"
+    read -r uri suite _ <<< "$repo" || true
+    [[ -n "${uri:-}" && "${suite:-}" == */* ]] || return 1
+    comp="${suite#*/}"; suite="${suite%%/*}"
+    dl="$(mktemp -d "${TROOT}/var/tmp/package-fix-source.XXXXXX")"
+    mkdir -p "$dl/lists/partial" "$dl/archives/partial" "$dl/get"
+    # apt fetches as _apt.
+    chmod 755 "$dl" "$dl/get"
+    echo "deb-src [signed-by=${UBUNTU_KEYRING}] ${uri} ${suite} ${comp}" > "$dl/sources.list"
+    local o=(-o Dir::Etc::sourcelist="$dl/sources.list" -o Dir::Etc::sourceparts=- -o Dir::State::Lists="$dl/lists"
+        -o Dir::Cache::Archives="$dl/archives" -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache=)
+    if ! apt-get update -qq "${o[@]}" > "$dl/log" 2>&1 || grep -q '^E: ' "$dl/log" \
+            || ! (cd "$dl/get" && apt-get source -qq --download-only "${o[@]}" "${source}=${uver}") >> "$dl/log" 2>&1 \
+            || ! ls "$dl/get"/*.dsc > /dev/null 2>&1; then
+        rm -rf "$dl"
+        return 1
+    fi
+    for f in "$dl/get"/*; do
+        case "$f" in
+            *.dsc|*.asc) ;;
+            *.debian.tar.*) tar -xOf "$f" ;;
+            *.diff.gz) gzip -dc "$f" ;;
+            *.tar.*) if [[ "$(upstream_of "$uver")" != "$(upstream_of "$base")" ]]; then tar -xOf "$f"; fi ;;
+        esac
+    done 2> /dev/null | normal_form | units > "$out" || true
+    rm -rf "$dl"
+    [[ -s "$out" ]]
+}
+
+# The fix's CVEs whose patch's fingerprint is not all in UNITS, comma-separated
+# in the fix's order: a patch's CVEs are those its file name holds, or every
+# CVE of the fix when it holds none of them. A build with no fingerprint
+# proves nothing, so lacks every CVE.
+missing_fix_text() {  # FIX_DIR UNITS CVES(comma)
+    local dir="$1" units="$2" cves="$3" pb b64 text n=0 miss="" c out=""
+    while read -r pb b64; do
+        n=$((n + 1))
+        text="$(printf '%s' "$b64" | base64 -d 2>/dev/null || true)"
+        if [[ -z "$text" ]] || ! grep -qxF -- "$text" "$units"; then
+            miss="${miss} $(grep -oE 'CVE-[0-9]{4}-[0-9]+' <<< "$pb" | paste -sd ' ' || true)"
+            [[ "$pb" =~ CVE-[0-9]{4}-[0-9]+ && ",${cves}," == *",${BASH_REMATCH[0]},"* ]] || miss="${miss} ${cves//,/ }"
+        fi
+    done < <(sed -n 's/^fingerprint=//p' "$dir/FIXINFO" 2>/dev/null)
+    [[ "$n" -gt 0 ]] || { echo "$cves"; return 0; }
+    for c in ${cves//,/ }; do
+        [[ " ${miss} " == *" ${c} "* ]] && out="${out:+$out,}$c"
+    done
+    echo "$out"
+}
+
 # The verdict on Ubuntu's VERSION of a fix's source: "covers", or "lacks CVE,CVE".
-verdict() {  # SOURCE BINARY BASE UBUNTU_VERSION CVES(comma)
-    local source="$1" bin="$2" base="$3" uver="$4" cves="$5" cache dl deb text missing="" cve
+verdict() {  # SOURCE BINARY BASE UBUNTU_VERSION CVES(comma) FIX_DIR
+    local source="$1" bin="$2" base="$3" uver="$4" cves="$5" fdir="$6" cache dl deb text missing="" cve key
     cache="${VERDICTS}/$(slug "$source")_$(slug "$uver")"
-    if [[ -f "$cache" ]] && [[ "$(sed -n 's/^cves=//p' "$cache")" == "$cves" ]]; then
+    # Kept while the fix's CVEs and fingerprints are the ones it was reached for.
+    key="${cves} $(sed -n 's/^fingerprint=//p' "$fdir/FIXINFO" 2>/dev/null | sha256sum | cut -c1-16)"
+    if [[ -f "$cache" ]] && [[ "$(sed -n 's/^key=//p' "$cache")" == "$key" ]]; then
         sed -n 's/^verdict=//p' "$cache"
         return 0
     fi
@@ -311,9 +387,19 @@ verdict() {  # SOURCE BINARY BASE UBUNTU_VERSION CVES(comma)
     for cve in ${cves//,/ }; do
         names_cve "$cve" <<< "$text" || missing="${missing:+$missing,}$cve"
     done
+    # Every CVE named: Ubuntu's source must also carry each patch's code.
+    if [[ -z "$missing" ]]; then
+        if ! ubuntu_source_units "$source" "$bin" "$base" "$uver" "$dl.units"; then
+            rm -f "$dl.units"
+            return 1
+        fi
+        missing="$(missing_fix_text "$fdir" "$dl.units" "$cves")"
+        rm -f "$dl.units"
+        [[ -z "$missing" ]] || echo "package fixes: ${source}: Ubuntu ${uver}'s changelog names every CVE ours carries, but its source lacks the fix for ${missing}" >&2
+    fi
     local v="covers"
     [[ -n "$missing" ]] && v="lacks ${missing}"
-    printf 'cves=%s\nverdict=%s\n' "$cves" "$v" > "$cache"
+    printf 'key=%s\nverdict=%s\n' "$key" "$v" > "$cache"
     echo "$v"
 }
 
@@ -395,7 +481,7 @@ while read -r source version base archive sha from cves; do
     done < <(installed_binaries "$source")
     if [[ "$ahead" != "-" ]]; then
         [[ -f "$(pin_path "$source")" ]] && rm -f "$(pin_path "$source")" && say "unpinned ${source}: ${ahead} is installed, newer than ours"
-        if v="$(verdict "$source" "$from" "$base" "$ahead" "$cves")"; then
+        if v="$(verdict "$source" "$from" "$base" "$ahead" "$cves" "$dir")"; then
             if [[ "$v" == covers ]]; then
                 row "$source" "$version" 0 "$ahead" - - 0 "$for_base" -
             else
@@ -411,16 +497,16 @@ while read -r source version base archive sha from cves; do
     # The hand-back.
     uver="$(ubuntu_newest "$from")"
     if [[ -n "$uver" ]] && dpkg --compare-versions "$uver" gt "$base"; then
-        if v="$(verdict "$source" "$from" "$base" "$uver" "$cves")"; then
+        if v="$(verdict "$source" "$from" "$base" "$uver" "$cves" "$dir")"; then
             if [[ "$v" == covers ]]; then
-                [[ -f "$(pin_path "$source")" ]] && rm -f "$(pin_path "$source")" && say "handed ${source} back to Ubuntu ${uver}: its changelog names every CVE ours carries"
+                [[ -f "$(pin_path "$source")" ]] && rm -f "$(pin_path "$source")" && say "handed ${source} back to Ubuntu ${uver}: its changelog names every CVE ours carries, and its source carries each fix"
                 row "$source" "$version" "$installed" "$uver" - - 0 "$for_base" -
                 continue
             fi
             lacks="${uver}:${v#lacks }"
         else
             unread="$uver"
-            say "WARNING - ${source}: could not read Ubuntu ${uver}'s changelog; ours stays"
+            say "WARNING - ${source}: could not read Ubuntu ${uver}'s changelog or source; ours stays"
         fi
     fi
     refused=0

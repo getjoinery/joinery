@@ -18,10 +18,12 @@
  *
  * Behaviour contract, per recipe, SiteEnginePublisher's shape:
  * - state=none, or no RECIPE: not in ACTIVE.
- * - Ubuntu's tracker shows every CVE the recipe names released on 26.04: left
- *   out of ACTIVE, with a line saying so (Q2: no second install, and no second
- *   container replacement, for a fix Ubuntu beat us to). A tracker that cannot
- *   be read leaves it in.
+ * - Ubuntu's tracker shows every CVE the recipe names released on 26.04: kept,
+ *   with a line saying so. The tracker is Ubuntu's claim; each machine hands
+ *   the fix back only when Ubuntu's source carries every patch's code (owner
+ *   Q6), and a machine whose Ubuntu build does never pins ours, so there is no
+ *   second install. The recipe is retired (state=none) by a person, once the
+ *   machines report it handed back (IncidentSourcePackageFixUbuntuNewer).
  * - ACTIVE records this recipe's hash and the archive is in static_files with
  *   its hash: nothing changes.
  * - Likewise, the archive gone from static_files but in the build cache with
@@ -44,6 +46,9 @@
  *
  * publish() never throws; it reports a status and the caller decides.
  *
+ * @version 1.2 - a recipe whose CVEs Ubuntu's tracker shows released stays in ACTIVE (owner Q6): the machines
+ *                decide from Ubuntu's source, and the tracker said released for CVE-2026-129291, which
+ *                Ubuntu's 8.5.4-0ubuntu1.6 does not carry
  * @version 1.1 - reviewer2's build review (G7): a recipe that changed is refused until its revision is bumped,
  *                since machines already on that version would keep the old bytes under the same number;
  *                build.sh is no longer part of a recipe's hash, so editing the build script rebuilds nothing
@@ -109,8 +114,8 @@ class PackageFixPublisher {
 				}
 				$covered = self::coveredByUbuntu($tracker, $source, $recipe['cves']);
 				if ($covered !== null) {
-					$say('Package fixes: ' . $source . ' left out - Ubuntu has released every CVE it carries on 26.04 (' . $covered . '); set its RECIPE to state=none');
-					continue;
+					$say('Package fixes: ' . $source . ' kept - Ubuntu\'s tracker shows every CVE it carries released on 26.04 (' . $covered . '); '
+						. 'machines hand it back once that build\'s source carries each fix, then set its RECIPE to state=none');
 				}
 				$recipe_hash = self::recipeHash($src, $source);
 				$have = $recorded[$source] ?? null;

@@ -1,0 +1,14 @@
+# Package fix recipe for php8.5 (see ../build.sh for the format).
+# CVE-2026-129291 (PHP 8.5.13, rated high: an FPM worker's stdio pipe closed twice), on
+# Ubuntu's 8.5.4-0ubuntu1.6. Ubuntu's changelog and tracker call it fixed in 1.6, but 1.6
+# carries no fix for it: its fpm_children.c is 8.5.4's. Every other fix of 8.5.13 rated
+# critical or high is in 1.6. The patch is upstream's commit, its NEWS entry left out.
+# Our own pools set catch_workers_output off, which keeps the bug from reaching them.
+state=active
+ubuntu_source=php8.5 8.5.4-0ubuntu1.6
+dsc_sha256=04ced2ff478372b0cf0b7f9fee3ed0bf16b72f283e957c7f9bca30c77ae36d32
+revision=1
+cves=CVE-2026-129291
+changelog_from=php8.5-common
+date=2026-11-20
+test=default

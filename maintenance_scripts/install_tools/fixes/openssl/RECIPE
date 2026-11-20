@@ -1,0 +1,14 @@
+# Package fix recipe for openssl (see ../build.sh for the format).
+# OpenSSL's fixes of 4-16 November 2026 on Ubuntu's 3.5.5-1ubuntu3.7, which every node
+# runs; Ubuntu had not shipped them on 26.04 by 2026-11-20 (all needs-triage). NVD rates
+# each high; OpenSSL's own advisories (secadv 20261110, 20261117) rate them Low. The
+# highest rating counts (owner, 2026-11-20).
+# Each patch is OpenSSL's upstream commit, applying with no fuzz.
+state=active
+ubuntu_source=openssl 3.5.5-1ubuntu3.7
+dsc_sha256=862f069310a08da930cf309d6a3bf603124eef15a71a7d13a15223dc75da7e6e
+revision=1
+cves=CVE-2026-88823 CVE-2026-107496 CVE-2026-95692 CVE-2026-95691 CVE-2026-107493 CVE-2026-124709
+changelog_from=libssl3t64
+date=2026-11-20
+test=default
