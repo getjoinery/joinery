@@ -4,6 +4,8 @@
 # names, and gives each back to Ubuntu once Ubuntu's own build carries the same
 # fixes (specs/package_fixes_ahead_of_ubuntu.md WP3).
 #
+# Version: 1.3 - an archive is fetched first from the site's own upgrade server (its upgrade_source
+#                setting): a box installed from dev with no agent asked only getjoinery.com (B19)
 # Version: 1.2 - a fix is handed back only when Ubuntu's newer source carries every fingerprint of every
 #                patch, not only when its changelog names every CVE (owner Q6, reviewer2 H1): a
 #                changelog is Ubuntu's claim, the source is what it ships
@@ -177,16 +179,39 @@ is_container_host() {
     [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]] || command -v docker > /dev/null 2>&1
 }
 
+# The upgrade server of the site this copy belongs to (its upgrade_source
+# setting): the release, ACTIVE with it, came from there, so its archives are
+# there. Empty on a machine with no site (a container host's bundle copy) or
+# when the database cannot be read.
+site_upgrade_source() {
+    local site config name user pass value
+    # The gate's fixture root names it; it never reads a real site's database.
+    if [[ -n "$TROOT" ]]; then
+        printf '%s' "${PACKAGE_FIXES_UPGRADE_SOURCE:-}"; return 0
+    fi
+    site="$(cd "$HERE/../.." 2>/dev/null && pwd)" || return 0
+    config="$site/config/Globalvars_site.php"
+    [[ -f "$config" && -f "$HERE/_config_value.php" ]] && command -v php > /dev/null && command -v psql > /dev/null || return 0
+    name="$(php "$HERE/_config_value.php" "$config" dbname 2>/dev/null)"
+    user="$(php "$HERE/_config_value.php" "$config" dbusername 2>/dev/null)"
+    pass="$(php "$HERE/_config_value.php" "$config" dbpassword 2>/dev/null)"
+    [[ -n "$name" && -n "$user" ]] || return 0
+    value="$(PGPASSWORD="$pass" PGCONNECT_TIMEOUT=10 psql -h localhost -U "$user" -d "$name" -tAX \
+        -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'upgrade_source'" 2>/dev/null | tr -d '[:space:]')"
+    [[ "$value" =~ ^https://[^/[:space:]]+/?$ ]] && printf '%s' "${value%/}"
+    return 0
+}
+
 # Where an archive is fetched from, in order: SERVER alone when named;
-# otherwise the management node this machine's agent joined, then
-# UPGRADE_SERVER or getjoinery.com.
+# otherwise the site's upgrade server, the management node this machine's
+# agent joined, then UPGRADE_SERVER or getjoinery.com, each once.
 fix_servers() {  # [SERVER]
     if [[ -n "${1:-}" ]]; then printf '%s\n' "$1"; return 0; fi
-    local plane fallback="${UPGRADE_SERVER:-https://getjoinery.com}"
+    local plane upgrade fallback="${UPGRADE_SERVER:-https://getjoinery.com}"
+    upgrade="$(site_upgrade_source)"
     plane="$(sed -n 's|^[[:space:]]*"plane_url":[[:space:]]*"\(https://[^"/[:space:]]*\)/\{0,1\}"[[:space:]]*,\{0,1\}[[:space:]]*$|\1|p' \
         "${TROOT}/etc/joinery-agent/node_identity.json" 2>/dev/null | head -1)"
-    [[ -n "$plane" && "$plane" != "${fallback%/}" ]] && printf '%s\n' "$plane"
-    printf '%s\n' "$fallback"
+    printf '%s\n' "$upgrade" "$plane" "${fallback%/}" | awk 'NF && !seen[$0]++'
 }
 
 # Fetch, check and unpack one archive into its directory. Echoes nothing;

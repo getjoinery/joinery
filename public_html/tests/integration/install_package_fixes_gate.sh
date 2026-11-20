@@ -189,6 +189,17 @@ printf 'jfa jfa 1.0-0ubuntu1+joinery1\njfb jfb 2.0-1ubuntu2\n' > "$STUB/dpkg"
 run converge "$SERVER" > /dev/null
 chk "state: jfa installed" "$(st jfa 3)" "1"
 
+echo "No server named: the site's upgrade server first (B19)"
+rm -rf "$LIB/jfb" "$LISTS"/joinery-fix-jfb-* "$PREF/joinery-fix-jfb.pref"
+mkdir -p "$R/etc/joinery-agent"
+printf '{\n  "plane_url": "https://plane.invalid",\n  "node_id": 1\n}\n' > "$R/etc/joinery-agent/node_identity.json"
+chk "converge succeeds" "$(PACKAGE_FIXES_UPGRADE_SOURCE="$SERVER" UPGRADE_SERVER=file:///nonexistent run converge)" "0"
+chk "the fix came from the site's upgrade server, before the agent's plane" "$(grep -c "placed jfb 2.0-1ubuntu2+joinery1 (from ${SERVER})" "$T/out")" "1"
+rm -rf "$LIB/jfb" "$LISTS"/joinery-fix-jfb-* "$PREF/joinery-fix-jfb.pref"
+chk "with no upgrade server known, the plane and the fallback are asked, and fail here" "$(PACKAGE_FIXES_UPGRADE_SOURCE= UPGRADE_SERVER=file:///nonexistent run converge | tr -d "\n"; grep -c "jfb: could not fetch" "$T/out")" "01"
+rm -f "$R/etc/joinery-agent/node_identity.json"
+run converge "$SERVER" > /dev/null
+
 echo "An archive that is not ACTIVE's"
 printf '%s\n' "$header" "$LA" "$(sed "s/sha256=[0-9a-f]*/sha256=$(printf 'd%.0s' $(seq 64))/" <<< "$LB")" > "$ACTIVE"
 rm -rf "$LIB/jfb" "$LISTS"/joinery-fix-jfb-* "$PREF/joinery-fix-jfb.pref"
