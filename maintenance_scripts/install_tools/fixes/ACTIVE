@@ -1,2 +1,4 @@
 # Written by the publish (PackageFixPublisher): the package fixes this tree's machines take,
 # published beside the release under static_files/fixes/. Do not edit.
+source=openssl version=3.5.5-1ubuntu3.7+joinery1 ubuntu_base=3.5.5-1ubuntu3.7 archive=joinery-fix-openssl-3.5.5-1ubuntu3.7+joinery1-amd64.tar.xz sha256=96107669c70480e277867aad2927002808985e2d12f9076d15e216b37b012e1e recipe_sha256=ee36add2c0472686853582e116cc550276fc40dc8c5c0f3362fc2e506d043177 changelog_from=libssl3t64 cves=CVE-2026-88823 CVE-2026-107496 CVE-2026-95692 CVE-2026-95691 CVE-2026-107493 CVE-2026-124709
+source=php8.5 version=8.5.4-0ubuntu1.6+joinery1 ubuntu_base=8.5.4-0ubuntu1.6 archive=joinery-fix-php8.5-8.5.4-0ubuntu1.6+joinery1-amd64.tar.xz sha256=4232f1e6b6bba0a37dd235abbfc5f028107cdcebf5c744aa370bffad333dd635 recipe_sha256=2e70c231872b1004aed222ec09774ce37a2960f401be8abaa2d9fa1b043fe630 changelog_from=php8.5-common cves=CVE-2026-129291
