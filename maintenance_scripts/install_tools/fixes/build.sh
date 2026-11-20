@@ -4,6 +4,8 @@
 # plus upstream's security patches, as every binary package that source makes
 # (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.3 - test_skip: a recipe may leave out test folders of a part no node uses (php's
+#                MySQL tests each wait out a 60-second timeout: about 50 minutes a build)
 # Version: 1.2 - each patch's fingerprint (owner Q6, reviewer2 H1): a few of its added code lines found
 #                nowhere in Ubuntu's base source, written into FIXINFO; a machine hands a fix back only
 #                when Ubuntu's newer source carries every one
@@ -40,6 +42,12 @@
 #                                         dpkg-buildpackage runs it; a command
 #                                         instead runs in the built source tree
 #                                         and must exit 0
+#                 test_skip=<dir ...>     optional: test folders of the source
+#                                         (paths ending in /tests) removed
+#                                         before the build, so the package's own
+#                                         suite leaves them out: tests of a part
+#                                         no node uses that hang without a
+#                                         server (php's MySQL tests)
 #   patches/    NNNN-CVE-YYYY-N.patch, one per fix, each applying with -p1.
 #               Each carries, above the diff, a line
 #                 Origin: <upstream fix commit URL>
@@ -115,6 +123,7 @@ CVES="$(recipe_value cves)"
 CHANGELOG_FROM="$(recipe_value changelog_from)"
 RECIPE_DATE="$(recipe_value date)"
 TEST_CMD="$(recipe_value test)"
+TEST_SKIP="$(recipe_value test_skip)"
 [[ -n "${SOURCE:-}" && -n "${BASE_VERSION:-}" && -z "${EXTRA:-}" ]] || die "ubuntu_source must be '<source> <version>'"
 [[ "$SOURCE" =~ ^[a-z0-9][a-z0-9.+-]+$ ]] || die "'${SOURCE}' is not a source package name"
 [[ "$(basename "$RECIPE_DIR")" == "$SOURCE" ]] || die "the recipe for ${SOURCE} sits in $(basename "$RECIPE_DIR")/, not ${SOURCE}/"
@@ -129,6 +138,9 @@ done
 [[ "$RECIPE_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && date -u -d "$RECIPE_DATE" > /dev/null 2>&1 \
     || die "date must be YYYY-MM-DD"
 [[ -n "$TEST_CMD" ]] || TEST_CMD=default
+for d in $TEST_SKIP; do
+    [[ "$d" =~ ^[A-Za-z0-9_][A-Za-z0-9_./+-]*/tests$ && "$d" != *..* ]] || die "test_skip: '${d}' is not a source path ending in /tests"
+done
 
 VERSION="${BASE_VERSION}+joinery${REVISION}"
 dpkg --compare-versions "$VERSION" gt "$BASE_VERSION" || die "${VERSION} does not sort above ${BASE_VERSION}"
@@ -262,6 +274,13 @@ done
 # dpkg-source unapplies after the build what it applied before it; the patched
 # tree is what the tests below read, so the patches stay applied.
 rm -f "$SRC/.pc/.dpkg-source-unapply"
+# The recipe's test_skip folders go, after the patches so none is left half
+# patched; the package's own suite then has nothing of theirs to run.
+for d in $TEST_SKIP; do
+    [[ -d "$SRC/$d" ]] || die "test_skip: ${SOURCE} ${BASE_VERSION} has no ${d}/"
+    rm -rf "${SRC:?}/$d"
+    say "left out the tests in ${d}/ (test_skip)"
+done
 
 # --- 4. The changelog entry ---------------------------------------------------
 {

@@ -12,3 +12,6 @@ cves=CVE-2026-129291
 changelog_from=php8.5-common
 date=2026-11-20
 test=default
+# PHP's MySQL tests are left out: no node uses MySQL, and in Ubuntu's test run each of
+# mysqli's fake-server tests waits out a 60-second timeout (about 50 minutes a build).
+test_skip=ext/mysqli/tests ext/pdo_mysql/tests

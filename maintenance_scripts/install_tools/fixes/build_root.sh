@@ -3,6 +3,10 @@
 # build_root.sh - the Ubuntu 26.04 build root the publishing machine builds
 # package fixes in (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.2 - a build never holds the build lock past its end: the build runs without the lock's
+#                descriptor, and whatever it left running inside its root is stopped when it ends
+#                (php's curl tests left an openssl s_server that kept the lock and refused the next
+#                publish)
 # Version: 1.1 - each build runs in a throwaway overlay of the root, so one build's dependencies are
 #                never in the next (reviewer2 G12): the root itself is only brought up to date
 # Version: 1.0
@@ -69,8 +73,24 @@ is_root_ready() {
 # The root a run's mounts and chroot act on: ROOT itself, or a build's overlay of it.
 TARGET="$ROOT"
 MOUNTED=()
+# Every process whose root is the build's: a test suite's server left running
+# would keep the overlay busy, and the next build waiting.
+stop_leftovers() {
+    local p r n
+    [[ -n "${TARGET:-}" && "$TARGET" != "/" ]] || return 0
+    for n in 1 2 3; do
+        r=0
+        for p in /proc/[0-9]*; do
+            [[ "$(readlink "$p/root" 2>/dev/null)" == "$TARGET" ]] || continue
+            kill -KILL "${p#/proc/}" 2>/dev/null && r=1
+        done
+        [[ "$r" -eq 1 ]] || return 0
+        sleep 1
+    done
+}
 unmount_all() {
     local i
+    stop_leftovers
     for (( i=${#MOUNTED[@]}-1; i>=0; i-- )); do
         umount -l "${MOUNTED[$i]}" 2>/dev/null || true
     done
@@ -169,7 +189,9 @@ build() {  # RECIPE_DIR OUT_DIR
     mkdir -p "$TARGET/root/fixes"
     cp "$HERE/build.sh" "$TARGET/root/fixes/"
     cp -r "$recipe" "$TARGET/root/fixes/$source"
-    in_root bash /root/fixes/build.sh "/root/fixes/$source" /root/fix-out
+    # Without the lock's descriptor: nothing the build starts can hold the lock.
+    in_root bash /root/fixes/build.sh "/root/fixes/$source" /root/fix-out 9>&-
+    stop_leftovers
     built="$(ls "$TARGET/root/fix-out/"*.tar.xz 2>/dev/null | head -n 1)"
     [[ -n "$built" && -f "$built.sha256" ]] || die "build.sh left no archive"
     cp -f "$built" "$built.sha256" "$out/"

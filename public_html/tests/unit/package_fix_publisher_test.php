@@ -121,6 +121,24 @@ unlink($cache . '/' . $name);
 $r = PackageFixPublisher::publish($site, null, $opts);
 check($built === array('php8.5') && is_file($published($name)), 'gone from both: built again');
 
+section('A publish refused after its builds: the next one takes them from the cache');
+
+// The refused publish put ACTIVE back; the archive it built stays in the cache.
+$built = array();
+$kept = $active();
+file_put_contents($src . '/' . PackageFixPublisher::STAMP_FILE, '');
+unlink($published($name));
+check(trim((string)@file_get_contents($cache . '/' . $name . '.recipe')) === PackageFixPublisher::recipeHash($src, 'php8.5'),
+	'the cache records the recipe hash each archive was built from');
+$said = array();
+$r = PackageFixPublisher::publish($site, function ($m) use (&$said) { $said[] = $m; }, $opts);
+check($built === array() && is_file($published($name)) && $active() === $kept, 'no build: the cached archive is published and ACTIVE names it again', implode(' | ', $said));
+check(count(preg_grep('/taken from the build cache/', $said)) === 1, 'it says the archive came from the build cache');
+file_put_contents($src . '/' . PackageFixPublisher::STAMP_FILE, '');
+file_put_contents($cache . '/' . $name . '.recipe', str_repeat('0', 64) . "\n");
+$r = PackageFixPublisher::publish($site, null, $opts);
+check($built === array('php8.5'), 'a cached archive of other recipe files is not taken: built again');
+
 section('A changed recipe is built again, and only it');
 
 $built = array();
@@ -192,7 +210,8 @@ section('A recipe that is not whole refuses');
 foreach (array("state=active\nubuntu_source=php8.5\n" => 'no version', "state=maybe\n" => 'an unknown state',
 	"state=active\nubuntu_source=php8.5 8.5.4-0ubuntu1.5\nrevision=1\ncves=CVE-26-1\nchangelog_from=php8.5-common\n" => 'a bad CVE id',
 	"state=active\nubuntu_source=php8.4 8.4.1-1\nrevision=1\ncves=CVE-2026-1000\nchangelog_from=php8.4-common\n" => 'another source\'s name') as $text => $label) {
-	file_put_contents($src . '/openssl/RECIPE', $text) || (@mkdir($src . '/openssl') && file_put_contents($src . '/openssl/RECIPE', $text));
+	is_dir($src . '/openssl') || mkdir($src . '/openssl');
+	file_put_contents($src . '/openssl/RECIPE', $text);
 	$r = PackageFixPublisher::publish($site, null, $opts);
 	check($r['status'] === PackageFixPublisher::STATUS_FAILED, $label . ': failed', $r['message']);
 }

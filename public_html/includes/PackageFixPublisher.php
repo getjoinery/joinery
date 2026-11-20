@@ -31,6 +31,9 @@
  * - ACTIVE records this version built from other recipe files: refused until
  *   the recipe's revision is bumped. Machines already on that version would
  *   keep the old binaries under the same number.
+ * - The build cache holds this version built from these recipe files (a
+ *   publish that built it and then stopped, such as one refused because
+ *   origin moved): reused, not built again.
  * - Otherwise a build is owed: built in the root into the cache, copied to
  *   static_files, its line rewritten.
  * - Owed and not done: STATUS_FAILED, and publish_upgrade.php refuses the
@@ -43,6 +46,8 @@
  * the origin's, so it fetches each archive ACTIVE names from its upstream (the
  * upgrade_source setting), keeps it only when the hash is ACTIVE's, and serves
  * it from its own static_files/fixes/.
+ * @version 1.3 - a build the cache holds for this version and these recipe files is reused: a publish refused
+ *                after its builds (origin moved) no longer costs the next one the same hours again
  *
  * publish() never throws; it reports a status and the caller decides.
  *
@@ -136,6 +141,12 @@ class PackageFixPublisher {
 				if ($have !== null && $have['version'] === $recipe['version'] && $have['recipe_sha256'] !== $recipe_hash) {
 					throw new Exception($source . '/RECIPE changed since ' . $recipe['version'] . ' was published; bump its revision, so machines that have '
 						. $recipe['version'] . ' take the new build');
+				}
+				$reused = self::cachedBuild($cache_dir, $static_dir, $source, $recipe, $recipe_hash);
+				if ($reused !== null) {
+					$say('Package fixes: ' . $reused['archive'] . ' was built from this recipe by an earlier publish - taken from the build cache');
+					$lines[$source] = $reused;
+					continue;
 				}
 				$say('Package fixes: building ' . $source . ' ' . $recipe['version'] . ' ('
 					. ($have === null ? 'new recipe' : ($have['recipe_sha256'] !== $recipe_hash ? 'its recipe changed' : 'the recorded archive is gone'))
@@ -255,12 +266,39 @@ class PackageFixPublisher {
 			if (!rename($build_dir . '/' . $name . '.sha256', $archive . '.sha256') || !rename($build_dir . '/' . $name, $archive)) {
 				throw new Exception('cannot move ' . $name . ' into the build cache');
 			}
+			// The recipe files it was built from, so a later publish can take it.
+			if (@file_put_contents($archive . '.recipe', $recipe_hash . "\n") === false) {
+				throw new Exception('cannot record the recipe hash of ' . $name . ' in the build cache');
+			}
 		} finally {
 			exec('rm -rf ' . escapeshellarg($build_dir));
 		}
 		self::place($archive, $static_dir, $name);
 		return array('source' => $source, 'version' => $recipe['version'], 'ubuntu_base' => $recipe['ubuntu_base'], 'archive' => $name,
 			'sha256' => $sha, 'recipe_sha256' => $recipe_hash, 'changelog_from' => $recipe['changelog_from'], 'cves' => $recipe['cves']);
+	}
+
+	/**
+	 * This version of the recipe as an earlier build left it in the cache,
+	 * built from these very recipe files, placed in static_files; its ACTIVE
+	 * line. Null when there is none, or it does not match its own SHA-256.
+	 */
+	protected static function cachedBuild($cache_dir, $static_dir, $source, array $recipe, $recipe_hash) {
+		$prefix = 'joinery-fix-' . $source . '-' . preg_replace('/^\d+:/', '', $recipe['version']) . '-';
+		foreach (glob(rtrim($cache_dir, '/') . '/' . $prefix . '*.tar.xz') ?: array() as $archive) {
+			$name = basename($archive);
+			if (!preg_match(self::ARCHIVE_PATTERN, $name) || trim((string)@file_get_contents($archive . '.recipe')) !== $recipe_hash) {
+				continue;
+			}
+			$sha = self::readSidecar($archive);
+			if ($sha === null || !self::fileHas($archive, $sha)) {
+				continue;
+			}
+			self::place($archive, $static_dir, $name);
+			return array('source' => $source, 'version' => $recipe['version'], 'ubuntu_base' => $recipe['ubuntu_base'], 'archive' => $name,
+				'sha256' => $sha, 'recipe_sha256' => $recipe_hash, 'changelog_from' => $recipe['changelog_from'], 'cves' => $recipe['cves']);
+		}
+		return null;
 	}
 
 	/**
