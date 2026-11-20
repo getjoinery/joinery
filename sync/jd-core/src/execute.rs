@@ -8119,10 +8119,17 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 path.display(),
             )));
         }
-    } else if op.entity.entity_type == EntityType::File && !its_agreed_file_is_here(env, &entry, &path)? {
-        // Where the disk cannot say which file is the record's own, the bytes
-        // say it, as the download's last gate reads them: on a disk without
-        // births the path's word trashed the file the swap had put there.
+    }
+    // And the file must still hold what both sides agreed. Where the disk
+    // cannot say which file is the record's own, the bytes say it, as the
+    // download's last gate reads them: on a disk without births the path's
+    // word trashed the file a swap had put there. Where it can, its own file
+    // by identity is not enough either: the user can edit it in place after
+    // the look this trash was decided on -- a trash queued in a pass that
+    // died before running it, then run in the next, after the edit. An edit
+    // beats a delete, and one nobody else has seen exists only here; it
+    // stands down, and the next look meets the edit (killplat 81365).
+    if op.entity.entity_type == EntityType::File && !its_agreed_file_is_here(env, &entry, &path)? {
         return Ok(OpOutcome::Overtaken(format!(
             "{} is not the file the server deleted; deciding again from what is there now",
             path.display(),

@@ -8624,3 +8624,22 @@ fn frozen_a_trash_that_stands_down_for_a_folder_moved_in_keeps_its_park_seed() {
         Names::Ordinary,
     );
 }
+
+/// killplat-mac-pc 81365: the Mac trashes a folder; the PC queues the trash of
+/// a file in it and dies before running it, and the user edits that file in
+/// place before the PC comes back. The trash ran on the file's identity alone
+/// and took the edit, which nobody else had seen.
+#[test]
+fn frozen_a_queued_trash_never_takes_an_edit_made_after_it_seed() {
+    never_fires(&["no_edit_lost_to_an_act_that_never_saw_it"], || {
+        workload_core(
+            81_365,
+            40,
+            &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+            false,
+            Vault::None,
+            true,
+            Names::Ordinary,
+        );
+    });
+}

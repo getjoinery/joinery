@@ -28568,3 +28568,82 @@ fn a_peers_move_onto_a_name_a_file_with_the_same_bytes_just_took_here_keeps_both
     assert_eq!(live, 2, "both files stand on the server: {:?}", files.iter().map(|f| (f.id, f.name.clone(), f.trashed)).collect::<Vec<_>>());
     assert_invariants(&world, &committed);
 }
+
+#[test]
+fn a_file_edited_here_after_its_trash_was_queued_is_not_trashed() {
+    // The Mac deletes a file. The laptop learns of it and queues the trash of
+    // its copy, and dies before running it. Before the laptop comes back, the
+    // user edits that file in place here -- the same file, new bytes. The
+    // queued trash must not take the edit: an edit beats a delete, and one
+    // nobody else has seen exists only here.
+    let mut staged = None;
+    for die_after in 0..12 {
+        let world = World::new(9_858, &["laptop", "mac"]);
+        let laptop = world.device("laptop");
+        let mac = world.device("mac");
+        laptop.fs.user_write("notes.txt", b"before");
+        laptop.fs.user_write("other.txt", b"other before");
+        assert!(world.settle().is_some());
+        mac.fs.user_remove("notes.txt");
+        mac.fs.user_write("other.txt", b"other edited on the mac, so the laptop has a download to make");
+        world.pass(mac);
+        laptop.net.arm_death(die_after);
+        world.pass(laptop);
+        laptop.net.set_faults(NetFaults::none());
+        let queued = laptop.store.queued_ops().unwrap().into_iter().any(|o| o.kind == "trash_local");
+        if queued && laptop.fs.exists("notes.txt") {
+            staged = Some(world);
+            break;
+        }
+    }
+    let world = staged.expect("some call leaves the trash queued");
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    laptop.fs.user_write("notes.txt", b"edited after the delete, seen by nobody");
+    committed.note("notes.txt", b"edited after the delete, seen by nobody");
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "it settles");
+    let want = jd_sim::sha256_hex(b"edited after the delete, seen by nobody");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == want).map(|f| f.name).collect();
+    assert!(!live.is_empty(), "the edit reaches the server, live: {:?}", world.server.files().iter().map(|f| (f.name.clone(), f.trashed)).collect::<Vec<_>>());
+    assert_invariants(&world, &committed);
+}
+
+#[test]
+fn a_file_edited_here_inside_a_folder_whose_trash_was_queued_is_not_trashed() {
+    // The same, one level down: the Mac deletes the folder the file is in,
+    // the laptop dies with the trash queued, and the user edits the file
+    // inside it in place before the laptop comes back. The edit survives the
+    // folder's delete, on the server and here.
+    let mut staged = None;
+    for die_after in 0..14 {
+        let world = World::new(9_859, &["laptop", "mac"]);
+        let laptop = world.device("laptop");
+        let mac = world.device("mac");
+        laptop.fs.user_write("Dir/notes.txt", b"before");
+        laptop.fs.user_write("other.txt", b"other before");
+        assert!(world.settle().is_some());
+        mac.fs.user_remove("Dir");
+        mac.fs.user_write("other.txt", b"other edited on the mac, so the laptop has a download to make");
+        world.pass(mac);
+        laptop.net.arm_death(die_after);
+        world.pass(laptop);
+        laptop.net.set_faults(NetFaults::none());
+        let queued = laptop.store.queued_ops().unwrap().into_iter().any(|o| o.kind == "trash_local");
+        if queued && laptop.fs.exists("Dir/notes.txt") {
+            staged = Some(world);
+            break;
+        }
+    }
+    let world = staged.expect("some call leaves the trash queued");
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+    laptop.fs.user_write("Dir/notes.txt", b"edited after the delete, seen by nobody");
+    committed.note("Dir/notes.txt", b"edited after the delete, seen by nobody");
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "it settles");
+    let want = jd_sim::sha256_hex(b"edited after the delete, seen by nobody");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == want).map(|f| f.name).collect();
+    assert!(!live.is_empty(), "the edit reaches the server, live: {:?}", world.server.files().iter().map(|f| (f.name.clone(), f.trashed)).collect::<Vec<_>>());
+    assert!(disk_tree(laptop).values().any(|h| h.as_deref() == Some(want.as_str())), "and stands here: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+}
