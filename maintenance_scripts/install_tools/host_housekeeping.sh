@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.43 - the hourly security check is installed on a developer's box too (security_check.sh 1.4 trusts the
+#                recorded tree owner, as the converger does); a refusal there is said, not counted
 # Version: 1.42 - Package fixes ahead of Ubuntu (section 6): install_package_fixes.sh converge runs on every
 #                machine, a developer's box included
 # Version: 1.41 - The PHP-FPM pool drop-in sets rlimit_core = 0, so a crashing worker never writes its memory
@@ -1280,9 +1282,12 @@ fi
 # A developer's box is the one machine whose tree is deliberately not root's
 # alone: its root-written config/tree_owner (fix_permissions.sh) names a
 # developer's account, and the tree is that account's. The publishing box is
-# one, and so is a workstation that serves the working tree. The check is not
-# installed there, and that is said, not counted as a failure: failing every
-# run hid every other failure on the box (B24, and localdev on 2026-10-29).
+# one, and so is a workstation that serves the working tree. The check is
+# installed there too: it trusts the recorded owner, as the converger does for
+# every installer it already runs there as root. Where the tree is not its
+# record's alone it is refused, and that is said, not counted as a failure:
+# failing every run hid every other failure on the box (B24, and localdev on
+# 2026-10-29).
 # Anywhere else a tree that is not root's alone still fails: a node's record
 # names root, a site on a host that refuses unsigned code has a root-owned
 # tree whatever the record says, and a tree that drifted from its record is
@@ -1316,7 +1321,15 @@ sck_developer_tree() {
     [[ "$(stat -L -c %U "$(dirname "${SCK}")" 2>/dev/null)" == "${owner}" ]]
 }
 if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]] && sck_developer_tree; then
-    say "the hourly security check is not installed: this is a developer's box, whose tree is $(stat -L -c %U "$(dirname "${SCK}")" 2>/dev/null)'s by its record, and a root timer will not run from it"
+    # The check trusts the tree's recorded owner, as the converger does for
+    # every installer it runs here as root (security_check.sh 1.4), so it is
+    # installed. A tree that is not its record's alone is still refused, and
+    # that is said, not counted.
+    if SCK_OUT="$(bash "${SCK}" install 2>&1)"; then
+        printf '%s\n' "${SCK_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
+    else
+        say "the hourly security check is not installed on this developer's box: $(printf '%s' "${SCK_OUT}" | tail -1)"
+    fi
 elif [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
     if SCK_OUT="$(bash "${SCK}" install 2>&1)"; then
         printf '%s\n' "${SCK_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'

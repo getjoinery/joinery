@@ -164,9 +164,11 @@ chk "a second install: current, nothing reloaded" "$(bash "$TS" install)|$(grep 
 for f in install_tools/site_refresh.sh sysadmin_tools/install_security_updates.sh; do
     chmod g+w "$T/tree/$f"; touch "$STUB/timer_on"; : > "$STUB/systemctl"
     chk "a script it runs ($f) that another account can write: refused, and a timer already on is stopped" \
-        "$(bash "$TS" install 2>&1 | grep -c "not root's alone")|$(grep -c 'disable --now joinery-security-check.timer' "$STUB/systemctl")" "1|1"
+        "$(bash "$TS" install 2>&1 | grep -c "'s alone (owner")|$(grep -c 'disable --now joinery-security-check.timer' "$STUB/systemctl")" "1|1"
     chmod g-w "$T/tree/$f"
 done
+chk "outside a test, the owner is the one the host converger trusts (_tree_trust.sh), as for every installer" \
+    "$(grep -c 'joinery_tree_owner_record' "$ROOT/maintenance_scripts/sysadmin_tools/security_check.sh")|$(grep -c 'joinery_tree_owner_record' "$ROOT/maintenance_scripts/install_tools/site_refresh.sh")" "1|1"
 chk "an argument it does not know: refused" "$(bash "$TS" now > /dev/null 2>&1; echo $?)" "2"
 
 echo "RESULT: ${passed} passed, ${failed} failed"

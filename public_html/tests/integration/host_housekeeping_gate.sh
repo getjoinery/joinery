@@ -696,7 +696,7 @@ MC="$T/metal-ctr"; cp -r "$MT" "$MC"; rm -f "$MC"/etc/php/8.3/fpm/pool.d/zz-join
 MEMORY_PLAN_CPUS=1 JOINERY_HOUSEKEEPING_ROOT="$MC" bash "$SCRIPT" >/dev/null 2>&1
 chk "a container is left to its own start (_site_start.sh)" "$(ls "$MC"/etc/php/8.3/fpm/pool.d/zz-joinery-memory.conf "$MC"/etc/postgresql/16/main/conf.d/20-joinery-memory.conf 2>/dev/null | wc -l)" "0"
 
-echo "== the hourly security check: a developer's box is said, not failed (localdev 2026-10-29) =="
+echo "== the hourly security check on a developer's box: installed, a refusal said, not failed (localdev 2026-10-29) =="
 # The decision alone, with its two helpers stubbed: the branch that uses it
 # runs only against the real system.
 DT="$(mktemp -d)"
@@ -729,6 +729,11 @@ STUB
 touch "$DT/site/config/agent_signing_key"
 chk "the publishing box is one by its signing key, whatever its record says" "$(STUB_OWNER=root dev_tree)" "developer"
 rm -rf "$DT"
+# The developer's box installs the check too (security_check.sh 1.4 trusts the
+# recorded owner); its refusal there is said, never counted.
+DEVBR="$(sed -n '/&& sck_developer_tree; then/,/^elif/p' "$HK")"
+chk "a developer's box installs the hourly check, and a refusal there is said, not failed" \
+    "$(grep -c 'bash "${SCK}" install' <<< "$DEVBR")|$(grep -c 'FAILED=1' <<< "$DEVBR")|$(grep -c 'not installed on this developer' <<< "$DEVBR")" "1|0|1"
 
 echo "== A logrotate file an OS upgrade left obsolete =="
 if command -v dpkg-query >/dev/null 2>&1; then

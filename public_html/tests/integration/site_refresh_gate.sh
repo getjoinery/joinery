@@ -43,6 +43,11 @@ export RECREATE_WAIT_SECONDS=3 SITE_REFRESH_MIN_FREE_BYTES=1 BUSY_WAIT_SECONDS=0
 # As systemd sets it for every unit's processes: the nightly service and the
 # host agent run these scripts as units.
 export INVOCATION_ID=gate0000000000000000000000000000
+# Package fixes read from an empty fixture root until the section that pins
+# some: a box that converges real fixes (this one does) would otherwise lend
+# the gate its own pins (B26).
+mkdir -p "$T/pf-none"
+export PACKAGE_FIXES_ROOT="$T/pf-none"
 R="$T/root"
 mkdir -p "$T/bin" "$STUB" "$R/etc/joinery/host_restrictions" "$R/etc/containers"
 echo '{"defaultAction":"SCMP_ACT_ERRNO"}' > "$R/etc/containers/joinery-site-seccomp.json"
@@ -475,7 +480,7 @@ chk "the run builds a base that takes the host's pinned base sources" "$(srun ru
 chk "  laid out at their final paths: the fix's folder, its list, its pin and the origin automatic updates need (reviewer2 G1); never Postfix's" "$(cat "$STUB/base_context")" \
     "./etc/apt/apt.conf.d/52joinery-package-fixes ./etc/apt/preferences.d/joinery-fix-php8.5.pref ./etc/apt/sources.list.d/joinery-fix-php8.5-8.5.4-0ubuntu1.5-joinery2.list ./var/lib/joinery/package-fixes/php8.5/8.5.4-0ubuntu1.5-joinery2/Packages "
 chk "  the new base is checked in turn and is not due" "$(st base_due)" "no"
-rm -rf "$T/pf"; unset PACKAGE_FIXES_ROOT
+rm -rf "$T/pf"; export PACKAGE_FIXES_ROOT="$T/pf-none"
 
 echo "=== site_refresh run ==="
 reset
@@ -614,12 +619,12 @@ bash "$TR/maintenance_scripts/install_tools/site_refresh.sh" install > /dev/null
 chk "a state from before the timer gains when it was installed" "$(grep -c '^installed_at=..*' "$R/var/lib/joinery/site-refresh/state")|$(grep -c '^checked_at=x' "$R/var/lib/joinery/site-refresh/state")" "1|1"
 for f in _host_files.sh _site_start.sh default_virtualhost.conf; do
     chmod g+w "$TR/maintenance_scripts/install_tools/$f"
-    chk "  $f writable by another account: refused" "$(bash "$TR/maintenance_scripts/install_tools/site_refresh.sh" install 2>&1 | grep -c "not root's alone")" "1"
+    chk "  $f writable by another account: refused" "$(bash "$TR/maintenance_scripts/install_tools/site_refresh.sh" install 2>&1 | grep -c "'s alone (owner")" "1"
     chmod g-w "$TR/maintenance_scripts/install_tools/$f"
 done
 chmod g+w "$TR/maintenance_scripts/sysadmin_tools/recreate_site.sh"; : > "$STUB/systemctl"; touch "$STUB/timer_on"
 chk "a tree another account can write: refused (the timer runs it as root), and a timer already on is stopped" \
-    "$(bash "$TR/maintenance_scripts/install_tools/site_refresh.sh" install 2>&1 | grep -c "not root's alone")|$(grep -c 'disable --now joinery-site-refresh.timer' "$STUB/systemctl")" "1|1"
+    "$(bash "$TR/maintenance_scripts/install_tools/site_refresh.sh" install 2>&1 | grep -c "'s alone (owner")|$(grep -c 'disable --now joinery-site-refresh.timer' "$STUB/systemctl")" "1|1"
 
 echo "=== Docker: a site made before run specs (fleet_security_patching WP4, B10) ==="
 # docker-prod's six: no run spec, an image with no health check and no base id,

@@ -3,6 +3,9 @@
 # security_check.sh - which security fixes this machine is waiting for, looked
 # for every hour (specs/fleet_security_patching.md WP1, Q3).
 #
+# Version: 1.4 - the timer installs where the tree is its owner's alone, the owner the host converger trusts
+#                (_tree_trust.sh, config/tree_owner): the publishing box, whose converger already runs its
+#                developer account's installers as root, had no hourly check at all
 # Version: 1.3 - package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md WP3): each run
 #   first converges them (install_package_fixes.sh converge: a fetch that failed is tried again, and a
 #   fix Ubuntu's own build has caught up with is handed back), and a package from the Joinery-Fixes
@@ -98,12 +101,24 @@ fi
 
 # --- install: the hourly timer --------------------------------------------------
 if [ "$CMD" = install ]; then
-    # A root timer runs this tree as root, so what it runs must be root's alone.
+    # A root timer runs this tree as root, so what it runs must be its owner's
+    # alone: the owner the host converger trusts (_tree_trust.sh, the site's
+    # config/tree_owner record), root on a node and the developer account on
+    # the publishing box, where the converger already runs that account's
+    # installers as root every minute. Nobody else may be able to write it.
     want_owner=0
-    [ -n "$TROOT" ] && want_owner="$(id -u)"
+    owner_name=root
+    if [ -n "$TROOT" ]; then
+        want_owner="$(id -u)"; owner_name="$(id -un)"
+    elif [ -f "${HERE}/../install_tools/_tree_trust.sh" ]; then
+        # shellcheck source=../install_tools/_tree_trust.sh
+        . "${HERE}/../install_tools/_tree_trust.sh"
+        owner_name="$(joinery_tree_owner_record "$(cd "${HERE}/../.." && pwd)" 2> /dev/null)" || owner_name=root
+        want_owner="$(id -u "$owner_name" 2> /dev/null)" || { want_owner=0; owner_name=root; }
+    fi
     refuse_tree() {
         if systemctl is-enabled --quiet joinery-security-check.timer 2> /dev/null; then
-            systemctl disable --now joinery-security-check.timer > /dev/null 2>&1 && say "the timer is stopped until the tree is root's alone again"
+            systemctl disable --now joinery-security-check.timer > /dev/null 2>&1 && say "the timer is stopped until the tree is its owner's alone again"
         fi
         systemctl disable joinery-security-check.service > /dev/null 2>&1 || true
         die "$1"
@@ -115,7 +130,7 @@ if [ "$CMD" = install ]; then
         [ -e "$p" ] || refuse_tree "${p} is missing; the timer was not installed"
         read -r owner mode < <(stat -L -c '%u %a' "$p")
         [ "$owner" = "$want_owner" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] \
-            || refuse_tree "${p} is not root's alone (owner ${owner}, mode ${mode}); a root timer will not run from this tree"
+            || refuse_tree "${p} is not ${owner_name}'s alone (owner ${owner}, mode ${mode}); a root timer will not run from this tree"
     done
     # TimeoutStartSec is past the run's own bounds (lists, simulation, an
     # at-once install of up to 3900 s, a second simulation, the base check):

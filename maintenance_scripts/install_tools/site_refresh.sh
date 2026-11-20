@@ -4,6 +4,8 @@
 # security fix for something in their image (specs/multi_tenant_host_hardening.md
 # D9, B7), on a site container engine host and on a Docker host alike.
 #
+# Version: 1.6 - the timer installs where the tree is its owner's alone, the owner the host converger trusts
+#                (_tree_trust.sh, config/tree_owner), as security_check.sh 1.4 does
 # Version: 1.5 - a base built from other package fixes ahead of Ubuntu than the host would build it with now
 #                (its joinery.package_fixes label, against install.sh package_fixes_label) is due for a fix,
 #                naming the sources that differ, so the host replaces its sites at once; only sources the
@@ -149,14 +151,24 @@ if [ "$CMD" = install ]; then
     # A root timer runs this tree as root, so the tree must be root's alone:
     # a tree another account can write would make the timer a way to run
     # anything as root.
+    # Its owner is the one the host converger trusts (_tree_trust.sh: the
+    # site's config/tree_owner record, root where there is none).
     tree="$(cd "${HERE}/../.." && pwd)"
     want_owner=0
-    [ -n "$TROOT" ] && want_owner="$(id -u)"   # a test's tree is its own
+    owner_name=root
+    if [ -n "$TROOT" ]; then
+        want_owner="$(id -u)"; owner_name="$(id -un)"   # a test's tree is its own
+    elif [ -f "${HERE}/_tree_trust.sh" ]; then
+        # shellcheck source=_tree_trust.sh
+        . "${HERE}/_tree_trust.sh"
+        owner_name="$(joinery_tree_owner_record "$tree" 2> /dev/null)" || owner_name=root
+        want_owner="$(id -u "$owner_name" 2> /dev/null)" || { want_owner=0; owner_name=root; }
+    fi
     # A tree that is not (any more) root's alone stops a timer already on:
     # housekeeping runs install every minute, so it comes back once it is.
     refuse_tree() {
         if systemctl is-enabled --quiet joinery-site-refresh.timer 2> /dev/null; then
-            systemctl disable --now joinery-site-refresh.timer > /dev/null 2>&1 && say "the timer is stopped until the tree is root's alone again"
+            systemctl disable --now joinery-site-refresh.timer > /dev/null 2>&1 && say "the timer is stopped until the tree is its owner's alone again"
         fi
         die "$1"
     }
@@ -169,7 +181,7 @@ if [ "$CMD" = install ]; then
         [ -e "$p" ] || refuse_tree "${p} is missing; the timer was not installed"
         read -r owner mode < <(stat -L -c '%u %a' "$p")
         [ "$owner" = "$want_owner" ] && [ $(( 8#$mode & 8#022 )) -eq 0 ] \
-            || refuse_tree "${p} is not root's alone (owner ${owner}, mode ${mode}); a root timer will not run from this tree"
+            || refuse_tree "${p} is not ${owner_name}'s alone (owner ${owner}, mode ${mode}); a root timer will not run from this tree"
     done
     svc="$(cat <<EOF
 # Written by site_refresh.sh install (specs/multi_tenant_host_hardening.md D9).
