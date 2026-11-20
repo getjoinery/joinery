@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.141 - a container inventory's packages and base_fixes (container_inventory 1.5): what each site runs of the
+ *                sources a package fix can cover, and the fixes its base took
  * @version 1.140 - a host report's package_fixes (host_report 1.42; specs/package_fixes_ahead_of_ubuntu.md WP3)
  * @version 1.139 - the ready email of a site on its buyer's own domain names one DNS step, on the sites page (walkthrough Q16)
  * @version 1.138 - the ready email of a site whose domain we registered says to expect the registrar's email (walkthrough Q15)
@@ -4239,6 +4241,10 @@ HTML;
 				'run_spec'   => ($c['run_spec'] ?? null) === true,
 				// The security a site of install.sh's was made under (container_inventory 1.3): null for anything else.
 				'security'   => self::inventory_security($c['security'] ?? null),
+				// What a site of install.sh's runs of the sources a package fix can cover in the
+				// base, and the fixes its base took (container_inventory 1.5): null for anything else.
+				'packages'   => self::inventory_packages($c['packages'] ?? null),
+				'base_fixes' => self::inventory_base_fixes($c['base_fixes'] ?? null),
 			];
 		}
 		return ['read' => true, 'engine' => $engine, 'containers' => $out, 'truncated' => $truncated];
@@ -4258,6 +4264,32 @@ HTML;
 			'drop_all' => ($v['drop_all'] ?? null) === true,
 			'setuid'   => self::host_report_count($v['setuid'] ?? null),
 		];
+	}
+
+	/** The base sources a container_inventory entry names a version for. */
+	const CONTAINER_PACKAGE_SOURCES = ['php8.5', 'openssl', 'apache2', 'postgresql-18'];
+
+	/** Each base source's installed version (null when not installed); "unknown" while not running; null otherwise. */
+	private static function inventory_packages($v) {
+		if ($v === 'unknown') { return 'unknown'; }
+		if (!is_array($v)) { return null; }
+		$out = [];
+		foreach (self::CONTAINER_PACKAGE_SOURCES as $src) {
+			$ver = $v[$src] ?? null;
+			$out[$src] = (is_string($ver) && preg_match('/^[A-Za-z0-9.+~:-]{1,64}$/', $ver)) ? $ver : null;
+		}
+		return $out;
+	}
+
+	/** The base's joinery.package_fixes label: "none", source=version pairs, or null. */
+	private static function inventory_base_fixes($v) {
+		if (!is_string($v)) { return null; }
+		if ($v === 'none') { return 'none'; }
+		$pairs = [];
+		foreach (array_slice(explode(',', $v), 0, 16) as $pair) {
+			if (preg_match('/^([a-z0-9][a-z0-9.+-]{0,63})=([A-Za-z0-9.+~:-]{1,64})$/', $pair, $m)) { $pairs[$m[1]] = $m[2]; }
+		}
+		return $pairs === [] ? null : $pairs;
 	}
 
 	private static function process_container_inventory($job) {

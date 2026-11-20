@@ -76,7 +76,7 @@ chk "a name that is not a word: listed reduced, never inspected" \
 chk "install.sh's sites say so; the impostor and postgres do not" \
     "$(jv "$T/out.json" containers.1.install_sh)/$(jv "$T/out.json" containers.2.install_sh)/$(jv "$T/out.json" containers.3.install_sh)/$(jv "$T/out.json" containers.4.install_sh)" \
     "true/true/false/false"
-chk "each entry's keys" "$(jv "$T/out.json" containers.1 keys)" "name,install_sh,image,state,mounts,run_spec,security"
+chk "each entry's keys" "$(jv "$T/out.json" containers.1 keys)" "name,install_sh,image,state,mounts,run_spec,security,packages,base_fixes"
 chk "a site of install.sh's: the filter it was made under, the capabilities it adds as X, and that it drops every other" \
     "$(python3 -c "import json,sys; d=[c for c in json.load(open(sys.argv[1]))['containers'] if c['name']=='siteone'][0]['security']; print(d['filter'][:4], ','.join(d['caps']), d['drop_all'], d['setuid'])" "$T/out.json")" "aaaa CHOWN,SETUID True unknown"
 chk "anything install.sh did not make carries no security" \
@@ -195,6 +195,49 @@ chk "a Podman site: the set it keeps, from Podman's own BoundingCaps, and every 
     "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1]))['containers'][0]['security']; print(d['filter'][:4], ','.join(d['caps']), d['drop_all'])" "$T/pod.json")" \
     "bbbb CHOWN,DAC_OVERRIDE,FOWNER,KILL,SETGID,SETUID True"
 chk "another container on it: not install.sh's, stopped" "$(jv "$T/pod.json" containers.1.install_sh)/$(jv "$T/pod.json" containers.1.state)/$(jv "$T/pod.json" containers.1.image)" "false/stopped/docker.io/library/redis:7"
+
+echo "=== Package versions in a running site, read through its root ==="
+mkdir -p "$T/bin2" "$T/proc/4242/root/var/lib/dpkg"
+cat > "$T/proc/4242/root/var/lib/dpkg/status" <<'DPKG'
+Package: libssl3t64
+Status: install ok installed
+Architecture: amd64
+Version: 3.5.5-1ubuntu3.7+joinery1
+
+Package: php8.5-common
+Status: install ok installed
+Version: 8.5.4-0ubuntu1.6+joinery1
+
+Package: php8.5-cli
+Status: install ok installed
+Version: 8.5.4-0ubuntu1.6
+
+Package: postgresql-18
+Status: deinstall ok config-files
+Version: 18.1-1
+
+Package: apache2
+Status: install ok installed
+Version: 2.4.66-2ubuntu1
+DPKG
+cat > "$T/bin2/docker" <<'STUB'
+#!/bin/bash
+case "$1 $2" in
+    "ps -a") printf 'siteone\nsitetwo\nother\n' ;;
+    "inspect -f")
+        echo "/siteone|SITENAME=siteone|running|joinery-siteone:latest|volume:siteone_data |||CAP_ALL |4242|sha256:abc|openssl=3.5.5-1ubuntu3.7+joinery1,php8.5=8.5.4-0ubuntu1.6+joinery1"
+        echo "/sitetwo|SITENAME=sitetwo|exited|joinery-sitetwo:latest|volume:sitetwo_data |||CAP_ALL |0|sha256:def|<no value>"
+        echo "/other||running|redis:7|volume:r |||  |4242|sha256:aaa|none" ;;
+esac
+STUB
+chmod 755 "$T/bin2/docker"
+PATH="$T/bin2:$PATH" CONTAINER_INVENTORY_ETC="$T/etc" CONTAINER_INVENTORY_PROC="$T/proc" CONTAINER_INVENTORY_RUN="$T/run" bash "$SCRIPT" > "$T/pkg.json" 2>/dev/null
+chk "a running site: each base source's installed version, null where not installed" \
+    "$(jv "$T/pkg.json" containers.0.packages)" \
+    '{"php8.5":"8.5.4-0ubuntu1.6+joinery1","openssl":"3.5.5-1ubuntu3.7+joinery1","apache2":"2.4.66-2ubuntu1","postgresql-18":null}'
+chk "its base's package fix label" "$(jv "$T/pkg.json" containers.0.base_fixes)" "openssl=3.5.5-1ubuntu3.7+joinery1,php8.5=8.5.4-0ubuntu1.6+joinery1"
+chk "a stopped site: packages unknown, no label is null" "$(jv "$T/pkg.json" containers.1.packages)/$(jv "$T/pkg.json" containers.1.base_fixes)" "unknown/null"
+chk "a container install.sh did not make: neither is read" "$(jv "$T/pkg.json" containers.2.packages)/$(jv "$T/pkg.json" containers.2.base_fixes)" "null/null"
 
 echo "=== Static pins ==="
 chk "no engine verb but ps and inspect, and no engine named but through the helper" \

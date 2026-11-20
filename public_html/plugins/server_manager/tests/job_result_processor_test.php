@@ -2451,6 +2451,21 @@ check(JobResultProcessor::sanitise_container_inventory(array('engine' => 'lxc', 
 	&& JobResultProcessor::sanitise_container_inventory(array('containers' => 'none'))['containers'] === 'none'
 	&& JobResultProcessor::sanitise_container_inventory(array('containers' => 'nonsense'))['containers'] === 'unknown',
 	'no docker is none; anything else that is not a list is unknown');
+// Packages and base_fixes (container_inventory 1.5): each base source's version or null, unknown while stopped, the base's label.
+$cp = JobResultProcessor::sanitise_container_inventory(array('engine' => 'podman', 'containers' => array(
+	array('name' => 'sa', 'install_sh' => true, 'image' => 'joinery-sa:latest', 'state' => 'running', 'mounts' => array(),
+		'packages' => array('php8.5' => '8.5.4-0ubuntu1.6+joinery1', 'openssl' => '3.5.5-1ubuntu3.7+joinery1', 'apache2' => 'x;rm', 'postgresql-18' => null, 'extra' => '1'),
+		'base_fixes' => 'openssl=3.5.5-1ubuntu3.7+joinery1,php8.5=8.5.4-0ubuntu1.6+joinery1,bad pair'),
+	array('name' => 'sb', 'install_sh' => true, 'image' => 'joinery-sb:latest', 'state' => 'exited', 'mounts' => array(), 'packages' => 'unknown', 'base_fixes' => 'none'),
+	array('name' => 'old', 'install_sh' => true, 'image' => 'joinery-old:latest', 'state' => 'running', 'mounts' => array()),
+)));
+check($cp['containers'][0]['packages'] === array('php8.5' => '8.5.4-0ubuntu1.6+joinery1', 'openssl' => '3.5.5-1ubuntu3.7+joinery1', 'apache2' => null, 'postgresql-18' => null),
+	'container_inventory packages: the four base sources only, a version that is not one is null', var_export($cp['containers'][0]['packages'], true));
+check($cp['containers'][0]['base_fixes'] === array('openssl' => '3.5.5-1ubuntu3.7+joinery1', 'php8.5' => '8.5.4-0ubuntu1.6+joinery1'),
+	'base_fixes: the label as source => version, a malformed pair dropped', var_export($cp['containers'][0]['base_fixes'], true));
+check($cp['containers'][1]['packages'] === 'unknown' && $cp['containers'][1]['base_fixes'] === 'none'
+	&& $cp['containers'][2]['packages'] === null && $cp['containers'][2]['base_fixes'] === null,
+	'a stopped site is unknown, a base with none says none, an older script reports neither');
 // A site's sixteen volumes are all kept (B65); a container with more than 32, or more containers than 150, is a cut list.
 $vols = function ($n) { $m = array(); for ($i = 1; $i <= $n; $i++) { $m[] = array('type' => 'volume', 'name' => 'siteone_v' . $i); } return $m; };
 $ci16 = JobResultProcessor::sanitise_container_inventory(array('engine' => 'docker', 'truncated' => false,

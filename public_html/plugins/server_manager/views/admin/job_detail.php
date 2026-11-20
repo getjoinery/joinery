@@ -6,6 +6,8 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.42 - container_inventory: a Packages column, what each site runs of the sources a package fix can cover
+ *                (our fix marked) and what its base took
  * @version 1.41 - mail_test_send: a Send a test message button on an ordinary domain's answer, and what the send did
  * @version 1.40 - mailbox_status: the domain list with a Check button each, and one domain's rows, flags, DNS and send outcomes
  * @version 1.39 - the site_log_count card names both logs it reads
@@ -904,7 +906,7 @@ if ($result) {
 			echo '<div class="card-body text-muted">No containers.</div>';
 		} else {
 			echo '<div class="card-body small text-muted">A site container is one install.sh made: its name is a site name and its SITENAME is its name. Removing a site, holding it stopped and restarting it act only on those; anything else here is someone else\'s and nothing on this plane touches it.</div>';
-			echo '<div class="card-body p-0"><table class="table table-sm mb-0"><thead><tr><th>Container</th><th>Made by install.sh</th><th>Image</th><th>State</th><th>Mounts</th><th>Run spec</th></tr></thead><tbody>';
+			echo '<div class="card-body p-0"><table class="table table-sm mb-0"><thead><tr><th>Container</th><th>Made by install.sh</th><th>Image</th><th>State</th><th>Mounts</th><th>Run spec</th><th>Packages</th></tr></thead><tbody>';
 			foreach ($list as $c) {
 				$mounts = $c['mounts'] ?? 'unknown';
 				if (is_array($mounts)) {
@@ -916,9 +918,30 @@ if ($result) {
 				} else {
 					$mounts = 'unknown';
 				}
+				// What the site runs of the sources a package fix can cover, ours marked, and what its base took.
+				$pk = $c['packages'] ?? null;
+				if (is_array($pk)) {
+					$parts = array();
+					foreach ($pk as $src => $ver) {
+						if ($ver === null) { continue; }
+						$parts[] = htmlspecialchars((string)$src) . ' <code>' . htmlspecialchars((string)$ver) . '</code>'
+							. (strpos((string)$ver, '+joinery') !== false ? ' (our fix)' : '');
+					}
+					$packages = $parts ? implode('<br>', $parts) : 'none';
+				} else {
+					$packages = $pk === 'unknown' ? 'unknown (not running)' : '-';
+				}
+				$bf = $c['base_fixes'] ?? null;
+				if (is_array($bf)) {
+					$parts = array();
+					foreach ($bf as $src => $ver) { $parts[] = htmlspecialchars((string)$src) . ' ' . htmlspecialchars((string)$ver); }
+					$packages .= '<br><span class="text-muted">base took: ' . implode(', ', $parts) . '</span>';
+				} elseif ($bf === 'none') {
+					$packages .= '<br><span class="text-muted">base took no fixes</span>';
+				}
 				echo '<tr' . (empty($c['install_sh']) ? ' class="table-warning"' : '') . '><td><code>' . htmlspecialchars((string)$c['name']) . '</code></td><td>'
 					. (!empty($c['install_sh']) ? 'yes' : '<strong>no</strong>') . '</td><td><code>' . htmlspecialchars((string)$c['image']) . '</code></td><td>'
-					. htmlspecialchars((string)$c['state']) . '</td><td class="small">' . $mounts . '</td><td>' . (!empty($c['run_spec']) ? 'yes' : 'no') . '</td></tr>';
+					. htmlspecialchars((string)$c['state']) . '</td><td class="small">' . $mounts . '</td><td>' . (!empty($c['run_spec']) ? 'yes' : 'no') . '</td><td class="small">' . $packages . '</td></tr>';
 			}
 			echo '</tbody></table></div>';
 			if (!empty($result_data['truncated'])) {
