@@ -6,9 +6,20 @@
 # dir is 2 GB+, and a session may keep several); the root disk is one 79 GB
 # volume, and it hit 100% on 2026-09-12 with 42 GB of scratch in it.
 #
+# /tmp is a RAM disk on this box (tmpfs, half the memory), so scratch an ended
+# session leaves behind is held in memory: on 2026-11-20 one ended session's
+# Psalm cache held 4.4 GB of it and filled swap.
+#
 # What this prunes, and only this:
-#   1. Session scratchpads whose newest file is older than $KEEP_DAYS — the
-#      session is gone; scratch is temporary by definition.
+#   1. Scratchpads of sessions that have ended, once nothing in them has been
+#      written for $ENDED_HOURS hours. A session has ended when no running
+#      Claude process records it (~/.claude/sessions/PID.json, the pid alive
+#      and started when the record says) and no process has a file open or its
+#      working directory inside its folder (a background task keeps writing
+#      under the session it started in). A running session's scratchpad is
+#      never removed, however long it sits idle, and neither is a folder its
+#      transcript shows it writing background task output to (a resumed
+#      session keeps writing tasks/ under the id it first ran as).
 #   2. Any Rust `target` dir under /tmp/claude-1000 not written to in
 #      $TARGET_DAYS days, wherever it sits — a build cache, always rebuildable.
 #   3. Stale git worktrees under /tmp/claude-1000 (registered with the repo,
@@ -21,8 +32,9 @@
 #      this one catches a session that builds faster than its caches age
 #      (2026-10-01: 80 target dirs, 30 GB, the disk at 3.6 GB free).
 #
-# It never touches: a scratchpad written to within $KEEP_DAYS, source trees, the
-# repo, /var, or anything outside /tmp/claude-1000. Dry run by default — pass
+# It never touches: a running session's scratchpad (only rules 2 and 4's build
+# caches inside it), a folder a process is using, source trees, the repo, /var,
+# or anything outside /tmp/claude-1000. Dry run by default — pass
 # --delete to act. Prints what it would (or did) remove and the space involved;
 # a --delete run that removes nothing prints nothing, so it can run hourly.
 #
@@ -30,12 +42,17 @@
 # disk in under two hours:
 #   17 * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/prune_dev_scratch.sh --delete >> /var/www/html/joinerytest/logs/prune_dev_scratch.log 2>&1
 #
+# @version 1.2 - rule 1 removes an ended session's scratchpad after $ENDED_HOURS idle hours (/tmp is RAM),
+#               and never a running session's, one it writes task output to, or one a process is using
 # @version 1.1
 set -u
 
-SCRATCH_ROOT="/tmp/claude-1000"
+SCRATCH_ROOT="${SCRATCH_ROOT:-/tmp/claude-1000}"  # tests point it at a fixture
 REPO="/var/www/html/joinerytest"
-KEEP_DAYS="${KEEP_DAYS:-3}"      # a session idle this long is over
+KEEP_DAYS="${KEEP_DAYS:-3}"      # a worktree idle this long is over
+ENDED_HOURS="${ENDED_HOURS:-2}"  # an ended session's scratch idle this long goes
+SESSIONS_DIR="${SESSIONS_DIR:-$HOME/.claude/sessions}"
+PROJECTS_DIR="${PROJECTS_DIR:-$HOME/.claude/projects}"  # session transcripts
 TARGET_DAYS="${TARGET_DAYS:-2}"  # a build cache idle this long is cold
 CAP_GB="${CAP_GB:-15}"           # all build caches together stay under this
 GRACE_HOURS="${GRACE_HOURS:-6}"  # a cache written this recently is in use
@@ -46,7 +63,7 @@ stamp() { date '+%Y-%m-%d %H:%M:%S'; }
 human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "$1"; }
 total=0
 announced=0
-free_before=$(df -h --output=avail / | tail -1 | tr -d ' ')
+free_before="$(df -h --output=avail / | tail -1 | tr -d ' ') disk, $(df -h --output=avail "$SCRATCH_ROOT" 2>/dev/null | tail -1 | tr -d ' ') scratch"
 
 announce() { # the header, once, before the first removal
 	[ "$announced" = 1 ] && return
@@ -86,7 +103,35 @@ if [ -d "$REPO/.git" ]; then
 	[ "$DO_DELETE" = 1 ] && git -C "$REPO" worktree prune
 fi
 
-# 1. Dead session scratchpads: <project>/<session-uuid>/ with nothing newer than KEEP_DAYS.
+# 1. Ended sessions' scratchpads: <project>/<session-uuid>/.
+# Running sessions: each record whose pid is alive and started when the record
+# says (procStart is /proc/PID/stat's start time; a reused pid differs).
+live=" "
+for rec in "$SESSIONS_DIR"/*.json; do
+	[ -f "$rec" ] || continue
+	read -r pid sid start < <(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); print(d.get("pid",""), d.get("sessionId",""), d.get("procStart",""))' "$rec" 2>/dev/null) || continue
+	[ -n "$pid" ] && [ -n "$sid" ] && [ -r "/proc/$pid/stat" ] || continue
+	if [ -n "$start" ]; then
+		now_start=$(sed 's/^.*) //' "/proc/$pid/stat" 2>/dev/null | awk '{print $20}')
+		[ "$now_start" = "$start" ] || continue
+	fi
+	live="$live$sid "
+	# The folders this session writes background task output to.
+	transcript="$(find "$PROJECTS_DIR" -maxdepth 2 -name "$sid.jsonl" -print -quit 2>/dev/null)"
+	[ -n "$transcript" ] || continue
+	while read -r tasks_sid; do
+		live="$live$tasks_sid "
+	done < <(grep -oE "Output is being written to: $SCRATCH_ROOT/[^/]+/[0-9a-f-]{36}/tasks/" "$transcript" 2>/dev/null \
+		| sed -E 's|.*/([0-9a-f-]{36})/tasks/$|\1|' | sort -u)
+done
+# Folders a process is using: an open file or a working directory inside one.
+in_use=" "
+while read -r path; do
+	rest="${path#"$SCRATCH_ROOT"/}"; proj_part="${rest%%/*}"; rest="${rest#*/}"; sess_part="${rest%%/*}"
+	[ -n "$sess_part" ] && in_use="$in_use$proj_part/$sess_part "
+done < <( { find /proc/[0-9]*/fd -maxdepth 1 -lname "$SCRATCH_ROOT/*" -printf '%l\n' 2>/dev/null
+	for c in /proc/[0-9]*/cwd; do l=$(readlink "$c" 2>/dev/null) && case "$l" in "$SCRATCH_ROOT"/*) echo "$l";; esac; done; } | sort -u)
 for proj in "$SCRATCH_ROOT"/*/; do
 	[ -d "$proj" ] || continue
 	for sess in "$proj"*/; do
@@ -95,8 +140,11 @@ for proj in "$SCRATCH_ROOT"/*/; do
 			[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*) ;;
 			*) continue;;  # not a session dir
 		esac
-		if [ -z "$(find "$sess" -type f -mtime -"$KEEP_DAYS" -print -quit 2>/dev/null)" ]; then
-			remove "${sess%/}" "session idle > ${KEEP_DAYS}d"
+		sid="$(basename "$sess")"
+		case "$live" in *" $sid "*) continue;; esac
+		case "$in_use" in *" $(basename "$proj")/$sid "*) continue;; esac
+		if [ -z "$(find "$sess" -newermt "${ENDED_HOURS} hours ago" -print -quit 2>/dev/null)" ]; then
+			remove "${sess%/}" "session ended, idle > ${ENDED_HOURS}h"
 		fi
 	done
 done
@@ -138,4 +186,4 @@ done < <(printf '%s\n' "${kept[@]}" | sort -n)
 
 [ "$announced" = 1 ] || [ "$DO_DELETE" = 0 ] || exit 0
 announce
-echo "$(stamp) total $( [ "$DO_DELETE" = 1 ] && echo freed || echo reclaimable ): $(human "$total"); build caches left: $(human "$cache_total") of ${CAP_GB} GB cap; free after: $(df -h --output=avail / | tail -1 | tr -d ' ')"
+echo "$(stamp) total $( [ "$DO_DELETE" = 1 ] && echo freed || echo reclaimable ): $(human "$total"); build caches left: $(human "$cache_total") of ${CAP_GB} GB cap; free after: $(df -h --output=avail / | tail -1 | tr -d ' ') disk, $(df -h --output=avail "$SCRATCH_ROOT" 2>/dev/null | tail -1 | tr -d ' ') scratch"
