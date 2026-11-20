@@ -209,9 +209,6 @@ section('Offered only on the test account');
 list($p, $site_node, $agent, $host, $item) = $site('m1');
 check(TestSiteDiscard::offered($p) && TestSiteDiscard::refusal($p) === '', 'a site on the test account is offered, and may go');
 
-$p->set('cvp_hosting_mode', 'customer');
-check(!TestSiteDiscard::offered($p), 'a site in a customer\'s own cloud account is not offered');
-$p->set('cvp_hosting_mode', 'operator');
 $test_account->set('oca_is_test', false);
 $test_account->save();
 check(!TestSiteDiscard::offered($p), 'a site in an account of ours not flagged test is not offered');
@@ -271,6 +268,50 @@ check($no_trap === '' && $trap === 'joineryemailtests@dev.getjoinery.com' && $cu
 list($ordered) = TestSiteDiscard::nodes($p);
 check(count($ordered) === 2 && (int)$ordered[0]->key === (int)$agent->key && (int)$ordered[1]->key === (int)$site_node->key,
 	'the Docker host\'s node goes first, the site\'s node last');
+
+// ---------------------------------------------------------------------------
+section('A test purchase on the buyer\'s own cloud account');
+
+// Built as a buyer's own-cloud site is: no account of ours on the row, its
+// boxes filed as the customer's.
+$own = function (string $label, bool $test_mode = true) use ($site) {
+	list($p, $site_node, $agent, $host, $item) = $site($label, $test_mode);
+	$p->set('cvp_hosting_mode', 'customer');
+	$p->set('cvp_oca_operator_cloud_account_id', null);
+	$p->save();
+	$host->set('mgh_cloud_account', CloudAccounts::CUSTOMER);
+	$host->save();
+	return array($p, $site_node, $agent, $host, $item);
+};
+list($op, $o_site, $o_agent, $o_host) = $own('own1');
+check(TestSiteDiscard::offered($op) && TestSiteDiscard::refusal($op) === '',
+	'a test purchase on the buyer\'s own cloud account is offered, and may go', TestSiteDiscard::refusal($op));
+list($olive) = $own('own2', false);
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $olive->key);
+check(!TestSiteDiscard::offered($olive), 'a live purchase on the buyer\'s own cloud account is never offered');
+$o_host->set('mgh_cloud_account', CloudAccounts::MAIN);
+$o_host->save();
+$why = TestSiteDiscard::refusal($op);
+check(strpos($why, 'Main side') !== false, 'one whose box is filed as ours on the main account is refused', $why);
+$o_host->set('mgh_cloud_account', CloudAccounts::CUSTOMER);
+$o_host->save();
+
+$o_instance = (string)$op->get('cvp_instance_id');
+$o_dns = new FakeDiscardDns();
+$o_hist = array();
+$r = TestSiteDiscard::discard($op, array('dns' => $o_dns, 'mail' => tsd_mail('sub-own1', 'Active', $o_hist), 'cancel' => function ($i) {}));
+check(in_array($o_instance, $cloud->deleted, true) && $r['finished'] && !$r['failed'],
+	'its server, found in the test account, is deleted and its records go', json_encode($r));
+
+// A server the test account does not have is in an account we hold no key to.
+list($op2) = $own('own3');
+$o2_instance = (string)$op2->get('cvp_instance_id');
+unset($cloud->servers[$o2_instance]);
+$r = TestSiteDiscard::discard($op2, array('dns' => $o_dns, 'mail' => tsd_mail('sub-own3', 'Active', $o_hist), 'cancel' => function ($i) {}));
+check(!in_array($o2_instance, $cloud->deleted, true) && $r['finished']
+	&& strpos(implode(' ', $r['done']), 'left running') !== false,
+	'a server that is not in the test account is left, and the message says so', json_encode($r));
+$cloud->deleted = array();
 
 // ---------------------------------------------------------------------------
 section('The safety catch');

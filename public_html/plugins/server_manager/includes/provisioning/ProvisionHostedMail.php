@@ -47,6 +47,7 @@
  * amber state on the wizard is the right answer to a provider outage — not a
  * failed provision.
  *
+ * @version 1.15 - the test-site mail trap stays with sites in our own test account (TestSiteDiscard::ours)
  * @version 1.14 - push_attempts() counts from the last Retry email setup, so a retry gets a fresh allowance (hosting_after_purchase B19)
  * @version 1.13 - the failure alert names Retry email setup on the node page (hosting_after_purchase E2)
  * @version 1.12 - a site on its buyer's own Linode paid with the email and backups bundle is set up too (own_linode_we_install W5)
@@ -568,7 +569,7 @@ class ProvisionHostedMail {
 		if ($trap === '' || !filter_var($trap, FILTER_VALIDATE_EMAIL)) {
 			return '';
 		}
-		return TestSiteDiscard::test_account($provision) !== null ? $trap : '';
+		return (TestSiteDiscard::ours($provision) && TestSiteDiscard::test_account($provision) !== null) ? $trap : '';
 	}
 
 	/** The trap a settings job carried, or ''. */

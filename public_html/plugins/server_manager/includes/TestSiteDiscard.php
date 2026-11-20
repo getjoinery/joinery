@@ -6,7 +6,11 @@
  *
  * Offered only for a provision whose server is in one of our cloud accounts
  * flagged test. That covers a test-mode purchase and an admin's rehearsal
- * alike. A site in a container on a shared host (a Starter site) is a test
+ * alike. A test-mode purchase built on the buyer's own cloud account is
+ * offered too: a test buyer connects the test account, so its server is
+ * looked for in the test account held here and deleted when found there. One
+ * that is not there is in an account we hold no key to, and is left running,
+ * and the message says so. A site in a container on a shared host (a Starter site) is a test
  * site when its HOST is on the Test side of the dashboard, and its account is
  * the host machine's own (or, for a host made by hand, the test account held
  * here). The flag only offers the button. Nothing is deleted until the
@@ -55,6 +59,8 @@
  * remove is on the Main side of the dashboard: the provision's account and the
  * dashboard's record must agree that the site is a test one.
  *
+ * @version 1.5 - a test purchase on the buyer's own cloud account is offered too: its server goes when it is found in
+ *                the test account held here, and is left when it is not
  * @version 1.4 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.3 - a site in a container on a shared host (Starter): a test site by its host's side and account;
  *                its container removed by its host, its host, the host's node and the other sites never touched
@@ -70,14 +76,63 @@ class TestSiteDiscard {
 
 	/** The account the provision's server is in, when it is one of ours flagged test; else null. Asks no provider. */
 	public static function test_account(CustomerCloudProvision $provision): ?OperatorCloudAccount {
-		if ((string)$provision->get('cvp_hosting_mode') !== 'operator' || $provision->get('cvp_delete_time')) {
+		if ($provision->get('cvp_delete_time')) {
 			return null;
 		}
 		if ($provision->is_container()) {
-			return self::container_account($provision);
+			return (string)$provision->get('cvp_hosting_mode') === 'operator' ? self::container_account($provision) : null;
+		}
+		if (!self::ours($provision)) {
+			// The buyer's own cloud account: a test site only when bought in
+			// test mode. Its row names no account of ours.
+			return $provision->is_test_purchase() ? self::held_test_account() : null;
 		}
 		$account = HeldCloudAccounts::provision_account($provision);
 		return ($account !== null && $account->get('oca_is_test')) ? $account : null;
+	}
+
+	/** Is its server in one of our accounts (true), or on the buyer's own (false)? */
+	public static function ours(CustomerCloudProvision $provision): bool {
+		return (string)$provision->get('cvp_hosting_mode') === 'operator';
+	}
+
+	/** The test account held here, a usable one first; null when none is held. */
+	private static function held_test_account(): ?OperatorCloudAccount {
+		$fallback = null;
+		foreach (OperatorCloudAccount::held() as $account) {
+			if (!$account->get('oca_is_test')) {
+				continue;
+			}
+			if ($account->usable()) {
+				return $account;
+			}
+			$fallback = $fallback ?? $account;
+		}
+		return $fallback;
+	}
+
+	/**
+	 * Is this node a test box? One on the Test side of the dashboard is. A
+	 * site on the buyer's own cloud account has its box filed as the
+	 * customer's, which the dashboard shows on the Main side: that counts
+	 * too, and a box filed as ours on the main account never does.
+	 */
+	private static function test_box(CustomerCloudProvision $provision, ManagedNode $node): bool {
+		if (CloudAccounts::of_node($node) === CloudAccounts::TEST) {
+			return true;
+		}
+		if (self::ours($provision)) {
+			return false;
+		}
+		$filed = (string)$node->get('mgn_cloud_account');
+		$host_id = (int)$node->get('mgn_mgh_managed_host_id');
+		if ($host_id > 0) {
+			$host = new ManagedHost($host_id, TRUE);
+			if ($host->key && !$host->get('mgh_delete_time')) {
+				$filed = (string)$host->get('mgh_cloud_account');
+			}
+		}
+		return trim($filed) === CloudAccounts::CUSTOMER;
 	}
 
 	/** The shared host a container site is placed or reserved on, or null. */
@@ -114,17 +169,7 @@ class TestSiteDiscard {
 		if ($own !== null) {
 			return $own->get('oca_is_test') ? $own : null;
 		}
-		$fallback = null;
-		foreach (OperatorCloudAccount::held() as $account) {
-			if (!$account->get('oca_is_test')) {
-				continue;
-			}
-			if ($account->usable()) {
-				return $account;
-			}
-			$fallback = $fallback ?? $account;
-		}
-		return $fallback;
+		return self::held_test_account();
 	}
 
 	/** Is the button offered? Asks no provider. */
@@ -163,7 +208,7 @@ class TestSiteDiscard {
 			// at a main-side box (the management node itself, say) would have
 			// its server reported gone at the test account and then the box
 			// removed from the dashboard.
-			if (CloudAccounts::of_node($node) !== CloudAccounts::TEST) {
+			if (!self::test_box($provision, $node)) {
 				return $node->get('mgn_name') . ' is on the Main side of the dashboard, not the Test side, so it is not a test site.';
 			}
 			$why = NodeRemoval::copy_refusal($node);
@@ -333,6 +378,9 @@ class TestSiteDiscard {
 			$instance = $driver->getInstance($id);
 		} catch (CloudComputeException $e) {
 			if ((int)$e->getCode() === 404) {
+				if (!self::ours($provision)) {
+					$out['done'][] = 'Server ' . $id . ' is not in the test account: it is in the buyer\'s own cloud account, which we hold no key to, and was left running. Delete it there.';
+				}
 				return;
 			}
 			$out['failed'][] = 'Could not ask the test account about server ' . $id . ': ' . $e->getMessage();
