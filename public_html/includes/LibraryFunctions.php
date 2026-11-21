@@ -1511,6 +1511,86 @@ class LibraryFunctions {
 	}
 	
 	/**
+	 * The one model the REST API is asked for, by name: $name itself when it is
+	 * a class discover_model_classes(['include_plugins' => true,
+	 * 'plugin_status' => 'active']) would return, null otherwise. Same rules,
+	 * without reading every model file: a SystemBase subclass whose file is a
+	 * *_class.php (not hidden) directly in core data/ or in data/ of a plugin
+	 * active of either kind (the plugin's folder may be a link), or a model of an active sandboxed plugin. The name must be
+	 * the class's own spelling, as in_array() over the discovered list
+	 * required (class names resolve without case; endpoints do not).
+	 * tests/unit/api_model_class_test.php holds it to discovery's answer for
+	 * every class.
+	 *
+	 * @return string|null
+	 */
+	static function api_model_class($name) {
+		$name = (string)$name;
+		if (!preg_match('/^[A-Z][A-Za-z0-9_]*$/D', $name)) {
+			return null;
+		}
+		try {
+			if (!class_exists($name)) {
+				return null;
+			}
+			$reflection = new ReflectionClass($name);
+		} catch (\Throwable $e) {
+			// A model file that cannot load is skipped by discovery too.
+			return null;
+		}
+		if ($reflection->getName() !== $name || !$reflection->isSubclassOf('SystemBase')) {
+			return null;
+		}
+
+		$base = PathHelper::getBasePath();
+		$file = $reflection->getFileName();
+		if ($file === false || strpos($file, "eval()'d code") !== false) {
+			// No file: only a sandboxed plugin's model, declared from its
+			// manifest (SandboxModels), is one.
+			if (!preg_match(SandboxModels::CLASS_PATTERN, $name)) {
+				return null;
+			}
+			$plugin = substr($name, 4, strrpos($name, '_') - 4);
+			if (!PluginHelper::isPluginName($plugin) || !is_dir($base . '/plugins/' . $plugin)
+				|| !PluginHelper::isActiveOfEitherKind($plugin)) {
+				return null;
+			}
+			return in_array($name, SandboxModels::classesForPlugins(array($plugin)), true) ? $name : null;
+		}
+
+		// discovery's glob('*_class.php') skips a hidden file; so does this.
+		$filename = basename($file);
+		if ($filename[0] === '.' || !preg_match('/_class\.php$/D', $filename)) {
+			return null;
+		}
+		$directory = realpath(dirname($file));
+		if ($directory === false) {
+			return null;
+		}
+		if ($directory === realpath($base . '/data')) {
+			return $name;
+		}
+		// The plugin whose data/ holds it. PHP reports the resolved path, so a
+		// plugin folder that is a link names its target; compare each plugin's
+		// data/ resolved, the folder the path names first.
+		$owner = function ($plugin) use ($base, $directory) {
+			return PluginHelper::isPluginName($plugin) && is_dir($base . '/plugins/' . $plugin . '/data')
+				&& realpath($base . '/plugins/' . $plugin . '/data') === $directory;
+		};
+		// Any active folder holding it will do, as in discovery, which walks them all.
+		$named = basename(dirname($directory));
+		if ($owner($named) && PluginHelper::isActiveOfEitherKind($named)) {
+			return $name;
+		}
+		foreach (LibraryFunctions::list_plugins() as $listed) {
+			if ($listed !== $named && $owner($listed) && PluginHelper::isActiveOfEitherKind($listed)) {
+				return $name;
+			}
+		}
+		return null;
+	}
+
+	/**
 	 * Load model classes from a specific directory
 	 * 
 	 * @param string $directory Directory path to scan

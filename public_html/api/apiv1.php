@@ -2,6 +2,8 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.41 - a record or collection URL looks up the one model it names (LibraryFunctions::api_model_class())
+ *   instead of reading every model file on each request
  * @version 2.40 - as the viewer, a row by id only when its owner column is the viewer's (reviewer2 J2)
  * @version 2.39 - a sandboxed plugin's own-rows request: the relay's viewer header makes it act as that member
  *   at level 0, admitted by the plugin's own-rows grants only (design 8)
@@ -816,19 +818,19 @@ function api_refuse_unless_viewer_owns($object, $class_name) {
 	}
 }
 
-// Discover all model classes, then apply the Layer 1 exposure opt-in. discover_model_classes()
-// must keep returning ALL models (shared with schema/deletion subsystems); the CRUD surface is
-// the filtered subset. An unexposed class is indistinguishable from a nonexistent one (404).
-$classes = LibraryFunctions::discover_model_classes(['include_plugins' => true, 'plugin_status' => 'active']);
-$readable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_readable')));
-$writable_classes = array_values(array_filter($classes, fn($c) => api_flag($c, 'api_writable')));
+// The one model the URL names, then the Layer 1 exposure opt-in. api_model_class() answers
+// exactly as discover_model_classes() over core and the active plugins would, for that one
+// name, without reading every model file. An unexposed class is indistinguishable from a
+// nonexistent one (404).
+$record_class = LibraryFunctions::api_model_class($operation);
+$collection_class = $record_class === null ? LibraryFunctions::api_model_class(substr($operation, 0, -1)) : null;
 
-if (in_array($operation, $classes)) {
+if ($record_class !== null) {
 	$class_name = $operation;
 
 	if ($request_method == 'get') {
 
-		if (!in_array($class_name, $readable_classes)) {
+		if (!api_flag($class_name, 'api_readable')) {
 			api_error('Not found', 'NotFound', 404);
 		}
 
@@ -871,7 +873,7 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'put') {
 
-		if (!in_array($class_name, $writable_classes)) {
+		if (!api_flag($class_name, 'api_writable')) {
 			api_error('Not found', 'NotFound', 404);
 		}
 
@@ -913,7 +915,7 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'post') {
 
-		if (!in_array($class_name, $writable_classes)) {
+		if (!api_flag($class_name, 'api_writable')) {
 			api_error('Not found', 'NotFound', 404);
 		}
 
@@ -958,7 +960,7 @@ if (in_array($operation, $classes)) {
 
 	} else if ($request_method == 'delete') {
 
-		if (!in_array($class_name, $writable_classes)) {
+		if (!api_flag($class_name, 'api_writable')) {
 			api_error('Not found', 'NotFound', 404);
 		}
 
@@ -989,12 +991,12 @@ if (in_array($operation, $classes)) {
 		}
 	}
 
-} else if (in_array(substr($operation, 0, -1), $classes)) {
+} else if ($collection_class !== null) {
 
 	// Collection GET
 	$class_name = substr($operation, 0, -1);
 
-	if (!in_array($class_name, $readable_classes)) {
+	if (!api_flag($class_name, 'api_readable')) {
 		api_error('Not found', 'NotFound', 404);
 	}
 

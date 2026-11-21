@@ -20,6 +20,7 @@
  *
  * USAGE (CLI only): php tests/functional/sandbox/sandbox_data_test.php [base_url] [origin_ip]
  *
+ * @version 1.2 - the API's lookup by name (api_model_class) follows activation
  * @version 1.1 - the admin is at content's write and soft-delete levels (6, 7)
  * @version 1.0
  */
@@ -100,6 +101,7 @@ try {
 	check(class_exists($class) && is_subclass_of($class, 'SandboxRecord'), "Its model is the class $class");
 	$active_models = LibraryFunctions::discover_model_classes(array('include_plugins' => true, 'plugin_status' => 'active'));
 	check(in_array($class, $active_models, true), 'and an active model to discovery');
+	check(LibraryFunctions::api_model_class($class) === $class, 'and the API finds it by name');
 	$menu = $db->prepare('SELECT count(*) FROM amu_admin_menus WHERE amu_slug = ?');
 	$menu->execute(array('sbx-' . $name));
 	check((int)$menu->fetchColumn() === 1, 'Its menu entry is added');
@@ -157,6 +159,7 @@ try {
 	SandboxPlugins::reset();
 	SandboxModels::reset();
 	check(!SandboxPlugins::isActive($name), 'It is inactive');
+	check(LibraryFunctions::api_model_class($class) === null, 'The API no longer finds its model by name');
 	$r = api_request('GET', '/api/v1/' . $class . 's', key_headers(make_machine_key($admin->key, 'sbx-plain-' . $name, 4)['api_key']->get('apk_public_key'), ''));
 	$plain = make_machine_key($admin->key, 'sbx-plain2-' . $name, 4);
 	$r = api_request('GET', '/api/v1/' . $class . 's', key_headers($plain['api_key']->get('apk_public_key'), $plain['secret_key']));

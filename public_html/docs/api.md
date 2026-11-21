@@ -73,7 +73,7 @@ Collection reads accept `page` (0-based), `numperpage`, `sort` (column name), `s
 **`numperpage` defaults to 3, and is at most 200** (a larger value reads as 200; the answer's
 `numperpage` says which was used). A page that lists a whole small collection must pass it explicitly — relying on the default silently truncates the list at three rows, and the caller cannot tell a short page from a complete one without reading `num_results`.
 
-`sort` must name a declared column of the model being read; anything else is a `400`. A sort column is an identifier, which SQL cannot bind as a parameter, so it is validated against `$field_specifications` rather than escaped. The bare column name works too — the table prefix is inferred (`sort=user_id` and `sort=usr_user_id` are equivalent on `Users`). Sorting by an expression is not supported.
+`sort` must name a declared column of the model being read; anything else is a `400`. A sort column is an identifier, which SQL cannot bind as a parameter, so it is validated against `$field_specifications` rather than escaped. The bare column name works too — the table prefix is inferred (`sort=user_id` and `sort=usr_user_id` are equivalent on `Users`). Sorting by an expression is not supported. A column no answer shows (one the unreadable floor covers, below) cannot be sorted or filtered on either: either is a `400`, since matching on a secret tests a guess of it and ordering by one tells its order.
 
 ### Timestamps
 
@@ -244,12 +244,13 @@ A machine account (`usr_is_machine`, see [Account Security](account_security.md#
 
 ### Scoped machine keys
 
-A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` lists what a key may do, one entry per item, comma separated. Two kinds of entry:
+A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` lists what a key may do, one entry per item, comma separated. Three kinds of entry:
 
 | Entry | Example | Reaches |
 |---|---|---|
 | An action name | `dns_filtering/resolver_snapshot` | `POST /api/v1/action/{name}` for that action |
 | A model and one verb | `EventRegistrant:read` | that model's record endpoints for that verb: `read` is `GET /{Class}/{id}` and `GET /{Class}s`, `create` is `POST`, `update` is `PUT`, `delete` is `DELETE` |
+| A model, one verb, and `own` | `Order:read:own` | the same endpoints, for one member's own rows only. Only a sandboxed plugin's key carries one; its relay names the member in `X-Joinery-Sandbox-Viewer`, accepted only on such a key from this machine, and the request acts as that member. See [Sandboxed Plugins § Each member's own records](sandboxed_plugins.md#installing) |
 
 A scoped key:
 
@@ -682,7 +683,7 @@ Add a trailing **s** to the class name for collections.
 | `sort` | (none) | Declared column of the model; the prefix may be omitted. Anything else is a 400 |
 | `sdirection` | ASC | Sort direction: `ASC` or `DESC` (any other value is read as `ASC`) |
 
-Any additional query parameters are passed as filter options to the Multi class. Check the specific Multi class to see which filter keys it accepts.
+Any additional query parameters are passed as filter options to the Multi class. Check the specific Multi class to see which filter keys it accepts. Each value is bound as a parameter, never written into the SQL, and a filter on an unreadable column is a `400`.
 
 **Example:** `GET /api/v1/Users?page=0&numperpage=20&sort=usr_id&sdirection=DESC`
 
@@ -858,6 +859,7 @@ Who is counted depends on the credential:
 | Requests on an app credential | User, all their app credentials together | 20,000 (`ApiAuth::APP_REQUEST_LIMIT`), or the browser limit when higher | Per hour | `api_session_rate_limit_requests` / `_window` |
 | Failed app sign-ins (`app_access_auth`) | Source network (IPv4 address, IPv6 /64); and username | 60; 600 | Per 15 minutes | — |
 | Agent channel, device link, Drive upload | IP address | own buckets | Per hour | `api_agent_*`, `api_device_link_*`, `api_upload_*` |
+| A sandboxed plugin's key | Plugin | 1,000 | Per hour | `api_rate_limit_requests` / `_window`; not counted against the loopback address |
 
 A person's browser, their devices and their app credentials are three separate budgets, each counted on the requests made with that kind of credential. A desktop's first sync of a large folder (about two requests a file) or a mail program's first download of a mailbox slows itself when it reaches its budget and leaves the person's website working. The budget is per kind, never per key: linking another device or adding another app password buys no more requests.
 

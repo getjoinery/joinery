@@ -270,6 +270,12 @@ read the kind from the contents (`SandboxPlugins::isSandboxedDir()`):
 - the code check counts an unsigned one as unsigned code
   (`PackageSignature::verifyTree()`, `utils/verify_package.php --tree`).
 
+The publishing box (the site holding the release signing key) takes no
+uploaded zip, since its plugins are its source tree. A sandboxed plugin is
+written into its `plugins/` and installed from there: recorded
+`plg_trust = 'sandboxed'`, refused while the switch is off, and with no
+email to superadmins.
+
 Uploading a new version of an installed plugin replaces it like any package.
 When the plugin is active, everything it owns follows the new manifest at
 once, within what was approved (below).
