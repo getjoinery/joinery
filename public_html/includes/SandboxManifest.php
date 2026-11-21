@@ -31,6 +31,7 @@
  *     ],
  *     "outbound_hosts": ["hooks.slack.com"],door 5: hosts it may call over HTTPS
  *     "send_email": true,                   door 6: it sends mail through the site's EmailSender
+ *     "accept_uploads": true,               door 7: its own pages take uploaded files, kept with File
  *     "settings": [ {"name", "label", "type", "secret", "default", "required", "options", "help"} ],
  *     "models": [ {"name": "SentLog", "label": "…", "fields": [ {"name", "type", "label", "required", "max_length", "index"} ]} ],
  *     "admin_pages":   [ {"slug", "title", "sections": [ … ]} ],   door 4; with no sections the
@@ -40,6 +41,9 @@
  *     "limits": {"memory_mb": 16, "timeout_ms": 5000}
  *   }
  *
+ * @version 1.7 - a call's memory may be up to what the site gives a page request (memoryCeilingMb()), not 64 MB
+ * @version 1.6 - "accept_uploads": true, its drawn pages take files and it keeps them with File as native code does
+ *                (spec sandboxed_plugin_uploads)
  * @version 1.5 - "send_email": true, the plugin sends mail with EmailSender as native code does (spec sandboxed_plugin_email)
  * @version 1.4 - a framed page's handlers: the only ones its frame may call (reviewer2 K1)
  * @version 1.3 - a page may be framed ("frame": true, design 9)
@@ -98,9 +102,23 @@ class SandboxManifest {
 
 	const FREQUENCIES = array('hourly', 'daily', 'weekly');
 
-	/** Ceilings applied to a call whatever a manifest asks for. */
-	const MAX_MEMORY_MB  = 64;
+	/**
+	 * Ceilings applied to a call whatever a manifest asks for. Memory is the
+	 * site's own: what PHP gives a page request here (memoryCeilingMb()), so
+	 * a sandboxed plugin's call has what a native plugin's code has.
+	 * MEMORY_SHAPE_MAX_MB only bounds what a manifest may write.
+	 */
+	const MEMORY_SHAPE_MAX_MB = 4096;
 	const MAX_TIMEOUT_MS = 10000;
+
+	/** The ceiling when the web server's PHP sets none, or cannot be read: PHP's own default. */
+	const MEMORY_FALLBACK_MB = 128;
+
+	/** Tests only: the memory ceiling in MB, in place of the site's. Never set by the platform. @var int|null */
+	public static $memory_ceiling_override = null;
+
+	/** @var int|null */
+	private static $memory_ceiling = null;
 	const DEFAULT_MEMORY_MB  = 16;
 	const DEFAULT_TIMEOUT_MS = 5000;
 
@@ -164,7 +182,7 @@ class SandboxManifest {
 	public static function problems(array $d, ?string $expected_name = null): array {
 		$e = array();
 		$known = array('name', 'title', 'version', 'description', 'author', 'platform', 'permissions', 'signals',
-			'schedules', 'outbound_hosts', 'send_email', 'settings', 'models', 'admin_pages', 'profile_pages', 'menu', 'limits');
+			'schedules', 'outbound_hosts', 'send_email', 'accept_uploads', 'settings', 'models', 'admin_pages', 'profile_pages', 'menu', 'limits');
 		foreach (array_keys($d) as $key) {
 			if (!in_array($key, $known, true)) {
 				$e[] = "unknown key '" . self::show($key) . "'";
@@ -201,6 +219,9 @@ class SandboxManifest {
 		if (isset($d['send_email']) && !is_bool($d['send_email'])) {
 			$e[] = 'send_email must be true or false';
 		}
+		if (isset($d['accept_uploads']) && !is_bool($d['accept_uploads'])) {
+			$e[] = 'accept_uploads must be true or false';
+		}
 		$settings = self::checkSettings($d['settings'] ?? array(), $e);
 		$models = self::checkModels($d['models'] ?? array(), is_string($name) ? $name : '', $e);
 		$slugs = array();
@@ -219,8 +240,9 @@ class SandboxManifest {
 			if (!is_array($l) || array_diff(array_keys($l), array('memory_mb', 'timeout_ms'))) {
 				$e[] = 'limits may hold only memory_mb and timeout_ms';
 			} else {
-				if (isset($l['memory_mb']) && (!is_int($l['memory_mb']) || $l['memory_mb'] < 1 || $l['memory_mb'] > self::MAX_MEMORY_MB)) {
-					$e[] = 'limits.memory_mb must be 1 to ' . self::MAX_MEMORY_MB;
+				if (isset($l['memory_mb']) && (!is_int($l['memory_mb']) || $l['memory_mb'] < 1 || $l['memory_mb'] > self::MEMORY_SHAPE_MAX_MB)) {
+					$e[] = 'limits.memory_mb must be a whole number of MB from 1 (a call gets at most what this site gives a page request, '
+						. self::memoryCeilingMb() . ' MB here)';
 				}
 				if (isset($l['timeout_ms']) && (!is_int($l['timeout_ms']) || $l['timeout_ms'] < 100 || $l['timeout_ms'] > self::MAX_TIMEOUT_MS)) {
 					$e[] = 'limits.timeout_ms must be 100 to ' . self::MAX_TIMEOUT_MS;
@@ -681,6 +703,9 @@ class SandboxManifest {
 	/** Whether it sends mail (door 6). */
 	public function sendsEmail(): bool { return ($this->data['send_email'] ?? false) === true; }
 
+	/** Whether its drawn pages take uploaded files (door 7). */
+	public function acceptsUploads(): bool { return ($this->data['accept_uploads'] ?? false) === true; }
+
 	/** @return array[] */
 	public function schedules(): array { return array_values($this->data['schedules'] ?? array()); }
 
@@ -704,11 +729,60 @@ class SandboxManifest {
 
 	public function menu(): ?array { return $this->data['menu'] ?? null; }
 
+	/**
+	 * The most memory one call may have, in MB: the memory_limit the site's
+	 * web server gives PHP, which is what a native plugin's code runs with.
+	 * The same from a page and from cron (whose CLI PHP has no limit): in a
+	 * web request it is this process's own; elsewhere it is read from the
+	 * web server's PHP configuration: the first FPM pool found that sets
+	 * php_admin_value or php_value [memory_limit], else the FPM php.ini, else
+	 * Apache's (conf.d/*.ini overrides are not read). The fleet runs one FPM
+	 * pool per box; on a box serving through mod_php beside an FPM php.ini, a
+	 * call from cron may get FPM's value where a page call gets Apache's.
+	 * With none set, or none readable, PHP's own default (MEMORY_FALLBACK_MB).
+	 */
+	public static function memoryCeilingMb(): int {
+		if (self::$memory_ceiling_override !== null) {
+			return max(1, (int)self::$memory_ceiling_override);
+		}
+		if (self::$memory_ceiling !== null) {
+			return self::$memory_ceiling;
+		}
+		$value = null;
+		if (PHP_SAPI !== 'cli' && PHP_SAPI !== 'phpdbg') {
+			$value = (string)ini_get('memory_limit');
+		} else {
+			$dir = '/etc/php/' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+			foreach (glob($dir . '/fpm/pool.d/*.conf') ?: array() as $pool) {
+				if (preg_match('~^\s*php(?:_admin)?_value\[memory_limit\]\s*=\s*(\S+)~m', (string)@file_get_contents($pool), $m)) {
+					$value = $m[1];
+					break;
+				}
+			}
+			foreach (array($dir . '/fpm/php.ini', $dir . '/apache2/php.ini') as $ini) {
+				if ($value === null && preg_match('~^\s*memory_limit\s*=\s*(\S+)~m', (string)@file_get_contents($ini), $m)) {
+					$value = $m[1];
+				}
+			}
+		}
+		self::$memory_ceiling = self::megabytes((string)$value) ?? self::MEMORY_FALLBACK_MB;
+		return self::$memory_ceiling;
+	}
+
+	/** A php.ini size (128M, 1G, 134217728) in whole MB; null for none, -1 or unreadable. */
+	private static function megabytes(string $value): ?int {
+		if (!preg_match('~^([0-9]+)([KMG]?)$~iD', trim($value, " \t\"'"), $m) || (int)$m[1] <= 0) {
+			return null;
+		}
+		$bytes = (int)$m[1] * array('' => 1, 'K' => 1024, 'M' => 1048576, 'G' => 1073741824)[strtoupper($m[2])];
+		return $bytes >= 1048576 ? intdiv($bytes, 1048576) : null;
+	}
+
 	/** @return array{memory_mb:int,timeout_ms:int} the limits applied to every call */
 	public function limits(): array {
 		$l = $this->data['limits'] ?? array();
 		return array(
-			'memory_mb'  => min((int)($l['memory_mb'] ?? self::DEFAULT_MEMORY_MB), self::MAX_MEMORY_MB),
+			'memory_mb'  => min((int)($l['memory_mb'] ?? self::DEFAULT_MEMORY_MB), self::memoryCeilingMb()),
 			'timeout_ms' => min((int)($l['timeout_ms'] ?? self::DEFAULT_TIMEOUT_MS), self::MAX_TIMEOUT_MS),
 		);
 	}

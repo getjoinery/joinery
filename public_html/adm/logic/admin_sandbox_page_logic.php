@@ -10,6 +10,7 @@
  *             answer, through SandboxHost, waiting at most a few seconds
  *   settings  the plugin's declared settings, saved by the one settings writer
  *
+ * @version 1.5 - a drawn page's post carries its uploads (spec sandboxed_plugin_uploads)
  * @version 1.4 - a framed page (design 9): the outer page, once its frame is approved
  * @version 1.3 - a plugin holding all-rows grants on personal models shows its pages only to a viewer who may read
  *                each of them (design 11)
@@ -78,7 +79,8 @@ function admin_sandbox_page_logic(array $input): LogicResult {
 	if (SandboxPages::isPluginDrawn($page)) {
 		list($query, $fields) = SandboxPages::requestValues($_GET, LibraryFunctions::isFormSubmission() ? $_POST : array());
 		$drawn = SandboxPages::drawPluginPage($plugin, 'admin', $page, $here, $query, $fields,
-			LibraryFunctions::isFormSubmission() ? 'POST' : 'GET', new User($session->get_user_id(), TRUE));
+			LibraryFunctions::isFormSubmission() ? 'POST' : 'GET', new User($session->get_user_id(), TRUE),
+			LibraryFunctions::isFormSubmission() ? $_FILES : array());
 		if (!empty($drawn['redirect'])) {
 			return LogicResult::redirect($drawn['redirect']);
 		}

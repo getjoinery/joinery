@@ -26,6 +26,11 @@
  * plugins the active one installed first keeps the tag (byPrecedence), so the
  * catalog is total whether or not the check has been run.
  *
+ * A sandboxed plugin that takes uploads (manifest accept_uploads) has one tag,
+ * sbx_{plugin}, labelled by its title (sandboxTags()). No native plugin may be
+ * named sbx..., so it cannot collide.
+ *
+ * @version 1.3 - each installed sandboxed plugin that takes uploads names its files' tag (spec sandboxed_plugin_uploads)
  * @version 1.2 - a tag two plugins claim goes to the active plugin installed first, not to directory order
  * @changelog 1.1 - a usable tag with a stray key stays in the catalog as declared; errorsFor() can check against a set of plugins
  * @changelog 1.0
@@ -69,6 +74,9 @@ class FileSourceDeclarations {
 				}
 				$catalog[$tag] = self::normalize($spec);
 			}
+		}
+		foreach (self::sandboxTags() as $tag => $spec) {
+			if (!isset($catalog[$tag])) $catalog[$tag] = $spec;
 		}
 		foreach (self::$test_declarations as $tag => $spec) {
 			if (!isset($catalog[$tag])) $catalog[$tag] = $spec;
@@ -192,6 +200,31 @@ class FileSourceDeclarations {
 	 * plugin => its fileSources map, every plugin on disk, in directory order.
 	 * A plugin whose fileSources is not an object is noted in $malformed instead.
 	 */
+	/**
+	 * The tag of each installed sandboxed plugin whose manifest takes uploads:
+	 * sbx_{plugin} => "{title} files", listed, not in the default view.
+	 *
+	 * @return array<string,array{label:string,internal:bool,default_view:bool}>
+	 */
+	private static function sandboxTags(): array {
+		$out = array();
+		try {
+			foreach (SandboxPlugins::installedOnDisk() as $name) {
+				try {
+					$manifest = SandboxPlugins::manifest($name);
+				} catch (SandboxManifestException $e) {
+					continue;
+				}
+				if ($manifest->acceptsUploads()) {
+					$out['sbx_' . $name] = array('label' => $manifest->title() . ' files', 'internal' => false, 'default_view' => false);
+				}
+			}
+		} catch (Throwable $e) {
+			// No database (a CLI tool before it is configured): no sandboxed plugin is installed.
+		}
+		return $out;
+	}
+
 	private static function manifests(): array {
 		if (self::$manifests !== null) return self::$manifests;
 

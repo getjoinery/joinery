@@ -441,6 +441,7 @@ $rule_permitted = array(
 	'plugins/mailbox/logic/fleet_enroll_logic.php' => 'enrolling the caller\'s own site or tier slot, once enroll checked the site is theirs and entitled',
 	'plugins/server_manager/logic/profile_sites_logic.php' => 'the DNS write receipts for a buyer\'s own-domain site, found in their own list, written with their own DNS credential',
 	'includes/oauth/consumers/DnsPublishConsumer.php' => 'the DNS write receipts when the page that started the flow set its own floor (the visitor\'s own domain)',
+	'includes/SandboxRelay.php' => 'a sandboxed plugin renaming or trashing a file in its reach, whoever is viewing: one with its own tag (sbx_{plugin}), its data as its own rows are, or any file under an approved File records grant, as its key reaches every row of a model',
 );
 $rule_found = array();
 foreach ($scan as $file) {

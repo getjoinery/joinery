@@ -14,6 +14,7 @@
  * Also the API action `sandbox_page` (the apps submit a plugin's member forms
  * through it), for a person's credential only.
  *
+ * @version 1.5 - a drawn page's post carries its uploads (spec sandboxed_plugin_uploads)
  * @version 1.4 - a framed page (design 9): the outer page, for a browser only
  * @version 1.3 - plugin and page from the address only; a drawn page is refused to the API (reviewer2 H1, H6)
  * @version 1.2 - a page with no sections is drawn by the plugin's own view, cleaned by core (drawn)
@@ -69,7 +70,8 @@ function sandbox_page_logic(array $input): LogicResult {
 		}
 		list($query, $fields) = SandboxPages::requestValues($_GET, LibraryFunctions::isFormSubmission() ? $_POST : array());
 		$drawn = SandboxPages::drawPluginPage($plugin, 'member', $page, $here, $query, $fields,
-			LibraryFunctions::isFormSubmission() ? 'POST' : 'GET', new User($session->get_user_id(), TRUE));
+			LibraryFunctions::isFormSubmission() ? 'POST' : 'GET', new User($session->get_user_id(), TRUE),
+			LibraryFunctions::isFormSubmission() ? $_FILES : array());
 		if (!empty($drawn['redirect'])) {
 			return LogicResult::redirect($drawn['redirect']);
 		}

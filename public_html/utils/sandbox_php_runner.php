@@ -37,6 +37,7 @@
  * Nothing here is a wall: the fence is. A plugin may write to its stdout
  * itself; it can only send asks it could send through SandboxPipe anyway.
  *
+ * @version 1.5 - a page call's uploads are $_FILES, and SandboxPage::file() (spec sandboxed_plugin_uploads)
  * @version 1.4 - on_page: the plugin's view draws a page (SandboxPage)
  * @version 1.3 - a refused ask throws with the API's status as its code
  * @version 1.2 - the runtime boots inside the output buffer and the try, so a failure there is answered (reviewer2 F3)
@@ -100,7 +101,7 @@ final class SandboxPipe {
 /** A page call's request, and what the view may set besides its body. */
 final class SandboxPage {
 
-	/** @var array {page, kind, method, query, fields, user} */
+	/** @var array {page, kind, method, query, fields, files, user} */
 	public static $input = array();
 
 	/** @var string|null */
@@ -130,6 +131,17 @@ final class SandboxPage {
 
 	public static function query(string $name, $default = null) {
 		return self::$input['query'][$name] ?? $default;
+	}
+
+	/**
+	 * One posted file box, as $_FILES holds it: {name, type, size, error,
+	 * tmp_name}, each a list for a box named name[]. Null when none was sent.
+	 * tmp_name goes to File::createFromUpload() as native code passes it; the
+	 * fence cannot read the file itself.
+	 */
+	public static function file(string $name): ?array {
+		$file = self::$input['files'][$name] ?? null;
+		return is_array($file) ? $file : null;
 	}
 }
 
@@ -201,6 +213,8 @@ try {
 		// What the view echoes is the page's body; it may set a title or ask
 		// for a redirect to one of its own pages (SandboxPage).
 		SandboxPage::$input = is_array($envelope['input'] ?? null) ? $envelope['input'] : array();
+		// The page's uploads where native code reads them.
+		$_FILES = is_array($envelope['input']['files'] ?? null) ? $envelope['input']['files'] : array();
 		ob_start();
 		(static function (string $view): void {
 			require $view;

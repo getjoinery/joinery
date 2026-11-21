@@ -142,7 +142,7 @@ $cases = array(
 	'a table column that is not a field'       => array(function (&$x) { $x['admin_pages'][0]['sections'][0]['columns'][] = 'usr_password'; }, 'is not a field'),
 	'a table on a profile page'                => array(function (&$x) { $x['profile_pages'] = $x['admin_pages']; }, 'a profile page cannot show a table'),
 	'a menu with no admin pages'               => array(function (&$x) { $x['admin_pages'] = array(); }, 'needs at least one admin page'),
-	'a memory limit above the ceiling'         => array(function (&$x) { $x['limits']['memory_mb'] = 512; }, 'memory_mb'),
+	'a memory limit past what a manifest may write' => array(function (&$x) { $x['limits']['memory_mb'] = SandboxManifest::MEMORY_SHAPE_MAX_MB + 1; }, 'memory_mb'),
 	'a timeout above the ceiling'              => array(function (&$x) { $x['limits']['timeout_ms'] = 60000; }, 'timeout_ms'),
 	'a model declared twice'                   => array(function (&$x) { $x['models'][] = $x['models'][0]; }, 'declared twice'),
 	'two models told apart only by case'       => array(function (&$x) { $m = $x['models'][0]; $m['name'] = 'Sentlog'; $x['models'][] = $m; }, 'not told apart by case'),

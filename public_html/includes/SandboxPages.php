@@ -8,6 +8,8 @@
  * answered and reads a table's rows. A member's page's logic is
  * logic/sandbox_page_logic.php, which is also the API action the apps call.
  *
+ * @version 1.6 - uploads: a drawn page's call carries the request's files (requestFiles()) when the plugin was
+ *                approved for them, and its cleaner keeps file inputs (spec sandboxed_plugin_uploads)
  * @version 1.5 - framePrelude(): core's first script in the frame removes the WebRTC constructors, which
  *                Chromium's policy does not block (V6, in a real browser)
  * @version 1.4 - the frame's policy blocks WebRTC where the browser knows the directive (reviewer2 K3)
@@ -311,11 +313,13 @@ class SandboxPages {
 	 * @param string $here the page's own address (every form posts to it)
 	 * @return array{ok:bool, html?:string, title?:string, redirect?:string, message?:string}
 	 */
-	public static function drawPluginPage(string $plugin, string $kind, array $page, string $here, array $query, array $fields, string $method, ?User $user): array {
+	public static function drawPluginPage(string $plugin, string $kind, array $page, string $here, array $query, array $fields, string $method, ?User $user, array $files = array()): array {
 		if (!self::strictScriptsEnforced()) {
 			return array('ok' => false, 'message' => self::NO_STRICT_POLICY);
 		}
-		$result = SandboxHost::page($plugin, $kind, $page['slug'], $method, $query, $fields, $user);
+		$uploads = !empty(SandboxConsent::effective($plugin)['uploads']);
+		$files = ($uploads && $method === 'POST') ? self::requestFiles($files) : array();
+		$result = SandboxHost::page($plugin, $kind, $page['slug'], $method, $query, $fields, $user, $files);
 		if ($result['status'] !== SandboxLog::STATUS_OK) {
 			return array('ok' => false, 'message' => (string)$result['message']);
 		}
@@ -333,6 +337,8 @@ class SandboxPages {
 			'asset_url'   => self::assetUrl($plugin),
 			'image_hosts' => SandboxConsent::effective($plugin)['outbound_hosts'],
 			'form_hidden' => array('plugin' => $plugin, 'page' => (string)$page['slug']),
+			'uploads'     => $uploads,
+			'upload_url'  => self::uploadUrl(),
 		));
 		if ($clean['status'] !== DocumentText::OK && $clean['status'] !== DocumentText::EMPTY) {
 			error_log('[SandboxPages] ' . $plugin . '/' . $page['slug'] . ': the body was refused: ' . (string)$clean['detail']);
@@ -404,6 +410,67 @@ class SandboxPages {
 			return $out;
 		};
 		return array($clean($get), $clean($post));
+	}
+
+	/** The most files one page call carries: PHP's own default max_file_uploads. */
+	const MAX_FILES = 20;
+
+	/**
+	 * The request's uploads as a drawn page's call carries them: $_FILES in
+	 * PHP's own shape (one entry, or one level of lists for name[]), at most
+	 * MAX_FILES files, each {name, type, size, error, tmp_name} with the name
+	 * and type one line. tmp_name is the site's own temporary path, which the
+	 * fence cannot read; the relay takes it back only when it is one of these
+	 * (SandboxRelay, file.upload). Anything deeper than one level is left out.
+	 */
+	public static function requestFiles(array $files): array {
+		$line = function ($v, int $max): string {
+			return mb_substr(trim((string)preg_replace('~[\x00-\x1F\x7F]+~', ' ', is_scalar($v) ? (string)$v : '')), 0, $max);
+		};
+		$one = function (array $f, $i) use ($line): ?array {
+			$pick = function ($key) use ($f, $i) { return $i === null ? ($f[$key] ?? null) : ($f[$key][$i] ?? null); };
+			if (!is_string($pick('tmp_name')) || !is_scalar($pick('error'))) {
+				return null;
+			}
+			return array('name' => $line($pick('name'), 255), 'type' => $line($pick('type'), 255),
+				'size' => (int)$pick('size'), 'error' => (int)$pick('error'), 'tmp_name' => (string)$pick('tmp_name'));
+		};
+		$out = array();
+		$count = 0;
+		foreach ($files as $control => $f) {
+			if (!is_string($control) || !preg_match('~^[A-Za-z][A-Za-z0-9_-]{0,63}$~D', $control) || !is_array($f)) {
+				continue;
+			}
+			if (!is_array($f['tmp_name'] ?? null)) {
+				$entry = $count < self::MAX_FILES ? $one($f, null) : null;
+				if ($entry !== null) {
+					$out[$control] = $entry;
+					$count++;
+				}
+				continue;
+			}
+			$list = array('name' => array(), 'type' => array(), 'size' => array(), 'error' => array(), 'tmp_name' => array());
+			foreach (array_keys($f['tmp_name']) as $i) {
+				$entry = (is_int($i) && $count < self::MAX_FILES) ? $one($f, $i) : null;
+				if ($entry === null) {
+					continue;
+				}
+				foreach ($entry as $key => $value) {
+					$list[$key][] = $value;
+				}
+				$count++;
+			}
+			if ($list['tmp_name']) {
+				$out[$control] = $list;
+			}
+		}
+		return $out;
+	}
+
+	/** The site's uploads address, as File::get_url() starts it: /uploads/. */
+	public static function uploadUrl(): string {
+		$dir = trim((string)Globalvars::get_instance()->get_setting('upload_web_dir'), '/');
+		return $dir === '' ? '' : '/' . $dir . '/';
 	}
 
 	public static function profilePageUrl(string $plugin, string $slug): string {

@@ -17,6 +17,8 @@
  * meaning their PHP is here, and one arriving from the catalog later would
  * find its name held.
  *
+ * @version 1.1 - a records grant may name File (read, update, delete), which the relay serves, not the API
+ *                (spec sandboxed_plugin_uploads)
  * @version 1.0
  */
 
@@ -55,6 +57,15 @@ class SandboxCompatibility {
 		foreach ($m->permittedRecords() as $model => $verbs) {
 			if (!ApiKey::is_model_class($model)) {
 				$problems[] = "It needs the records $model, which this site does not have (is the plugin that holds them active?).";
+				continue;
+			}
+			if ($model === 'File') {
+				// Files are not a model the API serves; the relay carries a
+				// plugin's File asks out itself (SandboxRelay::fileReach()).
+				// A file is made with createFromUpload() or createFromBytes().
+				if (in_array('create', $verbs, true)) {
+					$problems[] = 'It asks to create File records, but a file is made with File::createFromUpload() or File::createFromBytes() (accept_uploads), not as a record.';
+				}
 				continue;
 			}
 			foreach ($verbs as $verb) {

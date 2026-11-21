@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.8 - sendBatch() honours email_dry_run, as send() does (it sent a test's batch to the trap)
  * @version 1.7 - EmailSender::$remote: inside a sandboxed plugin's fence, send(), sendBatch() and template
  *   rendering are carried to the site, which runs them with this same class (specs/sandboxed_plugin_email.md)
  * @version 1.6 - every send that leaves is counted per From-domain in MailSendOutcome: signed, unsigned or
@@ -749,6 +750,13 @@ class EmailSender {
         // protected identity domain must never ride them (see send()'s guard).
         if (MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf((string)$message->getFrom()))) {
             throw new Exception('Refusing to batch-send from a protected identity domain.');
+        }
+
+        // Dry run covers batches too, as send()'s does: built and checked, never sent.
+        if ((string)Globalvars::get_instance()->get_setting('email_dry_run') === '1') {
+            $this->logEmailDebug('Dry run: suppressed batch of ' . count($recipients) . ' — subject: '
+                . $message->getSubject(), 'dry-run');
+            return ['success' => true, 'failed_recipients' => []];
         }
 
         // Test mode covers batches too — one send to the trap stands in for

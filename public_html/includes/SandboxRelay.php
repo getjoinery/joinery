@@ -17,6 +17,9 @@
  *   email.send    {message, queue_on_failure}                  EmailSender::send() on the site
  *   email.batch   {message, recipients}                        EmailSender::sendBatch() on the site
  *   email.render  {inner, outer, footer, values}               EmailTemplateRenderer filled on the site
+ *   file.upload   {tmp_name, name, type, owner_id, restrictions}  File::createFromUpload() of one of this call's uploads
+ *   file.bytes    {part, more, name, type, owner_id, restrictions}  File::createFromBytes(), the bytes base64 in parts
+ *   file.read     {id, offset}                                 read_bytes() of a file it reaches, base64, one part
  *
  * Record and action asks go to this site's own API over this machine's
  * loopback, signed with the plugin's key, which is loaded here by plugin name
@@ -51,6 +54,23 @@
  * site's worker, outside the fence's limits, so it may not hold a loop
  * (reviewer2 P3). A date in the values arrives tagged and is a DateTime again.
  *
+ * A file ask is the plugin's File call, run here with File, allowed only when
+ * the plugin was approved to take uploads (accept_uploads; spec
+ * sandboxed_plugin_uploads). A file it makes is the viewer's, private, and
+ * tagged as the plugin's (fil_source sbx_{plugin}); the only columns it may
+ * set are the title and description. An upload is taken only when its path
+ * is one of the uploads core put in this call's envelope, and PHP says it was
+ * uploaded in this request. File is not a model the API serves, so its
+ * record asks for File (get, list, update, delete) and file.read are
+ * carried out here: they reach the files with its tag, or every file with an
+ * approved records grant on File for the verb. Bytes cross in parts of
+ * FILE_PART_BYTES, up to half the call's memory past the runtime's.
+ *
+ * @version 1.6 - a Drive file is read only to a plugin: rename and trash refused (reviewer2 B1, owner 2026-11-21)
+ * @version 1.5 - a records grant on File reaches every file; bytes cross in parts, up to half the call's memory
+ *                past the runtime's; the memory may be up to what the site gives a page request
+ *                (owner 2026-11-21, spec sandboxed_plugin_uploads)
+ * @version 1.4 - file.upload, file.bytes, file.read, and record asks for its own files (spec sandboxed_plugin_uploads)
  * @version 1.3 - email.send, email.batch and email.render (spec sandboxed_plugin_email)
  * @version 1.2 - own-rows grants: a record ask the plugin holds only as Model:verb:own goes as the member viewing
  *                (VIEWER_HEADER, from core's envelope), and is refused on a call with no viewer (design 8)
@@ -112,6 +132,34 @@ class SandboxRelay {
 	 */
 	public static $mail_seen = null;
 
+	/**
+	 * Tests only: a callable (string $path) => bool, in place of is_uploaded_file(). Never set by the platform.
+	 *
+	 * @var callable|null
+	 */
+	public static $upload_check = null;
+
+	/** A file's bytes cross the pipe in parts of this size, each well inside one message (SandboxRunner::MAX_LINE_BYTES). */
+	const FILE_PART_BYTES = 1048576;
+
+	/** The columns a plugin may set on a file it keeps. */
+	const FILE_COLUMNS = array('fil_title', 'fil_description');
+
+	/** @var array<string,int> this call's uploads, core's envelope: tmp_name => its upload error */
+	private $uploads = array();
+
+	/** @var int the call's memory, from core's envelope */
+	private $memory_mb = 16;
+
+	/** @var array|null {id, bytes} the file being read in parts */
+	private $reading = null;
+
+	/** @var string|null the temporary file a file made from bytes is gathered in, part by part */
+	private $pending = null;
+
+	/** @var int */
+	private $pending_size = 0;
+
 	/** @var string */
 	private $plugin;
 	/** @var float */
@@ -141,6 +189,21 @@ class SandboxRelay {
 		// member it is for; a signal or a schedule carries none.
 		$id = $envelope['input']['user']['id'] ?? null;
 		$this->viewer = is_int($id) && $id > 0 ? $id : null;
+		$memory = $envelope['limits']['memory_mb'] ?? null;
+		$this->memory_mb = is_int($memory) && $memory > 0 ? min($memory, SandboxManifest::memoryCeilingMb()) : SandboxManifest::DEFAULT_MEMORY_MB;
+		// The request's uploads, as core put them in the envelope (SandboxPages::requestFiles()).
+		foreach ((array)($envelope['input']['files'] ?? array()) as $entry) {
+			if (!is_array($entry)) {
+				continue;
+			}
+			$paths = (array)($entry['tmp_name'] ?? array());
+			$errors = (array)($entry['error'] ?? array());
+			foreach ($paths as $i => $path) {
+				if (is_string($path) && $path !== '') {
+					$this->uploads[$path] = (int)($errors[$i] ?? UPLOAD_ERR_NO_FILE);
+				}
+			}
+		}
 	}
 
 	public function setDeadline(float $deadline): void {
@@ -171,6 +234,9 @@ class SandboxRelay {
 			if (in_array($kind, array('email.send', 'email.batch', 'email.render'), true)) {
 				return $this->email($kind, $ask);
 			}
+			if (in_array($kind, array('file.upload', 'file.bytes', 'file.read'), true)) {
+				return $this->file($kind, $ask);
+			}
 			return $this->refuse('ask', mb_substr($kind, 0, 40), 'There is no ask ' . mb_substr($kind, 0, 40) . '.');
 		} catch (Throwable $e) {
 			error_log('[SandboxRelay] ' . $this->plugin . ' ' . mb_substr($kind, 0, 40) . ': ' . $e->getMessage());
@@ -183,6 +249,9 @@ class SandboxRelay {
 
 	private function record(string $kind, array $ask): array {
 		$verb = self::RECORD_VERBS[$kind];
+		if (($ask['model'] ?? null) === 'File' && $this->fileReach($verb) !== null) {
+			return $this->fileRecord($kind, $ask);
+		}
 		$class = $this->modelClass($ask['model'] ?? null, $verb);
 		if (!is_string($class)) {
 			return $this->refuse('api', $kind, $class['error']);
@@ -682,6 +751,323 @@ class SandboxRelay {
 			'receipt' => is_array($report['receipt'] ?? null) ? $report['receipt'] : null,
 			'error' => isset($report['error']) ? (string)$report['error'] : null,
 		));
+	}
+
+	// ---- files ---------------------------------------------------------------
+
+	/** The origin tag on every file this plugin keeps. */
+	private function fileTag(): string {
+		return 'sbx_' . $this->plugin;
+	}
+
+	private function uploadsApproved(): bool {
+		return !empty(SandboxConsent::effective($this->plugin)['uploads']);
+	}
+
+	/**
+	 * Which files a File verb reaches for this plugin: 'all' with a records
+	 * grant on File for the verb (an approval line of its own, as for any
+	 * site record), 'own' (the files with its tag) when it was approved for
+	 * uploads, or null. File is not a model the API serves, so its asks are
+	 * carried out here either way.
+	 */
+	private function fileReach(string $verb): ?string {
+		if (in_array($verb, SandboxConsent::effective($this->plugin)['records']['File'] ?? array(), true)) {
+			return 'all';
+		}
+		return $this->uploadsApproved() ? 'own' : null;
+	}
+
+	/** What the fence's runtime itself holds of a call's memory (measured about 4.3 MB, File loaded). */
+	const RUNTIME_MEMORY_MB = 6;
+
+	/**
+	 * The largest file the plugin may read or make from bytes in one call:
+	 * half of the call's memory past the runtime's own, since the bytes are
+	 * held whole and briefly twice (measured: a 9 MB read peaks 13 MB above
+	 * the runtime). About 5 MB at the default 16 MB, 29 MB at 64.
+	 */
+	private function fileBytesCap(): int {
+		return intdiv(max(0, $this->memory_mb - self::RUNTIME_MEMORY_MB) * 1048576, 2);
+	}
+
+	/** Why a file is too large, and how the author raises the cap. */
+	private function capWords(): string {
+		return 'at most ' . DiskSpace::format($this->fileBytesCap()) . ' in one call: half of the ' . $this->memory_mb
+			. ' MB the plugin\'s calls have, past the ' . self::RUNTIME_MEMORY_MB . ' MB its runtime holds (its manifest\'s limits.memory_mb sets that, up to '
+			. SandboxManifest::memoryCeilingMb() . ' MB, what this site gives a page request)';
+	}
+
+	private function file(string $kind, array $ask): array {
+		if ($kind === 'file.read' ? $this->fileReach('read') === null : !$this->uploadsApproved()) {
+			return $this->refuse('file', $kind, $kind === 'file.read' ? 'This plugin was not approved to read files.'
+				: 'This plugin was not approved to take uploaded files.');
+		}
+		if ($this->secondsLeft() < 1) {
+			$this->note('file', $kind, 'timeout', 'no time left');
+			return array('ok' => false, 'error' => 'The call ran out of time.');
+		}
+		if ($kind === 'file.read') {
+			return $this->fileRead($ask);
+		}
+
+		// Bytes larger than one message come in parts, kept in a temporary file here until the last.
+		$target = $kind === 'file.upload' ? 'upload' : 'bytes';
+		if ($kind === 'file.bytes') {
+			$part = is_string($ask['part'] ?? null) ? base64_decode($ask['part'], true) : false;
+			if (!is_string($part)) {
+				$this->dropPending();
+				return $this->refuse('file', $target, 'The bytes must be base64.');
+			}
+			if ($this->pending === null) {
+				$this->pending = (string)tempnam(sys_get_temp_dir(), 'sbx_bytes_');
+				$this->pending_size = 0;
+			}
+			$this->pending_size += strlen($part);
+			if ($this->pending_size > $this->fileBytesCap()) {
+				$this->dropPending();
+				return $this->refuse('file', $target, 'A file made from bytes may be ' . $this->capWords() . '.');
+			}
+			if (file_put_contents($this->pending, $part, FILE_APPEND) === false) {
+				$this->dropPending();
+				$this->note('file', $target, 'error', 'not written');
+				return array('ok' => false, 'error' => 'The bytes could not be kept.');
+			}
+			if (!empty($ask['more'])) {
+				return array('ok' => true, 'received' => $this->pending_size);
+			}
+		}
+
+		// A new file: the viewer's, private, tagged, with only a title and a description of the plugin's.
+		if ($this->viewer === null) {
+			$this->dropPending();
+			return $this->refuse('file', $target, 'A file is kept in the account of the person viewing the page, and this call has no one viewing it.');
+		}
+		if (self::positiveInt($ask['owner_id'] ?? null) !== $this->viewer) {
+			$this->dropPending();
+			return $this->refuse('file', $target, 'A sandboxed plugin keeps a file in the account of the person viewing the page (owner ' . $this->viewer . ').');
+		}
+		$columns = $this->fileColumns($ask['restrictions'] ?? array());
+		if (is_string($columns)) {
+			$this->dropPending();
+			return $this->refuse('file', $target, $columns);
+		}
+		$columns['fil_private'] = true;
+		$columns['fil_source'] = $this->fileTag();
+		$name = self::oneLine($ask['name'] ?? '', 255);
+		$type = self::oneLine($ask['type'] ?? '', 255);
+
+		if ($kind === 'file.upload') {
+			$path = $ask['tmp_name'] ?? null;
+			if (!is_string($path) || !array_key_exists($path, $this->uploads)) {
+				return $this->refuse('file', $target, 'That is not a file uploaded to this page.');
+			}
+			if ($this->uploads[$path] !== UPLOAD_ERR_OK) {
+				return $this->refuse('file', $target, 'That upload did not arrive (PHP upload error ' . $this->uploads[$path] . ').');
+			}
+			$uploaded = self::$upload_check !== null ? (bool)call_user_func(self::$upload_check, $path) : is_uploaded_file($path);
+			if (!$uploaded || !is_file($path)) {
+				return $this->refuse('file', $target, 'That upload is no longer here (it was kept already, or the request has ended).');
+			}
+		} else {
+			$path = (string)$this->pending;
+			$this->pending = null;
+		}
+		$size = (int)filesize($path);
+		try {
+			$room = DiskAllowance::refusal($size);
+			if ($room !== '') {
+				return $this->refuse('file', $target, $room);
+			}
+			// As createFromBytes() makes it: from a temporary file, and not announced.
+			$file = File::createFromUpload($path, $name !== '' ? $name : ($kind === 'file.upload' ? 'upload' : 'attachment'), $type,
+				$this->viewer, $columns, false);
+		} finally {
+			if ($kind === 'file.bytes' && is_file($path)) {
+				@unlink($path);
+			}
+		}
+		if (!$file->key) {
+			$this->note('file', $target, 'error', 'not saved');
+			return array('ok' => false, 'error' => 'The file could not be saved.');
+		}
+		$this->note('file', $target . ' ' . $file->key, 'ok', mb_substr($name, 0, 80) . ', ' . DiskSpace::format($size));
+		return array('ok' => true, 'record' => $file->export_for_api());
+	}
+
+	/**
+	 * One part of a file's bytes, from offset: read whole at the first part
+	 * (as read_bytes() reads it) and kept for the rest of the call, so each
+	 * part fits in one message.
+	 */
+	private function fileRead(array $ask): array {
+		$offset = $ask['offset'] ?? 0;
+		if (!is_int($offset) || $offset < 0) {
+			return $this->refuse('file', 'read', 'The offset is a whole number from 0.');
+		}
+		$id = self::positiveInt($ask['id'] ?? null);
+		if ($offset === 0 || $this->reading === null || $this->reading['id'] !== $id) {
+			$this->reading = null;
+			$file = $this->reachableFile($ask['id'] ?? null, 'read');
+			if (!$file instanceof File) {
+				return $this->refuse('file', 'read', $file);
+			}
+			if ($file->get('fil_delete_time')) {
+				return $this->refuse('file', 'read ' . $file->key, 'That file is in the trash.');
+			}
+			$size = $file->plain_size_bytes();
+			if ($size > $this->fileBytesCap()) {
+				return $this->refuse('file', 'read ' . $file->key, 'A sandboxed plugin reads a file of ' . $this->capWords()
+					. '; this one is ' . DiskSpace::format($size) . '.');
+			}
+			$bytes = $file->read_bytes('original');
+			if (!is_string($bytes)) {
+				return $this->refuse('file', 'read ' . $file->key, 'That file\'s bytes could not be read.');
+			}
+			$this->reading = array('id' => (int)$file->key, 'bytes' => $bytes);
+			$this->note('file', 'read ' . $file->key, 'ok', DiskSpace::format(strlen($bytes)));
+		}
+		$total = strlen($this->reading['bytes']);
+		$part = (string)substr($this->reading['bytes'], $offset, self::FILE_PART_BYTES);
+		$next = $offset + strlen($part);
+		if ($next >= $total) {
+			$this->reading = null;
+		}
+		return array('ok' => true, 'bytes' => base64_encode($part), 'size' => $total, 'next' => $next < $total ? $next : null);
+	}
+
+	/** Forget a part-sent file the plugin did not finish. */
+	private function dropPending(): void {
+		if ($this->pending !== null && is_file($this->pending)) {
+			@unlink($this->pending);
+		}
+		$this->pending = null;
+		$this->pending_size = 0;
+	}
+
+	public function __destruct() {
+		$this->dropPending();
+	}
+
+	/** A file this plugin's verb reaches, by id (fileReach()), or why not. @return File|string */
+	private function reachableFile($id, string $verb) {
+		$id = self::positiveInt($id);
+		if ($id === null) {
+			return 'The id must be a whole number above 0.';
+		}
+		$reach = $this->fileReach($verb);
+		$file = new File($id, TRUE);
+		if (!$file->key || $reach === null || ($reach === 'own' && $file->get('fil_source') !== $this->fileTag())) {
+			// A file out of its reach is not this plugin's to know of: the same answer as none.
+			return 'There is no file ' . $id . ($reach === 'all' ? '' : ' among this plugin\'s files') . '.';
+		}
+		return $file;
+	}
+
+	/** The columns a plugin sets on a file: the title and description only. @return array|string */
+	private function fileColumns($given) {
+		if (!is_array($given) || ($given !== array() && array_is_list($given))) {
+			return 'The columns must be an object of column => value.';
+		}
+		$out = array();
+		foreach ($given as $key => $value) {
+			$column = self::readableColumn('File', $key);
+			if ($column === null || !in_array($column, self::FILE_COLUMNS, true)) {
+				return 'A sandboxed plugin sets only a file\'s title and description (fil_title, fil_description): its files are private to their owner and admins, '
+					. mb_substr((string)$key, 0, 60) . ' is not one it sets.';
+			}
+			if (!is_string($value) && $value !== null) {
+				return 'The ' . $column . ' must be text.';
+			}
+			$out[$column] = $column === 'fil_title' ? self::oneLine((string)$value, 255) : ($value === null ? null : mb_substr($value, 0, 10000));
+		}
+		return $out;
+	}
+
+	/** A record ask on File (fileReach() is not null for its verb). */
+	private function fileRecord(string $kind, array $ask): array {
+		if ($kind === 'record.create') {
+			return $this->refuse('file', 'create', 'A file is made with File::createFromUpload() or File::createFromBytes().');
+		}
+		if ($kind === 'record.list') {
+			$query = self::listQuery('File', $ask);
+			if (is_string($query)) {
+				return $this->refuse('file', 'list', $query);
+			}
+			$where = array('TRUE');
+			$params = array();
+			if ($this->fileReach('read') !== 'all') {
+				// Its own files only: a filter the plugin cannot change.
+				$where[] = 'fil_source = ?';
+				$params[] = $this->fileTag();
+			}
+			foreach ($query as $key => $value) {
+				if (in_array($key, array('sort', 'sdirection', 'numperpage', 'page'), true)) {
+					continue;
+				}
+				if ($key === 'deleted') {
+					$where[] = $value === '1' ? 'fil_delete_time IS NOT NULL' : 'fil_delete_time IS NULL';
+					continue;
+				}
+				// A readable declared column (listQuery()), so a plain name; the value is bound.
+				$where[] = $key . ' = ?';
+				$params[] = $value;
+			}
+			$order = isset($query['sort']) ? $query['sort'] . ' ' . $query['sdirection'] . ', fil_file_id' : 'fil_file_id';
+			$limit = (int)$query['numperpage'];
+			$offset = (int)$query['page'] * $limit;
+			$db = DbConnector::get_instance()->get_db_link();
+			$count = $db->prepare('SELECT COUNT(*) FROM fil_files WHERE ' . implode(' AND ', $where));
+			$count->execute($params);
+			$ids = $db->prepare('SELECT fil_file_id FROM fil_files WHERE ' . implode(' AND ', $where)
+				. ' ORDER BY ' . $order . ' LIMIT ' . $limit . ' OFFSET ' . $offset);
+			$ids->execute($params);
+			$records = array();
+			foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $id) {
+				$records[] = (new File((int)$id, TRUE))->export_for_api();
+			}
+			$total = (int)$count->fetchColumn();
+			$this->note('file', 'list', 'ok', count($records) . ' of ' . $total);
+			return array('ok' => true, 'status' => 200, 'records' => $records, 'total' => $total);
+		}
+		$verb = array('record.get' => 'get', 'record.update' => 'update', 'record.delete' => 'delete')[$kind];
+		$file = $this->reachableFile($ask['id'] ?? null, self::RECORD_VERBS[$kind]);
+		if (!$file instanceof File) {
+			$this->note('file', $verb, 'refused', $file);
+			// The API's answer for a row that is not there (the fence reads it as no row).
+			return array('ok' => false, 'status' => 404, 'error' => $file);
+		}
+		if ($kind !== 'record.get' && $file->get('fil_source') === File::SOURCE_DRIVE) {
+			// Drive's own rename and trash check the name, keep an encrypted
+			// file's name sealed, and tell every device (FileChange); they run
+			// only from a signed-in browser. A plugin reads Drive files (owner
+			// 2026-11-21, reviewer2 B1).
+			return $this->refuse('file', $verb . ' ' . $file->key, 'A Drive file changes only through Drive, which keeps every device in step; a sandboxed plugin may read it.');
+		}
+		if ($kind === 'record.update') {
+			$columns = $this->fileColumns($ask['fields'] ?? array());
+			if (is_string($columns)) {
+				return $this->refuse('file', 'update ' . $file->key, $columns);
+			}
+			foreach ($columns as $column => $value) {
+				$file->set($column, $value);
+			}
+			// Within its reach, whoever is viewing (reachableFile()): its own
+			// files are its data, as its own rows are, and an approved records
+			// grant reaches every file, as its key reaches every row of a model.
+			SystemBase::rule_checked_write(function () use ($file) { $file->save(); });
+			$file->load();
+		} elseif ($kind === 'record.delete') {
+			SystemBase::rule_checked_write(function () use ($file) { $file->soft_delete(); });
+			$file->load();
+		}
+		$this->note('file', $verb . ' ' . $file->key, 'ok', mb_substr((string)$file->get('fil_title'), 0, 80));
+		return array('ok' => true, 'status' => 200, 'record' => $file->export_for_api());
+	}
+
+	/** Text as one line (no control characters) of at most $max characters. */
+	private static function oneLine($value, int $max): string {
+		return is_scalar($value) ? mb_substr(trim((string)preg_replace('~[\x00-\x1F\x7F]+~', ' ', (string)$value)), 0, $max) : '';
 	}
 
 	private function emailRender(array $ask): array {

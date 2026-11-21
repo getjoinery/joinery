@@ -45,6 +45,12 @@
  * each send and template fill then goes to the site, which runs it with the
  * same classes. A call that sends no mail loads none of it.
  *
+ * Files (sandbox_runtime_files.php): File is core's. File::remote() asks
+ * joinery_fence_file_remote() in the same way; making a file from an upload
+ * or from bytes, and reading one's bytes, then go to the site. Its row is a
+ * model like any other, read and written through SystemBase::$remote_store.
+ *
+ * @version 1.4 - files: File::$remote (sandbox_runtime_files.php, spec sandboxed_plugin_uploads)
  * @version 1.3 - mail: EmailSender::$remote (sandbox_runtime_mail.php, spec sandboxed_plugin_email)
  * @version 1.2 - the model layer (sandbox_runtime_models.php): SystemBase::$remote_store, the plugin's models,
  *                and the classes of the native plugins whose models it was approved for (envelope class_dirs)
@@ -59,6 +65,15 @@
 function joinery_fence_mail_remote(): EmailRemote {
 	require_once __DIR__ . '/sandbox_runtime_mail.php';
 	return new SandboxRemoteMail();
+}
+
+/**
+ * The fence's file layer (File::remote() asks for it at its first use).
+ * Defined only here, in the fence's runtime, which the site never loads.
+ */
+function joinery_fence_file_remote(): FileRemote {
+	require_once __DIR__ . '/sandbox_runtime_files.php';
+	return new SandboxRemoteFiles();
 }
 
 /** What a stand-in throws for something the fence does not have. */

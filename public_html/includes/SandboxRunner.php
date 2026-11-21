@@ -33,6 +33,7 @@
  * then the run's uid. Conversation is in strict turns: nothing more is read
  * from the process while an answer to it is unwritten.
  *
+ * @version 1.6 - the fence reads the file layer (utils/sandbox_runtime_files.php, spec sandboxed_plugin_uploads)
  * @version 1.5 - the fence reads the mail layer (utils/sandbox_runtime_mail.php, spec sandboxed_plugin_email); the
  *                runtime files are read from one list
  * @version 1.4 - a line may be 4 MB, for a framed page's document
@@ -80,7 +81,7 @@ class SandboxRunner {
 	const SCRIPT = 'utils/sandbox_php_runner.php';
 	const RUNTIME = 'utils/sandbox_runtime.php';
 	const STANDINS = array('utils/sandbox_runtime_standins.php', 'utils/sandbox_runtime_standins_session.php', 'utils/sandbox_runtime_models.php',
-		'utils/sandbox_runtime_mail.php');
+		'utils/sandbox_runtime_mail.php', 'utils/sandbox_runtime_files.php');
 
 	/** What a call says on a host that refuses sandboxed plugins (design 10). */
 	const SHARED_HOST = 'This server is shared with other sites, and does not run sandboxed plugins.';

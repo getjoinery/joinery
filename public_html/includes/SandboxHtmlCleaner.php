@@ -22,11 +22,15 @@
  *   links       href keeps http:, https:, mailto: and relative addresses.
  *   images      src is one of the plugin's own files (assets/NAME, served by
  *               core from src/assets) or an https address on one of its
- *               approved hosts; any other image is dropped.
+ *               approved hosts; with uploads on, also a plain path under the
+ *               site's uploads address (a file it kept, which the site serves
+ *               only to whoever may see it); any other image is dropped.
  *   forms       action is the page's own address, whatever the plugin wrote;
- *               method is GET or POST. No password or file input survives,
- *               nor a hidden _csrf_token (FormWriter mints one in the fence,
- *               which means nothing to core).
+ *               method is GET or POST. No password input survives, nor a
+ *               hidden _csrf_token (FormWriter mints one in the fence, which
+ *               means nothing to core). A file input survives only with
+ *               uploads on and only in a POST form, which core then sends as
+ *               multipart/form-data; enctype is never the plugin's.
  *
  * Then it parses its own output again and cleans that: unless the second
  * pass changes nothing, the page is refused (a mutation, markup that grows
@@ -40,8 +44,12 @@
  *
  * Options: page_url (the form action), asset_url (what assets/NAME becomes:
  * the prefix, NAME url-encoded after it), image_hosts (approved hosts),
- * form_hidden (name => value, added to every GET form).
+ * form_hidden (name => value, added to every GET form), uploads (bool: the
+ * plugin was approved to take uploaded files), upload_url (the site's uploads
+ * address, /uploads/).
  *
+ * @version 1.2 - uploads: a file input in a POST form, the form sent multipart; images under the uploads address
+ *                (spec sandboxed_plugin_uploads)
  * @version 1.1 - reviewer2 H1-H5: core's control names dropped; classes from the kit's content list only; GET
  *                forms carry the page's plugin and page; a leading newline in pre/textarea kept; autocomplete on/off
  * @version 1.0
@@ -78,14 +86,14 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 		'form' => array('action', 'method'),
 		'fieldset' => array('disabled'), 'legend' => array(), 'label' => array(),
 		'input' => array('type', 'name', 'value', 'placeholder', 'required', 'checked', 'disabled', 'readonly',
-			'min', 'max', 'step', 'maxlength', 'minlength', 'size', 'multiple', 'pattern', 'autocomplete'),
+			'min', 'max', 'step', 'maxlength', 'minlength', 'size', 'multiple', 'pattern', 'autocomplete', 'accept'),
 		'select' => array('name', 'required', 'disabled', 'multiple', 'size'),
 		'option' => array('value', 'selected', 'disabled', 'label'), 'optgroup' => array('label', 'disabled'),
 		'textarea' => array('name', 'rows', 'cols', 'placeholder', 'required', 'disabled', 'readonly', 'maxlength', 'minlength'),
 		'button' => array('type', 'name', 'value', 'disabled'),
 	);
 
-	/** Input types kept; any other input is dropped (password, file, image among them). */
+	/** Input types kept; any other input is dropped (password, image among them; file only with uploads on, FILE_INPUT). */
 	const INPUT_TYPES = array('text', 'email', 'number', 'date', 'time', 'datetime-local', 'month', 'week',
 		'checkbox', 'radio', 'hidden', 'search', 'tel', 'url', 'range', 'color', 'submit', 'reset', 'button');
 
@@ -119,7 +127,8 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 	}
 
 	public function __construct(array $options = array()) {
-		$this->options = $options + array('page_url' => '', 'asset_url' => '', 'image_hosts' => array(), 'form_hidden' => array());
+		$this->options = $options + array('page_url' => '', 'asset_url' => '', 'image_hosts' => array(), 'form_hidden' => array(),
+			'uploads' => false, 'upload_url' => '');
 	}
 
 	/**
@@ -166,6 +175,12 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 				continue;
 			}
 			$this->cleanChildren($node);
+			if ($node->localName === 'form' && $node->getAttribute('method') === 'post'
+					&& $node->querySelector('input[type="file"]') !== null) {
+				// Only a multipart post carries the file; the plugin's own
+				// enctype was dropped with its other attributes.
+				$node->setAttribute('enctype', 'multipart/form-data');
+			}
 			if ($node->localName === 'form' && $node->getAttribute('method') === 'get') {
 				// A browser replaces the action's query with the form's fields on
 				// a GET submit, so the page's own keys go in as fields. Any the
@@ -236,7 +251,18 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 				if ($type === '') {
 					$type = 'text';
 				}
-				if (!in_array($type, self::INPUT_TYPES, true)) {
+				if ($type === 'file') {
+					// With approval, and in a POST form only: a GET form sends a
+					// file's name, never the file.
+					$form = $el->parentElement ? $el->parentElement->closest('form') : null;
+					if (empty($this->options['uploads']) || $form === null || strtolower((string)$form->getAttribute('method')) !== 'post') {
+						return false;
+					}
+					foreach (array('value', 'placeholder', 'checked', 'readonly', 'min', 'max', 'step', 'maxlength', 'minlength',
+							'size', 'pattern', 'autocomplete') as $attr) {
+						$el->removeAttribute($attr);
+					}
+				} elseif (!in_array($type, self::INPUT_TYPES, true)) {
 					return false;
 				}
 				$el->setAttribute('type', $type);
@@ -287,6 +313,12 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 		if (preg_match('~^(?:\./)?assets/([A-Za-z0-9_\-][A-Za-z0-9_.\-/]{0,199})$~D', $src, $m)
 				&& strpos($m[1], '..') === false && strpos($m[1], '//') === false && (string)$this->options['asset_url'] !== '') {
 			return (string)$this->options['asset_url'] . rawurlencode($m[1]);
+		}
+		$uploads = (string)$this->options['upload_url'];
+		if (!empty($this->options['uploads']) && $uploads !== '' && strpos($src, $uploads) === 0
+				&& preg_match('~^[A-Za-z0-9_\-][A-Za-z0-9_.\-/]{0,299}$~D', substr($src, strlen($uploads)))
+				&& strpos($src, '..') === false && strpos(substr($src, 1), '//') === false) {
+			return $src;
 		}
 		$parts = parse_url($src);
 		if (is_array($parts) && strtolower((string)($parts['scheme'] ?? '')) === 'https' && !isset($parts['user']) && !isset($parts['pass'])

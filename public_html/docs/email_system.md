@@ -588,7 +588,7 @@ email_dry_run = "1"           // Build and validate, never transmit
 ```
 
 `EmailSender::send()` returns success without touching a transport and without
-queueing. The check sits after validation, so a malformed message still fails
+queueing, and `sendBatch()` answers success with no failed recipients. The check sits after validation, so a malformed message still fails
 loudly, and above both transport branches, so an injected per-mailbox transport
 is suppressed along with the globally selected service. Suppressed sends are
 recorded through the debug log with the service name `dry-run`.

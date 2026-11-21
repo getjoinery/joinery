@@ -70,7 +70,8 @@ Write it the way a native plugin is written: models (`new Note()`,
 `new MultiNote([...])`), `Globalvars::get_instance()->get_setting()` for its
 own settings, `SessionControl::get_instance()` for who is viewing, FormWriter
 or plain HTML for forms. What it cannot do (raw SQL, a session write, the
-config file, the network beside an approved host, mail without `send_email`) fails with a message that
+config file, the network beside an approved host, mail without `send_email`,
+uploads without `accept_uploads`) fails with a message that
 says so; each part is under [Calls](#calls).
 
 The author's command, `utils/sandbox_plugin.php`:
@@ -157,16 +158,17 @@ manifest says can be code.
 | `version` | yes | `x.y.z` |
 | `platform` | yes | The platform API version the plugin was built for (`SandboxManifest::PLATFORM_VERSION` is this site's) |
 | `description`, `author` | no | Text, at most 1000 and 120 characters |
-| `permissions` | no | `actions`: action names it may call. `records`: model class → verbs (`read`, `create`, `update`, `delete`) it may use on models outside the plugin |
+| `permissions` | no | `actions`: action names it may call. `records`: model class → verbs (`read`, `create`, `update`, `delete`) it may use on models outside the plugin; `File` takes `read`, `update` and `delete` (see [Files](#files)) |
 | `signals` | no | Signal names delivered to it |
 | `schedules` | no | `name`, `frequency` (`hourly`, `daily`, `weekly`), `time` (`HH:MM`, daily and weekly), `day_of_week` (0-6, weekly) |
 | `outbound_hosts` | no | Hostnames it may call over HTTPS: no scheme, port, address or wildcard |
 | `send_email` | no | `true` when it sends mail (see [Mail](#mail)); `true` or `false` only |
+| `accept_uploads` | no | `true` when its drawn pages take uploaded files (see [Files](#files)); `true` or `false` only |
 | `settings` | no | `name`, `label`, `type` (`text`, `textarea`, `number`, `boolean`, `select`, `url`, `email`), `secret` (text and url only, no default), `default`, `required`, `options` (select), `help` |
 | `models` | no | Up to 20; see [Data](#data) |
 | `admin_pages`, `profile_pages` | no | `slug`, `title`, `sections` (`text`, `table`, `form`, `settings`); a profile page holds no table or settings |
 | `menu` | no | `title`: one admin menu entry holding a link to each admin page |
-| `limits` | no | `memory_mb` (1-64, default 16) and `timeout_ms` (100-10000, default 5000) for each call |
+| `limits` | no | `memory_mb` (default 16) and `timeout_ms` (100-10000, default 5000) for each call. A call gets at most the memory the site gives a page request (`memory_limit` of the web server's PHP, 128 MB unless the site sets otherwise; `SandboxManifest::memoryCeilingMb()`), which is what a native plugin's code has; asking for more gives that |
 
 Any key not listed is refused, so a misspelling is an error rather than a
 silently ignored declaration.
@@ -319,8 +321,9 @@ Activate, and `PluginManager::activate()` refuses it
 | Run on a schedule | `schedules` |
 | Send data to these websites | `outbound_hosts` |
 | Send email | `send_email`: to any address, through the site's mail service, from any sender address it accepts (never a protected mailbox domain), using the site's email templates |
+| Accept uploaded files | `accept_uploads`: on its own pages, from the person viewing; each file kept in that person's account, private to them and admins; it reaches only the files it kept |
 | Add these pages to members' menus | `profile_pages`, saying which have a form members fill in and which the plugin draws |
-| Warning | personal records (all rows or own) beside outside websites or email: it could send those records off the site |
+| Warning | personal records (all rows or own), or the files people upload to it, beside outside websites or email: it could send them off the site |
 
 and, as its own, its models, its admin pages and its settings. A record grant
 reaches every record of the model ("All users: read only"), since the
@@ -468,14 +471,17 @@ among them, and no `id`, `style`, `on*`, `data-*`, `form`, `formaction`,
 `mailto:` and relative addresses. Every form posts back to the page itself,
 by GET or POST, and the post reaches the view as `fields`; a GET form is
 given the page's own `plugin` and `page` as hidden fields (a GET submit
-replaces the action's query). No password or file input survives, nor a
+replaces the action's query). No password input survives, and a file input
+only in a POST form of a plugin approved to take uploads (the form is then
+sent as `multipart/form-data`; see [Files](#files)); nor does a
 control named `_csrf_token`, `plugin`, `page`, `action` or `section`, and
 the page logic takes the plugin and page from the address only, never from
 a posted body. An image is the plugin's own file,
 `assets/NAME` (served by core from `src/assets/` at
 `/sandbox_asset?plugin=&file=`, PNG, JPEG, GIF or WebP, to anyone (a
-framed page's document loads them with no cookies), no link and no path out), or `https` on one of its approved hosts; any
-other is dropped. The cleaner parses its own output again and refuses the
+framed page's document loads them with no cookies), no link and no path out), `https` on one of its approved hosts, or,
+for a plugin approved to take uploads, a plain path under `/uploads/` (a file
+it kept, served only to whoever may see it); any other is dropped. The cleaner parses its own output again and refuses the
 page unless nothing changes. The page carries a line naming the plugin that
 drew it (`SandboxPages::provenance()`), and the body sits in a box that asks the browser to keep everything in it
 (`SandboxPages::bodyOpen()`: `contain: layout paint`, `overflow: hidden`, so
@@ -591,8 +597,9 @@ stand-ins (`utils/sandbox_runtime.php`, `utils/sandbox_runtime_standins*.php`):
   settings by their full `sbx_{plugin}__{name}` names, and by their manifest
   names too unless core declares a setting of that name (a plugin's `debug`
   answers only as `sbx_{plugin}__debug`), and the site's `site_name`,
-  `webDir`, `default_timezone` and `default_email_template` (the outer
-  template `quickSend()` names). Every
+  `webDir`, `default_timezone`, `default_email_template` (the outer
+  template `quickSend()` names) and `upload_web_dir` (where `File::get_url()`
+  points). Every
   other name is unset (null), a secret or not; `config_file_setting()` gives
   its default.
 - `SessionControl::get_instance()` answers who is viewing: `get_user_id()`,
@@ -692,6 +699,80 @@ Each send is a line of the call log (door `email`): the first three
 addresses, how many more, and the subject. Without the approval every send is refused, saying the plugin was
 not approved to send email. On the site `EmailSender::$remote` is null.
 
+### Files
+
+A plugin whose manifest says `"accept_uploads": true`, once an admin approves
+it, takes files on the pages it draws and keeps them with the site's own
+`File` class, written as native code writes it:
+
+```php
+// src/admin/import.php, posted by <form method="post"><input type="file" name="doc">...
+if (SandboxPage::isPost() && ($_FILES['doc']['error'] ?? null) === UPLOAD_ERR_OK) {
+	$me = SessionControl::get_instance()->get_user_id();
+	$file = File::createFromUpload($_FILES['doc']['tmp_name'], $_FILES['doc']['name'], $_FILES['doc']['type'], $me,
+		array('fil_title' => 'Import'));
+	$note = new Note();
+	$note->set('attachment', $file->key);   // an integer field of its own model
+	$note->save();
+}
+$file = new File($note->get('attachment'), TRUE);
+echo '<a href="' . htmlspecialchars($file->get_url()) . '">' . htmlspecialchars($file->get_name()) . '</a>';
+$csv = $file->read_bytes();
+$file->set('fil_title', 'Imported'); $file->save();
+$file->soft_delete();
+foreach (new MultiFile(array('fil_title' => 'Import')) as $f) { ... }
+File::createFromBytes($report, 'report.csv', 'text/csv', $me);
+```
+
+A page call carries the request's files as `$_FILES`, in PHP's own shape (a
+`name[]` box is lists), at most 20, and `SandboxPage::file($name)` gives one
+box. The files come only through the plugin's own drawn pages, admin and
+member: a framed page posts nothing, and a section form and the
+`sandbox_page` API action carry no files.
+
+In the fence `File::remote()` answers `SandboxRemoteFiles`
+(`utils/sandbox_runtime_files.php`), made at its first use, so making a file
+and reading one's bytes are asks the site carries out with the same `File`;
+`new File()`, `MultiFile`, `save()` and `soft_delete()` are the model layer's
+record asks, as for any model. The site holds every file to these rules:
+
+- it is kept in the account of the person viewing the page (`$owner_id`
+  must be theirs; a signal or schedule call has no one, so it keeps none),
+  private (its owner and admins see it, `File::is_viewable()`), and tagged
+  `sbx_{plugin}`, which the admin Files page lists as "{title} files";
+- the plugin sets only `fil_title` and `fil_description`;
+- it reaches, lists, renames and trashes the files with its tag, and with a
+  `records` grant on `File` (`read`, `update`, `delete`, each its own) every
+  file on the site, which the approval screen says in those words. A Drive
+  file is read only to it: Drive's own rename and trash keep every device in
+  step and run only from a signed-in browser, so a rename or trash of one is
+  refused. Out of its
+  reach a file is not found. A grant needs no `accept_uploads`, but making a
+  file does. `File` is not a model the API serves, so these asks are carried
+  out by core's relay, not through `/api/v1`;
+- an upload's `tmp_name` is the site's own temporary path, taken back only
+  when it is one of the request's uploads and PHP says it was uploaded; the
+  fence cannot read that file, so a plugin that wants to look before keeping
+  keeps it, reads it, and trashes it if it does not want it. A file it does
+  not keep is deleted by PHP when the request ends;
+- `read_bytes()` answers a file's original and `createFromBytes()` takes
+  bytes of up to half of the call's memory past the 6 MB the runtime holds
+  (about 5 MB at the default 16 MB, 61 MB at 128 MB), since
+  the bytes are held whole; they cross in 1 MB parts. A larger file is
+  refused, saying the limit and how to raise it;
+- the site's own upload limits apply, and on a shared host its disk
+  allowance.
+
+Each file call is a line of the call log (door `file`). Without the approval
+every file call is refused, saying the plugin was not approved to take
+uploaded files, and a file input is dropped from its pages. The files stay
+when the plugin is uninstalled: they are the uploaders'. On the site
+`File::$remote` is null.
+
+### The asks
+
+Every ask the fence writes, and what core does with it:
+
 | Ask | Arguments | Core does |
 |---|---|---|
 | `record.get` | `model`, `id` | `GET /api/v1/{Class}/{id}`; answers `record` |
@@ -705,6 +786,9 @@ not approved to send email. On the site `EmailSender::$remote` is null.
 | `email.send` | `message`, `queue_on_failure` | `EmailSender::send()`; answers `sent`, `report` |
 | `email.batch` | `message`, `recipients` | `EmailSender::sendBatch()`; answers `success`, `failed_recipients` |
 | `email.render` | `inner`, `outer`, `footer`, `values` | `EmailTemplateRenderer` filled; answers `subject`, `html`, `text`, `has_content`, `set_values` |
+| `file.upload` | `tmp_name`, `name`, `type`, `owner_id`, `restrictions` | `File::createFromUpload()` of one of this call's uploads; answers `record` |
+| `file.bytes` | `part` (base64), `more`; on the last part `name`, `type`, `owner_id`, `restrictions` | the parts gathered, then `File::createFromBytes()`; answers `record` |
+| `file.read` | `id`, `offset` | one 1 MB part of `read_bytes()` of a file it reaches; answers `bytes` (base64), `size`, `next` |
 
 `model` is the plugin's own model by its short name (`SentLog`) or a core
 model it was approved for (`Event`). Record and action asks go to the site's

@@ -42,9 +42,29 @@ interface FileStreamingDecryptor {
 }
 
 /**
+ * Where File's byte and store work goes when File runs in a sandboxed
+ * plugin's fence (File::remote(), spec sandboxed_plugin_uploads). The site
+ * carries each one out with this same class; each answer is the file's row as
+ * the API shows it. Never set on the site.
+ */
+interface FileRemote {
+	/** File::createFromUpload(). @return array the saved file's row */
+	public function createFromUpload(string $src_path, string $display_name, string $content_type, int $owner_id, array $restrictions): array;
+
+	/** File::createFromBytes(). @return array the saved file's row */
+	public function createFromBytes(string $bytes, string $filename, string $content_type, int $owner_id, array $restrictions): array;
+
+	/** File::read_bytes() of the original. */
+	public function readBytes(int $file_id): ?string;
+}
+
+/**
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.23.0 - File::$remote (FileRemote): in a sandboxed plugin's fence, createFromUpload(),
+ *                   createFromBytes() and read_bytes() are carried to the site; the blob is the site's to move
+ *                   (spec sandboxed_plugin_uploads). Null on the site, which nothing here changes
  * @version 1.22.3 - the filename_like filter's value is quoted, never joined into the condition
  * @version 1.22.2 - provisionSigningKey() forgets the remembered key first, so a re-mint makes a new one
  * @version 1.22.1 - get_by_name() answers FALSE for a name that is not UTF-8 (was a database error and a 500)
@@ -127,6 +147,38 @@ class File extends SystemBase {	public static $prefix = 'fil';
 
 	/** The catalog key standing in for "no origin tag" (legacy rows). */
 	const SOURCE_UNCLASSIFIED = '_none';
+
+	/**
+	 * In a sandboxed plugin's fence, where the byte and store work goes
+	 * (FileRemote); null on the site. Read it through remote().
+	 *
+	 * @var FileRemote|null
+	 */
+	public static $remote = null;
+
+	/**
+	 * The fence's FileRemote, or null on the site. The fence's runtime
+	 * (utils/sandbox_runtime.php, never loaded by the site) defines
+	 * joinery_fence_file_remote(); it is asked here, at the moment of use, so
+	 * no load order can leave the work to run in the fence itself.
+	 */
+	public static function remote(): ?FileRemote {
+		if (self::$remote === null && function_exists('joinery_fence_file_remote')) {
+			self::$remote = joinery_fence_file_remote();
+		}
+		return self::$remote;
+	}
+
+	/** A File holding a row the site answered with (the fence only). */
+	private static function fromRemoteRow(array $row): File {
+		$file = new File(NULL);
+		$id = $row[static::$pkey_column] ?? null;
+		if (is_int($id) || (is_string($id) && ctype_digit($id))) {
+			$file->key = (int)$id;
+			$file->data = (object)$row;
+		}
+		return $file;
+	}
 
 	/**
 	 * What each origin tag IS — one declaration, read by every surface that lists
@@ -427,6 +479,10 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @throws FileException when the bytes cannot be placed
 	 */
 	public static function createFromUpload($src_path, $display_name, $content_type, $owner_id, array $restrictions = array(), bool $announce = true) {
+		if (self::remote() !== null) {
+			return self::fromRemoteRow(self::$remote->createFromUpload((string)$src_path, (string)$display_name,
+				(string)$content_type, (int)$owner_id, $restrictions));
+		}
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 
 		if (!is_file($src_path)) {
@@ -543,6 +599,10 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @throws FileException when the bytes cannot be written to disk
 	 */
 	public static function createFromBytes($bytes, $filename, $content_type, $owner_id, array $restrictions = array()) {
+		if (self::remote() !== null) {
+			return self::fromRemoteRow(self::$remote->createFromBytes((string)$bytes, (string)$filename,
+				(string)$content_type, (int)$owner_id, $restrictions));
+		}
 		$tmp = tempnam(sys_get_temp_dir(), 'fil_bytes_');
 		if ($tmp === false || file_put_contents($tmp, $bytes) === false) {
 			if ($tmp !== false) { @unlink($tmp); }
@@ -691,6 +751,12 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @return string|null
 	 */
 	function read_bytes($size_key = 'original') {
+		if (self::remote() !== null) {
+			if ($size_key !== 'original') {
+				throw new FileException('A sandboxed plugin reads a file\'s original only; its sizes are made and served by the site.');
+			}
+			return $this->key ? self::$remote->readBytes((int)$this->key) : null;
+		}
 		$blob = $this->_blob();
 		return $blob ? $blob->read_bytes($size_key) : null;
 	}
@@ -1546,6 +1612,10 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * is_viewable(), and the siblings keep serving the public bytes.
 	 */
 	function move_to_correct_directory() {
+		if (self::remote() !== null) {
+			// The site moves the blob when it carries out the save or the trash.
+			return;
+		}
 		$blob_id = $this->get('fil_fbb_file_blob_id');
 		if (!$blob_id) {
 			return;
@@ -1631,6 +1701,9 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * sealing) are left untouched.
 	 */
 	function save($debug = false) {
+		if (self::remote() !== null && !$this->key) {
+			throw new FileException('A file is made with File::createFromUpload() or File::createFromBytes().');
+		}
 		// On a new row the blob's magic-byte detection wins over any
 		// client-supplied type — it describes the bytes actually stored.
 		//

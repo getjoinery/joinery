@@ -14,7 +14,7 @@
  *     "limits":   {"memory_mb": 16, "timeout_ms": 5000},
  *     "settings": {"webhook_url": "…"},          secrets opened
  *     "outbound_hosts": ["hooks.slack.com"],      the approved ones
- *     "site":     {"site_name": "…", "webDir": "…", "default_timezone": "…", "default_email_template": "…"},
+ *     "site":     {"site_name": "…", "webDir": "…", "default_timezone": "…", "default_email_template": "…", "upload_web_dir": "…"},
  *     "models":   [ … the manifest's model declarations … ]
  *   }
  *
@@ -45,6 +45,8 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.9 - a page call's input carries files (the request's uploads, SandboxPages::requestFiles()); the public
+ *                facts include upload_web_dir, which File::get_url() reads (spec sandboxed_plugin_uploads)
  * @version 1.8 - the site's public facts include default_email_template, which EmailSender::quickSend() names
  * @version 1.7 - a UI call says where it came from (source, kind, page)
  * @version 1.6 - page(): a page drawn by the plugin's own view (on_page), with the UI call's bounds
@@ -125,7 +127,7 @@ class SandboxHost {
 	 *
 	 * @param string $kind 'admin' or 'member'
 	 */
-	public static function page(string $plugin, string $kind, string $slug, string $method, array $query, array $fields, ?User $user): array {
+	public static function page(string $plugin, string $kind, string $slug, string $method, array $query, array $fields, ?User $user, array $files = array()): array {
 		$user_id = $user ? (int)$user->key : null;
 		$slot = self::takeUiSlot($user_id);
 		if (!is_array($slot)) {
@@ -140,6 +142,8 @@ class SandboxHost {
 				'method' => $method === 'POST' ? 'POST' : 'GET',
 				'query'  => $query ?: new stdClass(),
 				'fields' => $fields ?: new stdClass(),
+				// The request's uploads, in $_FILES' shape, only for a plugin approved for them (SandboxPages).
+				'files'  => $files ?: new stdClass(),
 				'user'   => $user ? array('id' => (int)$user->key, 'permission' => (int)$user->get('usr_permission'),
 					'timezone' => (string)($user->get('usr_timezone') ?: '')) : null,
 			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'user_id' => $user_id));
@@ -235,7 +239,7 @@ class SandboxHost {
 		);
 	}
 
-	/** The site's public facts for the envelope: site_name, webDir, default_timezone, default_email_template. */
+	/** The site's public facts for the envelope: site_name, webDir, default_timezone, default_email_template, upload_web_dir. */
 	private static function siteFacts(): array {
 		$settings = Globalvars::get_instance();
 		return array(
@@ -244,6 +248,8 @@ class SandboxHost {
 			'default_timezone' => (string)($settings->get_setting('default_timezone') ?: 'UTC'),
 			// The outer template's name, which EmailSender::quickSend() asks for.
 			'default_email_template' => (string)$settings->get_setting('default_email_template'),
+			// Where File::get_url() puts a file's address (/uploads/...).
+			'upload_web_dir' => (string)$settings->get_setting('upload_web_dir'),
 		);
 	}
 
