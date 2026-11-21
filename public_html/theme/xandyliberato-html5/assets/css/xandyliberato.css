@@ -6,6 +6,7 @@
  * in theme.json, so an admin's colour settings still win. Everything here is
  * layout and the home page's own sections.
  *
+ * @version 1.1.2 - what assets/js/mailchimp-form.js writes under a field of that form
  * @version 1.1.1 - a Mailchimp embed form pasted into content takes the site's look
  * @version 1.0.0
  */
@@ -191,7 +192,8 @@ body.jy-default { background: var(--jy-color-surface); color: var(--jy-color-tex
 
 /* Pasted into page content as Mailchimp's embed code. Its stylesheet and
    script come from Mailchimp's hosts, which the site's policy refuses, so the
-   form takes its look from here. The embed's own style block (which sets a
+   form takes its look from here and its checks from assets/js/mailchimp-form.js
+   (views/page.php). The embed's own style block (which sets a
    fixed 600px width) comes after this file, hence the body prefix. */
 body #mc_embed_signup { width: auto; max-width: 560px; margin: 32px 0; padding: 32px;
   background: var(--jy-color-surface); border: 1px solid var(--jy-color-border); border-radius: 12px;
@@ -220,6 +222,9 @@ body #mc_embed_signup { width: auto; max-width: 560px; margin: 32px 0; padding: 
 #mc_embed_signup .brandingLogo { margin: 0; }
 #mc_embed_signup .brandingLogo img { display: block; height: 28px; width: auto; opacity: 0.7; }
 #mc_embed_signup .response:empty { display: none; }
+/* What assets/js/mailchimp-form.js writes under a field it refuses. */
+#mc_embed_signup .mce_inline_error { margin-top: 6px; font-size: 14px; color: #b91c1c; }
+#mc_embed_signup input[aria-invalid="true"] { border-color: #dc2626; }
 @media (max-width: 640px) {
   body #mc_embed_signup { padding: 20px; margin: 24px 0; }
 }

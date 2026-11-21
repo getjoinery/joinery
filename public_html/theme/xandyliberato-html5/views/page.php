@@ -53,6 +53,16 @@
 	}
 
 	echo '</div>';
+
+	// A Mailchimp sign-up form pasted into the content asks for a script on
+	// Mailchimp's host, which the site's policy refuses. This file of the
+	// theme's own checks the form in its place.
+	if (strpos((string)$page->get_filled_content(), 'mc_embed_signup') !== false) {
+		$mc_script = 'theme/xandyliberato-html5/assets/js/mailchimp-form.js';
+		$mc_path = PathHelper::getIncludePath($mc_script);
+		echo '<script src="/' . $mc_script . '?v=' . (is_file($mc_path) ? filemtime($mc_path) : '1') . '" defer></script>';
+	}
+
 	echo PublicPage::EndPanel();
 	echo PublicPage::EndPage();
 
