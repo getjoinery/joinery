@@ -12,6 +12,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 2.2 - Disconnect keeps the management node address the admin was sent with (connect_to)
  * @version 2.1 - a site the operator hosts (HostedPlanNotice::hostedHere) cannot disconnect from its management node
  * @version 2.0 - the agent's on/off switch is gone: the agent runs on every machine, and joining a
  *                management node is the owner's decision here
@@ -135,7 +136,11 @@ function admin_management_node_logic(array $input): LogicResult {
 		} catch (\Throwable $e) {
 			error_log('admin_management_node: could not clear the manager object-store marker: ' . $e->getMessage());
 		}
-		return LogicResult::redirect('/admin/admin_management_node');
+		// Sent here by a management node to connect to it: its address rides
+		// along, so the connect form is filled in once the agent has left.
+		$connect_to = trim((string)($input['connect_to'] ?? ''));
+		return LogicResult::redirect('/admin/admin_management_node'
+			. (preg_match('#^https://[a-z0-9.-]+(:\d+)?$#i', $connect_to) ? '?connect_to=' . rawurlencode($connect_to) : ''));
 	}
 
 	if (isset($input['action']) && $input['action'] === 'cancel_disconnect') {

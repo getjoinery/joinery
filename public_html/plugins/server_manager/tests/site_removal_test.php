@@ -4,7 +4,7 @@
  * tier: db
  * env: any
  * needs: []
- * covers: [plugins/server_manager/includes/SiteRemoval.php, plugins/server_manager/includes/InstanceTransferFinish.php]
+ * covers: [plugins/server_manager/includes/SiteRemoval.php, plugins/server_manager/data/customer_cloud_provisions_class.php, plugins/server_manager/includes/InstanceTransferFinish.php]
  */
 /**
  * A buyer takes a site on their own server off Your Sites (walkthrough Q36):
@@ -106,6 +106,30 @@ $node = new ManagedNode((int)$node->key, TRUE);
 check($result['kind'] === SiteRemoval::KIND_STOP && !empty($own->get('cvp_delete_time')), 'the site leaves the page');
 check(!$node->get('mgn_enabled') && trim((string)$node->get('mgn_agent_public_key')) === '' && !$node->get('mgn_uptime_enabled'),
 	'its agent is forgotten, its checks are off and the node is disabled');
+
+section('A bundle bought later for the site\'s address is the site\'s bundle');
+// Bought from the buyer's connected sites after the build: the purchase is on
+// the service rows, not on the site's order (walkthrough finding 164).
+$node3 = srm_node('srm-later-' . $run);
+$later = srm_site($buyer, 'srm-later-' . $run, 'done', 'customer', array('cvp_mgn_managed_node_id' => (int)$node3->key));
+check($later->bundle_order_item_id() === 0 && strpos(SiteRemoval::question($later), 'subscription is cancelled') === false,
+	'a site with no bundle has none, and the question says nothing of one');
+$bundle = srm_line($buyer, '2.99');
+$tenant = new ServiceTenant(NULL);
+$tenant->set('svt_usr_user_id', (int)$buyer->key);
+$tenant->set('svt_service', ServiceTenant::SERVICE_MAIL);
+$tenant->set('svt_state', ServiceTenant::STATE_ACTIVE);
+$tenant->set('svt_paid_until', '2036-01-01 00:00:00');
+$tenant->set('svt_slug', 'srm' . str_replace('-', '', $run));
+$tenant->set('svt_host', (string)$later->get('cvp_domain'));
+$tenant->set('svt_odi_order_item_id', (int)$bundle->key);
+$tenant->save();
+harness_register_row('svt_service_tenants', 'svt_service_tenant_id', $tenant->key);
+check($later->bundle_order_item_id() === (int)$bundle->key, 'the line that pays for its service rows is found');
+check(strpos(SiteRemoval::question($later), 'subscription is cancelled') !== false, 'and the question says it is cancelled with the site');
+$with = srm_site($buyer, 'srm-with-' . $run, 'done', 'customer', array('cvp_services_order_item_id' => 424242));
+check($with->bundle_order_item_id() === 424242, 'a bundle bought with the site is the one on its order');
+check($hosted->bundle_order_item_id() === 0, 'a site we host has no bundle line');
 
 section('As the signed-in buyer, on the rule the page checks');
 // A member may not write a node or a provision; the page checks the site is

@@ -8,6 +8,8 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.18 - a management node that answers it no longer knows this machine (the agent's disowned_time, agent 1.128.0)
+ *                is said so, with Disconnect as the way to connect again; Disconnect keeps ?connect_to=
  * @version 1.17 - ?connect_to= fills in the management node's address, and a waiting request links to that node's
  *                account page so its owner can claim it with nothing copied
  * @version 1.16 - a site the operator hosts offers no Disconnect, and says why
@@ -100,7 +102,20 @@ if (!$agent_installed) {
 
 // ---- Management: is this machine managed, and everything about that ------
 $is_managed = $status === 'connected';
-if ($is_managed) {
+// The management node answers that it does not know this machine: it let the
+// site go from its side (its owner stopped the management there, or the node
+// was removed). The agent keeps the connection and reports the answer; ending
+// it here is the admin's press.
+$disowned_since = $is_managed ? trim((string)($state['disowned_time'] ?? '')) : '';
+// The management node that sent the admin here to connect ("Add a server I
+// already run"), kept through a Disconnect so the form comes back filled in.
+$connect_to = trim((string)($_GET['connect_to'] ?? ''));
+if (!preg_match('#^https://[a-z0-9.-]+(:\d+)?$#i', $connect_to)) {
+	$connect_to = '';
+}
+if ($disowned_since !== '') {
+	$badge_class = 'bg-warning text-dark'; $badge_text = 'No longer managed';
+} elseif ($is_managed) {
 	$badge_class = 'bg-success'; $badge_text = 'Managed';
 } elseif ($request !== null && $status === 'pending' && $fpr_display !== '') {
 	$badge_class = 'bg-warning text-dark'; $badge_text = 'Waiting for approval';
@@ -114,7 +129,18 @@ echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
 echo '<h5 class="card-title mb-2">Management <span class="badge ' . $badge_class . '">' . $badge_text . '</span></h5>';
 
 if ($is_managed) {
-	echo '<p class="mb-2">This site is managed by <code>' . htmlspecialchars((string)($state['url'] ?? '')) . '</code>';
+	if ($disowned_since !== '') {
+		echo '<div class="alert alert-warning" role="alert">'
+		   . '<strong>' . htmlspecialchars((string)($state['url'] ?? 'The management node')) . ' has stopped managing this site.</strong> '
+		   . 'Since ' . htmlspecialchars(LibraryFunctions::convert_time($disowned_since, 'UTC', $session->get_timezone(), 'M j, Y g:i a'))
+		   . ' it answers that it does not know this machine: the management was ended there, or this site was removed from it. '
+		   . 'Nothing is updated, watched or backed up from there now. '
+		   . (empty($page_vars['hosted_here'])
+				? 'Disconnect below to end the connection on this side too. After that this site can be connected again, to it or to another management node.'
+				: 'This site is hosted by it, so write to its support rather than disconnecting.')
+		   . '</div>';
+	}
+	echo '<p class="mb-2">This site ' . ($disowned_since !== '' ? 'was connected to' : 'is managed by') . ' <code>' . htmlspecialchars((string)($state['url'] ?? '')) . '</code>';
 	if (!empty($state['node_slug']) || !empty($state['node_id'])) {
 		echo ' as <strong>' . htmlspecialchars((string)($state['node_slug'] ?? '')) . '</strong>'
 		   . (!empty($state['node_id']) ? ' (node #' . (int)$state['node_id'] . ')' : '');
@@ -141,6 +167,7 @@ if ($is_managed) {
 		echo '<form method="POST" action="' . $self . '" '
 		   . 'data-jy-confirm="Disconnect from this management node? It stops managing this site, and reconnecting starts a fresh introduction.">'
 		   . '<input type="hidden" name="action" value="disconnect">'
+		   . ($connect_to !== '' ? '<input type="hidden" name="connect_to" value="' . htmlspecialchars($connect_to) . '">' : '')
 		   . '<button type="submit" class="btn btn-outline-danger">Disconnect</button>'
 		   . '</form>';
 	}
@@ -188,10 +215,7 @@ if ($is_managed) {
 	$formwriter->hiddeninput('action', '', array('value' => 'connect'));
 	// A management node that sent the owner here (its "Add a server I
 	// already run") names itself in the address: filled in, never submitted.
-	$prefill = trim((string)($_GET['connect_to'] ?? ''));
-	if (!preg_match('#^https://[a-z0-9.-]+(:\d+)?$#i', $prefill)) {
-		$prefill = '';
-	}
+	$prefill = $connect_to;
 	$formwriter->textinput('management_node_url', 'Management node URL', array(
 		'placeholder' => 'https://manage.example.com',
 		'value'       => $prefill,

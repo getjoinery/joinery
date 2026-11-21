@@ -169,7 +169,8 @@ function profile_sites_logic(array $input): LogicResult {
 			$mine_name = (string)$mine->get('mgn_name');
 			// let_go() refuses a server that is not this buyer's own.
 			SystemBase::rule_checked_write(function () use ($mine, $user_id) { JoinedServers::let_go($mine, (int)$user_id); });
-			$text = 'We have stopped managing ' . htmlspecialchars($mine_name) . ' and taken it off this page. Your server is untouched.';
+			$text = 'We have stopped managing ' . htmlspecialchars($mine_name) . ' and taken it off this page. Your server is untouched. '
+				. 'Your site\'s own Management Node page says so within a few minutes, with the Disconnect button that ends the connection on its side.';
 			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
 		} catch (Throwable $e) {
 			$text = 'That server could not be removed from here. Write to us and we will do it.';
@@ -190,7 +191,8 @@ function profile_sites_logic(array $input): LogicResult {
 			// writes its node and its row, which a member may not otherwise.
 			$removed = SystemBase::rule_checked_write(function () use ($gone) { return SiteRemoval::remove($gone); });
 			$text = $removed['kind'] === SiteRemoval::KIND_STOP
-				? 'We have stopped managing ' . htmlspecialchars((string)$gone->get('cvp_domain')) . ' and taken it off this page. Your server is untouched.'
+				? 'We have stopped managing ' . htmlspecialchars((string)$gone->get('cvp_domain')) . ' and taken it off this page. Your server is untouched. '
+				. 'Your site\'s own Management Node page says so within a few minutes, with the Disconnect button that ends the connection on its side.'
 					. ($removed['bundle_cancelled'] ? ' Its email and backups subscription is cancelled and runs to the end of the paid period.' : '')
 				: htmlspecialchars((string)$gone->get('cvp_domain')) . ' has been removed.';
 			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
@@ -432,7 +434,7 @@ function profile_sites_logic(array $input): LogicResult {
 			// On its buyer's own Linode: the card says whose server it is, and
 			// whether our email and backups came with it.
 			'own_linode'      => !$provision->is_pre_payment() && ManagedSiteDraft::plan_of($provision) === 'own_linode',
-			'with_services'   => (int)$provision->get('cvp_services_order_item_id') > 0,
+			'with_services'   => $provision->bundle_order_item_id() > 0,
 			'show_mail'       => $hosted || (int)$provision->get('cvp_services_order_item_id') > 0,
 			// An open suspension's reason, shown to the customer (HostedSuspensions).
 			'suspended'       => ($sus = HostedSuspension::open_for($provision->key)) ? (string)$sus->get('hsu_reason') : null,
@@ -814,7 +816,7 @@ function profile_sites_links(CustomerCloudProvision $provision): array {
 	if ((string)$provision->get('cvp_domain_source') === 'register') {
 		$links['Domain'] = '/profile/server_manager/domain';
 	}
-	if ((int)$provision->get('cvp_services_order_item_id') > 0) {
+	if ($provision->bundle_order_item_id() > 0) {
 		$links[ManagedSiteDraft::BUNDLE_NAME] = '/profile/server_manager/services';
 	}
 	return $links;

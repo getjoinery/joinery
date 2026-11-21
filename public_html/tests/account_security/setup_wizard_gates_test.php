@@ -27,7 +27,7 @@ harness_boot();
 
 section('The login interrupt leaves the routes the wizard itself depends on alone');
 foreach (array('/setup', '/logout', '/profile/security', '/profile/verify-stepup', '/api/v1/passkey_register_options',
-		'/verify-email', '/login', '/recovery-verify', '/services_connected') as $path) {
+		'/verify-email', '/login', '/recovery-verify', '/services_connected', '/admin/admin_management_node') as $path) {
 	check(SetupSteps::interruptExempt($path), "$path is exempt");
 }
 foreach (array('/', '/profile', '/profile/security/other', '/admin/server_manager', '/api/v2/x', '/setupx') as $path) {

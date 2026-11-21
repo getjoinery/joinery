@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.48 - bundle_order_item_id(): the email and backups line bought with the site or later for its address
  * @version 1.47 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.46 - PROVIDER_REFUSED, provider_refusal(): a site waiting because its buyer's own account refused the server
  * @version 1.45 - cvp_site_dns_records, cvp_site_dns_time: the buyer's DNS list is held until it is whole (walkthrough Q16)
@@ -726,6 +727,30 @@ class CustomerCloudProvision extends SystemBase {
 
 	/** What every external thing a test purchase creates is named with, in front. */
 	const TEST_NAME_PREFIX = 'test_';
+
+	/**
+	 * The paid line of this site's email and backups bundle: the one bought
+	 * with the site, or one its buyer bought later for the site's address from
+	 * their connected sites (that purchase is recorded on the service rows,
+	 * not here). 0 when the site has none.
+	 */
+	public function bundle_order_item_id(): int {
+		$with_site = (int)$this->get('cvp_services_order_item_id');
+		if ($with_site > 0) {
+			return $with_site;
+		}
+		$user_id = (int)$this->get('cvp_usr_user_id');
+		$domain = trim((string)$this->get('cvp_domain'));
+		if ($user_id <= 0 || $domain === '' || $this->is_operator_hosted() || !class_exists('ServiceTenant')) {
+			return 0;
+		}
+		foreach (ServiceTenant::forHost($user_id, $domain) as $row) {
+			if ((int)$row->get('svt_odi_order_item_id') > 0 && !$row->get('svt_revoked_time')) {
+				return (int)$row->get('svt_odi_order_item_id');
+			}
+		}
+		return 0;
+	}
 
 	/**
 	 * The order line that paid for this site, when the store that sold it is

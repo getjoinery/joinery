@@ -36,6 +36,7 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.34 - /admin/admin_management_node, where a management node sends the admin to connect this site, is left alone too
  * @version 1.33 - /services_connected, the return from the wizard's Connect button, is left alone by the login interrupt
  * @version 1.32 - the email links (/verify-email, /login?act_code=, /recovery-verify) are left alone by the login
  *                interrupt: a signed-in buyer who opened their confirmation link landed in the wizard, unconfirmed
@@ -369,6 +370,12 @@ class SetupSteps {
 		// from the store): it carries the site's new credential, once. Sent to
 		// the wizard instead, the link is made at the store and lost here.
 		if ($path === '/services_connected') {
+			return true;
+		}
+		// Where a management node sends this site's admin to connect the site
+		// to it (Add a server I already run). Sent to the wizard instead, the
+		// address they came with is lost and nothing is connected.
+		if ($path === '/admin/admin_management_node') {
 			return true;
 		}
 		// Quiet pages register from plugin bootstraps, which load lazily.
