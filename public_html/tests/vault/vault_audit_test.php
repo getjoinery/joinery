@@ -6,6 +6,7 @@
  * needs: []
  */
 /**
+ * @version 1.2 - custodyDeclined() writes its own event
  * @version 1.1 - a credential event's close rows carry each window's open duration
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -51,6 +52,19 @@ check($rows[0]['evl_event'] === VaultAudit::EVENT_OPENED, 'and it is the opened 
 check(strpos($rows[0]['evl_note'], 'via=passkey') !== false, 'the arming method is recorded');
 check(strpos($rows[0]['evl_note'], 'idle_cap=600s') !== false, 'the idle cap is recorded');
 check(strpos($rows[0]['evl_note'], 'absolute_cap=7200s') !== false, 'the absolute cap is recorded');
+
+section('A refused hand-over of stored keys is written down');
+
+VaultAudit::custodyDeclined($uid, 'mail', VaultAudit::ANSWER_NO, 37, $sid);
+VaultAudit::custodyDeclined($uid, 'Not A Scope', 'anything', -4, $sid);
+$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT evl_note FROM evl_event_logs
+	WHERE evl_usr_user_id = ? AND evl_event = ? ORDER BY evl_event_log_id');
+$q->execute(array($uid, VaultAudit::EVENT_CUSTODY_DECLINED));
+$declined = $q->fetchAll(PDO::FETCH_COLUMN);
+check(count($declined) === 2 && $declined[0] === 'scope=mail answer=no items=37 session=' . VaultAudit::handle($sid),
+	'the row names the scope, the answer and how many rows were waiting', json_encode($declined));
+check(isset($declined[1]) && strpos($declined[1], 'scope=other answer=no items=0 ') === 0, 'a value outside the known forms is not written as given', $declined[1] ?? '');
+check(count(audit_rows($uid)) === 1, 'and it is not a window row');
 
 section('The session id never reaches the log');
 

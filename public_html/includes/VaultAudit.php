@@ -24,6 +24,7 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.7 - custodyDeclined(): the person refused a hand-over of stored keys their browser was asked for
  * @version 1.6 - REASON_REPLACED: a window a later arm of the same slot took the place of is closed in the log
  * @version 1.5 - opened() records where the key is held (holder=daemon|pool, fallback=pool_rung); parseNote()
  *   reads every note this class writes, for the plane's vault window view (agent_event_log_filter.md)
@@ -40,6 +41,10 @@ class VaultAudit {
 
 	const EVENT_OPENED = 'vault_window_opened';
 	const EVENT_CLOSED = 'vault_window_closed';
+	/** The person refused a hand-over of stored keys the server asked their browser for. */
+	const EVENT_CUSTODY_DECLINED = 'vault_custody_declined';
+	const ANSWER_NO     = 'no';       // the No button
+	const ANSWER_CLOSED = 'closed';   // the dialog was closed without an answer
 
 	// How a window was armed.
 	const VIA_PASSKEY    = 'passkey';
@@ -107,6 +112,20 @@ class VaultAudit {
 			. ' open_seconds=' . ($open_seconds === null ? 'unknown' : (string)max(0, $open_seconds))
 			. ($unwraps === null ? '' : ' unwraps=' . $unwraps);
 		self::write(self::EVENT_CLOSED, $user_id, $note);
+	}
+
+	/**
+	 * The person was asked whether a move of stored keys off a browser-held
+	 * vault was their own doing and did not say yes. $items is how many rows
+	 * were waiting to move. Worth reading: an honest lowering is answered yes,
+	 * so this row means either a slip or a change somebody else made.
+	 */
+	public static function custodyDeclined(int $user_id, string $scope, string $how, int $items, ?string $session_id): void {
+		$note = 'scope=' . (preg_match('/^[a-z][a-z0-9_]{0,31}$/', $scope) ? $scope : 'other')
+			. ' answer=' . ($how === self::ANSWER_CLOSED ? self::ANSWER_CLOSED : self::ANSWER_NO)
+			. ' items=' . max(0, $items)
+			. ' session=' . self::handle($session_id);
+		self::write(self::EVENT_CUSTODY_DECLINED, $user_id, $note);
 	}
 
 	/**

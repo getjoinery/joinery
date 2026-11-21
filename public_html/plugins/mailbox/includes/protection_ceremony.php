@@ -30,6 +30,7 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.13 - the lowering receipt carries what was changed (data-changes), for the question asked before the move
  * @version 2.12 - the checklist takes 'shown' (drawn visible, for a page with one target)
  * @version 2.11 - a fix button's confirm is data-jy-confirm (no inline handler)
  * @version 2.10 - the no-relay step points at the Relay section on the Server tab
@@ -656,7 +657,10 @@ function mailbox_fortress_receipt_render(InboundEmailDomain $domain, array $stat
 	$html = mailbox_receipt_open(' id="fortress-receipt"'
 		. ' data-domain-id="' . intval($domain->key) . '"'
 		. ' data-direction="' . ($is_fortress ? 'raise' : 'lower') . '"'
-		. ' data-backlog="' . ($is_fortress ? $raise : $lower) . '"');
+		. ' data-backlog="' . ($is_fortress ? $raise : $lower) . '"'
+		// What the browser names when it asks before moving anything.
+		. (!$is_fortress && $lower > 0 ? ' data-changes="' . htmlspecialchars(json_encode(MailboxFortressLevel::loweringChanges(
+			(int)SessionControl::get_instance()->get_user_id(), intval($domain->key))), ENT_QUOTES) . '"' : ''));
 	$html .= '<h3 style="margin-top:0;">This domain is now ' . htmlspecialchars(ucfirst($domain->security_level())) . '</h3>';
 	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
 	if ($is_fortress) {

@@ -62,6 +62,9 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.19 - changeCustody() asks the person, before the vault opens, whether the change the server names
+ *   (opts.changes: what, and the level it is at now) is theirs (confirmHandOver); anything but an explicit yes
+ *   moves nothing, and a no or a closed dialog is posted for the audit log (vault_custody_declined)
  * @version 1.18 - resealScope() finishing a rotation it did not begin refuses a pending key the opened secret
  *   does not own, before any row moves; a reload reopens a key only when the kept secret owns it
  * @version 1.17 - a committed rotation keeps the tab's resume halves for the new key to overwrite (no
@@ -804,14 +807,31 @@ window.JoinerySealed = (function () {
 	 * stopped resumes, since a moved row is not listed again. Resolves
 	 * { moved }. opts.progress(moved, total) reports as it goes (total is
 	 * the count at the start).
+	 *
+	 * The move hands those keys to a key the server names, and it is the
+	 * server that says a move is due, so the person is asked first
+	 * (confirmHandOver), before the vault is opened: only they know whether
+	 * they lowered anything. opts.noun names what moves ('message');
+	 * opts.changes is what the consumer says was changed, named in the question.
 	 */
 	async function changeCustody(scope, opts) {
 		opts = opts || {};
 		var report = opts.progress || function () {};
-		var s = await session(scope, { reason: opts.reason || 'to move your messages off it' });
 		var moved = 0, total = null, cursor = { model: '', after_id: 0 };
+		var first = await joineryApi.post('vault_custody_rows', { scope: scope, model: '', after_id: 0, limit: 100 });
+		if (!(first.rows && first.rows.length) && !first.next) return { moved: 0 };
+		var answer = await confirmHandOver(first.remaining, opts.noun || 'item', opts.changes);
+		if (answer !== 'yes') {
+			// Written down for the site's audit log. The answer stands whether or not the note lands.
+			if (answer) {
+				try { await joineryApi.post('vault_custody_declined', { scope: scope, how: answer }); } catch (e) { /* the refusal stands */ }
+			}
+			throw new Error('Nothing was moved. If the change was not yours, tell your site admin that this site asked for it.');
+		}
+		var s = await session(scope, { reason: opts.reason || 'to move your messages off it' });
 		for (;;) {
-			var page = await joineryApi.post('vault_custody_rows', { scope: scope, model: cursor.model, after_id: cursor.after_id, limit: 100 });
+			var page = first || await joineryApi.post('vault_custody_rows', { scope: scope, model: cursor.model, after_id: cursor.after_id, limit: 100 });
+			first = null;
 			if (page.remaining != null) total = page.remaining;
 			if (page.rows && page.rows.length) {
 				var out = [];
@@ -830,6 +850,58 @@ window.JoinerySealed = (function () {
 			cursor = page.next;
 		}
 		return { moved: moved };
+	}
+
+	/**
+	 * Ask the person whether a hand-over of stored keys to the server is their
+	 * own doing, naming what the server says was changed (changes: [{what,
+	 * level, count}], e.g. a mailbox and the level it is at now). Resolves
+	 * 'yes' only on the explicit yes; 'no' on the No button, 'closed' when the
+	 * dialog was closed or Esc pressed, and null on a page with no dialog to
+	 * ask in. All but 'yes' mean no.
+	 */
+	function confirmHandOver(count, noun, changes) {
+		if (!window.JoineryModal || !window.JoineryModal.open) return Promise.resolve(null);
+		var n = parseInt(count, 10);
+		var plural = function (k) { return k + ' stored ' + noun + (k === 1 ? '' : 's'); };
+		var what = n > 0 ? plural(n) : 'your stored ' + noun + 's';
+		var list = (changes || []).filter(function (c) { return c && c.what && c.level; });
+		return new Promise(function (resolve) {
+			var answer = 'closed';
+			var box = document.createElement('div');
+			var add = function (tag, text, parent) {
+				var el = document.createElement(tag);
+				el.textContent = text;
+				(parent || box).appendChild(el);
+				return el;
+			};
+			if (list.length === 1) {
+				add('h3', 'Did you change ' + list[0].what + ' to ' + list[0].level + '?');
+				add('p', 'This site says so, and is asking your browser to hand the keys to ' + what + ' over to the server. '
+					+ 'After that, the server can read them.');
+				add('p', 'If you did not make that change, answer No and tell your site admin: someone else made it.');
+			} else if (list.length > 1) {
+				add('h3', 'Did you make these changes?');
+				var ul = add('ul', '');
+				list.forEach(function (c) {
+					add('li', c.what + ' changed to ' + c.level + (parseInt(c.count, 10) > 0 ? ' (' + plural(parseInt(c.count, 10)) + ')' : ''), ul);
+				});
+				add('p', 'This site says so, and is asking your browser to hand the keys to ' + what + ' over to the server. '
+					+ 'After that, the server can read them.');
+				add('p', 'If any of these is not your change, answer No and tell your site admin: someone else made it.');
+			} else {
+				add('h3', 'Did you lower a protection level yourself?');
+				add('p', 'This site is asking your browser to hand the keys to ' + what + ' over to the server. '
+					+ 'After that, the server can read them.');
+				add('p', 'That is right only if you yourself chose a lower protection level. '
+					+ 'If you did not, answer No and tell your site admin: someone else changed it.');
+			}
+			var handle = window.JoineryModal.open(box, { buttons: [
+				{ label: 'No, I did not', style: 'primary', onClick: function () { answer = 'no'; } },
+				{ label: 'Yes, I changed it. Hand them over', style: 'danger', onClick: function () { answer = 'yes'; } },
+			] });
+			handle.dialog.addEventListener('close', function () { resolve(answer); }, { once: true });
+		});
 	}
 
 	// ---- self-check ----------------------------------------------------------

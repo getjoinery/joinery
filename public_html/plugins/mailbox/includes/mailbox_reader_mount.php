@@ -37,6 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.35.0 - the lowering banner carries what was changed (data-changes), for the question asked before the move
  * @version 1.34.0 - the relay-pending banner is always present for a vault client (hidden at none), so the reader
  *                   can show it when end-to-end mail arrives while the page is open
  * @version 1.33.0 - no inline script: the reader's settings are a JSON block, the unseal loop and the catch-up
@@ -150,7 +151,8 @@ function mailbox_reader_emit_fortress_banner(callable $asset_ver, bool $vault_cl
 		}
 	}
 	if ($lower > 0) {
-		echo '<div class="mbx-catchup-banner" data-fortress-level data-direction="lower" data-backlog="' . $lower . '">'
+		echo '<div class="mbx-catchup-banner" data-fortress-level data-direction="lower" data-backlog="' . $lower . '"'
+			. ' data-changes="' . htmlspecialchars(json_encode(MailboxFortressLevel::loweringChanges($user_id)), ENT_QUOTES) . '">'
 			. '<span class="mbx-catchup-text" data-fortress-text>Finish moving this mailbox off end-to-end: '
 			. htmlspecialchars($plural($lower)) . '.</span>'
 			. '<button type="button" class="mbx-catchup-btn" data-fortress-lower>Move them</button></div>';

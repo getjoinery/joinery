@@ -94,6 +94,17 @@ kept secret owns it. A wrapping of one key shown beside another key's public
 half therefore opens nothing and moves nothing. Pinned by
 `tests/vault/session_key_proof_gate.sh` and `rotation_resume_gate.sh`.
 
+**Stored keys leave a browser-held vault only on the person's yes.**
+`JoinerySealed.changeCustody()` moves row keys to a key the server names, and
+the server is also what says a move is due, so it asks first, before the vault
+is opened: whether the change the consumer names is theirs (`opts.changes`,
+for mail the mailbox and the level it is at now: "Did you change
+jo@example.com to Standard?"), how many stored items are about to be handed
+over, and that the server can then read them. Anything but the explicit yes (a no, a closed dialog, a page with no
+dialog) opens nothing and moves nothing; a no or a closed dialog is written to
+the audit log (`vault_custody_declined`). Pinned by
+`tests/vault/custody_confirm_gate.sh`.
+
 **One touch.** `vault_unlock_options {with_root}` asks for both PRF outputs.
 `JoineryPasskeys.derive()` takes the second out of the response it hands back,
 so the posted credential carries the first only, exactly as the server has
@@ -1678,6 +1689,14 @@ Two events, one row per state **transition**:
 |---|---|
 | `vault_window_opened` | `VaultUnlock::open()` arms a window |
 | `vault_window_closed` | the window ends, for any reason |
+
+A third event, `vault_custody_declined`, records a person refusing a
+hand-over of stored keys their browser was asked for (*Stored keys leave a
+browser-held vault only on the person's yes*, above): `scope`, `answer` (`no`
+for the No button, `closed` for a dialog closed without an answer), `items`
+(how many rows were waiting, by this server's count) and the session handle.
+An honest lowering is answered yes, so the row means a slip or a change
+somebody else made. The browser posts it through `vault_custody_declined`.
 
 A beacon beats every 25 seconds for as long as a tab is open. Those are not
 transitions and are not logged — burying the two facts that matter under

@@ -19,6 +19,8 @@
  *
  * Used by the domain editor's receipt card and the mailbox page's banner.
  *
+ * @version 1.2 - the move asks first whether the person made the change, naming the mailbox and its new level
+ *   (data-changes); a no moves nothing and says so
  * @version 1.1 - progress goes to the receipt's move row, not its first row; the raise
  *   watches the deferred work's count instead of running passes itself
  * @version 1.0
@@ -77,12 +79,22 @@
 		}
 	}
 
+	/** What the server says was lowered, for the question: [{what, level, count}]. */
+	function changesOf(el) {
+		try {
+			var list = JSON.parse(el.dataset.changes || '[]');
+			return Array.isArray(list) ? list : [];
+		} catch (e) { return []; }
+	}
+
 	async function runLower(el, button) {
 		var text = textOf(el);
 		button.disabled = true;
 		try {
 			var result = await JoinerySealed.changeCustody('mail', {
 				reason: 'to move your messages back to this server',
+				noun: 'message',
+				changes: changesOf(el),
 				progress: function (moved, total) {
 					if (text) text.textContent = 'Moved ' + moved + (total != null ? ' of ' + total : '') + '…';
 				},
@@ -93,7 +105,9 @@
 		} catch (e) {
 			button.disabled = false;
 			setDot(el, '#dc3545');
-			if (text) text.textContent = 'Moving stopped: ' + (e && e.message ? e.message : 'something went wrong') + '. Press the button to carry on.';
+			var declined = e && /^Nothing was moved\./.test(e.message || '');
+			if (text) text.textContent = declined ? e.message
+				: 'Moving stopped: ' + (e && e.message ? e.message : 'something went wrong') + '. Press the button to carry on.';
 		}
 	}
 

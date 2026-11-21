@@ -31,6 +31,7 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.7 - loweringChanges(): which mailboxes the lowering backlog belongs to and the level each is at now
  * @version 1.6 - the backlog reads only the user's Fortress mailboxes, found first in the alias and domain
  *                tables: with none, no message is read (the heartbeat asks on every beat); the settle
  *                backlog reads by the model's manifest index
@@ -503,6 +504,40 @@ class MailboxFortressLevel {
 			. ($domain_id > 0 ? ' AND m.iem_ied_inbound_email_domain_id = ' . intval($domain_id) : ''));
 		$stmt->execute(array($user_id));
 		return intval($stmt->fetchColumn());
+	}
+
+	/**
+	 * What the lowering backlog is made of, for the question the browser asks
+	 * before it moves anything: each mailbox (or domain, for mail kept for no
+	 * mailbox) whose messages wait, the level it is at now, and how many.
+	 * [{what, level, count}], largest first.
+	 */
+	public static function loweringChanges(int $user_id, int $domain_id = 0): array {
+		if ($user_id <= 0) {
+			return array();
+		}
+		$level = InboundEmailAlias::effectiveLevelSql('a', 'd');
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare("SELECT a.iea_alias AS alias, d.ied_domain AS domain,
+				" . $level . " AS level, COUNT(*) AS n
+			FROM iem_inbound_email_messages m
+			LEFT JOIN iea_inbound_email_aliases a ON a.iea_inbound_email_alias_id = m.iem_iea_inbound_email_alias_id
+			JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = m.iem_ied_inbound_email_domain_id
+			WHERE " . $level . " <> '" . InboundEmailDomain::LEVEL_FORTRESS . "'
+			  AND m.iem_sealed_owner_user_id = ? AND " . InboundEmailMessage::mailKeySql('m.iem_sealed_key') . "
+			  AND m.iem_pending_parse = false"
+			. ($domain_id > 0 ? ' AND m.iem_ied_inbound_email_domain_id = ' . intval($domain_id) : '') . "
+			GROUP BY 1, 2, 3 ORDER BY n DESC, 2, 1");
+		$stmt->execute(array($user_id));
+		$out = array();
+		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+			$alias = (string)($r['alias'] ?? '');
+			$out[] = array(
+				'what'  => $alias !== '' ? $alias . '@' . $r['domain'] : (string)$r['domain'],
+				'level' => ucfirst((string)$r['level']),
+				'count' => intval($r['n']),
+			);
+		}
+		return $out;
 	}
 }
 /**

@@ -29,6 +29,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_level_change
  *
+ * @version 1.4 - loweringChanges() names what was lowered and to what
  * @version 1.3 - window store is RamStore: no APCu probe, a CLI process holds windows as the web does
  * @version 1.2 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.1 - B22, B24, B25 (review 2026-09-28)
@@ -221,6 +222,10 @@ try {
 		'while the domain is Fortress the walk lists none of its messages');
 	$domain = flc_level($domain, InboundEmailDomain::LEVEL_PRIVATE);
 	check(MailboxFortressLevel::loweringBacklogCount($owner_id, intval($domain->key)) === 2, 'two messages wait for the browser');
+	$changes = MailboxFortressLevel::loweringChanges($owner_id, intval($domain->key));
+	check(array_sum(array_column($changes, 'count')) === 2 && $changes && !array_diff(array_column($changes, 'level'), array('Private'))
+		&& strpos((string)$changes[0]['what'], (string)$domain->get('ied_domain')) !== false,
+		'the question can name what was lowered, and to what', json_encode($changes));
 	$page = VaultCustodyChange::page($owner_id, 'mail', '', 0, 100);
 	$rows = array();
 	while (true) {

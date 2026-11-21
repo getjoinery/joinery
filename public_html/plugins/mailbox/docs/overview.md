@@ -2038,6 +2038,12 @@ editor opens the owner's mail vault first (made on first use), then saves.
 - **Lower.** The level flips first, then the owner's browser moves each row's DEK to
   the server key (`JoinerySealed.changeCustody('mail')`, the core custody-change
   batch); the receipt runs it, and a closed tab resumes from the mailbox banner.
+  Before the vault opens the browser asks whether the owner made the change,
+  naming each mailbox and the level it is at now
+  (`MailboxFortressLevel::loweringChanges()`, carried on the receipt and the
+  banner as `data-changes`) and how many stored messages go to the server; anything but yes
+  moves nothing, and the banner says so and to tell the site admin
+  (docs/sealed_vault.md).
   Deferred work `mailbox_fortress_lowered` puts the manifest's names back on the
   parts and clears the Fortress-only columns. Fortress → Standard is that, then the
   unseal pass.
