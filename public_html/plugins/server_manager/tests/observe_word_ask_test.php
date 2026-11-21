@@ -120,6 +120,24 @@ $r = ask_node_logic(array('node' => $node->get('mgn_slug'), 'word' => 'disk_usag
 check($r->error !== null && strpos((string)$r->error, 'does not report') !== false, 'a word the node does not report is refused', (string)$r->error);
 $r = ask_node_logic(array('node' => $node->get('mgn_slug'), 'word' => 'host_report', 'params' => 'not json'));
 check($r->error !== null && strpos((string)$r->error, 'params') !== false, 'params that are not an object are refused', (string)$r->error);
+$r = ask_node_logic(array('node' => $node->get('mgn_slug')));
+check($r->error !== null && strpos((string)$r->error, 'or neither') !== false, 'a node with no word is refused, naming the list', (string)$r->error);
 check(owa_jobs($node) === $before, 'none of the refusals queued a job');
+
+section('ask_node with neither node nor word: the list of nodes');
+
+$r = ask_node_logic(array());
+$listed = null;
+foreach (($r->data['nodes'] ?? array()) as $row) {
+	if ($row['node'] === $node->get('mgn_slug')) { $listed = $row; }
+}
+check($r->error === null && $listed !== null, 'the list names the node by its slug', (string)$r->error);
+check(($listed['words'] ?? null) === ObserveWordAsk::offered($node) && ($listed['agent_version'] ?? null) === AgentVocabulary::FLOOR,
+	'  with the words it offers and its agent version', var_export($listed, true));
+$leak = json_encode($r->data['nodes'] ?? array());
+check(strpos($leak, '192.0.2.41') === false && strpos($leak, (string)$node->get('mgn_agent_public_key')) === false
+	&& strpos($leak, '/var/www/html/owa') === false,
+	'  and never its address, key or paths', '');
+check(owa_jobs($node) === $before, '  listing queues no job');
 
 harness_finish();

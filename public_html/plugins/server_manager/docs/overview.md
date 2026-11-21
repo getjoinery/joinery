@@ -265,7 +265,11 @@ every answer and who asked for it.
 `params` (an object of the word's parameters) and `wait` (1–90 seconds, default
 60). It returns the job id, `status` (`completed`, `failed`, or `waiting` when the
 node has not answered yet; the job still finishes on the node's list), the
-agent's outcome and error, the processed `result` and the redacted transcript. Only
+agent's outcome and error, the processed `result` and the redacted transcript. With
+neither `node` nor `word` it returns `nodes`, every node on this management node in
+slug order: its slug, name, host's slug, whether it is enabled, a relay or has had its
+site removed, its Joinery and agent versions, its last poll, and the words it offers;
+never an address, port, key or account, and no job is queued. Only
 a machine key whose scope names the action reaches it (`requires_scoped_key`), at
 the look level; `requested_by` is `api_key:{id}`. A working session's machine
 holds one such key, made on **Admin > API Keys** with only this action chosen.
