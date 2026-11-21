@@ -62,6 +62,8 @@
  * keypair: the registered models' rows through vault_client_reseal_rows /
  * vault_row_reseal, and every other key through the consumers' onReseal hooks.
  *
+ * @version 1.18 - resealScope() finishing a rotation it did not begin refuses a pending key the opened secret
+ *   does not own, before any row moves; a reload reopens a key only when the kept secret owns it
  * @version 1.17 - a committed rotation keeps the tab's resume halves for the new key to overwrite (no
  *   drop racing the put, which asked for an unlock on the next page)
  * @version 1.16 - v1 retired (v1_key_retirement WP2): reads only v2.edgeseal.
@@ -298,6 +300,8 @@ window.JoinerySealed = (function () {
 			var secret = await VaultCrypto.unwrapSecretKey(rec.wrapped, key, VaultKeyring.adFor(scope, 'resume'));
 			if (isOpen(scope)) { secret.fill(0); return; }   // a ceremony won the race
 			var s = VaultKeyring.sessionFrom(scope, secret, rec.public_key);
+			try { await assertOwnKey(s, rec.public_key, 'a key'); } catch (e) { s.lock(); dropResume(scope); return; }
+			if (isOpen(scope)) { s.lock(); return; }   // a ceremony won the race while the key was proved
 			s.label = rec.label || s.label;
 			sessions[scope] = s;
 			resetIdle();
@@ -685,6 +689,16 @@ window.JoinerySealed = (function () {
 		}
 	}
 
+	// The public key a session's own secret gives must be the one named: rows
+	// are about to be sealed to that name, and the server supplied it.
+	async function assertOwnKey(s, publicKeyB64, what) {
+		var derived = null;
+		try { derived = await s.derivedPublicKey(); } catch (e) { derived = null; }
+		if (!publicKeyB64 || derived !== publicKeyB64) {
+			throw new Error('This site named ' + what + ' that is not the one your vault opens, so nothing was moved or sealed to it. Do not retry; tell your site admin.');
+		}
+	}
+
 	async function resealScope(scope, opts) {
 		opts = opts || {};
 		var report = opts.progress || function () {};
@@ -719,6 +733,12 @@ window.JoinerySealed = (function () {
 				: await VaultKeyring.ensureUnlocked(scope, { pending: true, reason: 'to finish rotating its key' });
 			if (!newSession) throw new Error('The new key of your ' + (st.label || 'vault') + ' did not open. Reload the page and try again.');
 			newPublicKey = st.pending_public_key;
+			// A rotation this browser did not just begin: the pending key and its
+			// wrappings are the server's word. Every stored row key is about to be
+			// sealed to that key, so it must be the opened secret's own.
+			try {
+				await assertOwnKey(newSession, newPublicKey, 'a new key for your ' + (st.label || 'vault'));
+			} catch (e) { newSession.lock(); throw e; }
 		}
 
 		var committed = false;

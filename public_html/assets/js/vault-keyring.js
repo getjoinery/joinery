@@ -23,6 +23,8 @@
  * (assets/js/passkeys.js), joineryApi (assets/js/joinery-api.js), and for
  * ensureUnlocked() JoineryModal (assets/js/base.js).
  *
+ * @version 1.13 - provenSession(): a session is opened only on the public key its own secret gives; a key
+ *   the server named that the opened secret does not own is refused, before a recovery code is spent
  * @version 1.12 - v1 retired (v1_key_retirement WP2): no rotation_required answer or redirect, no
  *   rootKeyReplacement() (only an old X25519 root needed one)
  * @version 1.11 - a passphrase is at least 12 characters, as SealedBox::PASSPHRASE_MIN_CHARS says (it said 10)
@@ -243,7 +245,7 @@ window.VaultKeyring = (function () {
 		});
 		if (!wrap) throw new Error('This passkey is not enrolled on your vault.');
 		var secret = await VaultCrypto.unwrapSecretKey(wrap.wrapped_secret_key, kek, adFor(scope, 'passkey', credentialId));
-		return makeSession(scope, secret, st.public_key);
+		return provenSession(scope, secret, st.public_key);
 	}
 
 	// Unlock via the optional passphrase.
@@ -256,8 +258,8 @@ window.VaultKeyring = (function () {
 		for (var i = 0; i < pp.length; i++) {
 			try {
 				var secret = await VaultCrypto.unwrapSecretKey(pp[i].wrapped_secret_key, kek, ad);
-				return makeSession(scope, secret, st.public_key);
-			} catch (e) { /* wrong passphrase for this row - try next */ }
+				return await provenSession(scope, secret, st.public_key);
+			} catch (e) { if (e && e.keyMismatch) throw e; /* wrong passphrase for this row - try next */ }
 		}
 		throw new Error('Incorrect passphrase.');
 	}
@@ -275,11 +277,31 @@ window.VaultKeyring = (function () {
 			if (!kekBySalt[salt]) kekBySalt[salt] = await VaultCrypto.kekFromRecoveryCode(code, salt);
 			try {
 				var secret = await VaultCrypto.unwrapSecretKey(candidates[i].wrapped_secret_key, kekBySalt[salt], ad);
+				// Proved before the code is spent: a key that is not this vault's costs no code.
+				var opened = await provenSession(scope, secret, st.public_key);
 				await api('vault_client_consume_recovery', { scope: scope, wrapping_id: candidates[i].id });
-				return { session: makeSession(scope, secret, st.public_key), consumedWrappingId: candidates[i].id };
-			} catch (e) { /* wrong code for this row - try next */ }
+				return { session: opened, consumedWrappingId: candidates[i].id };
+			} catch (e) { if (e && e.keyMismatch) throw e; /* wrong code for this row - try next */ }
 		}
 		throw new Error('Invalid or already-used recovery key.');
+	}
+
+	// A session on a secret this browser just opened, refused unless the public
+	// key the server named is that secret's own. The server reports the key and
+	// stores the wrappings, so a wrapping of one key shown beside another key's
+	// public half (a planted rotation) opens here and must stop here: every
+	// seal made through the session, and every row a rotation moves, goes to
+	// the public key the session carries.
+	async function provenSession(scope, secret, publicKeyB64) {
+		var derived = null;
+		try { derived = await VaultCrypto.publicKeyFromSecret(secret); } catch (e) { derived = null; }
+		if (derived === null || derived !== publicKeyB64) {
+			secret.fill(0);
+			var err = new Error('This site named a key for your vault that is not the one your vault opens, so it was not opened and nothing was sealed to it. Do not retry; tell your site admin.');
+			err.keyMismatch = true;
+			throw err;
+		}
+		return makeSession(scope, secret, publicKeyB64);
 	}
 
 	// The keyring view of a rotation's PENDING key: its own wrappings and public
@@ -919,8 +941,8 @@ window.VaultKeyring = (function () {
 		for (var i = 0; i < list.length; i++) {
 			try {
 				var secret = await VaultCrypto.unwrapSecretKey(list[i].wrapped_secret_key, kek, rootAd(type, credentialId));
-				return makeSession(ROOT, secret, rootSt.public_key);
-			} catch (e) { /* not this one */ }
+				return await provenSession(ROOT, secret, rootSt.public_key);
+			} catch (e) { if (e && e.keyMismatch) throw e; /* not this one */ }
 		}
 		return null;
 	}
@@ -932,7 +954,7 @@ window.VaultKeyring = (function () {
 		if (!w) return null;
 		var kek = await rootSession.scopeKek(scope);
 		var secret = await VaultCrypto.unwrapSecretKey(w.wrapped_secret_key, kek, adFor(scope, 'root'));
-		var s = makeSession(scope, secret, st.public_key);
+		var s = await provenSession(scope, secret, st.public_key);
 		s.label = st.label;
 		return s;
 	}
@@ -1044,8 +1066,8 @@ window.VaultKeyring = (function () {
 		if (res && res.root_wrapping) {
 			try {
 				var secret = await VaultCrypto.unwrapSecretKey(res.root_wrapping.wrapped_secret_key, k.root, rootAd('recovery'));
-				root = makeSession(ROOT, secret, rootSt.public_key);
-			} catch (e) { root = null; }
+				root = await provenSession(ROOT, secret, rootSt.public_key);
+			} catch (e) { if (e && e.keyMismatch) throw e; root = null; }
 		}
 		return { res: res, rootSession: root };
 	}

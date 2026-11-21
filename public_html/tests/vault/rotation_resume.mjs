@@ -12,6 +12,7 @@
  *
  * Exit 0 = pass. Run by rotation_resume_gate.sh.
  *
+ * @version 1.1 - a planted pending key is refused before any row moves
  * @version 1.0
  */
 
@@ -42,10 +43,12 @@ function storage() {
 }
 
 // A keyring session as VaultKeyring.makeSession shapes it, minus the crypto.
-function fakeSession(scope, publicKey) {
+// `ownKey` is the public key its secret really gives, when that is not the one it was handed.
+function fakeSession(scope, publicKey, ownKey) {
 	let secret = new Uint8Array(32).fill(7);
 	return {
 		scope, publicKey,
+		derivedPublicKey: async () => ownKey || publicKey,
 		locked: () => secret === null,
 		wrapUnder: async () => 'wrapped-under-' + publicKey,
 		openSealed: async () => new Uint8Array(32),
@@ -140,6 +143,44 @@ check(threw, 'a refused commit fails the rotation');
 check(stopped.some((c) => c.body.op === 'drop'), 'a stopped rotation drops the tab\'s resume half');
 check(ctx.sessionStorage.getItem('jy_vault_resume:mail') === null, 'and its resume record');
 check(!Sealed.isOpen('mail'), 'and leaves the vault shut');
+
+// A rotation this browser did not begin, planted in the database: the pending
+// public key is someone else's and the pending wrapping is a copy of the
+// current one, so it opens to the old secret. Nothing may move onto that key.
+api.post = answer;
+Sealed.adopt('mail', fakeSession('mail', OLD_KEY));
+await settle();
+const PLANTED = 'planted-public-key';
+let rowsAsked = 0;
+api.post = async (action, body) => {
+	if (action === 'vault_client_reseal_rows') {
+		rowsAsked++;
+		calls.push({ action, body: Object.assign({}, body) });
+		return { rows: [{ model: 'M', id: 1, sealed_dek: 'v2.edgeseal.mail.x' }], next: null, remaining: 1 };
+	}
+	return answer(action, body);
+};
+win.VaultKeyring.status = async () => ({ set_up: true, root_wrapped: false, pending_key_generation: 2,
+	pending_public_key: PLANTED, label: 'Mail vault', wrappings: [] });
+win.VaultKeyring.ensureUnlocked = async (scope, o) => (o && o.pending ? fakeSession(scope, PLANTED, OLD_KEY) : null);
+const mark3 = calls.length;
+let refusedWith = null;
+try { await Sealed.resealScope('mail'); } catch (e) { refusedWith = e.message; }
+await settle();
+const plantedCalls = calls.slice(mark3).map((c) => c.action);
+check(refusedWith !== null && /not the one your vault opens/.test(refusedWith), 'a planted pending key is refused', refusedWith);
+check(rowsAsked === 0 && !plantedCalls.includes('vault_row_reseal') && !plantedCalls.includes('vault_client_rotate_commit'),
+	'no row is moved onto it and nothing is committed', JSON.stringify(plantedCalls));
+
+// The same rotation with the pending key the opened secret owns goes through.
+win.VaultKeyring.ensureUnlocked = async (scope, o) => (o && o.pending ? fakeSession(scope, PLANTED) : null);
+Sealed.adopt('mail', fakeSession('mail', OLD_KEY));
+await settle();
+const mark4 = calls.length;
+await Sealed.resealScope('mail');
+const finished = calls.slice(mark4).map((c) => c.action);
+check(finished.includes('vault_row_reseal') && finished.includes('vault_client_rotate_commit'),
+	'a pending key the opened secret owns is finished as before', JSON.stringify(finished));
 
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

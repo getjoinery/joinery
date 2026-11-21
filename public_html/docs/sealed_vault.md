@@ -82,6 +82,18 @@ opens through the root takes only its `root` wrapping. A content vault made
 before the root keeps its own unlockers (its rotation still writes them); it
 opens once by its own ceremony and is then given its `root` wrapping.
 
+**A session's key is its secret's own.** The server reports each vault's
+public key and stores its wrappings, so the browser takes neither on trust
+together: every path that opens a secret (`VaultKeyring.provenSession()`:
+passkey, passphrase, recovery code, the root, a content vault through the
+root) derives the public key from the opened secret and refuses a session
+when the server named another, before a recovery code is spent.
+`JoinerySealed.resealScope()` makes the same check on a pending key it did
+not make itself before any row moves, and a reload reopens a key only when the
+kept secret owns it. A wrapping of one key shown beside another key's public
+half therefore opens nothing and moves nothing. Pinned by
+`tests/vault/session_key_proof_gate.sh` and `rotation_resume_gate.sh`.
+
 **One touch.** `vault_unlock_options {with_root}` asks for both PRF outputs.
 `JoineryPasskeys.derive()` takes the second out of the response it hands back,
 so the posted credential carries the first only, exactly as the server has
