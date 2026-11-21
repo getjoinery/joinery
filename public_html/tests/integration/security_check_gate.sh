@@ -144,6 +144,11 @@ chk "on a container host, the site containers' base is asked too; a base with no
 printf 'security_packages=curl php8.5-fpm libssl3t64\n' > "$R/var/lib/joinery/site-refresh/state"; : > "$STUB/calls"
 chk "  a base waiting for a critical fix: the containers' replacement starts now" \
     "$(run run)|$(grep -c '^site_refresh start$' "$STUB/calls")|$([ -n "$(st at_once_refresh_at)" ] && echo t)" "0|1|t"
+printf 'security_packages=curl\nsites_behind=sb:php8.5-common,libssl3t64\n' > "$R/var/lib/joinery/site-refresh/state"; : > "$STUB/calls"
+chk "  a base waiting for nothing critical, but a site behind it on PHP (started after the cycle, B24): the replacement starts now" \
+    "$(bash "$TS" run > "$T/b24out" 2>&1; echo $?)|$(grep -c '^site_refresh start$' "$STUB/calls")|$(grep -c 'lack a critical package the base has (sb:php8.5-common,libssl3t64)' "$T/b24out")" "0|1|1"
+printf 'security_packages=curl\nsites_behind=\n' > "$R/var/lib/joinery/site-refresh/state"; : > "$STUB/calls"
+chk "  no site behind and nothing critical: nothing starts" "$(run run)|$(grep -c '^site_refresh start$' "$STUB/calls")" "0|0"
 rm -f "$R/etc/systemd/system/joinery-site-refresh.service" "$STUB/timer_on"; : > "$STUB/calls"
 run run > /dev/null
 chk "  and not elsewhere" "$(grep -c '^site_refresh' "$STUB/calls")" "0"

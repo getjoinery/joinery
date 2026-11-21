@@ -3,6 +3,8 @@
 # security_check.sh - which security fixes this machine is waiting for, looked
 # for every hour (specs/fleet_security_patching.md WP1, Q3).
 #
+# Version: 1.5 - a running site behind the base on a critical package (site_refresh.sh 1.7 sites_behind:
+#                a site stopped through a cycle and started later) is replaced at once too (B24)
 # Version: 1.4 - the timer installs where the tree is its owner's alone, the owner the host converger trusts
 #                (_tree_trust.sh, config/tree_owner): the publishing box, whose converger already runs its
 #                developer account's installers as root, had no hourly check at all
@@ -49,8 +51,8 @@
 # install_security_updates.sh runs then, the run the nightly updates make, and
 # the check is taken again after it. The kernel is the exception: it needs a
 # reboot, which is a person's choice. On a container host a critical fix for
-# the site containers' base starts their nightly replacement now
-# (site_refresh.sh start).
+# the site containers' base, or a running site that lacks one the base has,
+# starts their nightly replacement now (site_refresh.sh start).
 #
 # State: /var/lib/joinery/security-check/state (key=value, read by
 # host_report.sh). A test, never root, runs it
@@ -353,8 +355,15 @@ if [ -f "$SITE_REFRESH" ] && systemctl is-enabled --quiet joinery-site-refresh.t
     if timeout --kill-after=30 900 bash "$SITE_REFRESH" check 7>&- < /dev/null; then
         base_critical="$(sed -n 's/^security_packages=//p' "$SITE_REFRESH_STATE" 2> /dev/null | tr ' ' '\n' \
             | grep -E '^(php[0-9]|libapache2-mod-php|apache2|libssl|openssl|postgresql|libpq)' | head -6 | paste -sd ' ')"
-        if [ -n "$base_critical" ]; then
-            say "the site containers' base waits for ${base_critical}: replacing them now"
+        # A site stopped while its base was replaced, and started since, runs
+        # the old base: the base waits for nothing, the site does.
+        sites_behind="$(sed -n 's/^sites_behind=//p' "$SITE_REFRESH_STATE" 2> /dev/null | head -1)"
+        if [ -n "$base_critical" ] || [ -n "$sites_behind" ]; then
+            if [ -n "$base_critical" ]; then
+                say "the site containers' base waits for ${base_critical}: replacing them now"
+            else
+                say "sites lack a critical package the base has (${sites_behind}): replacing them now"
+            fi
             bash "$SITE_REFRESH" start 7>&- < /dev/null || say "the replacement could not be started"
             S[at_once_refresh_at]="$(now)"; state_save
         fi

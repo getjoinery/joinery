@@ -4,6 +4,10 @@
 # security fix for something in their image (specs/multi_tenant_host_hardening.md
 # D9, B7), on a site container engine host and on a Docker host alike.
 #
+# Version: 1.7 - sites_behind: a running site on an older base that lacks a version of PHP, Apache,
+#                OpenSSL or PostgreSQL the current base has (its own dpkg status, read through
+#                /proc/PID/root), which the hourly check replaces at once: a site stopped through a
+#                cycle and started later ran its old base until the night (B24)
 # Version: 1.6 - the timer installs where the tree is its owner's alone, the owner the host converger trusts
 #                (_tree_trust.sh, config/tree_owner), as security_check.sh 1.4 does
 # Version: 1.5 - a base built from other package fixes ahead of Ubuntu than the host would build it with now
@@ -95,6 +99,9 @@ MIN_FREE_BYTES="${SITE_REFRESH_MIN_FREE_BYTES:-3221225472}"   # 3 GiB for a fres
 CHECK_TIMEOUT="${SITE_REFRESH_CHECK_TIMEOUT:-600}"
 SITE_TIMEOUT="${SITE_REFRESH_SITE_TIMEOUT:-2700}"           # one site's replacement, past its own bounds
 BUILD_MEMORY="${SITE_REFRESH_BUILD_MEMORY:-2g}"             # the base build's steps
+PROC="${SITE_REFRESH_PROC:-/proc}"                          # tests only: another folder
+# What a site faces the internet with, as security_check.sh names it critical.
+CRITICAL_RE='^(php[0-9]|libapache2-mod-php|apache2|libssl|openssl|postgresql|libpq)'
 
 say()  { echo "site_refresh: $*"; }
 die()  { echo "site_refresh: $*" >&2; exit 1; }
@@ -258,7 +265,7 @@ state_save() {
     mkdir -p "$STATE_DIR" && chmod 755 "$STATE_DIR"
     tmp="$(mktemp "${STATE_DIR}/.state.XXXXXX")" || return 1
     for k in installed_at checked_at checked_ok_at check check_error pending pending_security security_packages package_fixes base_version base_id base_built_at base_due \
-             ran_at run run_error replaced passed_over sites sites_due; do
+             ran_at run run_error replaced passed_over sites sites_due sites_behind; do
         printf '%s=%s\n' "$k" "$(clean "${S[$k]:-}")" >> "$tmp"
     done
     chmod 644 "$tmp" && mv -f "$tmp" "$STATE"
@@ -301,10 +308,11 @@ read_base() {
 # none, every index fetch fails on se1), and runs apt as root without dropping
 # to _apt.
 # A full upgrade counts a fix that needs a new package too; a fresh build
-# installs it.
+# installs it. The container also names the base's installed packages (VER
+# lines), from which BASE_CRITICAL keeps the critical ones, for sites_behind.
 do_check() {
     local out rc lines sec
-    S[checked_at]="$(now)"; S[check_error]=""
+    S[checked_at]="$(now)"; S[check_error]=""; BASE_CRITICAL=""
     read_base
     if [ -z "$BASE_ID_FULL" ]; then
         S[check]="ok"; S[base_due]="missing"; S[pending]=""; S[pending_security]=""; S[security_packages]=""
@@ -312,8 +320,9 @@ do_check() {
     fi
     out="$(timeout --kill-after=10 "$CHECK_TIMEOUT" "$ENGINE" run --rm --memory 512m --pids-limit 512 \
         --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --security-opt=no-new-privileges --entrypoint bash "$BASE_REF" -c \
-        'A="-o APT::Sandbox::User=root"; apt-get $A update -qq > /dev/null 2>&1 || { echo "UPDATE_FAILED"; exit 0; }; apt-get $A -s -q full-upgrade 2> /dev/null | grep "^Inst " || true' 2>&1 < /dev/null)"
+        'dpkg-query -W -f "\${db:Status-Status} \${Package}=\${Version}\n" 2> /dev/null | sed -n "s/^installed /VER /p"; A="-o APT::Sandbox::User=root"; apt-get $A update -qq > /dev/null 2>&1 || { echo "UPDATE_FAILED"; exit 0; }; apt-get $A -s -q full-upgrade 2> /dev/null | grep "^Inst " || true' 2>&1 < /dev/null)"
     rc=$?
+    BASE_CRITICAL="$(sed -n 's/^VER //p' <<< "$out" | grep -E "${CRITICAL_RE}" | sort -u)"
     if [ "$rc" -ne 0 ] || grep -q '^UPDATE_FAILED' <<< "$out"; then
         S[check]="failed"
         S[check_error]="$( [ "$rc" -ne 0 ] && echo "the check container exited ${rc}: $(tail -1 <<< "$out")" || echo "apt-get update failed in the check container")"
@@ -401,10 +410,33 @@ site_due() {
     if [ "$label" != "$want" ]; then DUE_WHY="an older system call filter"; return 0; fi
     return 1
 }
+# Behind: a due site on an older base, missing one of the current base's
+# critical package versions (BASE_CRITICAL) from its own dpkg status. Prints
+# the packages it lacks, comma separated; nothing when it lacks none, or its
+# status cannot be read. A site is a base and more, so every base package is
+# in it.
+site_behind() {
+    local pid status
+    [ -n "${BASE_CRITICAL:-}" ] || return 0
+    pid="$(site_engine inspect -f '{{.State.Pid}}' "$1" 2> /dev/null < /dev/null)"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 0
+    status="${PROC}/${pid}/root/var/lib/dpkg/status"
+    [ -r "$status" ] || return 0
+    grep -vxFf <(awk '/^Package: /{p=$2} /^Status: /{i=($4=="installed")} /^Version: /{v=$2}
+        /^$/{if(i&&p!="")print p"="v; p=""; i=0; v=""} END{if(i&&p!="")print p"="v}' "$status") <<< "$BASE_CRITICAL" \
+        | cut -d= -f1 | head -6 | paste -sd ','
+}
 count_due() {
-    local s n=0 d=0
-    while IFS= read -r s; do n=$((n + 1)); site_due "$s" && d=$((d + 1)); done < <(host_sites)
-    S[sites]="$n"; S[sites_due]="$d"
+    local s n=0 d=0 lacks behind=()
+    while IFS= read -r s; do
+        n=$((n + 1))
+        site_due "$s" || continue
+        d=$((d + 1))
+        [ "$DUE_WHY" = "an older base" ] || continue
+        lacks="$(site_behind "$s")"
+        [ -n "$lacks" ] && behind+=("${s}:${lacks}")
+    done < <(host_sites)
+    S[sites]="$n"; S[sites_due]="$d"; S[sites_behind]="${behind[*]}"
 }
 
 mkdir -p "${TROOT}/run/joinery" && chmod 755 "${TROOT}/run/joinery"

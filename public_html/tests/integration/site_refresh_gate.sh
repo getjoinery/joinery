@@ -90,6 +90,7 @@ case "$1" in
       *.Mounts*) cat "$d/mounts" 2>/dev/null ;;
       *NetworkSettings.Networks*) echo "bridge " ;;
       *State.Running*) [ "$(cat "$d/state")" = running ] && echo true || echo false ;;
+      *State.Pid*) cat "$d/pid" 2>/dev/null || echo 0 ;;
       *State.Status*) cat "$d/state" ;;
       # As a real engine call may: stdin read, where a test asks for it.
       *Config.Env*) [ -f "$S/inspect_reads_stdin" ] && timeout 1 cat > /dev/null 2>&1; cat "$d/env" ;;
@@ -442,6 +443,30 @@ chk "a check that fails: recorded, the last good check's time kept" "$(srun chec
 rm "$STUB/check_fail"
 grep -v security "$STUB/apt" > "$STUB/apt.n"; mv "$STUB/apt.n" "$STUB/apt"
 chk "updates but no security fix: the base is not due" "$(srun check)|$(st base_due)|$(st pending_security)" "0|no|0"
+
+# B24: a site on an older base that lacks a critical version the base has
+# (one stopped through the cycle and started since) is named behind.
+cp "$STUB/apt" "$STUB/apt.keep"
+printf '%s\n' 'VER php8.5-common=8.5.4-0ubuntu1.6+joinery1' 'VER libssl3t64=3.5.5-1ubuntu3.7+joinery1' 'VER curl=8.18.0-1ubuntu2.8' >> "$STUB/apt"
+export SITE_REFRESH_PROC="$T/proc"
+dpkg_status() {  # PID then PACKAGE=VERSION...
+    local pid="$1" pv; shift; mkdir -p "$T/proc/$pid/root/var/lib/dpkg"
+    for pv in "$@"; do printf 'Package: %s\nStatus: install ok installed\nVersion: %s\n\n' "${pv%%=*}" "${pv#*=}"; done > "$T/proc/$pid/root/var/lib/dpkg/status"
+}
+chk "sites_behind: a site whose status cannot be read is not named" "$(srun check)|$(st sites_behind)" "0|"
+echo 4242 > "$STUB/containers/sb/pid"; echo 4343 > "$STUB/containers/sa/pid"
+dpkg_status 4242 php8.5-common=8.5.4-0ubuntu1.5 libssl3t64=3.5.5-1ubuntu3.7+joinery1 curl=8.18.0-1ubuntu2.7
+dpkg_status 4343 php8.5-common=8.5.4-0ubuntu1.5 libssl3t64=3.5.5-1ubuntu3.7
+chk "  sb, on an older base with the old PHP, is behind on it; curl is not critical; sa, on this base, is never named" "$(srun check)|$(st sites_behind)" "0|sb:php8.5-common"
+dpkg_status 4242 php8.5-common=8.5.4-0ubuntu1.6+joinery1 libssl3t64=3.5.5-1ubuntu3.7+joinery1 curl=8.18.0-1ubuntu2.7
+chk "  sb with every critical version the base has: due, but not behind" "$(srun check)|$(st sites_due)|$(st sites_behind)" "0|1|"
+dpkg_status 4242 php8.5-common=8.5.4-0ubuntu1.6+joinery1 libssl3t64=3.5.5-1ubuntu3.7 curl=8.18.0-1ubuntu2.7
+touch "$R/etc/joinery/sites/sb/quiet"
+chk "  a quiet site is never behind" "$(srun check)|$(st sites_behind)" "0|"
+rm -f "$R/etc/joinery/sites/sb/quiet"
+chk "  without the quiet mark: behind on OpenSSL" "$(srun check)|$(st sites_behind)" "0|sb:libssl3t64"
+chk "  the run replaces it, and it is behind no more" "$(srun run)|$(st replaced | sed 's/:[0-9.]*//g')|$(st sites_behind)" "0|sb|"
+mv "$STUB/apt.keep" "$STUB/apt"; rm -f "$STUB/containers/sa/pid"; unset SITE_REFRESH_PROC
 echo 0000 > "$STUB/images/$BASE/hash"
 chk "a base this tree would build differently is due" "$(srun check)|$(st base_due)" "0|setup_changed"
 echo "$BASE_HASH" > "$STUB/images/$BASE/hash"
