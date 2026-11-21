@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.10 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.9 - the name_like filter's value is quoted and product_id_is_not is a whole number, never joined into the condition
  * @version 1.8 - OWNERSHIP_EACH: every purchase records one more ownership and none refuses a repeat (ownership_repeats())
  * @version 1.7 - seo_public_records(): none while the store is switched off
@@ -990,7 +991,7 @@ class MultiProduct extends SystemMultiBase {
 		}
 
 		if (isset($this->options['name_like'])) {
-			$filters['pro_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['name_like'] . '%');
+			$filters['pro_name'] = SqlCondition::bind('ILIKE ?', '%' . (string)$this->options['name_like'] . '%');
 		}
 
 		if (isset($this->options['is_active'])) {
@@ -1022,7 +1023,7 @@ class MultiProduct extends SystemMultiBase {
 		}
 
 		if (isset($this->options['product_id_is_not'])) {
-			$filters['pro_product_id'] = '!= ' . (int)$this->options['product_id_is_not'];
+			$filters['pro_product_id'] = SqlCondition::bind('!= ?', (int)$this->options['product_id_is_not']);
 		}
 
 		if (isset($this->options['pro_sbt_subscription_tier_id'])) {
@@ -1032,7 +1033,7 @@ class MultiProduct extends SystemMultiBase {
 
 		if (isset($this->options['max_visible_tier_level'])) {
 			$level = intval($this->options['max_visible_tier_level']);
-			$filters['(pro_tier_min_level'] = "<= {$level} OR pro_tier_min_level IS NULL)";
+			$filters['(pro_tier_min_level'] = SqlCondition::bind('<= ? OR pro_tier_min_level IS NULL)', $level);
 		}
 
 		return $this->_get_resultsv2('pro_products', $filters, $this->order_by, $only_count, $debug);

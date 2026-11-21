@@ -62,6 +62,8 @@ interface FileRemote {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.23.2 - fil_install_id: the install of the sandboxed plugin that kept the file (spec plugin_install_identity A1)
+ * @version 1.23.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.23.0 - File::$remote (FileRemote): in a sandboxed plugin's fence, createFromUpload(),
  *                   createFromBytes() and read_bytes() are carried to the site; the blob is the site's to move
  *                   (spec sandboxed_plugin_uploads). Null on the site, which nothing here changes
@@ -339,6 +341,10 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // UPDATE (FileVersion, a copy-on-write split), never by save().
 	    'fil_fbb_file_blob_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true, 'insert_only'=>true),
 	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
+	    // A file a sandboxed plugin kept: that plugin install's id
+	    // (plg_plugins.plg_install_id). Its reach to its own files is by this,
+	    // so a later plugin of the same name never reaches them.
+	    'fil_install_id' => array('type'=>'varchar(32)', 'is_nullable'=>true),
 	    // When the file.uploaded signal went out for it (announce_upload()):
 	    // a file is announced once, when it is public.
 	    'fil_announced_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
@@ -2299,20 +2305,19 @@ class MultiFile extends SystemMultiBase {
 		// id-set restriction for "Shared with me" / grant listings.
 		if (isset($this->options['file_ids']) && is_array($this->options['file_ids'])) {
 			$ids = array_values(array_filter(array_map('intval', $this->options['file_ids'])));
-			$filters['fil_file_id'] = empty($ids) ? 'IN (NULL)' : 'IN (' . implode(',', $ids) . ')';
+			$filters['fil_file_id'] = SqlCondition::bind('IN (?)', $ids);
 		}
 
 		// folder-set restriction: files directly inside any of these folders
 		// (shared-folder search expands granted folders to their subtrees).
 		if (isset($this->options['folder_ids']) && is_array($this->options['folder_ids'])) {
 			$fids = array_values(array_filter(array_map('intval', $this->options['folder_ids'])));
-			$filters['fil_fol_folder_id'] = empty($fids) ? 'IN (NULL)' : 'IN (' . implode(',', $fids) . ')';
+			$filters['fil_fol_folder_id'] = SqlCondition::bind('IN (?)', $fids);
 		}
 
 		// Drive filename search (v1): match the display title, case-insensitive.
 		if (isset($this->options['title_like'])) {
-			$dblink = DbConnector::get_instance()->get_db_link();
-			$filters['fil_title'] = 'ILIKE ' . $dblink->quote('%' . $this->options['title_like'] . '%');
+			$filters['fil_title'] = SqlCondition::bind('ILIKE ?', '%' . $this->options['title_like'] . '%');
 		}
 
 
@@ -2320,16 +2325,15 @@ class MultiFile extends SystemMultiBase {
 		// LIKE 'image/%' (which would sweep in image/svg+xml — a file with no
 		// size variants). Constant values only; nothing user-supplied.
 		if (isset($this->options['picture'])) {
-			$in_list = "('" . implode("','", File::INLINE_SAFE_TYPES) . "')";
 			if ($this->options['picture']) {
-				$filters['fil_type'] = "IN " . $in_list;
+				$filters['fil_type'] = SqlCondition::bind('IN (?)', File::INLINE_SAFE_TYPES);
 			} else {
-				$filters['(fil_type'] = "NOT IN " . $in_list . " OR fil_type IS NULL)";
+				$filters['(fil_type'] = SqlCondition::bind('NOT IN (?) OR fil_type IS NULL)', File::INLINE_SAFE_TYPES);
 			}
 		}
 
 		if (isset($this->options['filename_like'])) {
-			$filters['fil_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['filename_like'] . '%');
+			$filters['fil_name'] = SqlCondition::bind('ILIKE ?', '%' . (string)$this->options['filename_like'] . '%');
 		}
 
 		// Origin filter: match exactly one source.
@@ -2370,7 +2374,6 @@ class MultiFile extends SystemMultiBase {
 
 		$has_include = isset($this->options['sources']);
 		if ($has_include || !empty($exclude_sources)) {
-			$dblink = DbConnector::get_instance()->get_db_link();
 
 			if ($has_include) {
 				// Allowlist, with any blocked entries subtracted from it.
@@ -2386,26 +2389,20 @@ class MultiFile extends SystemMultiBase {
 						$names[] = $source;
 					}
 				}
-				$quoted = array();
-				foreach (array_unique($names) as $source) {
-					$quoted[] = $dblink->quote($source);
-				}
-				if (empty($quoted)) {
+				$wanted = array_values(array_map('strval', array_unique($names)));
+				if (empty($wanted)) {
 					// An empty allowlist matches nothing rather than everything, so a
 					// caller that computed no sources gets no rows.
 					$filters['fil_source'] = $want_null ? 'IS NULL' : 'IN (NULL)';
 				} elseif ($want_null) {
-					$filters['(fil_source'] = 'IN (' . implode(',', $quoted) . ') OR fil_source IS NULL)';
+					$filters['(fil_source'] = SqlCondition::bind('IN (?) OR fil_source IS NULL)', $wanted);
 				} else {
-					$filters['fil_source'] = 'IN (' . implode(',', $quoted) . ')';
+					$filters['fil_source'] = SqlCondition::bind('IN (?)', $wanted);
 				}
 			} else {
 				// Blocklist only.
-				$quoted = array();
-				foreach ($exclude_sources as $source) {
-					$quoted[] = $dblink->quote($source);
-				}
-				$filters['(fil_source'] = 'NOT IN (' . implode(',', $quoted) . ') OR fil_source IS NULL)';
+				$wanted = array_values(array_map('strval', $exclude_sources));
+				$filters['(fil_source'] = SqlCondition::bind('NOT IN (?) OR fil_source IS NULL)', $wanted);
 			}
 		}
 

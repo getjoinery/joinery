@@ -198,9 +198,7 @@ class MultiOwnership extends SystemMultiBase {
 
 		// The ownership question: a row for this tag, or an all-access row.
 		if (isset($this->options['covers_tag'])) {
-			$dblink = DbConnector::get_instance()->get_db_link();
-			$filters['own_tag'] = 'IN (' . $dblink->quote($this->options['covers_tag'])
-				. ', ' . $dblink->quote(Ownership::TAG_ALL) . ')';
+			$filters['own_tag'] = SqlCondition::bind('IN (?, ?)', (string)$this->options['covers_tag'], Ownership::TAG_ALL);
 		}
 
 		if (isset($this->options['revoked'])) {

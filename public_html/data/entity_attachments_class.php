@@ -12,7 +12,7 @@
  * The attachment row is the list a page shows (name, type, size, order); the
  * File is what serves. removeAllFor() takes both away when the entity goes.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 class EntityAttachment extends SystemBase {
@@ -109,7 +109,7 @@ class MultiEntityAttachment extends SystemMultiBase {
 		// entity_ids => int[]: the attachments of any of these entities.
 		if (isset($this->options['entity_ids'])) {
 			$ids = array_values(array_filter(array_map('intval', (array)$this->options['entity_ids'])));
-			$filters['eat_entity_id'] = $ids ? 'IN (' . implode(',', $ids) . ')' : 'IN (0)';
+			$filters['eat_entity_id'] = SqlCondition::bind('IN (?)', $ids);
 		}
 
 		return $this->_get_resultsv2('eat_entity_attachments', $filters, $this->order_by, $only_count, $debug);

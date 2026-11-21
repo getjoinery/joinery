@@ -38,6 +38,7 @@
  * site. Shutdown is the strongest automatic action there is, and the deletion
  * that stops the bill is a person at the provider.
  *
+ * @version 1.4 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.3 - htr_remove_ready_time: a held Starter site whose backups were pruned, ready for a person to
  *                remove (specs/hosting_paid_launch.md B1)
  * @version 1.2 - the transferred state
@@ -163,10 +164,10 @@ class MultiHostedTrial extends SystemMultiBase {
 			$filters['htr_state'] = array((string)$this->options['state'], PDO::PARAM_STR);
 		}
 		if (isset($this->options['states']) && is_array($this->options['states']) && count($this->options['states'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['states']);
-			$filters['htr_state'] = 'IN (' . implode(',', $quoted) . ')';
+			$filters['htr_state'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		return $this->_get_resultsv2('htr_hosted_trials', $filters, $this->order_by, $only_count, $debug);

@@ -12,7 +12,7 @@
  * only when the probe died mid-way; PageProbe::sweep() removes those and
  * their users.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class PageProbeGrantException extends SystemBaseException {}
@@ -71,7 +71,7 @@ class MultiPageProbeGrant extends SystemMultiBase {
 		// before it becomes part of the condition.
 		if (isset($this->options['expired_before'])
 				&& preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string)$this->options['expired_before'])) {
-			$filters['ppg_expires_time'] = "< '" . $this->options['expired_before'] . "'";
+			$filters['ppg_expires_time'] = SqlCondition::bind('< ?', (string)$this->options['expired_before']);
 		}
 		return $this->_get_resultsv2('ppg_page_probe_grants', $filters, $this->order_by, $only_count, $debug);
 	}

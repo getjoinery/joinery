@@ -4586,6 +4586,12 @@ class UnknownMultiOptionException extends SystemBaseException {}
  *  column, not a server fault. */
 class UnsortableColumnException extends SystemBaseException implements DisplayableErrorMessage {}
 
+/** Thrown when a collection hands the query a condition, or a column, that is
+ *  not written in its own source: text put together while the request ran. A
+ *  value belongs in a bound filter or a SqlCondition, never in the text. This
+ *  is a fault in the collection class, not in what the caller asked for. */
+class UnwrittenConditionException extends SystemBaseException {}
+
 abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
 	private $multi_data;
@@ -4594,6 +4600,9 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
 	/** Per-class cache for known_option_keys(); null = source unreadable. */
 	private static $known_option_keys_cache = array();
+
+	/** Per-class cache for written_strings(): every quoted string in the class's source. */
+	private static $written_strings_cache = array();
 
 	public $loaded;
 	public $loadable;
@@ -4618,7 +4627,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		$this->loaded = FALSE;
 
 		if (is_array($options)) {
-			$this->options = array_merge(static::$default_options, $options);
+			$this->options = $this->read_yes_no_words(array_merge(static::$default_options, $options));
 		} 
 		else{
 			$this->options = static::$default_options;
@@ -4701,6 +4710,102 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			self::$known_option_keys_cache[$class] = $keys;
 		}
 		return self::$known_option_keys_cache[$class];
+	}
+
+	/** Per-class cache for yes_no_option_keys(). */
+	private static $yes_no_option_keys_cache = array();
+
+	/**
+	 * The option keys this collection reads as yes or no, derived from its
+	 * source the way known_option_keys() derives the keys themselves.
+	 *
+	 *   'flag'     the code only ever tests the option: `$this->options['k'] ? a : b`,
+	 *              `!empty(...)`, `if (...)`, `=== true`
+	 *   'presence' the code only ever asks whether the option was passed:
+	 *              `isset(...)`, with the value never read
+	 *
+	 * A key whose value is used anywhere (bound, cast, counted, compared with
+	 * anything but true, false or null) is neither: it is a value, and is left
+	 * exactly as the caller gave it.
+	 *
+	 * @param string|null $source Source text to read instead of the class files (tests).
+	 * @return array array('flag' => array(key => true), 'presence' => array(key => true))
+	 */
+	public static function yes_no_option_keys_in($source) {
+		$opt = '\\$this->options\\[\\s*[\'"](\\w+)[\'"]\\s*\\]';
+		$take = function ($pattern, &$source, $group = 1) {
+			$keys = array();
+			$source = preg_replace_callback($pattern, function ($m) use (&$keys, $group) {
+				$keys[$m[$group]] = true;
+				return ' ';
+			}, $source);
+			return $keys;
+		};
+		// The value-preserving reads that look like tests come out first.
+		$value = $take('/' . $opt . '\\s*\\?\\?/', $source);
+		$presence = $take('/\\bisset\\(\\s*' . $opt . '\\s*\\)/', $source)
+			+ $take('/\\barray_key_exists\\(\\s*[\'"](\\w+)[\'"]\\s*,\\s*\\$this->options\\s*\\)/', $source)
+			+ $take('/' . $opt . '\\s*[!=]==?\\s*null\\b/i', $source);
+		$flag = $take('/\\bempty\\(\\s*' . $opt . '\\s*\\)/', $source)
+			+ $take('/' . $opt . '\\s*[!=]==?\\s*(?:true|false)\\b/i', $source)
+			+ $take('/\\bif\\s*\\(\\s*' . $opt . '\\s*\\)/', $source)
+			+ $take('/(?:&&|\\|\\|)\\s*' . $opt . '\\s*\\)/', $source)
+			+ $take('/!\\s*' . $opt . '/', $source)
+			+ $take('/' . $opt . '\\s*\\)?\\s*\\?/', $source);
+		// Whatever mention is left reads the value.
+		$value += $take('/' . $opt . '/', $source);
+		$flag = array_diff_key($flag, $value);
+		return array('flag' => $flag, 'presence' => array_diff_key($presence, $flag, $value));
+	}
+
+	private function yes_no_option_keys() {
+		$class = get_class($this);
+		if (!isset(self::$yes_no_option_keys_cache[$class])) {
+			$source = '';
+			$seen_files = array();
+			for ($rc = new ReflectionClass($class); $rc && $rc->getName() !== 'SystemMultiBase'; $rc = $rc->getParentClass()) {
+				$file = $rc->getFileName();
+				if ($file && !isset($seen_files[$file])) {
+					$seen_files[$file] = true;
+					$source .= "\n" . (string)@file_get_contents($file);
+				}
+			}
+			$keys = self::yes_no_option_keys_in($source);
+			// Core's own option (deleted_option_filter) is a yes/no on every model.
+			$keys['flag']['deleted'] = true;
+			unset($keys['presence']['deleted']);
+			self::$yes_no_option_keys_cache[$class] = $keys;
+		}
+		return self::$yes_no_option_keys_cache[$class];
+	}
+
+	/**
+	 * Read the words a request sends for yes and no. A query string carries
+	 * text, and to PHP the text "false" is true: without this, ?published=false
+	 * would list the published rows. For an option the collection reads as yes
+	 * or no, "true"/"1" become TRUE and "false"/"0" become FALSE; for an
+	 * option the collection only checks was passed, a no means it was not.
+	 * Every other option, and every other value, is left as given.
+	 *
+	 * @param array $options
+	 * @return array
+	 */
+	private function read_yes_no_words($options) {
+		static $words = array('true' => true, '1' => true, 'false' => false, '0' => false);
+		$keys = null;
+		foreach ($options as $key => $value) {
+			if (!is_string($value) || !isset($words[strtolower($value)])) {
+				continue;
+			}
+			$keys = $keys ?? $this->yes_no_option_keys();
+			$yes = $words[strtolower($value)];
+			if (isset($keys['flag'][$key])) {
+				$options[$key] = $yes;
+			} elseif (isset($keys['presence'][$key]) && !$yes) {
+				unset($options[$key]);
+			}
+		}
+		return $options;
 	}
 
 	/**
@@ -4921,8 +5026,105 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		return $column;
 	}
 
+	/**
+	 * Every quoted string written in a PHP source text, as PHP reads it: the
+	 * constant strings only, so a string with a variable inside it is not one.
+	 *
+	 * @param string $source
+	 * @return array string => true
+	 */
+	public static function strings_written_in($source) {
+		$out = array();
+		foreach (token_get_all($source) as $token) {
+			if (!is_array($token) || $token[0] !== T_CONSTANT_ENCAPSED_STRING) {
+				continue;
+			}
+			$body = substr($token[1], 1, -1);
+			$out[$token[1][0] === "'"
+				? str_replace(array('\\\\', "\\'"), array('\\', "'"), $body)
+				: stripcslashes($body)] = true;
+		}
+		return $out;
+	}
+
+	/**
+	 * Every quoted string written in the source of this collection's class and
+	 * of each ancestor below SystemMultiBase. A file that cannot be read
+	 * contributes nothing, so a condition from it is refused, not let through.
+	 *
+	 * @return array string => true
+	 */
+	private function written_strings() {
+		$class = get_class($this);
+		if (!isset(self::$written_strings_cache[$class])) {
+			$strings = array();
+			$seen_files = array();
+			for ($rc = new ReflectionClass($class); $rc && $rc->getName() !== 'SystemMultiBase'; $rc = $rc->getParentClass()) {
+				$file = $rc->getFileName();
+				if (!$file || isset($seen_files[$file])) {
+					continue;
+				}
+				$seen_files[$file] = true;
+				// Read from the file each request, never from a shared cache: a
+				// cached list would be a second place the rule could be changed.
+				$src = @file_get_contents($file);
+				if ($src !== false) {
+					$strings += self::strings_written_in($src);
+				}
+			}
+			self::$written_strings_cache[$class] = $strings;
+		}
+		return self::$written_strings_cache[$class];
+	}
+
+	/**
+	 * Refuse a filter list that would put text into the query that nobody
+	 * wrote. A column name and a string condition both go into the SQL as they
+	 * are, so each must be a quoted string in this collection's source (a
+	 * column may instead be one the model declares); the text of a
+	 * SqlCondition is held to the same rule and its values are bound. What a
+	 * request sent can then reach the query only as a parameter, however the
+	 * collection's code passed it along.
+	 *
+	 * @param array  $filters The list getMultiResults() built.
+	 * @param string $table
+	 * @throws UnwrittenConditionException
+	 */
+	private function assert_filters_written($filters, $table) {
+		$written = null;
+		$model = $this->own_table_model($table);
+		foreach ($filters as $column => $condition) {
+			$column = (string)$column;
+			$bare = ltrim($column, '(');
+			if (!($model && isset($model::$field_specifications[$bare]))) {
+				$written = $written ?? $this->written_strings();
+				if (!isset($written[$column])) {
+					throw new UnwrittenConditionException(get_class($this) . ' filters on a column its source does not name: '
+						. mb_substr($column, 0, 80));
+				}
+			}
+			if (is_array($condition)) {
+				continue;
+			}
+			if ($condition instanceof SqlCondition) {
+				if ($condition->is_trusted()) {
+					continue;
+				}
+				$text = $condition->template();
+			} else {
+				$text = (string)$condition;
+			}
+			$written = $written ?? $this->written_strings();
+			if (!isset($written[$text])) {
+				throw new UnwrittenConditionException(get_class($this) . ' built the condition on ' . mb_substr($column, 0, 80)
+					. ' while running. Write the condition as one quoted string and bind its values with SqlCondition::bind().');
+			}
+		}
+	}
+
 	protected function _get_resultsv2($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {
 		$this->assert_options_known($table);
+		$this->assert_filters_written($filters, $table);
 
 		// Filters core derives from the model itself. Union with `+` so a
 		// filter the collection built by hand always wins over the inferred
@@ -4944,11 +5146,18 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
 		foreach ($filters as $column => $condition) {
 			if (is_array($condition)) {
-				// If an array is passed, assume it contains [value, PDO type]
+				// [value, PDO type]: the column equals that value
 				$where_clauses[] = "$column = ?";
 				$bind_params[] = [$condition[0], $condition[1]];
+			} elseif ($condition instanceof SqlCondition) {
+				// Written text, bound values
+				list($condition_sql, $condition_params) = $condition->expand();
+				$where_clauses[] = "$column $condition_sql";
+				foreach ($condition_params as $param) {
+					$bind_params[] = $param;
+				}
 			} else {
-				// Assume the caller is passing a raw SQL condition
+				// A condition written in the class's source (assert_filters_written)
 				$where_clauses[] = "$column $condition";
 			}
 		}

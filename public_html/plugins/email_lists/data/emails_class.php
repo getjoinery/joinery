@@ -322,10 +322,9 @@ class MultiEmail extends SystemMultiBase {
                 throw new InvalidArgumentException('recipient_group needs a provider key');
             }
             $reference_id = (int)($rg['reference_id'] ?? 0);
-            $filters['eml_email_id'] = "IN (SELECT erg_eml_email_id FROM erg_email_recipient_groups"
-                . " WHERE erg_provider = '" . $provider . "'"
-                . " AND erg_reference_id = " . $reference_id
-                . " AND erg_operation = 'add')";
+            $filters['eml_email_id'] = SqlCondition::bind(
+                "IN (SELECT erg_eml_email_id FROM erg_email_recipient_groups WHERE erg_provider = ? AND erg_reference_id = ? AND erg_operation = 'add')",
+                $provider, $reference_id);
         }
 
         if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {

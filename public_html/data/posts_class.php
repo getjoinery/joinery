@@ -286,16 +286,16 @@ class MultiPost extends SystemMultiBase {
 
 
 		if (isset($this->options['after_date'])) {
-			$filters['pst_published_time'] = '> ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['after_date']);
+			$filters['pst_published_time'] = SqlCondition::bind('> ?', (string)$this->options['after_date']);
 		}
 
 		if (isset($this->options['before_date'])) {
-			$filters['pst_published_time'] = '< ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['before_date']);
+			$filters['pst_published_time'] = SqlCondition::bind('< ?', (string)$this->options['before_date']);
 		}
 
 		if (isset($this->options['max_visible_tier_level'])) {
 			$level = intval($this->options['max_visible_tier_level']);
-			$filters['(pst_tier_min_level'] = "<= {$level} OR pst_tier_min_level IS NULL)";
+			$filters['(pst_tier_min_level'] = SqlCondition::bind('<= ? OR pst_tier_min_level IS NULL)', $level);
 		}
 
 		return $this->_get_resultsv2('pst_posts', $filters, $this->order_by, $only_count, $debug);

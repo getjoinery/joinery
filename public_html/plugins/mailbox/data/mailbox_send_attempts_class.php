@@ -31,6 +31,7 @@
  * a long plain string on an INSERT but accepts it on a row sealed to the same
  * owner.
  *
+ * @version 1.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.1 - record() writes the long plain facts after the row is sealed, so a
  *   reply on a Private mailbox records its attempt instead of being refused
  * @version 1.0.1 - comment wording: Private plus the relay-sealing and sending-lock add-ons
@@ -246,8 +247,8 @@ class MultiMailboxSendAttempt extends SystemMultiBase {
 		// sent from it, and the ones that answered it.
 		if (isset($this->options['about_message_id'])) {
 			$id = intval($this->options['about_message_id']);
-			$filters['(mst_iem_inbound_email_message_id'] = '= ' . $id
-				. ' OR mst_source_iem_inbound_email_message_id = ' . $id . ')';
+			$filters['(mst_iem_inbound_email_message_id'] = SqlCondition::bind(
+				'= ? OR mst_source_iem_inbound_email_message_id = ?)', $id, $id);
 		}
 		if (isset($this->options['message_id_header'])) {
 			$filters['mst_message_id_header'] = array($this->options['message_id_header'], PDO::PARAM_STR);

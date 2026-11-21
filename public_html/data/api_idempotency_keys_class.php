@@ -30,7 +30,7 @@
  * Nothing here is idempotency-specific: the hot-turn rule refuses the plaintext
  * write, and sealing is that refusal's ordinary resolution.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -150,8 +150,8 @@ class MultiApiIdempotencyKey extends SystemMultiBase {
 		}
 
 		if (isset($this->options['created_before'])) {
-			$filters['aik_create_time'] = "< '" . gmdate('Y-m-d H:i:s',
-				strtotime($this->options['created_before'])) . "'";
+			$filters['aik_create_time'] = SqlCondition::bind('< ?', gmdate('Y-m-d H:i:s',
+				strtotime($this->options['created_before'])));
 		}
 
 		return $this->_get_resultsv2('aik_api_idempotency_keys', $filters,

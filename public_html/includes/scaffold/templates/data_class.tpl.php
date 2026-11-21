@@ -103,8 +103,7 @@ class <?= $multi ?> extends SystemMultiBase {
 		}
 <?php elseif ($flt['kind'] === 'match'): ?>
 		if (isset($this->options['<?= $flt['option'] ?>'])) {
-			$dblink = DbConnector::get_instance()->get_db_link();
-			$filters['<?= $flt['column'] ?>'] = '<?= strtoupper($flt['match']) ?> ' . $dblink->quote('%' . $this->options['<?= $flt['option'] ?>'] . '%');
+			$filters['<?= $flt['column'] ?>'] = SqlCondition::bind('<?= strtoupper($flt['match']) ?> ?', '%' . $this->options['<?= $flt['option'] ?>'] . '%');
 		}
 <?php endif; ?>
 <?php endforeach; ?>

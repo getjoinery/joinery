@@ -1144,7 +1144,7 @@ class MultiEvent extends SystemMultiBase {
         }
         
         if (isset($this->options['name_like'])) {
-            $filters['evt_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['name_like'] . '%');
+            $filters['evt_name'] = SqlCondition::bind('ILIKE ?', '%' . (string)$this->options['name_like'] . '%');
         }
         
         if (isset($this->options['user_id_leader'])) {
@@ -1181,7 +1181,7 @@ class MultiEvent extends SystemMultiBase {
         }
         
         if (isset($this->options['name'])) {
-            $filters['evt_name'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['name'] . '%');
+            $filters['evt_name'] = SqlCondition::bind('ILIKE ?', '%' . (string)$this->options['name'] . '%');
         }
     
         if (isset($this->options['visibility'])) {
@@ -1214,7 +1214,7 @@ class MultiEvent extends SystemMultiBase {
 
         if (isset($this->options['max_visible_tier_level'])) {
             $level = intval($this->options['max_visible_tier_level']);
-            $filters['(evt_tier_min_level'] = "<= {$level} OR evt_tier_min_level IS NULL)";
+            $filters['(evt_tier_min_level'] = SqlCondition::bind('<= ? OR evt_tier_min_level IS NULL)', $level);
         }
 
         return $this->_get_resultsv2('evt_events', $filters, $this->order_by, $only_count, $debug);

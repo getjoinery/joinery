@@ -26,6 +26,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * nothing, only the same user can approve or deny it, and the poll hands over
  * the sealed keys alone.
  *
+ * @version 1.2.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.2.0 - dlk_bound: a ceremony opened by a signed-in app, bound to its key
  * @version 1.1.0 - dlk_sealed_vault_keys: one sealed secret per client-custody scope
  * @version 1.0.0
@@ -296,7 +297,7 @@ class MultiDeviceLink extends SystemMultiBase {
 			$filters['dlk_status'] = array($this->options['status'], PDO::PARAM_STR);
 		}
 		if (isset($this->options['expired_before'])) {
-			$filters['dlk_expires_time'] = '< ' . DbConnector::get_instance()->get_db_link()->quote($this->options['expired_before']);
+			$filters['dlk_expires_time'] = SqlCondition::bind('< ?', (string)$this->options['expired_before']);
 		}
 
 		return $this->_get_resultsv2('dlk_device_links', $filters, $this->order_by, $only_count, $debug);

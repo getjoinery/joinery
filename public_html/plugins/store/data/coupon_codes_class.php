@@ -172,7 +172,7 @@ class MultiCouponCode extends SystemMultiBase {
 		*/
 
         if (isset($this->options['active'])) {
-            $filters['ccd_is_active'] = "= " . ($this->options['active'] ? 'TRUE' : 'FALSE'); // Ensure valid SQL
+            $filters['ccd_is_active'] = $this->options['active'] ? '= TRUE' : '= FALSE'; // Ensure valid SQL
         }
 
 

@@ -10,6 +10,7 @@
  * Deleting a category is soft and hides every topic in it with the same
  * timestamp, so undelete() brings back exactly the topics the delete took.
  *
+ * @version 1.0.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.0.1 - a category is changed at its own write level (content), not the moderator's
  * @version 1.0.0
  */
@@ -184,8 +185,8 @@ class MultiForumCategory extends SystemMultiBase {
 		// readable_by => user id (0 = signed out): only the categories that
 		// person may read, decided in SQL by the same rule SpaceAccess applies.
 		if (isset($this->options['readable_by'])) {
-			$filters['fcg_forum_category_id'] = 'IN (SELECT fcg.fcg_forum_category_id FROM fcg_forum_categories fcg WHERE '
-				. SpaceAccess::readableSql('ForumCategory', 'fcg', (int)$this->options['readable_by']) . ')';
+			$filters['fcg_forum_category_id'] = SqlCondition::trusted('IN (SELECT fcg.fcg_forum_category_id FROM fcg_forum_categories fcg WHERE '
+				. SpaceAccess::readableSql('ForumCategory', 'fcg', (int)$this->options['readable_by']) . ')');
 		}
 
 		return $this->_get_resultsv2('fcg_forum_categories', $filters, $this->order_by, $only_count, $debug);

@@ -26,7 +26,7 @@ class AiQueuedActionException extends SystemBaseException {}
  * clear when cold. Rendering a sealed card needs the owner's window — which
  * approval always has, because resolving is an in-browser act.
  *
- * @version 1.2
+ * @version 1.3
  * @changelog 1.2 - MultiAiQueuedAction 'resolved' option: every row no longer
  *   pending (the AI panel's Past list)
  * @changelog 1.1 - SOURCE_RECIPE is in use: a pipeline job proposes an action
@@ -136,7 +136,7 @@ class MultiAiQueuedAction extends SystemMultiBase {
 
         // Everything already answered or lapsed: approved, declined, failed, expired.
         if (!empty($this->options['resolved'])) {
-            $filters['aqa_status'] = "<> '" . AiQueuedAction::STATUS_PENDING . "'";
+            $filters['aqa_status'] = SqlCondition::bind('<> ?', AiQueuedAction::STATUS_PENDING);
         }
 
         if (isset($this->options['conversation_id'])) {

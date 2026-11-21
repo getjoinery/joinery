@@ -584,6 +584,17 @@ class MultiExample extends SystemMultiBase
         if (isset($this->options['link'])) {
             $filters['exm_link'] = [$this->options['link'], PDO::PARAM_STR];
         }
+
+        // A comparison that carries a value is a SqlCondition: the text is
+        // written, the value is bound. A condition string put together from
+        // pieces ('> ' . $n, a quote()d value) is refused when the query runs.
+        if (isset($this->options['name_like'])) {
+            $filters['exm_name'] = SqlCondition::bind('ILIKE ?', '%' . $this->options['name_like'] . '%');
+        }
+
+        if (isset($this->options['ids'])) {
+            $filters['exm_example_id'] = SqlCondition::bind('IN (?)', array_map('intval', (array)$this->options['ids']));
+        }
         
         // Use SystemMultiBase's _get_resultsv2 method for database query
         return $this->_get_resultsv2('exm_examples', $filters, $this->order_by, $only_count, $debug);

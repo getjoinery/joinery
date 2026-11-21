@@ -300,7 +300,7 @@ class MultiMessage extends SystemMultiBase {
 		}
 
 		if (isset($this->options['context_id_only'])) {
-			$filters['msg_context_id'] = '= '.intval($this->options['context_id_only']).' AND msg_usr_user_id_recipient IS NULL';
+			$filters['msg_context_id'] = SqlCondition::bind('= ? AND msg_usr_user_id_recipient IS NULL', intval($this->options['context_id_only']));
 		}
 
 		if (isset($this->options['conversation_id'])) {
@@ -311,7 +311,7 @@ class MultiMessage extends SystemMultiBase {
 		// message id rather than the send time so two messages stored inside the
 		// same microsecond cannot straddle the cursor.
 		if (isset($this->options['after_message_id'])) {
-			$filters['msg_message_id'] = '> ' . (int)$this->options['after_message_id'];
+			$filters['msg_message_id'] = SqlCondition::bind('> ?', (int)$this->options['after_message_id']);
 		}
 
 		// A named set of messages in one query — what a thread render needs when
@@ -319,7 +319,7 @@ class MultiMessage extends SystemMultiBase {
 		if (isset($this->options['message_ids'])) {
 			$ids = array_values(array_filter(array_map('intval', (array)$this->options['message_ids'])));
 			$filters['msg_message_id'] = $ids
-				? 'IN (' . implode(',', $ids) . ')'
+				? SqlCondition::bind('IN (?)', $ids)
 				: 'IS NULL';
 		}
 

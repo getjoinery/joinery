@@ -157,4 +157,113 @@ try {
 	check(false, 'MultiPlugin filters a bool column on false', $e->getMessage());
 }
 
+// A column name and a string condition go into the query as they are, so the
+// query refuses any that is not a quoted string in the collection's own
+// source. These collections do what a careless filter would.
+section('A condition or column put together while running is refused');
+class MultiJoinedConditionPlugin extends SystemMultiBase {
+	protected static $model_class = 'Plugin';
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = array();
+		if (isset($this->options['joined'])) {
+			$joined = "= '" . $this->options['joined'] . "'";
+			$filters['plg_name'] = $joined;
+		}
+		if (isset($this->options['bound_text'])) {
+			$filters['plg_name'] = SqlCondition::bind('= ' . $this->options['bound_text'], 1);
+		}
+		if (isset($this->options['column'])) {
+			$filters[$this->options['column']] = array('x', PDO::PARAM_STR);
+		}
+		if (isset($this->options['written'])) {
+			$filters['plg_name'] = 'IS NULL';
+		}
+		if (isset($this->options['like'])) {
+			$filters['plg_name'] = SqlCondition::bind('ILIKE ?', $this->options['like']);
+		}
+		if (isset($this->options['names'])) {
+			$filters['(plg_name'] = SqlCondition::bind('IN (?) OR plg_name = ?)', $this->options['names'], 'no_such_plugin_zz');
+		}
+		return $this->_get_resultsv2('plg_plugins', $filters, $this->order_by, $only_count, $debug);
+	}
+}
+$refused = function (array $options) {
+	try {
+		(new MultiJoinedConditionPlugin($options))->count_all();
+	} catch (UnwrittenConditionException $e) {
+		return true;
+	} catch (Throwable $e) {
+		return get_class($e) . ': ' . $e->getMessage();
+	}
+	return false;
+};
+$injection = "x' OR (SELECT count(*) FROM usr_users) > 0 OR plg_name = 'x";
+$total = (int)DbConnector::get_instance()->get_db_link()->query('SELECT count(*) FROM plg_plugins')->fetchColumn();
+check($total > 0, 'the plugin table has rows to leak', $total . ' rows');
+check($refused(array('joined' => $injection)) === true, 'a value joined into a condition never reaches the database');
+check($refused(array('joined' => 'harmless')) === true, 'and is refused whatever the value: the form is the fault');
+check($refused(array('bound_text' => '? OR 1 = 1')) === true, 'SqlCondition text put together while running is refused');
+// Joined here, not written whole: a string this file writes whole is, by the
+// rule under test, one the collection in this file may use.
+check($refused(array('column' => 'plg_name = ' . "'x'" . ' OR 1 = 1 OR ' . 'plg_name')) === true, 'a column that is neither written nor declared is refused');
+check($refused(array('column' => 'plg_name')) === false, 'a declared column taken from a variable passes');
+check($refused(array('written' => true)) === false, 'a written condition passes');
+try {
+	$got = (new MultiJoinedConditionPlugin(array('like' => $injection)))->count_all();
+	check((int)$got === 0, 'a bound value is matched as text, not run', $got . ' rows');
+	$some = DbConnector::get_instance()->get_db_link()->query('SELECT plg_name FROM plg_plugins ORDER BY plg_name LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
+	$got = (new MultiJoinedConditionPlugin(array('names' => $some)))->count_all();
+	check((int)$got === count($some), 'a bound list finds exactly its members', $got . ' of ' . count($some));
+	$got = (new MultiJoinedConditionPlugin(array('names' => array())))->count_all();
+	check((int)$got === 0, 'an empty bound list finds nothing');
+} catch (Throwable $e) {
+	check(false, 'bound conditions run', get_class($e) . ': ' . $e->getMessage());
+}
+
+// A query string carries text, and the text "false" is true to PHP. An option
+// the collection reads as yes or no takes the words; an option that carries a
+// value is never touched.
+section('The words true and false are read as yes and no');
+class MultiYesNoPlugin extends SystemMultiBase {
+	protected static $model_class = 'Plugin';
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = array();
+		if (isset($this->options['named'])) {
+			$filters['plg_name'] = $this->options['named'] ? 'IS NOT NULL' : 'IS NULL';
+		}
+		if (isset($this->options['only_unnamed'])) {
+			$filters['plg_name'] = 'IS NULL';
+		}
+		if (!empty($this->options['unnamed'])) {
+			$filters['plg_name'] = 'IS NULL';
+		}
+		if (isset($this->options['called'])) {
+			$filters['plg_name'] = array($this->options['called'], PDO::PARAM_STR);
+		}
+		return $this->_get_resultsv2('plg_plugins', $filters, $this->order_by, $only_count, $debug);
+	}
+}
+$count = function (array $options) {
+	return (int)(new MultiYesNoPlugin($options))->count_all();
+};
+check($count(array('named' => 'false')) === 0 && $count(array('named' => false)) === 0, 'the word false on a yes/no option means no');
+check($count(array('named' => 'FALSE')) === 0 && $count(array('named' => '0')) === 0, 'so do FALSE and 0');
+check($count(array('named' => 'true')) === $total && $count(array('named' => '1')) === $total, 'true and 1 mean yes');
+check($count(array('unnamed' => 'false')) === $total, 'a tested option given false is not applied');
+check($count(array('unnamed' => 'true')) === 0, 'and given true it is');
+check($count(array('only_unnamed' => 'false')) === $total, 'an option that only has to be passed is not passed by saying no');
+check($count(array('only_unnamed' => 'true')) === 0 && $count(array('only_unnamed' => 1)) === 0, 'and is by saying yes');
+check($count(array('called' => 'false')) === 0 && $count(array('called' => 'true')) === 0, 'an option that carries a value keeps the word as text');
+$keys = SystemMultiBase::yes_no_option_keys_in('<?php
+	if (isset($this->options["a"])) { $f["x"] = $this->options["a"] ? "1" : "2"; }
+	if (!empty($this->options["b"])) {}
+	if (isset($this->options["c"])) { $f["x"] = array($this->options["c"], 1); }
+	if (isset($this->options["d"])) {}
+	if (isset($this->options["e"]) && $this->options["e"]) { $f["x"] = "%" . $this->options["e"]; }
+	$g = $this->options["g"] ?? null;
+	if ($this->options["h"] === true) {}
+	if (array_key_exists("i", $this->options)) { $f["x"] = $this->options["i"] === null ? "IS NULL" : array($this->options["i"], 1); }');
+check(array_keys($keys['flag']) === array('b', 'h', 'a'), 'tested options are yes/no', json_encode(array_keys($keys['flag'])));
+check(array_keys($keys['presence']) === array('d'), 'an option only checked for being passed is a presence option', json_encode(array_keys($keys['presence'])));
+
 harness_finish();

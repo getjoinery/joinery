@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.13 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.12 - a device-run rule's match log and forward bookkeeping run as rule_checked_write(): a member's parse had them refused
  * @version 1.11 - access_owner_is(): a mailbox's filter is its grant holders'; a domain-wide one is level-only
  * @version 1.10 - a filter removed with its mailbox or domain goes through its own permanent_delete(),
@@ -974,13 +975,13 @@ class MultiInboundEmailFilter extends SystemMultiBase {
 		if (array_key_exists('scope_domain_id', $this->options)) {
 			$domainId = intval($this->options['scope_domain_id']);
 			$aliasId = $this->options['scope_alias_id'] ?? null;
-			$domainWide = 'ief_iea_inbound_email_alias_id IS NULL AND ief_ied_inbound_email_domain_id = ' . $domainId;
 			if ($aliasId !== null) {
-				$filters['(ief_iea_inbound_email_alias_id'] = '= ' . intval($aliasId)
-					. ' OR (' . $domainWide . '))';
+				$filters['(ief_iea_inbound_email_alias_id'] = SqlCondition::bind(
+					'= ? OR (ief_iea_inbound_email_alias_id IS NULL AND ief_ied_inbound_email_domain_id = ?))',
+					intval($aliasId), $domainId);
 			} else {
-				$filters['(ief_iea_inbound_email_alias_id'] = 'IS NULL AND ief_ied_inbound_email_domain_id = '
-					. $domainId . ')';
+				$filters['(ief_iea_inbound_email_alias_id'] = SqlCondition::bind(
+					'IS NULL AND ief_ied_inbound_email_domain_id = ?)', $domainId);
 			}
 		}
 

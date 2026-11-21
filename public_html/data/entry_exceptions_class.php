@@ -50,7 +50,7 @@ class MultiCalEntryException extends SystemMultiBase {
         if (isset($this->options['cal_entry_ids']) && is_array($this->options['cal_entry_ids'])) {
             $ids = array_values(array_filter(array_map('intval', $this->options['cal_entry_ids'])));
             if ($ids) {
-                $filters['cex_cal_entry_id'] = 'IN (' . implode(',', $ids) . ')';
+                $filters['cex_cal_entry_id'] = SqlCondition::bind('IN (?)', $ids);
             }
         }
         if (isset($this->options['exception_date'])) {

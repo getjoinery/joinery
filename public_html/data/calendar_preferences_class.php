@@ -8,6 +8,7 @@
  * factory defaults (Standard, everything off). Edited on
  * /profile/calendar_settings; consumed by CalendarEmailEngine and CalendarLevel.
  *
+ * @version 1.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.1 - cpr_protection_level: the member's calendar is Standard or Private
  *   (docs/calendar.md § Protection level); CalendarLevel reads and flips it
  * @version 1.0
@@ -92,7 +93,7 @@ class MultiCalendarPreference extends SystemMultiBase {
 		if (isset($this->options['user_ids']) && is_array($this->options['user_ids'])) {
 			$ids = array_values(array_filter(array_map('intval', $this->options['user_ids'])));
 			if ($ids) {
-				$filters['cpr_usr_user_id'] = 'IN (' . implode(',', $ids) . ')';
+				$filters['cpr_usr_user_id'] = SqlCondition::bind('IN (?)', $ids);
 			} else {
 				$filters['cpr_usr_user_id'] = '= -1';
 			}

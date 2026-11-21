@@ -867,9 +867,8 @@ class MultiSeoPageMetadata extends SystemMultiBase {
 		}
 
 		if (isset($this->options['searchterm']) && $this->options['searchterm']) {
-			$dblink = DbConnector::get_instance()->get_db_link();
 			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['searchterm']) . '%';
-			$filters['spm_path'] = 'ILIKE ' . $dblink->quote($term);
+			$filters['spm_path'] = SqlCondition::bind('ILIKE ?', $term);
 		}
 
 		return $this->_get_resultsv2('spm_seo_page_metadata', $filters, $this->order_by, $only_count, $debug);

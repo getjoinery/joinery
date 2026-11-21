@@ -2,6 +2,8 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.42 - a collection filter value the database refuses for its column (a bad date, text for a
+ *   number) answers 400, not a server error
  * @version 2.41 - a record or collection URL looks up the one model it names (LibraryFunctions::api_model_class())
  *   instead of reading every model file on each request
  * @version 2.40 - as the viewer, a row by id only when its owner column is the viewer's (reviewer2 J2)
@@ -1084,6 +1086,18 @@ if ($record_class !== null) {
 		// column is interpolated, not bound, so it is validated there rather
 		// than trusted from here.
 		api_error($e->getMessage(), 'TransactionError', 400);
+	} catch (InvalidArgumentException $e) {
+		// A filter value of a shape no condition takes (a list inside a list).
+		api_error('Fetch objects: a filter value is not one the ' . $class_name . ' list can use', 'TransactionError', 400);
+	} catch (PDOException $e) {
+		// SQLSTATE class 22 is the database refusing a VALUE: text where a
+		// number or a date belongs, a number out of range. Every filter value
+		// is a bound parameter, so that is the caller's value and the caller's
+		// to fix. Anything else is a fault here and stays a server error.
+		if (substr((string)$e->getCode(), 0, 2) !== '22') {
+			throw $e;
+		}
+		api_error('Fetch objects: a filter value is not valid for the ' . $class_name . ' column it filters (a date, a number or true/false was expected)', 'TransactionError', 400);
 	}
 
 	$response_array = array();

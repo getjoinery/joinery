@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.43 - log_table_tail: an error read names the kind it was narrowed to
  * @version 1.42 - container_inventory: a Packages column, what each site runs of the sources a package fix can cover
  *                (our fix marked) and what its base took
  * @version 1.41 - mail_test_send: a Send a test message button on an ordinary domain's answer, and what the send did
@@ -582,6 +583,8 @@ if ($result) {
 		echo '<div class="card mb-3"><div class="card-header"><strong>'
 			. htmlspecialchars(JobCommandBuilder::LOG_TABLES[$table] ?? $table)
 			. (array_key_exists($ltt_event, JobCommandBuilder::LOG_EVENTS) ? ': ' . htmlspecialchars(JobCommandBuilder::LOG_EVENTS[$ltt_event]) : '')
+			. (array_key_exists((string)($result_data['kind'] ?? ''), JobCommandBuilder::LOG_ERROR_KINDS)
+				? ': ' . htmlspecialchars(JobCommandBuilder::LOG_ERROR_KINDS[(string)$result_data['kind']]) : '')
 			. '</strong> <small class="text-muted">— ' . count($result_data['rows']) . ' newest row(s)'
 			. ($ltt_hours ? ' of the last ' . (int)$ltt_hours . ' h' : '')
 			. (!empty($result_data['truncated']) ? ', cut to the size cap' : '') . '</small></div>';

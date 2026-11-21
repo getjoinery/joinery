@@ -6,7 +6,7 @@
  * a reaction that arrived from another instance over Joinery Direct has no local
  * user row and is attributed to the sending address instead.
  *
- * @version 1.1
+ * @version 1.2
  * @changelog 1.1 - msr_create_time is stamped when the row is made; it was left empty
  */
 
@@ -127,7 +127,7 @@ class MultiMessageReaction extends SystemMultiBase {
 			$ids = array_map('intval', (array)$this->options['message_ids']);
 			$ids = array_values(array_filter($ids));
 			$filters['msr_msg_message_id'] = $ids
-				? 'IN (' . implode(',', $ids) . ')'
+				? SqlCondition::bind('IN (?)', $ids)
 				: 'IS NULL';
 		}
 

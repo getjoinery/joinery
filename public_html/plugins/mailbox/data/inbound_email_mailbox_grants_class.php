@@ -32,7 +32,7 @@
  * mailbox whose whole promise is that it does not. The protection ceremony
  * checks both at the raise; this is what holds them afterwards.
  *
- * @version 1.6
+ * @version 1.7
  * @changelog 1.6 - a Fortress mailbox's holder must hold a `mail` vault (grant_set_error() $scope)
  * @changelog 1.5 - sync_for_alias serialises per mailbox on an advisory lock
  *   (two concurrent syncs could each pass the one-holder check and each
@@ -378,7 +378,7 @@ class MultiInboundEmailMailboxGrant extends SystemMultiBase {
 				$ids[] = intval($id);
 			}
 			if (count($ids)) {
-				$filters['ieg_iea_inbound_email_alias_id'] = 'IN (' . implode(',', $ids) . ')';
+				$filters['ieg_iea_inbound_email_alias_id'] = SqlCondition::bind('IN (?)', $ids);
 			} else {
 				// Empty set matches nothing.
 				$filters['ieg_iea_inbound_email_alias_id'] = 'IN (NULL)';

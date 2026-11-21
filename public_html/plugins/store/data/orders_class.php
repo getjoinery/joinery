@@ -235,11 +235,11 @@ class MultiOrder extends SystemMultiBase {
 		}
 
 		if (isset($this->options['created_before'])) {
-			$filters['ord_timestamp'] = '<= ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['created_before']);
+			$filters['ord_timestamp'] = SqlCondition::bind('<= ?', (string)$this->options['created_before']);
 		}
 
 		if (isset($this->options['created_after'])) {
-			$filters['ord_timestamp'] = '>= ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['created_after']);
+			$filters['ord_timestamp'] = SqlCondition::bind('>= ?', (string)$this->options['created_after']);
 		}
 
 		if (isset($this->options['test_mode'])) {
@@ -252,9 +252,9 @@ class MultiOrder extends SystemMultiBase {
 
 		if (isset($this->options['order_finished'])) {
 			if ($this->options['order_finished']) {
-				$filters['ord_order_id'] = 'IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = '.OrderItem::STATUS_PAID.')';
+				$filters['ord_order_id'] = SqlCondition::bind('IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = ?)', OrderItem::STATUS_PAID);
 			} else {
-				$filters['ord_order_id'] = 'IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = '.OrderItem::STATUS_UNPAID.' OR odi_status = '.OrderItem::STATUS_ERROR.')';
+				$filters['ord_order_id'] = SqlCondition::bind('IN (SELECT odi_ord_order_id FROM odi_order_items WHERE odi_status = ? OR odi_status = ?)', OrderItem::STATUS_UNPAID, OrderItem::STATUS_ERROR);
 			}
 		}
 

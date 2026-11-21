@@ -20,6 +20,7 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.13 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.12 - a line refunded in full revokes the ownerships it granted (revoke_ownerships(); walkthrough Q35)
  * @version 1.11 - refund_in_full(): all that is left of a line's payment, and its subscription cancelled
  * @version 1.10 - subscription_state_words(), subscription_payment_failed(): a subscription's state in a buyer's words
@@ -818,7 +819,7 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 
 		if (isset($this->options['order_date_after'])) {
-			$filters['odi_status_change_time'] = '> ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['order_date_after']);
+			$filters['odi_status_change_time'] = SqlCondition::bind('> ?', (string)$this->options['order_date_after']);
 		}
 
 		if (isset($this->options['is_subscription'])) {
@@ -826,15 +827,16 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 
 		if (isset($this->options['is_active_subscription'])) {
-			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NULL AND odi_status = " . OrderItem::STATUS_PAID;
+			$filters['odi_is_subscription'] = SqlCondition::bind('= TRUE AND odi_subscription_cancelled_time IS NULL AND odi_status = ?', OrderItem::STATUS_PAID);
 		}
 
 		// Currently-entitled subscriptions: never cancelled OR scheduled to
 		// cancel at a future time (end-of-period cancellations stay current —
 		// and reactivatable — until they lapse).
 		if (isset($this->options['is_current_subscription'])) {
-			$filters['odi_is_subscription'] = "= TRUE AND odi_status = " . OrderItem::STATUS_PAID
-				. " AND (odi_subscription_cancelled_time IS NULL OR odi_subscription_cancelled_time > now())";
+			$filters['odi_is_subscription'] = SqlCondition::bind(
+				'= TRUE AND odi_status = ? AND (odi_subscription_cancelled_time IS NULL OR odi_subscription_cancelled_time > now())',
+				OrderItem::STATUS_PAID);
 		}
 
 		// Lines whose product grants a subscription tier: a tier's own
@@ -845,7 +847,7 @@ class MultiOrderItem extends SystemMultiBase {
 		}
 
 		if (isset($this->options['is_cancelled_subscription'])) {
-			$filters['odi_is_subscription'] = "= TRUE AND odi_subscription_cancelled_time IS NOT NULL AND odi_status = " . OrderItem::STATUS_PAID;
+			$filters['odi_is_subscription'] = SqlCondition::bind('= TRUE AND odi_subscription_cancelled_time IS NOT NULL AND odi_status = ?', OrderItem::STATUS_PAID);
 		}
 
 		return $this->_get_resultsv2('odi_order_items', $filters, $this->order_by, $only_count, $debug);

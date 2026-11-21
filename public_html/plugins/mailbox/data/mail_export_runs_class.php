@@ -28,7 +28,7 @@
  * deletes it with its pieces; so is a run that never finished, counted from
  * when it was asked for.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -265,11 +265,11 @@ class MultiMailExportRun extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = array();
 		if (isset($this->options['states'])) {
-			$quoted = array();
+			$wanted = array();
 			foreach ((array)$this->options['states'] as $s) {
-				$quoted[] = "'" . preg_replace('/[^a-z_]/', '', (string)$s) . "'";
+				$wanted[] = preg_replace('/[^a-z_]/', '', (string)$s);
 			}
-			$filters['mxr_state'] = empty($quoted) ? "IN ('')" : 'IN (' . implode(',', $quoted) . ')';
+			$filters['mxr_state'] = empty($wanted) ? "IN ('')" : SqlCondition::bind('IN (?)', $wanted);
 		}
 		return $this->_get_resultsv2('mxr_mail_export_runs', $filters, $this->order_by, $only_count, $debug);
 	}

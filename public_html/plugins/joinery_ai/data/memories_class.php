@@ -165,7 +165,7 @@ class MultiAiMemory extends SystemMultiBase {
             $ids = array_map('intval', (array)$this->options['ids']);
             $ids = array_values(array_filter($ids, fn($i) => $i > 0));
             if (empty($ids)) $ids = [0];   // never matches, never malformed SQL
-            $filters['mem_memory_id'] = 'IN (' . implode(',', $ids) . ')';
+            $filters['mem_memory_id'] = SqlCondition::bind('IN (?)', $ids);
         }
 
         if (isset($this->options['deleted'])) {

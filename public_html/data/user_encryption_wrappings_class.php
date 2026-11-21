@@ -349,7 +349,7 @@ class MultiUserEncryptionWrapping extends SystemMultiBase {
 		if (isset($this->options['credential_id']))
 			$filters['uew_pkc_passkey_credential_id'] = [$this->options['credential_id'], PDO::PARAM_INT];
 		if (isset($this->options['is_used']))
-			$filters['uew_is_used'] = "= " . ($this->options['is_used'] ? 'TRUE' : 'FALSE');
+			$filters['uew_is_used'] = $this->options['is_used'] ? '= TRUE' : '= FALSE';
 		// A reserved row (empty wrapping) is not an unlocker — see reserve().
 		if (empty($this->options['include_reserved']))
 			$filters['uew_wrapped_secret_key'] = "<> ''";

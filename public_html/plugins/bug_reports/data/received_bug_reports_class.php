@@ -34,6 +34,7 @@
  *             (rbr_ignored_through, the newest at the time); the first report
  *             from a newer version makes the fault new again. Kept by the sweep
  *
+ * @version 1.4.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.4.0 - Resolve, Ignore, Snooze and Reopen on a fault, as an incident offers; seen, closed and muted
  *                  are gone (seen became new, closed resolved, muted ignored, migration br_001)
  * @version 1.3.0 - muted: a fault can be muted across every site and version
@@ -485,7 +486,7 @@ class MultiReceivedBugReport extends SystemMultiBase {
 			if ($group === '') {
 				$filters['(rbr_fingerprint'] = 'IS NULL AND rbr_error_hash IS NULL)';
 			} elseif (preg_match('/^[0-9a-f]{32}$/', $group)) {
-				$filters['(rbr_fingerprint'] = "= '" . $group . "' OR (rbr_fingerprint IS NULL AND rbr_error_hash = '" . $group . "'))";
+				$filters['(rbr_fingerprint'] = SqlCondition::bind('= ? OR (rbr_fingerprint IS NULL AND rbr_error_hash = ?))', $group, $group);
 			} else {
 				$filters['rbr_received_bug_report_id'] = '< 0';
 			}

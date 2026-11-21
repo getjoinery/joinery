@@ -441,12 +441,12 @@ class MultiEventSession extends SystemMultiBase {
         }
         
         if (isset($this->options['title_like'])) {
-            $filters['evs_title'] = 'ILIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['title_like'] . '%');
+            $filters['evs_title'] = SqlCondition::bind('ILIKE ?', '%' . (string)$this->options['title_like'] . '%');
         }
         
         
         if (isset($this->options['future'])) {
-            $filters['evs_end_time'] = '> ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['future']);
+            $filters['evs_end_time'] = SqlCondition::bind('> ?', (string)$this->options['future']);
         }
         
         if (isset($this->options['future_or_none'])) {
@@ -454,7 +454,7 @@ class MultiEventSession extends SystemMultiBase {
         }
         
         if (isset($this->options['past'])) {
-            $filters['evs_end_time'] = '< ' . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['past']);
+            $filters['evs_end_time'] = SqlCondition::bind('< ?', (string)$this->options['past']);
         }
         
         if (isset($this->options['past_or_none'])) {

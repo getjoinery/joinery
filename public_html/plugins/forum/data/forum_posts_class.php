@@ -10,7 +10,7 @@
  * post, and SpaceAccess::mayModerate() reads it, so the level is written here
  * and nowhere else. A post's author may edit and delete their own.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 class ForumPost extends SystemBase {
@@ -145,7 +145,7 @@ class MultiForumPost extends SystemMultiBase {
 		// author (moderators pass 'moderator' => TRUE).
 		if (isset($this->options['visible_to']) && empty($this->options['moderator'])) {
 			$uid = (int)$this->options['visible_to'];
-			$filters['(fpo_is_approved'] = '= TRUE OR fpo_usr_user_id = ' . $uid . ')';
+			$filters['(fpo_is_approved'] = SqlCondition::bind('= TRUE OR fpo_usr_user_id = ?)', $uid);
 		}
 
 		// in_live_topic => TRUE: only posts whose topic is not removed.
@@ -155,7 +155,7 @@ class MultiForumPost extends SystemMultiBase {
 
 		// after_id => post id: posts newer than it (unread counting).
 		if (isset($this->options['after_id'])) {
-			$filters['fpo_forum_post_id'] = '> ' . (int)$this->options['after_id'];
+			$filters['fpo_forum_post_id'] = SqlCondition::bind('> ?', (int)$this->options['after_id']);
 		}
 
 		return $this->_get_resultsv2('fpo_forum_posts', $filters, $this->order_by, $only_count, $debug);

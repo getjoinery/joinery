@@ -127,7 +127,9 @@ class MultiProductVersion extends SystemMultiBase {
 			if (preg_match('/^-?\d+$/D', $priority)) {
 				$filters['prv_display_priority'] = [(int)$priority, PDO::PARAM_INT];
 			} elseif (preg_match('/^(=|!=|<>|>=|<=|>|<)\s*(-?\d+)$/D', $priority, $m)) {
-				$filters['prv_display_priority'] = $m[1] . ' ' . (int)$m[2];
+				// The comparison is one of these written conditions; the number is bound.
+				$comparisons = array('=' => '= ?', '!=' => '!= ?', '<>' => '<> ?', '>=' => '>= ?', '<=' => '<= ?', '>' => '> ?', '<' => '< ?');
+				$filters['prv_display_priority'] = SqlCondition::bind($comparisons[$m[1]], (int)$m[2]);
 			} else {
 				throw new UnknownMultiOptionException("MultiProductVersion: prv_display_priority takes a whole number or a comparison with one, such as '> 0'.");
 			}

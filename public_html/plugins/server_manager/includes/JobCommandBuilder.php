@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.171 - build_log_table_tail reads the site's error table (table errors, agent 1.127.0) and narrows it to one
+ *                kind of error: script policy refusals, database errors, exceptions
  * @version 1.170 - build_decommission_node takes decommission_held_site (agent 1.123.0) for a held Starter site
  *                 marked ready to remove: the host's own hold stands in for the approval (hosting_paid_launch B1)
  * @version 1.169 - build_mail_test_send: one fixed test message to the probe mailbox (operate)
@@ -531,7 +533,29 @@ class JobCommandBuilder {
 		'events'      => 'Event log',
 		'form_errors' => 'Form errors',
 		'webhooks'    => 'Webhook log',
+		'errors'      => 'Error table',
 	];
+
+	/**
+	 * log_table_tail's error table and its kind words (table=errors only), and
+	 * the agent that first has them. An older agent refuses a table or a field
+	 * it does not know, so the plane offers neither before this version.
+	 */
+	const LOG_ERROR_KINDS = [
+		'script_policy' => 'Script policy refusals',
+		'database'      => 'Database errors',
+		'exceptions'    => 'Exceptions',
+	];
+	const LOG_ERRORS_AGENT = '1.127.0';
+
+	/** The log tables this node's agent can read: LOG_TABLES less what its agent is too old for. */
+	public static function log_tables_for($node) {
+		$tables = self::LOG_TABLES;
+		if (version_compare(AgentVocabulary::version($node) ?: '0', self::LOG_ERRORS_AGENT, '<')) {
+			unset($tables['errors']);
+		}
+		return $tables;
+	}
 
 	/** The most lines or rows either log word returns; the node caps at the same figure. */
 	const LOG_MAX_COUNT = 200;
@@ -2178,8 +2202,9 @@ class JobCommandBuilder {
 	 * @param int         $rows  1..LOG_MAX_COUNT, or 1..LOG_EVENT_MAX_COUNT with an event
 	 * @param string|null $event one of LOG_EVENTS' keys, table events only
 	 * @param int|null    $hours 1..LOG_MAX_HOURS: only the last hours
+	 * @param string|null $kind  one of LOG_ERROR_KINDS' keys, table errors only
 	 */
-	public static function build_log_table_tail($node, $table, $rows = 50, $event = null, $hours = null) {
+	public static function build_log_table_tail($node, $table, $rows = 50, $event = null, $hours = null, $kind = null) {
 		if (!self::has_primitive($node, 'log_table_tail')) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot read its log tables. "
@@ -2191,10 +2216,15 @@ class JobCommandBuilder {
 			throw new Exception("Node '{$node->get('mgn_slug')}' cannot read its logs by event or time: that needs agent "
 				. self::LOG_FILTER_AGENT . ' or newer. ' . AgentVocabulary::needs_newer_agent_text($node, []));
 		}
-		return self::build_log_table_tail_primitive($node, $table, $rows, $event, $hours);
+		if (((string)$table === 'errors' || $kind !== null)
+				&& version_compare(AgentVocabulary::version($node) ?: '0', self::LOG_ERRORS_AGENT, '<')) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot read its error table: that needs agent "
+				. self::LOG_ERRORS_AGENT . ' or newer. ' . AgentVocabulary::needs_newer_agent_text($node, []));
+		}
+		return self::build_log_table_tail_primitive($node, $table, $rows, $event, $hours, $kind);
 	}
 
-	public static function build_log_table_tail_primitive($node, $table, $rows = 50, $event = null, $hours = null) {
+	public static function build_log_table_tail_primitive($node, $table, $rows = 50, $event = null, $hours = null, $kind = null) {
 		$table = (string)$table;
 		if (!array_key_exists($table, self::LOG_TABLES)) {
 			throw new Exception("'" . $table . "' is not a log table the node offers. Choose one of: "
@@ -2220,6 +2250,14 @@ class JobCommandBuilder {
 				throw new Exception('Hours must be between 1 and ' . self::LOG_MAX_HOURS . '.');
 			}
 			$params['hours'] = (int)$hours;
+		}
+		if ($kind !== null) {
+			$kind = (string)$kind;
+			if ($table !== 'errors' || !array_key_exists($kind, self::LOG_ERROR_KINDS)) {
+				throw new Exception("'" . $kind . "' is not a kind of error the node can narrow its error table to. Choose one of: "
+					. implode(', ', array_keys(self::LOG_ERROR_KINDS)) . ', on the error table.');
+			}
+			$params['kind'] = $kind;
 		}
 		return ['primitive' => 'log_table_tail', 'params' => $params];
 	}

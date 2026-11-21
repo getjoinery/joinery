@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * assembled bytes into a File (or a new FileVersion) and deletes the row. Stale
  * rows + part-files are swept by the retention sweep (see $retention_policy).
  *
+ * @version 1.3.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.3.0 - discard() removes the uploader's own scratch row under rule_checked_write()
  * @version 1.2.0 - space_refusal() also refuses past the site's disk allowance (DiskAllowance)
  * @version 1.1.0
@@ -188,7 +189,7 @@ class MultiFileUpload extends SystemMultiBase {
 		}
 		if (isset($this->options['idle_before'])) {
 			// literal timestamp string, safe (produced server-side).
-			$filters['fup_update_time'] = "< " . DbConnector::get_instance()->get_db_link()->quote($this->options['idle_before']);
+			$filters['fup_update_time'] = SqlCondition::bind('< ?', (string)$this->options['idle_before']);
 		}
 
 		return $this->_get_resultsv2('fup_file_uploads', $filters, $this->order_by, $only_count, $debug);

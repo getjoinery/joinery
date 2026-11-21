@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.49 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.48 - decommission_held_site's claim budget: the teardown and the host's hold check
  * @version 1.47 - latestForNode() takes before_id: the run before a given one
  * @version 1.46 - ROUTINE_TYPES and option hide_routine: a completed never_do_check (every five minutes)
@@ -1027,7 +1028,7 @@ class MultiManagementJob extends SystemMultiBase {
 
 		// Leave out the completed runs of a routine job (ROUTINE_TYPES).
 		if (!empty($this->options['hide_routine'])) {
-			$filters['(mjb_job_type'] = "NOT IN ('" . implode("','", ManagementJob::ROUTINE_TYPES) . "') OR mjb_status <> 'completed')";
+			$filters['(mjb_job_type'] = SqlCondition::bind("NOT IN (?) OR mjb_status <> 'completed')", ManagementJob::ROUTINE_TYPES);
 		}
 
 		// Leave out the jobs of nodes hidden from the dashboard.

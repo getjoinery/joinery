@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.47 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.46 - PROVIDER_REFUSED, provider_refusal(): a site waiting because its buyer's own account refused the server
  * @version 1.45 - cvp_site_dns_records, cvp_site_dns_time: the buyer's DNS list is held until it is whole (walkthrough Q16)
  * @version 1.44 - cvp_no_mail_server: a bare-metal site built with no mail server, receiving through the relay fleet
@@ -1213,10 +1214,10 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 		}
 
 		if (isset($this->options['statuses']) && is_array($this->options['statuses']) && count($this->options['statuses'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['statuses']);
-			$filters['cvp_status'] = "IN (" . implode(',', $quoted) . ")";
+			$filters['cvp_status'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['external_order_item_id'])) {
@@ -1232,17 +1233,17 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 		}
 
 		if (isset($this->options['fleet_seed_states']) && is_array($this->options['fleet_seed_states']) && count($this->options['fleet_seed_states'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['fleet_seed_states']);
-			$filters['cvp_fleet_seed_state'] = "IN (" . implode(',', $quoted) . ")";
+			$filters['cvp_fleet_seed_state'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['install_password_states']) && is_array($this->options['install_password_states']) && count($this->options['install_password_states'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['install_password_states']);
-			$filters['cvp_install_password'] = "IN (" . implode(',', $quoted) . ")";
+			$filters['cvp_install_password'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['hosting_mode'])) {
@@ -1250,10 +1251,10 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 		}
 
 		if (isset($this->options['mail_states']) && is_array($this->options['mail_states']) && count($this->options['mail_states'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['mail_states']);
-			$filters['cvp_mail_state'] = "IN (" . implode(',', $quoted) . ")";
+			$filters['cvp_mail_state'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['instance_ip'])) {
@@ -1290,8 +1291,7 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 		// Rows that are past payment: everything but the buyer's pre-payment
 		// states. The complement of the draft sweep's view of the table.
 		if (!empty($this->options['past_payment'])) {
-			$pre = "'" . implode("','", CustomerCloudProvision::PRE_PAYMENT_STATUSES) . "'";
-			$filters['cvp_status'] = "NOT IN ({$pre})";
+			$filters['cvp_status'] = SqlCondition::bind('NOT IN (?)', CustomerCloudProvision::PRE_PAYMENT_STATUSES);
 		}
 
 		if (!empty($this->options['has_registrant'])) {
@@ -1306,16 +1306,15 @@ class MultiCustomerCloudProvision extends SystemMultiBase {
 			if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $before)) {
 				throw new CustomerCloudProvisionException('updated_before must be a Y-m-d H:i:s UTC timestamp.');
 			}
-			$filters['cvp_update_time'] = "< '" . $before . "'";
+			$filters['cvp_update_time'] = SqlCondition::bind('< ?', $before);
 		}
 
 		// Everything an operator still has a reason to watch: a provision working
 		// toward a site (or stuck), and a finished one whose install password
 		// this plane still holds.
 		if (!empty($this->options['open'])) {
-			$statuses = "'" . implode("','", CustomerCloudProvision::OPEN_STATUSES) . "'";
-			$held = "'" . implode("','", CustomerCloudProvision::PASSWORD_HELD_STATES) . "'";
-			$filters['(cvp_status'] = "IN ({$statuses}) OR cvp_install_password IN ({$held}))";
+			$filters['(cvp_status'] = SqlCondition::bind('IN (?) OR cvp_install_password IN (?))',
+				CustomerCloudProvision::OPEN_STATUSES, CustomerCloudProvision::PASSWORD_HELD_STATES);
 		}
 
 

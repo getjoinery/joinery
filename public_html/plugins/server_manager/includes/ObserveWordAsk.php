@@ -17,6 +17,7 @@
  * primitive than the word asked for is refused here, so the list cannot be
  * widened to an operate word by a builder's mapping.
  *
+ * @version 1.2.0 - log_table_tail takes kind (the error table's kinds, agent 1.127.0)
  * @version 1.1.0 - mailbox_status, sent as spam_learning_status to an older agent
  * @version 1.0.0 - shared by SupportNodeTools and ask_node (the 2026-11-10 running-list entry)
  */
@@ -73,7 +74,8 @@ class ObserveWordAsk {
 			case 'log_table_tail':
 				$built = JobCommandBuilder::build_log_table_tail($node, (string)($in['table'] ?? ''), (int)($in['rows'] ?? 50),
 					isset($in['event']) && $in['event'] !== '' ? (string)$in['event'] : null,
-					isset($in['hours']) && $in['hours'] !== '' ? (int)$in['hours'] : null);
+					isset($in['hours']) && $in['hours'] !== '' ? (int)$in['hours'] : null,
+					isset($in['kind']) && $in['kind'] !== '' ? (string)$in['kind'] : null);
 				break;
 			case 'unit_journal':
 				$built = JobCommandBuilder::build_unit_journal($node, (string)($in['unit'] ?? ''), (int)($in['lines'] ?? 100));

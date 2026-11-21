@@ -2594,8 +2594,36 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 		check($threw, 'log_table_tail\'s event and hours refuse on the plane: ' . var_export($bad, true));
 	}
 	check(array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is on the list, as the node\'s compiled shape of each line');
-	check(count(JobCommandBuilder::SITE_LOG_FILES) === 7 && count(JobCommandBuilder::LOG_TABLES) === 5,
-		'the mirrored lists are the seven files and five tables the specs name');
+	check(count(JobCommandBuilder::SITE_LOG_FILES) === 7 && count(JobCommandBuilder::LOG_TABLES) === 6,
+		'the mirrored lists are the seven files and six tables the specs name');
+
+	// The error table and its kinds (agent 1.127.0): offered and sent only to
+	// an agent that has them, the kind on the error table only.
+	$threw = '';
+	try { JobCommandBuilder::build_log_table_tail($filter_node, 'errors', 50); } catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, JobCommandBuilder::LOG_ERRORS_AGENT) !== false,
+		'an agent older than ' . JobCommandBuilder::LOG_ERRORS_AGENT . ' is never asked for its error table, and is told why', $threw);
+	check(!array_key_exists('errors', JobCommandBuilder::log_tables_for($filter_node))
+		&& count(JobCommandBuilder::log_tables_for($filter_node)) === 5,
+		'and its Logs form does not offer the error table');
+	$errors_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x04", 32)),
+		'mgn_agent_version'    => JobCommandBuilder::LOG_ERRORS_AGENT,
+		'mgn_agent_primitives' => 'check_status,log_table_tail',
+		'mgn_agent_log_access' => 'on',
+	));
+	check(array_key_exists('errors', JobCommandBuilder::log_tables_for($errors_node)), 'a new enough agent is offered the error table');
+	$built = JobCommandBuilder::build_log_table_tail($errors_node, 'errors', 200, null, 168, 'script_policy');
+	check($built === array('primitive' => 'log_table_tail', 'params' => array('table' => 'errors', 'rows' => 200,
+		'hours' => 168, 'kind' => 'script_policy')),
+		'an error read travels as the table, the rows, the hours and the kind word', var_export($built, true));
+	$built = JobCommandBuilder::build_log_table_tail($errors_node, 'errors', 20);
+	check($built['params'] === array('table' => 'errors', 'rows' => 20), 'the error table reads without a kind', var_export($built, true));
+	foreach (array(array('logins', 'script_policy'), array('errors', 'csp'), array('errors', "script_policy' OR 1=1"), array('events', 'database')) as $bad) {
+		$threw = false;
+		try { JobCommandBuilder::build_log_table_tail($errors_node, $bad[0], 10, null, null, $bad[1]); } catch (Exception $e) { $threw = true; }
+		check($threw, 'log_table_tail\'s kind refuses on the plane: ' . var_export($bad, true));
+	}
 
 	// site_log_count: a window question answered by counting, never by a tail.
 	$cnt_node = jcb_node(array(

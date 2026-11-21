@@ -683,7 +683,7 @@ Add a trailing **s** to the class name for collections.
 | `sort` | (none) | Declared column of the model; the prefix may be omitted. Anything else is a 400 |
 | `sdirection` | ASC | Sort direction: `ASC` or `DESC` (any other value is read as `ASC`) |
 
-Any additional query parameters are passed as filter options to the Multi class. Check the specific Multi class to see which filter keys it accepts. Each value is bound as a parameter, never written into the SQL, and a filter on an unreadable column is a `400`.
+Any additional query parameters are passed as filter options to the Multi class. Check the specific Multi class to see which filter keys it accepts. Each value is bound as a parameter, never written into the SQL (the collection layer refuses any condition text that is not written in the class's source; see [Plugin Developer Guide](plugin_developer_guide.md#writing-a-multi-collection-class)). A yes/no filter takes `true`/`false` or `1`/`0`. A filter on an unreadable column is a `400`, and so is a value the database refuses for its column: text where a number belongs, something that is not a date.
 
 **Example:** `GET /api/v1/Users?page=0&numperpage=20&sort=usr_id&sdirection=DESC`
 

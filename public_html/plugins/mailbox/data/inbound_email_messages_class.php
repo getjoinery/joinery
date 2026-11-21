@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.54 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.53 - the retention purges return the ids that went, so a caller can tell its own rows from the site's
  * @version 1.52 - PROMOTED_RESEAL_OWED_SQL and an index of exactly those rows by owner (PromotedRowRepair);
  *                live rows waiting to be parsed, by owner (DeferredIngest)
@@ -2587,9 +2588,7 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 			foreach ((array)$this->options['alias_ids'] as $id) {
 				$ids[] = intval($id);
 			}
-			$filters['iem_iea_inbound_email_alias_id'] = count($ids)
-				? 'IN (' . implode(',', $ids) . ')'
-				: 'IN (NULL)';
+			$filters['iem_iea_inbound_email_alias_id'] = SqlCondition::bind('IN (?)', $ids);
 		}
 
 		// IN-list of domain ids.
@@ -2598,12 +2597,9 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 			foreach ((array)$this->options['domain_ids'] as $id) {
 				$ids[] = intval($id);
 			}
-			$filters['iem_ied_inbound_email_domain_id'] = count($ids)
-				? 'IN (' . implode(',', $ids) . ')'
-				: 'IN (NULL)';
+			$filters['iem_ied_inbound_email_domain_id'] = SqlCondition::bind('IN (?)', $ids);
 		}
 
-		$dblink = DbConnector::get_instance()->get_db_link();
 
 		if (isset($this->options['thread_key'])) {
 			$filters['iem_thread_key'] = [$this->options['thread_key'], PDO::PARAM_STR];
@@ -2625,7 +2621,7 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 
 		if (isset($this->options['recipient']) && $this->options['recipient'] !== '') {
 			$term = '%' . str_replace(array('%', '_'), array('\\%', '\\_'), $this->options['recipient']) . '%';
-			$filters['iem_recipient'] = 'ILIKE ' . $dblink->quote($term);
+			$filters['iem_recipient'] = SqlCondition::bind('ILIKE ?', $term);
 		}
 
 		if (isset($this->options['message_id_header'])) {
@@ -2642,7 +2638,7 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 		}
 
 		if (isset($this->options['received_since'])) {
-			$filters['iem_received_time'] = '>= ' . $dblink->quote($this->options['received_since']);
+			$filters['iem_received_time'] = SqlCondition::bind('>= ?', (string)$this->options['received_since']);
 		}
 
 

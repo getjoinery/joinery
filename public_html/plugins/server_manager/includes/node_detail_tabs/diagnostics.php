@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.11 - Logs: the error table among the log tables, and Script policy refusals (7 days) (agent 1.127.0)
  * @version 1.10 - The machine: Mailbox (mailbox_status), the spam-learning counts and the site's mail domains
  * @version 1.9 - Compare edge and direct is data-jy-busy (no inline handler)
  * @version 1.8 - Vault windows (24 h): the vault's unlock history through log_table_tail (agent 1.113.0)
@@ -203,11 +204,28 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 			$fw_tbl->begin_form();
 			$fw_tbl->hiddeninput('action', '', ['id' => 'log_table_action', 'value' => 'log_table_tail']);
 			$fw_tbl->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'log_table_csrf', 'value' => SmAdminCsrf::token()]);
-			$fw_tbl->dropinput('table', 'Log table', ['options' => JobCommandBuilder::LOG_TABLES]);
+			$fw_tbl->dropinput('table', 'Log table', ['options' => JobCommandBuilder::log_tables_for($node)]);
 			$fw_tbl->numberinput('rows', 'Rows (1 to ' . JobCommandBuilder::LOG_MAX_COUNT . ')', ['min' => 1, 'max' => JobCommandBuilder::LOG_MAX_COUNT]);
 			$fw_tbl->submitbutton('btn_log_table', 'Read log table', ['class' => 'btn btn-sm btn-outline-secondary']);
 			$fw_tbl->end_form();
 			echo '</div>';
+			// What visitors' browsers said the strict script policy refused on
+			// this site: the rows CspReport wrote to its error table.
+			if (version_compare(AgentVocabulary::version($node) ?: '0', JobCommandBuilder::LOG_ERRORS_AGENT, '>=')) {
+				echo '<div>';
+				$fw_sp = $page->getFormWriter('script_policy_form', ['action' => $base_url . '&tab=diagnostics']);
+				$fw_sp->begin_form();
+				$fw_sp->hiddeninput('action', '', ['id' => 'script_policy_action', 'value' => 'log_table_tail']);
+				$fw_sp->hiddeninput('table', '', ['id' => 'script_policy_table', 'value' => 'errors']);
+				$fw_sp->hiddeninput('kind', '', ['id' => 'script_policy_kind', 'value' => 'script_policy']);
+				$fw_sp->hiddeninput('hours', '', ['id' => 'script_policy_hours', 'value' => (string)JobCommandBuilder::LOG_MAX_HOURS]);
+				$fw_sp->hiddeninput('rows', '', ['id' => 'script_policy_rows', 'value' => (string)JobCommandBuilder::LOG_MAX_COUNT]);
+				$fw_sp->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'script_policy_csrf', 'value' => SmAdminCsrf::token()]);
+				$fw_sp->submitbutton('btn_script_policy', 'Script policy refusals (7 days)', ['class' => 'btn btn-sm btn-outline-secondary',
+					'helptext' => 'What visitors\' browsers reported the strict script policy refused on this site in the last week: the page, what was refused and when. A script a browser extension added shows here too.']);
+				$fw_sp->end_form();
+				echo '</div>';
+			}
 			// The vault's unlock history: each window paired with its close,
 			// where its key was held, why it ended (agent_event_log_filter.md).
 			if (version_compare(AgentVocabulary::version($node) ?: '0', JobCommandBuilder::LOG_FILTER_AGENT, '>=')) {

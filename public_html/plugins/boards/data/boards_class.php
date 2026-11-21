@@ -12,7 +12,7 @@
  * their own. permanent_delete() removes every row under the board and the
  * Files its attachments hold.
  *
- * @version 1.0.1
+ * @version 1.0.2
  * @changelog 1.0.1 - the owner column is bbd_usr_user_id_owner; board admins write the board
  */
 
@@ -208,15 +208,15 @@ class MultiBoard extends SystemMultiBase {
 		// only narrows the query to the boards worth asking about.
 		if (isset($this->options['visible_to'])) {
 			$uid = (int)$this->options['visible_to'];
-			$filters['bbd_board_id'] = 'IN (
+			$filters['bbd_board_id'] = SqlCondition::bind('IN (
 				SELECT bbd_board_id FROM bbd_boards WHERE bbd_visibility = \'all_members\'
-				UNION SELECT bbm_bbd_board_id FROM bbm_board_members WHERE bbm_usr_user_id = ' . $uid . '
+				UNION SELECT bbm_bbd_board_id FROM bbm_board_members WHERE bbm_usr_user_id = ?
 				UNION SELECT bbm_bbd_board_id FROM bbm_board_members
 					WHERE bbm_grp_group_id IN (SELECT grm.grm_grp_group_id FROM grm_group_members grm
 						JOIN grp_groups grp ON grp.grp_group_id = grm.grm_grp_group_id
-						WHERE grm.grm_foreign_key_id = ' . $uid . ' AND grp.grp_category = \'user\'
+						WHERE grm.grm_foreign_key_id = ? AND grp.grp_category = \'user\'
 						AND grp.grp_delete_time IS NULL)
-				UNION SELECT bbd_board_id FROM bbd_boards WHERE bbd_usr_user_id_owner = ' . $uid . ')';
+				UNION SELECT bbd_board_id FROM bbd_boards WHERE bbd_usr_user_id_owner = ?)', $uid, $uid, $uid);
 		}
 
 		return $this->_get_resultsv2('bbd_boards', $filters, $this->order_by, $only_count, $debug);

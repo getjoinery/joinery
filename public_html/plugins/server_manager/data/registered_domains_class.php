@@ -29,6 +29,7 @@
  * sites page offers an alternate name on its strength, and submitting one
  * clears it and returns the row to pending under the same paid-line guard.
  *
+ * @version 1.3 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.2 - park_for_removed_site(): a row still being bought or wired up is parked when its site is
  *                removed from the dashboard
  * @version 1.1 - rdm_taken_time (specs/managed_hosting_phase1_purchase.md §7), offers_alternate() and take_alternate()
@@ -299,10 +300,10 @@ class MultiRegisteredDomain extends SystemMultiBase {
 
 		if (isset($this->options['statuses']) && is_array($this->options['statuses'])
 				&& count($this->options['statuses'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['statuses']);
-			$filters['rdm_status'] = 'IN (' . implode(',', $quoted) . ')';
+			$filters['rdm_status'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['graduation_state'])) {
@@ -311,10 +312,10 @@ class MultiRegisteredDomain extends SystemMultiBase {
 
 		if (isset($this->options['graduation_states']) && is_array($this->options['graduation_states'])
 				&& count($this->options['graduation_states'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['graduation_states']);
-			$filters['rdm_graduation_state'] = 'IN (' . implode(',', $quoted) . ')';
+			$filters['rdm_graduation_state'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['external_order_item_id'])) {

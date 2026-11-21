@@ -1668,24 +1668,24 @@ class MultiUser extends SystemMultiBase {
             // Ids only: each is made a number before it reaches the SQL.
             $ids = array_map('intval', (array)$this->options['user_id_list']);
             if(count($ids)) {
-                $filters['usr_user_id'] = 'IN ('.implode(',', $ids).')';
+                $filters['usr_user_id'] = SqlCondition::bind('IN (?)', $ids);
             }
         }
 
         if (isset($this->options['first_name_like'])) {
-            $filters['usr_first_name'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['first_name_like'].'%');
+            $filters['usr_first_name'] = SqlCondition::bind('ILIKE ?', '%'.$this->options['first_name_like'].'%');
         }
 
         if (isset($this->options['last_name_like'])) {
-            $filters['usr_last_name'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['last_name_like'].'%');
+            $filters['usr_last_name'] = SqlCondition::bind('ILIKE ?', '%'.$this->options['last_name_like'].'%');
         }
         
         if (isset($this->options['nickname_like'])) {
-            $filters['usr_nickname'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['nickname_like'].'%');
+            $filters['usr_nickname'] = SqlCondition::bind('ILIKE ?', '%'.$this->options['nickname_like'].'%');
         }
 
         if (isset($this->options['username_like'])) {
-            $filters['usr_username'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['username_like'].'%');
+            $filters['usr_username'] = SqlCondition::bind('ILIKE ?', '%'.$this->options['username_like'].'%');
         }
 
         if (isset($this->options['name_like'])) {
@@ -1693,13 +1693,13 @@ class MultiUser extends SystemMultiBase {
             $fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
             $searchwords = explode(' ', $fsearch);
             if (count($searchwords) >= 2) {
-                $filters['usr_first_name'] = 'ILIKE \'%'.$searchwords[0].'%\' AND usr_last_name ILIKE \'%'.$searchwords[1].'%\'';
+                $filters['usr_first_name'] = SqlCondition::bind('ILIKE ? AND usr_last_name ILIKE ?', '%'.$searchwords[0].'%', '%'.$searchwords[1].'%');
                 unset($filters['usr_last_name']); // Prevent duplicate condition
             }
         }
 
         if (isset($this->options['email_like'])) {
-            $filters['usr_email'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['email_like'].'%');
+            $filters['usr_email'] = SqlCondition::bind('ILIKE ?', '%'.$this->options['email_like'].'%');
         }
 
         if (isset($this->options['email_verified'])) {
@@ -1716,7 +1716,7 @@ class MultiUser extends SystemMultiBase {
         
         
         if (isset($this->options['not_system_users'])) {
-            $filters['usr_user_id'] = '!= '.User::USER_SYSTEM.' AND usr_user_id != '.User::USER_DELETED;
+            $filters['usr_user_id'] = SqlCondition::bind('!= ? AND usr_user_id != ?', (int)User::USER_SYSTEM, (int)User::USER_DELETED);
         }
 
         if (isset($this->options['permission_range'])) {
@@ -1724,7 +1724,7 @@ class MultiUser extends SystemMultiBase {
             $range = array_values((array)$this->options['permission_range']);
             $low = (int)($range[0] ?? 0);
             $high = (int)($range[1] ?? $low);
-            $filters['usr_permission'] = '>= '.$low.' AND usr_permission <= '.$high;
+            $filters['usr_permission'] = SqlCondition::bind('>= ? AND usr_permission <= ?', $low, $high);
         }
 
         if (isset($this->options['user_name_fulltext'])) {
@@ -1732,7 +1732,7 @@ class MultiUser extends SystemMultiBase {
             $fsearch = trim(preg_replace('/\s+/', ' ', $fsearch));
             $fsearch = str_replace(' ', ' | ', $fsearch);
             // COALESCE: a person with no last name is still found by their first.
-            $filters['to_tsvector(\'english\', COALESCE(usr_first_name, \'\') || \' \' || COALESCE(usr_last_name, \'\'))'] = '@@ to_tsquery(\'english\', \''.$fsearch.'\')';
+            $filters['to_tsvector(\'english\', COALESCE(usr_first_name, \'\') || \' \' || COALESCE(usr_last_name, \'\'))'] = SqlCondition::bind("@@ to_tsquery('english', ?)", $fsearch);
         }
 
         return $this->_get_resultsv2('usr_users', $filters, $this->order_by, $only_count, $debug);

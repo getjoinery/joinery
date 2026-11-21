@@ -74,7 +74,7 @@ class MultiEventLog extends SystemMultiBase {
         if (isset($this->options['created_since'])) {
             $ts = $this->options['created_since'];
             if (preg_match('/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})?$/', $ts)) {
-                $filters['evl_create_time'] = ">= '" . str_replace("'", '', $ts) . "'";
+                $filters['evl_create_time'] = SqlCondition::bind('>= ?', (string)$ts);
             }
         }
 

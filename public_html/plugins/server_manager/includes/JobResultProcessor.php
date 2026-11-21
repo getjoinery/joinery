@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.142 - process_log_table_tail keeps an error read's kind (agent 1.127.0)
  * @version 1.141 - a container inventory's packages and base_fixes (container_inventory 1.5): what each site runs of the
  *                sources a package fix can cover, and the fixes its base took
  * @version 1.140 - a host report's package_fixes (host_report 1.42; specs/package_fixes_ahead_of_ubuntu.md WP3)
@@ -2702,6 +2703,9 @@ HTML;
 		$max_rows = $event !== null ? JobCommandBuilder::LOG_EVENT_MAX_COUNT : JobCommandBuilder::LOG_MAX_COUNT;
 		$hours = isset($data['hours']) && is_numeric($data['hours'])
 			? max(1, min(JobCommandBuilder::LOG_MAX_HOURS, (int)$data['hours'])) : null;
+		// The kind an error read was narrowed to, when it is one this plane asks for.
+		$kind = (string)($data['kind'] ?? '');
+		$kind = array_key_exists($kind, JobCommandBuilder::LOG_ERROR_KINDS) ? $kind : null;
 		$rows = [];
 		$truncated_here = count($data['rows']) > $max_rows;
 		foreach (array_slice($data['rows'], 0, $max_rows) as $row) {
@@ -2725,6 +2729,7 @@ HTML;
 			'table'         => substr($table, 0, 64),
 			'columns'       => $columns,
 			'event'         => $event,
+			'kind'          => $kind,
 			'hours'         => $hours,
 			'rows_returned' => count($rows),
 			'rows'          => $rows,

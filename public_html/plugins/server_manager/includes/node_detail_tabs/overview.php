@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.114 - Errors (24 h): the site's error table counted by kind (check_status errors_24h, agent 1.127.0)
  * @version 1.113 - names the variables node_detail.php sets; the gateway, containers and SSL words are set on every path
  * @version 1.112 - Email setup: a failed hosted mail leg shows why and offers Retry email setup (hosting_after_purchase E2)
  * @version 1.111 - Bring back asks Access::permits(10) instead of comparing the level inline
@@ -2190,6 +2191,23 @@
 				'summary' => ($th_active !== '' ? 'active: ' . $th_active : 'none active') . ' · ' . (count($th_names) + ($th_active !== '' ? 1 : 0)) . ' installed',
 				'body' => $th_names ? '<div class="small text-muted mt-1">Also installed: ' . htmlspecialchars(implode(' · ', $th_names)) . '</div>' : '');
 		}
+		}
+
+		// The site's error table over the last day, counted on the node by kind
+		// (check_status's errors_24h, agent 1.127.0). Numbers only; the rows are a
+		// Diagnostics question (log_table_tail, table errors).
+		if (is_array($status_data) && is_array($status_data['errors_24h'] ?? null)) {
+			$er_parts = array();
+			foreach (JobCommandBuilder::LOG_ERROR_KINDS as $er_kind => $er_label) {
+				if (isset($status_data['errors_24h'][$er_kind]) && is_numeric($status_data['errors_24h'][$er_kind])) {
+					$er_parts[] = (int)$status_data['errors_24h'][$er_kind] . ' ' . strtolower($er_label);
+				}
+			}
+			if ($er_parts) {
+				$detail_rows[] = array('title' => 'Errors (24 h)', 'tone' => 'info',
+					'summary' => implode(' · ', $er_parts),
+					'body' => '<div class="small text-muted mt-1">Counted in the site\'s own error table. A script policy refusal is what a visitor\'s browser said the site\'s script policy stopped, including scripts a browser extension added. Read the rows from Diagnostics, Logs.</div>');
+			}
 		}
 
 		// The PHP the node runs, and whether old code still serves (check_status's php, agent 1.88.0;

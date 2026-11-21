@@ -19,6 +19,7 @@
  * allowed. A run is spent once finished or aborted: a signing request against
  * it is refused.
  *
+ * @version 1.4 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.3 - its owner removes it through its own permanent_delete(), not a flat delete
  * @version 1.2 - a Managed node owns a run as a customer does (svr_mgn_managed_node_id); svr_kind, the run's
  *                token hash and expiry, and svr_ledger_time, when its ledger file reached backup storage
@@ -185,7 +186,7 @@ class MultiShelfRun extends SystemMultiBase {
 		}
 		// Runs left open longer than this many hours: the prune pass aborts them.
 		if (isset($this->options['stale_hours'])) {
-			$filters['svr_create_time'] = "< now() - interval '" . max(1, (int)$this->options['stale_hours']) . " hours'";
+			$filters['svr_create_time'] = SqlCondition::bind('< now() - make_interval(hours => ?)', max(1, (int)$this->options['stale_hours']));
 		}
 		return $this->_get_resultsv2('svr_shelf_runs', $filters, $this->order_by, $only_count, $debug);
 	}

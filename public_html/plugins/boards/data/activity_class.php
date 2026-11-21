@@ -7,7 +7,7 @@
  * A row is never edited. bac_data carries what the verb needs to read back
  * ("from list", "to list", the old title, the label name) as it was at the time.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 class BoardActivity extends SystemBase {
@@ -65,7 +65,7 @@ class MultiBoardActivity extends SystemMultiBase {
 		$filters = array();
 		// after_id => rows newer than a poll cursor.
 		if (isset($this->options['after_id'])) {
-			$filters['bac_activity_id'] = '> ' . (int)$this->options['after_id'];
+			$filters['bac_activity_id'] = SqlCondition::bind('> ?', (int)$this->options['after_id']);
 		}
 		return $this->_get_resultsv2('bac_activity', $filters, $this->order_by, $only_count, $debug);
 	}

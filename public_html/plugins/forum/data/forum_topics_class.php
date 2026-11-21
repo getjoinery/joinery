@@ -9,7 +9,7 @@
  * post, counting only approved, live posts. A topic is never saved by a member
  * to change them. ForumReconcile recomputes them nightly as a check.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 class ForumTopic extends SystemBase {
@@ -168,7 +168,7 @@ class MultiForumTopic extends SystemMultiBase {
 		// everyone but their author (moderators pass 'moderator' => TRUE).
 		if (isset($this->options['visible_to']) && empty($this->options['moderator'])) {
 			$uid = (int)$this->options['visible_to'];
-			$filters['(ftp_is_approved'] = '= TRUE OR ftp_usr_user_id = ' . $uid . ')';
+			$filters['(ftp_is_approved'] = SqlCondition::bind('= TRUE OR ftp_usr_user_id = ?)', $uid);
 		}
 
 		return $this->_get_resultsv2('ftp_forum_topics', $filters, $this->order_by, $only_count, $debug);

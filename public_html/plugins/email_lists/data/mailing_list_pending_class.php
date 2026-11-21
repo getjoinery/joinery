@@ -11,6 +11,12 @@
  * A request from registration (source register) is sent no email: verifying
  * the new account's address confirms it (account.email_verified).
  *
+ * The names a visitor typed ride on the row, and name the account that
+ * confirming creates. They never reach an account that already exists, nor
+ * the confirmation email.
+ *
+ * @version 1.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
+ * @version 1.1 - mlp_nickname
  * @version 1.0
  */
 class MailingListPending extends SystemBase {
@@ -34,6 +40,7 @@ class MailingListPending extends SystemBase {
 		'mlp_mlt_mailing_list_id' => array('type'=>'int4', 'required'=>true),
 		'mlp_first_name' => array('type'=>'varchar(64)'),
 		'mlp_last_name' => array('type'=>'varchar(64)'),
+		'mlp_nickname' => array('type'=>'varchar(32)'),
 		'mlp_token_hash' => array('type'=>'varchar(64)', 'index'=>true),
 		'mlp_source' => array('type'=>'varchar(32)', 'required'=>true),
 		'mlp_request_time' => array('type'=>'timestamp(6)', 'default'=>'now()', 'index'=>true),
@@ -66,7 +73,7 @@ class MultiMailingListPending extends SystemMultiBase {
 		$filters = array();
 		// Only requests whose link still works.
 		if (!empty($this->options['live'])) {
-			$filters['mlp_request_time'] = "> now() - interval '" . (int)MailingListPending::LIFETIME_DAYS . " days'";
+			$filters['mlp_request_time'] = SqlCondition::bind('> now() - make_interval(days => ?)', (int)MailingListPending::LIFETIME_DAYS);
 		}
 		return $this->_get_resultsv2('mlp_mailing_list_pending', $filters, $this->order_by, $only_count, $debug);
 	}

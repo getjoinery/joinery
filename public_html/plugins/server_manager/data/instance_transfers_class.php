@@ -31,6 +31,7 @@
  * status is asked by — code_issued and accepted — and erased the moment the
  * row is anywhere else.
  *
+ * @version 1.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.1 - the state options combine instead of the last one replacing the rest; the queue's last
  *                email reads customer emails only
  * @version 1.0
@@ -291,10 +292,10 @@ class MultiInstanceTransfer extends SystemMultiBase {
 			$states = array('none');   // the options exclude each other: no row matches
 		}
 		if ($states !== null) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $states);
-			$filters['itx_state'] = 'IN (' . implode(',', $quoted) . ')';
+			$filters['itx_state'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		return $this->_get_resultsv2('itx_instance_transfers', $filters, $this->order_by, $only_count, $debug);

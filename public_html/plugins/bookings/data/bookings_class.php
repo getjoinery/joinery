@@ -12,6 +12,7 @@ class BookingException extends SystemBaseException {}
  * reschedule) is authorized by the random `bkn_action_token`, not a login.
  * External-provider bookings carry their provider id in `bkn_external_uri`.
  *
+ * @version 1.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.1 - the type key is bkn_bty_booking_type_id (BookingType is bty), which
  *   the convention resolves on its own — no source_class override
  */
@@ -156,8 +157,7 @@ class MultiBooking extends SystemMultiBase {
         }
 
         if (isset($this->options['start_after'])) {
-            $dblink = DbConnector::get_instance()->get_db_link();
-            $filters['bkn_start_time'] = ">= " . $dblink->quote($this->options['start_after']);
+            $filters['bkn_start_time'] = SqlCondition::bind('>= ?', (string)$this->options['start_after']);
         }
 
 

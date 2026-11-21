@@ -23,7 +23,7 @@
  *                        the model unless an operator pinned it to themselves
  *   closed               nobody is expected to say anything more
  *
- * @version 0.1.0
+ * @version 0.1.1
  */
 
 class SupportThreadException extends SystemBaseException {}
@@ -272,7 +272,7 @@ class MultiSupportThread extends SystemMultiBase {
 			$filters['sth_state'] = array($this->options['state'], PDO::PARAM_STR);
 		}
 		if (isset($this->options['state_not'])) {
-			$filters['sth_state'] = "<> " . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['state_not']);
+			$filters['sth_state'] = SqlCondition::bind('<> ?', (string)$this->options['state_not']);
 		}
 		if (isset($this->options['host'])) {
 			$filters['sth_host'] = array($this->options['host'], PDO::PARAM_STR);

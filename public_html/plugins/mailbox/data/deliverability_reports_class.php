@@ -17,7 +17,7 @@
  * said. Report rows themselves never expire — they are small, and they are
  * the only historical record of who has sent as a domain.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -93,7 +93,7 @@ class MultiDeliverabilityReport extends SystemMultiBase {
 			$filters['dvr_parse_status'] = [$this->options['parse_status'], PDO::PARAM_STR];
 		}
 		if (isset($this->options['received_since'])) {
-			$filters['dvr_create_time'] = ">= '" . gmdate('Y-m-d H:i:s', strtotime($this->options['received_since'])) . "'";
+			$filters['dvr_create_time'] = SqlCondition::bind('>= ?', gmdate('Y-m-d H:i:s', strtotime($this->options['received_since'])));
 		}
 
 		return $this->_get_resultsv2('dvr_deliverability_reports', $filters, $this->order_by, $only_count, $debug);

@@ -11,7 +11,7 @@
  * Archived cards are ordinary rows with bcd_archived_time set. Archive is the
  * everyday undo; delete is for admins.
  *
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 class BoardCard extends SystemBase {
@@ -164,19 +164,19 @@ class MultiBoardCard extends SystemMultiBase {
 		// card_ids => a list of ids (integers only; coerced).
 		if (isset($this->options['card_ids'])) {
 			$ids = array_map('intval', (array)$this->options['card_ids']);
-			$filters['bcd_card_id'] = $ids ? 'IN (' . implode(',', $ids) . ')' : 'IN (NULL)';
+			$filters['bcd_card_id'] = SqlCondition::bind('IN (?)', $ids);
 		}
 
 		// member_user_id => cards that person is on.
 		if (isset($this->options['member_user_id'])) {
-			$filters['bcd_card_id'] = (isset($filters['bcd_card_id']) ? $filters['bcd_card_id'] . ' AND bcd_card_id ' : '')
-				. 'IN (SELECT bcm_bcd_card_id FROM bcm_card_members WHERE bcm_usr_user_id = '
-				. (int)$this->options['member_user_id'] . ')';
+			$filters['(bcd_card_id'] = SqlCondition::bind(
+				'IN (SELECT bcm_bcd_card_id FROM bcm_card_members WHERE bcm_usr_user_id = ?))',
+				(int)$this->options['member_user_id']);
 		}
 
 		// due_before / due_after => UTC 'Y-m-d H:i:s' bounds on the due time.
 		if (isset($this->options['due_before'])) {
-			$filters['bcd_due_time'] = '< ' . DbConnector::get_instance()->get_db_link()->quote($this->options['due_before']);
+			$filters['bcd_due_time'] = SqlCondition::bind('< ?', (string)$this->options['due_before']);
 		}
 
 		return $this->_get_resultsv2('bcd_cards', $filters, $this->order_by, $only_count, $debug);

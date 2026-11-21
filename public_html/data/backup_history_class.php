@@ -14,6 +14,7 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.12 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.11 - held_until(): when object lock lets this run's objects be deleted (F8)
  * @version 1.10 - bkh_remote_space_id: the management node's storage space a brokered run went to
  *                 (specs/storage_targets.md WP5)
@@ -386,7 +387,7 @@ class MultiBackupHistory extends SystemMultiBase {
 			if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $since)) {
 				throw new BackupHistoryException('finished_since must be a UTC timestamp (Y-m-d H:i:s).');
 			}
-			$filters['bkh_finish_time'] = ">= '" . $since . "'";
+			$filters['bkh_finish_time'] = SqlCondition::bind('>= ?', $since);
 		}
 
 

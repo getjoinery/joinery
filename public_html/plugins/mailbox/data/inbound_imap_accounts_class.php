@@ -34,6 +34,7 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
+ * @version 1.8 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.7 - pointing an account at another mailbox clears its folders' label bindings
  * @version 1.6 - no plaintext encryption mode; resolveImapHost() refuses internal
  *   addresses and pins the connection; DUE_SQL backs off failing feeds
@@ -936,7 +937,7 @@ class MultiInboundImapAccount extends SystemMultiBase {
 		// split-parenthesis OR convention so the NULL case groups with the
 		// interval test without widening any other clause.
 		if (!empty($this->options['due'])) {
-			$filters['(iia_last_poll_time'] = substr(InboundImapAccount::DUE_SQL, strlen('(iia_last_poll_time '));
+			$filters['(iia_last_poll_time'] = SqlCondition::trusted(substr(InboundImapAccount::DUE_SQL, strlen('(iia_last_poll_time ')));
 		}
 
 

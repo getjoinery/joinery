@@ -232,7 +232,7 @@ class MultiPasskey extends SystemMultiBase {
 		if (isset($this->options['credential_id']))
 			$filters['pkc_credential_id'] = [$this->options['credential_id'], PDO::PARAM_STR];
 		if (isset($this->options['prf_capable']))
-			$filters['pkc_prf_capable'] = "= " . ($this->options['prf_capable'] ? 'TRUE' : 'FALSE');
+			$filters['pkc_prf_capable'] = $this->options['prf_capable'] ? '= TRUE' : '= FALSE';
 		$filters['pkc_delete_time'] = (isset($this->options['deleted']) && $this->options['deleted']) ? "IS NOT NULL" : "IS NULL";
 		return $this->_get_resultsv2('pkc_passkey_credentials', $filters, $this->order_by, $only_count, $debug);
 	}

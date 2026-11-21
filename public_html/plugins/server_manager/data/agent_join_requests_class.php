@@ -13,6 +13,7 @@
  * key fingerprint and tells the operator to compare it against what the node's
  * own panel shows.
  *
+ * @version 1.7 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.6 - ajr_container: the joining agent says it runs inside a container
  * @version 1.5 - ajr_decided_by: 'auto' for a join JoinAutoApproval approved (the auto_approve_provisioned_joins spec)
  * @version 1.4 - ajr_web_root: the public_html directory the joining agent's site lives in, when it has one
@@ -204,8 +205,7 @@ class MultiAgentJoinRequest extends SystemMultiBase {
 			$filters['ajr_public_key'] = [$this->options['public_key'], PDO::PARAM_STR];
 		}
 		if (isset($this->options['created_after'])) {
-			$filters['ajr_create_time'] = '>= ' . DbConnector::get_instance()->get_db_link()
-				->quote($this->options['created_after']);
+			$filters['ajr_create_time'] = SqlCondition::bind('>= ?', (string)$this->options['created_after']);
 		}
 
 		return $this->_get_resultsv2('ajr_agent_join_requests', $filters, $this->order_by, $only_count, $debug);

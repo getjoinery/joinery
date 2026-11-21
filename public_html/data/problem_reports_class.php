@@ -35,6 +35,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.3.4 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.3.3 - up to 50 new faults a day start automatic reports (was 20)
  * @version 1.3.2 - code typed at the command line (php -r, stdin) counts as an outside script
  * @version 1.3.1 - a page asked for a row that is not there (SystemRowNotFoundError) is a 404, not a fault, so it is never reported automatically
@@ -676,14 +677,14 @@ class MultiProblemReport extends SystemMultiBase {
 		if (isset($this->options['created_after'])) {
 			// Any time strtotime() reads, as UTC; an unreadable value means no lower bound.
 			$after = strtotime((string)$this->options['created_after'] . ' UTC');
-			$filters['prr_create_time'] = "> '" . gmdate('Y-m-d H:i:s', $after === false ? 0 : $after) . "'";
+			$filters['prr_create_time'] = SqlCondition::bind('> ?', gmdate('Y-m-d H:i:s', $after === false ? 0 : $after));
 		}
 		if (!empty($this->options['sendable'])) {
 			// Due: never sent, a failed try with tries left, or an automatic
 			// report that has counted recurrences since it was last sent.
-			$filters['(prr_status'] = "= 'queued' OR (prr_status = 'failed' AND prr_attempts < "
-				. (int)ProblemReport::MAX_ATTEMPTS . ")"
-				. " OR (prr_status = 'sent' AND prr_automatic AND prr_occurrences > prr_occurrences_sent))";
+			$filters['(prr_status'] = SqlCondition::bind(
+				"= 'queued' OR (prr_status = 'failed' AND prr_attempts < ?) OR (prr_status = 'sent' AND prr_automatic AND prr_occurrences > prr_occurrences_sent))",
+				(int)ProblemReport::MAX_ATTEMPTS);
 		}
 		if (isset($this->options['automatic'])) {
 			$filters['prr_automatic'] = $this->options['automatic'] ? '= true' : '= false';

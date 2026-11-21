@@ -27,6 +27,7 @@
  *
  * See specs/mail_archive_import.md.
  *
+ * @version 1.3 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.2 - recount() replaces addCounts(): counters are recounted from the entries' states,
  *   so a batch that died after storing messages no longer leaves them uncounted (B68)
  * @version 1.1
@@ -475,8 +476,7 @@ class MultiMailImportRun extends SystemMultiBase {
 
 		if (isset($this->options['alias_ids'])) {
 			$ids = array_map('intval', (array)$this->options['alias_ids']);
-			$filters['mir_iea_inbound_email_alias_id'] = empty($ids)
-				? 'IN (NULL)' : 'IN (' . implode(',', $ids) . ')';
+			$filters['mir_iea_inbound_email_alias_id'] = SqlCondition::bind('IN (?)', $ids);
 		}
 
 		if (isset($this->options['user_id'])) {
@@ -489,11 +489,11 @@ class MultiMailImportRun extends SystemMultiBase {
 
 		if (isset($this->options['states'])) {
 			$states = (array)$this->options['states'];
-			$quoted = array();
+			$wanted = array();
 			foreach ($states as $s) {
-				$quoted[] = "'" . preg_replace('/[^a-z_]/', '', (string)$s) . "'";
+				$wanted[] = preg_replace('/[^a-z_]/', '', (string)$s);
 			}
-			$filters['mir_state'] = empty($quoted) ? "IN ('')" : 'IN (' . implode(',', $quoted) . ')';
+			$filters['mir_state'] = empty($wanted) ? "IN ('')" : SqlCondition::bind('IN (?)', $wanted);
 		}
 
 		if (isset($this->options['file_id'])) {

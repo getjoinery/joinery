@@ -114,7 +114,7 @@ class MultiBookingType extends SystemMultiBase {
         }
 
         if (isset($this->options['active'])) {
-            $filters['bty_status'] = "= " . ($this->options['active'] ? '1' : '0');
+            $filters['bty_status'] = $this->options['active'] ? '= 1' : '= 0';
         }
 
         if (isset($this->options['provider'])) {

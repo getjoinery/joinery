@@ -45,6 +45,7 @@
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
+ * @version 1.6 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.5 - svt_mail_probed_time: the hourly provider check of an unverified node-linked mail row
  * @version 1.4 - svt_odi_order_item_id: the store line that pays for the row (a subscription's period end is
  *               followed by the reconcile); svt_nudged: the reminder emails already sent, so each goes once
@@ -361,10 +362,10 @@ class MultiServiceTenant extends SystemMultiBase {
 			$filters['svt_state'] = array((string)$this->options['state'], PDO::PARAM_STR);
 		}
 		if (isset($this->options['states']) && is_array($this->options['states']) && count($this->options['states'])) {
-			$quoted = array_map(function ($s) {
-				return "'" . preg_replace('/[^a-z_]/', '', $s) . "'";
+			$wanted = array_map(function ($s) {
+				return preg_replace('/[^a-z_]/', '', (string)$s);
 			}, $this->options['states']);
-			$filters['svt_state'] = 'IN (' . implode(',', $quoted) . ')';
+			$filters['svt_state'] = SqlCondition::bind('IN (?)', $wanted);
 		}
 		if (isset($this->options['provider_user_id'])) {
 			$filters['svt_provider_user_id'] = array((string)$this->options['provider_user_id'], PDO::PARAM_STR);

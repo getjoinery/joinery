@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.98 - log_table_tail passes kind (the error table's kinds)
  * @version 1.97 - retry_hosted_mail: a failed hosted email setup starts again (hosting_after_purchase E2)
  * @version 1.96 - Hide, Permanently Delete Site (not held) and Remove Permanently refuse while the hosting still bills (hosting_after_purchase B10)
  * @version 1.95 - bring_back_hosted: a held Starter site started again after a late payment (HostedLateReturn, O3)
@@ -406,7 +407,8 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_log_table_tail($node,
 					(string)($_POST['table'] ?? ''), (int)($_POST['rows'] ?? 50),
 					isset($_POST['event']) && $_POST['event'] !== '' ? (string)$_POST['event'] : null,
-					isset($_POST['hours']) && $_POST['hours'] !== '' ? (int)$_POST['hours'] : null);
+					isset($_POST['hours']) && $_POST['hours'] !== '' ? (int)$_POST['hours'] : null,
+					isset($_POST['kind']) && $_POST['kind'] !== '' ? (string)$_POST['kind'] : null);
 				$job = ManagementJob::createFromBuild($node->key, 'log_table_tail', $built, null, $uid);
 				return self::jobUrl($job);
 			}

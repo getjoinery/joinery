@@ -26,6 +26,7 @@ class CalendarEntryException extends SystemBaseException {}
  * quick-create popover, the API save and an approved AI proposal all work
  * with the window closed. Editing sealed content needs the window.
  *
+ * @version 1.3 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.2 - recurrence arithmetic lives in RecurrenceRule; the public methods delegate to it
  * @version 1.1 - sealed content columns on a Private calendar; cal_level_attempt_time
  *   lets a level change pass by a row that just failed to convert
@@ -557,7 +558,7 @@ class MultiCalendarEntry extends SystemMultiBase {
 		if (isset($this->options['start_utc_gte'])) {
 			$ts = $this->options['start_utc_gte'];
 			if (preg_match('/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})?$/', $ts)) {
-				$filters['(cal_start_utc'] = ">= '" . str_replace("'", '', $ts) . "')";
+				$filters['(cal_start_utc'] = SqlCondition::bind('>= ?)', (string)$ts);
 			}
 		}
 		// Recurring-parent window pre-filter: parent must start before window end.
@@ -565,7 +566,7 @@ class MultiCalendarEntry extends SystemMultiBase {
 		if (isset($this->options['start_utc_before'])) {
 			$ts = $this->options['start_utc_before'];
 			if (preg_match('/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})?$/', $ts)) {
-				$filters['cal_start_utc'] = "<= '" . str_replace("'", '', $ts) . "'";
+				$filters['cal_start_utc'] = SqlCondition::bind('<= ?', (string)$ts);
 			}
 		}
 		// Recurring-parent window pre-filter: series must reach window start.
@@ -573,7 +574,7 @@ class MultiCalendarEntry extends SystemMultiBase {
 		if (isset($this->options['end_date_null_or_gte'])) {
 			$d = $this->options['end_date_null_or_gte'];
 			if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
-				$filters['(cal_recurrence_end_date'] = "IS NULL OR cal_recurrence_end_date >= '" . $d . "')";
+				$filters['(cal_recurrence_end_date'] = SqlCondition::bind('IS NULL OR cal_recurrence_end_date >= ?)', (string)$d);
 			}
 		}
 

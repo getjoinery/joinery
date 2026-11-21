@@ -10,6 +10,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * never updated or soft-deleted; a purge task trims rows past the retention
  * window.
  *
+ * @version 1.3.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.3.0 - inside the caller's transaction a row that cannot be written fails the write it belongs to
  * @version 1.2.0 - KIND_LEVEL_CHANGED: a folder tree's protection level changed
  * @version 1.1.0
@@ -125,7 +126,7 @@ class MultiFileChange extends SystemMultiBase {
 		}
 		if (isset($this->options['after_cursor'])) {
 			// int-cast keeps this literal safe; the runner has no bound '>' form.
-			$filters['fch_file_change_id'] = '> ' . (int)$this->options['after_cursor'];
+			$filters['fch_file_change_id'] = SqlCondition::bind('> ?', (int)$this->options['after_cursor']);
 		}
 		if (isset($this->options['entity_type'])) {
 			$filters['fch_entity_type'] = array($this->options['entity_type'], PDO::PARAM_STR);

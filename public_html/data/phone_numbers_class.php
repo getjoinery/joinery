@@ -353,7 +353,7 @@ class MultiPhoneNumber extends SystemMultiBase {
 		}
 
 		if (isset($this->options['phone_number_like'])) {
-			$filters['phn_phone_number'] = 'LIKE ' . DbConnector::get_instance()->get_db_link()->quote('%' . (string)$this->options['phone_number_like'] . '%');
+			$filters['phn_phone_number'] = SqlCondition::bind('LIKE ?', '%' . (string)$this->options['phone_number_like'] . '%');
 		}
 
 		return $this->_get_resultsv2('phn_phone_numbers', $filters, $this->order_by, $only_count, $debug);

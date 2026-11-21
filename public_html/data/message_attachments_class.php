@@ -8,7 +8,7 @@
  * key. Same shape the inbound-mail attachment manifest established, so the two
  * read alike.
  *
- * @version 1.1
+ * @version 1.2
  * @changelog 1.1 - msa_create_time is stamped when the row is made; it was left empty
  */
 
@@ -96,7 +96,7 @@ class MultiMessageAttachment extends SystemMultiBase {
 			$ids = array_map('intval', (array)$this->options['message_ids']);
 			$ids = array_values(array_filter($ids));
 			$filters['msa_msg_message_id'] = $ids
-				? 'IN (' . implode(',', $ids) . ')'
+				? SqlCondition::bind('IN (?)', $ids)
 				: 'IS NULL';
 		}
 
