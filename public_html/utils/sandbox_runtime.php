@@ -16,8 +16,9 @@
  *
  *   Globalvars::get_instance()     SandboxGlobalvars: the plugin's own settings (from
  *                                  the envelope, by their manifest names or their full
- *                                  sbx_{plugin}__{name} names) and three public facts of
- *                                  the site: site_name, webDir, default_timezone. Any
+ *                                  sbx_{plugin}__{name} names) and four public facts of
+ *                                  the site: site_name, webDir, default_timezone,
+ *                                  default_email_template. Any
  *                                  other name answers unset, whatever it is called.
  *   SessionControl::get_instance() SandboxSession: who is viewing (id, level, time zone),
  *                                  from the envelope. No cookie, no CSRF secret, no unlock
@@ -38,11 +39,27 @@
  * Nothing here is a wall: the fence is. A plugin may replace any of this in
  * its own process; it gains only what its own asks to core could give it.
  *
+ * Mail (sandbox_runtime_mail.php): EmailSender and the template renderer
+ * are core's. EmailSender::remote() asks joinery_fence_mail_remote(),
+ * defined below, at its first use, however EmailSender's file was loaded;
+ * each send and template fill then goes to the site, which runs it with the
+ * same classes. A call that sends no mail loads none of it.
+ *
+ * @version 1.3 - mail: EmailSender::$remote (sandbox_runtime_mail.php, spec sandboxed_plugin_email)
  * @version 1.2 - the model layer (sandbox_runtime_models.php): SystemBase::$remote_store, the plugin's models,
  *                and the classes of the native plugins whose models it was approved for (envelope class_dirs)
  * @version 1.1 - namespaced plugin classes resolve (reviewer2 F2)
  * @version 1.0
  */
+
+/**
+ * The fence's mail (EmailSender::remote() asks for it at its first use).
+ * Defined only here, in the fence's runtime, which the site never loads.
+ */
+function joinery_fence_mail_remote(): EmailRemote {
+	require_once __DIR__ . '/sandbox_runtime_mail.php';
+	return new SandboxRemoteMail();
+}
 
 /** What a stand-in throws for something the fence does not have. */
 class SandboxRuntimeException extends Exception {}
@@ -113,6 +130,7 @@ final class SandboxRuntime {
 		SandboxFenceModels::register((string)($envelope['plugin'] ?? ''), (array)($envelope['models'] ?? array()));
 		spl_autoload_register(array('SandboxFenceModels', 'load'));
 		SystemBase::$remote_store = new SandboxRemoteStore();
+
 	}
 
 	/** Index the classes declared in the .php files beneath $dir into $index. */

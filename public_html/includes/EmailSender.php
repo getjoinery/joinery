@@ -13,6 +13,8 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.7 - EmailSender::$remote: inside a sandboxed plugin's fence, send(), sendBatch() and template
+ *   rendering are carried to the site, which runs them with this same class (specs/sandboxed_plugin_email.md)
  * @version 1.6 - every send that leaves is counted per From-domain in MailSendOutcome: signed, unsigned or
  *   handed on, from the transport's note; a dry run is not counted, a test-mode send is counted as one
  * @version 1.5 - usesIncludedMail(): whether the site sends through the included Joinery email
@@ -26,7 +28,45 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  *   (specs/mailbox_message_timeline.md A3); the debug log writes the columns
  *   DebugEmailLog declares (B1)
  */
+/**
+ * Where mail goes when this process cannot send it: a sandboxed plugin's
+ * process, inside the fence, which has no database, settings or network. Each
+ * call is carried to the site, which runs it with the real EmailSender and
+ * EmailTemplateRenderer (utils/sandbox_runtime_mail.php). Never set on the
+ * site: EmailSender::$remote is null there and nothing below changes.
+ */
+interface EmailRemote {
+    /** send() on the site. @return array{sent: bool, report: array} */
+    public function send(EmailMessage $message, bool $queue_on_failure): array;
+    /** sendBatch() on the site. @return array{success: bool, failed_recipients: string[]} */
+    public function sendBatch(EmailMessage $message, array $recipients): array;
+    /** A template filled on the site. @return array{subject: ?string, html: ?string, text: ?string, has_content: bool, set_values: mixed} */
+    public function render(string $inner, ?string $outer, $footer, array $values): array;
+}
+
 class EmailSender {
+
+    /**
+     * Set only inside a sandboxed plugin's fence (EmailRemote). Read it
+     * through remote(), which also finds the fence's however this file was
+     * loaded (by name, or by a require of its path).
+     *
+     * @var EmailRemote|null
+     */
+    public static $remote = null;
+
+    /**
+     * The fence's EmailRemote, or null on the site. The fence's runtime
+     * (utils/sandbox_runtime.php, never loaded by the site) defines
+     * joinery_fence_mail_remote(); it is asked here, at the moment of use,
+     * so no load order can leave a send to run in the fence itself.
+     */
+    public static function remote(): ?EmailRemote {
+        if (self::$remote === null && function_exists('joinery_fence_mail_remote')) {
+            self::$remote = joinery_fence_mail_remote();
+        }
+        return self::$remote;
+    }
 
     /**
      * Assertions a call site can make when sending from a process that has
@@ -384,6 +424,17 @@ class EmailSender {
      */
     public function send(EmailMessage $message, $queue_on_failure = true, ?EmailServiceProvider $transport = null,
             $egress_assertion = '') {
+        if (self::remote() !== null) {
+            // The site sends it, with its own defaults, guards and transport.
+            // A transport object and an egress assertion are this process's
+            // claims, and the site makes none on a plugin's behalf.
+            if ($transport !== null) {
+                throw new Exception('A sandboxed plugin sends through the site\'s own mail service; it cannot pass a transport.');
+            }
+            $answer = self::$remote->send($message, (bool)$queue_on_failure);
+            $this->last_send_report = $answer['report'] + $this->last_send_report;
+            return (bool)$answer['sent'];
+        }
         // Mail is an unencrypted channel, so a process holding sealed plaintext
         // may only send a message whose call site makes one of the assertions
         // above. Refusing here rather than at the transport is also what keeps
@@ -677,6 +728,9 @@ class EmailSender {
      * @return array ['success' => bool, 'failed_recipients' => string[]]
      */
     public function sendBatch(EmailMessage $message, array $recipients) {
+        if (self::remote() !== null) {
+            return self::$remote->sendBatch($message, array_values(array_map('strval', $recipients)));
+        }
         // No content-free escape here: a batch is one body to many people, which
         // is never the shape a sealed-content pointer takes. See send().
         require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));

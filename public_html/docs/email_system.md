@@ -51,7 +51,8 @@ $message = EmailMessage::create('user@example.com', 'Subject', 'Body content')
 - `attach($path, $name)` - Add an on-disk attachment by file path
 - `attachData($bytes, $name, $contentType)` - Add an in-memory attachment (generated/fetched content, no file needed)
 - `attachInlineData($bytes, $cid, $name, $contentType)` - Add an in-memory **inline (embedded)** image, rendered in the HTML body via a `cid:` reference (see [Inline / embedded images](#inline--embedded-images))
-- `header($name, $value)` - Add custom header
+- `header($name, $value)` - Add a custom header. The name must be a header token and the value one line (no CR, LF or NUL); a header the message's own fields write (From, Sender, To, Cc, Bcc, Reply-To, Return-Path, Subject, Date, Message-ID, MIME-Version, Content-Type, Content-Transfer-Encoding, Content-Disposition, Content-ID, DKIM-Signature, Received) is refused, since the sender's guards read those fields. Throws `InvalidArgumentException`
+- A subject or display name is kept to one line: CR, LF and NUL become spaces; so are an attachment's name and Content-ID, and an attachment type that does not start with type/subtype is `application/octet-stream`
 - `messageId($id)` - Pin the outgoing Message-ID (angle-bracketed) instead of letting the transport auto-generate one
 
 ### EmailSender Class
@@ -141,6 +142,14 @@ subject, and the reason) before throwing — deduped to once per From address
 per UTC day, since the event-log table carries no retention policy. The red
 Setup card, not the log, is the live signal; the log row is the durable
 record.
+
+**Sandboxed plugins send with these same classes.** Inside a sandboxed
+plugin's fence `EmailSender::remote()` answers the fence's carrier, so `send()`, `sendBatch()` and
+each template fill are carried to the site and run there by this class, with
+every rule above. A message crosses as `EmailMessage::toTransfer()` /
+`fromTransfer()` data, where an attachment is always its bytes. On the site
+`EmailSender::$remote` is null and nothing changes. See
+[Sandboxed Plugins § Mail](sandboxed_plugins.md#mail).
 
 ### EmailTemplateRenderer Class
 

@@ -14,7 +14,7 @@
  *     "limits":   {"memory_mb": 16, "timeout_ms": 5000},
  *     "settings": {"webhook_url": "…"},          secrets opened
  *     "outbound_hosts": ["hooks.slack.com"],      the approved ones
- *     "site":     {"site_name": "…", "webDir": "…", "default_timezone": "…"},
+ *     "site":     {"site_name": "…", "webDir": "…", "default_timezone": "…", "default_email_template": "…"},
  *     "models":   [ … the manifest's model declarations … ]
  *   }
  *
@@ -45,6 +45,7 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.8 - the site's public facts include default_email_template, which EmailSender::quickSend() names
  * @version 1.7 - a UI call says where it came from (source, kind, page)
  * @version 1.6 - page(): a page drawn by the plugin's own view (on_page), with the UI call's bounds
  * @version 1.5 - the envelope carries the plugin's model declarations (models)
@@ -234,13 +235,15 @@ class SandboxHost {
 		);
 	}
 
-	/** The site's public facts for the envelope: site_name, webDir, default_timezone. */
+	/** The site's public facts for the envelope: site_name, webDir, default_timezone, default_email_template. */
 	private static function siteFacts(): array {
 		$settings = Globalvars::get_instance();
 		return array(
 			'site_name'        => (string)$settings->get_setting('site_name'),
 			'webDir'           => (string)$settings->get_setting('webDir'),
 			'default_timezone' => (string)($settings->get_setting('default_timezone') ?: 'UTC'),
+			// The outer template's name, which EmailSender::quickSend() asks for.
+			'default_email_template' => (string)$settings->get_setting('default_email_template'),
 		);
 	}
 

@@ -7,6 +7,7 @@
  * itself. The session and database stand-ins are in
  * sandbox_runtime_standins_session.php, loaded once this one is in place.
  *
+ * @version 1.2 - default_email_template is a public fact (EmailSender::quickSend() reads it)
  * @version 1.1 - a setting's bare name answers only where core declares no setting of that name (reviewer2 F1)
  * @version 1.0
  */
@@ -15,7 +16,7 @@
 class SandboxGlobalvars extends Globalvars {
 
 	/** Site settings a plugin may read: public facts, never a secret or the config file. */
-	const PUBLIC_SETTINGS = array('site_name', 'webDir', 'default_timezone');
+	const PUBLIC_SETTINGS = array('site_name', 'webDir', 'default_timezone', 'default_email_template');
 
 	/** @var array<string,mixed> */
 	private $values = array();

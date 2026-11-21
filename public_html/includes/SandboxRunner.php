@@ -33,6 +33,8 @@
  * then the run's uid. Conversation is in strict turns: nothing more is read
  * from the process while an answer to it is unwritten.
  *
+ * @version 1.5 - the fence reads the mail layer (utils/sandbox_runtime_mail.php, spec sandboxed_plugin_email); the
+ *                runtime files are read from one list
  * @version 1.4 - a line may be 4 MB, for a framed page's document
  * @version 1.3 - the fence reads the model layer, and the includes/ and data/ of the native plugins whose models
  *                the plugin was approved for (nativeModelDirs, also in the envelope as class_dirs)
@@ -77,7 +79,8 @@ class SandboxRunner {
 	/** The core script the fence runs, and the runtime it loads. */
 	const SCRIPT = 'utils/sandbox_php_runner.php';
 	const RUNTIME = 'utils/sandbox_runtime.php';
-	const STANDINS = array('utils/sandbox_runtime_standins.php', 'utils/sandbox_runtime_standins_session.php', 'utils/sandbox_runtime_models.php');
+	const STANDINS = array('utils/sandbox_runtime_standins.php', 'utils/sandbox_runtime_standins_session.php', 'utils/sandbox_runtime_models.php',
+		'utils/sandbox_runtime_mail.php');
 
 	/** What a call says on a host that refuses sandboxed plugins (design 10). */
 	const SHARED_HOST = 'This server is shared with other sites, and does not run sandboxed plugins.';
@@ -260,9 +263,11 @@ class SandboxRunner {
 			'--rlimit-as=' . (self::ADDRESS_SPACE_BASE_BYTES + $memory_mb * 1048576),
 			'--read=' . $script,
 			'--read=' . $runtime,
-			'--read=' . (string)realpath(PathHelper::getIncludePath(self::STANDINS[0])),
-			'--read=' . (string)realpath(PathHelper::getIncludePath(self::STANDINS[1])),
-			'--read=' . (string)realpath(PathHelper::getIncludePath(self::STANDINS[2])),
+		);
+		foreach (self::STANDINS as $file) {
+			$cmd[] = '--read=' . (string)realpath(PathHelper::getIncludePath($file));
+		}
+		$cmd = array_merge($cmd, array(
 			// The setting declarations (names and factory defaults, the public
 			// repository's): core code reads them as it resolves a setting.
 			'--read=' . $tree . '/settings.json',
@@ -271,7 +276,7 @@ class SandboxRunner {
 			'--read-php=' . $tree . '/includes',
 			'--read-php=' . $tree . '/data',
 			'--read=' . $src,
-		);
+		));
 		// The includes/ and data/ of each native plugin whose model the
 		// plugin was approved for, .php files only, as core's are.
 		foreach (self::nativeModelDirs($plugin) as $dir) {

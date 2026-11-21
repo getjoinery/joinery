@@ -2,6 +2,17 @@
 require_once('PathHelper.php');
 require_once('EmailTemplateRenderer.php');
 
+/**
+ * EmailMessage - one outgoing message, composed fluently and sent by EmailSender.
+ *
+ * @version 1.1 - toTransfer() / fromTransfer(): the message as plain data, so a sandboxed plugin's fence can hand
+ *   it to the site (specs/sandboxed_plugin_email.md); an attachment travels as its bytes, never as a path.
+ *   header() refuses a name that is not a header token, a value with CR, LF or NUL, and the headers the
+ *   message's own fields write (From, To, Bcc, Subject...), which would go round the identity guard and the
+ *   test-mode trap; a subject or display name keeps to one line; validate() checks Reply-To, Cc, Bcc and the
+ *   Message-ID too (reviewer2 P2); an attachment's name and Content-ID keep to one line and its type starts
+ *   with a type/subtype token (P9)
+ */
 class EmailMessage {
     private $from;
     private $fromName;
@@ -16,6 +27,35 @@ class EmailMessage {
     private $headers = [];
     private $metadata = [];
     private $messageId;
+
+    /**
+     * Headers header() refuses: the message's own fields write them, and
+     * the site's guards read those fields (the protected-identity guard reads
+     * getFrom(), test mode rewrites the recipient lists), so one set as a
+     * header would go round them.
+     */
+    const RESERVED_HEADERS = array('from', 'sender', 'to', 'cc', 'bcc', 'reply-to', 'return-path', 'subject',
+        'date', 'message-id', 'mime-version', 'content-type', 'content-transfer-encoding', 'content-disposition',
+        'content-id', 'dkim-signature', 'received');
+
+    /** A header name: an RFC 5322 field name. */
+    const HEADER_NAME_PATTERN = '~^[\x21-\x39\x3B-\x7E]{1,64}$~D';
+
+    /**
+     * An attachment's Content-Type: one line that starts with a type/subtype
+     * token (parameters after it, such as "; method=REQUEST", are kept), or
+     * application/octet-stream.
+     */
+    private static function partType($type) {
+        $type = trim((string)self::oneLine($type));
+        return preg_match('~^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*(\s*;.*)?$~D', $type)
+            ? $type : 'application/octet-stream';
+    }
+
+    /** Text for a header line (a subject, a display name): one line, no NUL. */
+    private static function oneLine($value) {
+        return $value === null ? null : str_replace(array("\r\n", "\r", "\n", "\0"), ' ', (string)$value);
+    }
     
     /**
      * Static constructor for common use case
@@ -77,7 +117,7 @@ class EmailMessage {
      */
     public function from($email, $name = null) {
         $this->from = $email;
-        $this->fromName = $name;
+        $this->fromName = self::oneLine($name);
         return $this;
     }
     
@@ -95,11 +135,11 @@ class EmailMessage {
                     $this->recipients[] = ['email' => $n, 'name' => null];
                 } else {
                     // Associative array
-                    $this->recipients[] = ['email' => $e, 'name' => $n];
+                    $this->recipients[] = ['email' => $e, 'name' => self::oneLine($n)];
                 }
             }
         } else {
-            $this->recipients[] = ['email' => $email, 'name' => $name];
+            $this->recipients[] = ['email' => $email, 'name' => self::oneLine($name)];
         }
         return $this;
     }
@@ -150,17 +190,17 @@ class EmailMessage {
     }
 
     public function cc($email, $name = null) {
-        $this->ccRecipients[] = ['email' => $email, 'name' => $name];
+        $this->ccRecipients[] = ['email' => $email, 'name' => self::oneLine($name)];
         return $this;
     }
     
     public function bcc($email, $name = null) {
-        $this->bccRecipients[] = ['email' => $email, 'name' => $name];
+        $this->bccRecipients[] = ['email' => $email, 'name' => self::oneLine($name)];
         return $this;
     }
     
     public function subject($subject) {
-        $this->subject = $subject;
+        $this->subject = self::oneLine($subject);
         return $this;
     }
     
@@ -202,8 +242,8 @@ class EmailMessage {
     public function attachData($data, $fileName, $contentType = 'application/octet-stream') {
         $this->attachments[] = [
             'data' => $data,
-            'name' => $fileName ?: 'attachment',
-            'type' => $contentType ?: 'application/octet-stream',
+            'name' => self::oneLine($fileName ?: 'attachment'),
+            'type' => self::partType($contentType),
         ];
 
         return $this;
@@ -227,9 +267,9 @@ class EmailMessage {
     public function attachInlineData($data, $cid, $fileName, $contentType = 'application/octet-stream') {
         $this->attachments[] = [
             'data'   => $data,
-            'name'   => $fileName ?: 'attachment',
-            'type'   => $contentType ?: 'application/octet-stream',
-            'cid'    => $cid,
+            'name'   => self::oneLine($fileName ?: 'attachment'),
+            'type'   => self::partType($contentType),
+            'cid'    => self::oneLine($cid),
             'inline' => true,
         ];
 
@@ -246,8 +286,22 @@ class EmailMessage {
         return $this;
     }
 
+    /**
+     * @throws InvalidArgumentException for a name that is not a header token, one the message's own
+     *   fields write (RESERVED_HEADERS), or a value with CR, LF or NUL
+     */
     public function header($name, $value) {
-        $this->headers[$name] = $value;
+        $name = (string)$name;
+        if (!preg_match(self::HEADER_NAME_PATTERN, $name)) {
+            throw new InvalidArgumentException('A header name must be a plain token.');
+        }
+        if (in_array(strtolower($name), self::RESERVED_HEADERS, true)) {
+            throw new InvalidArgumentException('The ' . $name . ' header is the message\'s own; set it with its method.');
+        }
+        if (!is_scalar($value) || preg_match('~[\r\n\x00]~', (string)$value)) {
+            throw new InvalidArgumentException('The value of the ' . $name . ' header must be one line of text.');
+        }
+        $this->headers[$name] = (string)$value;
         return $this;
     }
     
@@ -312,6 +366,17 @@ class EmailMessage {
                 $errors[] = "Invalid recipient email: {$recipient['email']}";
             }
         }
+        foreach (array_merge($this->ccRecipients, $this->bccRecipients) as $recipient) {
+            if (!filter_var($recipient['email'], FILTER_VALIDATE_EMAIL)) {
+                $errors[] = "Invalid Cc or Bcc email: {$recipient['email']}";
+            }
+        }
+        if (!empty($this->replyTo) && !filter_var($this->replyTo, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Invalid reply-to email address';
+        }
+        if ($this->messageId !== null && preg_match('~[\r\n\x00]~', (string)$this->messageId)) {
+            $errors[] = 'Invalid Message-ID';
+        }
         
         return $errors;
     }
@@ -332,4 +397,119 @@ class EmailMessage {
     public function getHeaders() { return $this->headers; }
     public function getMetadata() { return $this->metadata; }
     public function getMessageId() { return $this->messageId; }
+
+    /**
+     * The message as plain data (JSON-safe), for another process to send.
+     * A file attached by path is read here, in the process that attached it,
+     * and travels as its bytes: the receiving side never opens a path it was
+     * handed (fromTransfer()).
+     *
+     * @throws Exception when an attached file cannot be read
+     */
+    public function toTransfer(): array {
+        $attachments = array();
+        foreach ($this->attachments as $a) {
+            if (isset($a['path'])) {
+                $bytes = @file_get_contents($a['path']);
+                if (!is_string($bytes)) {
+                    throw new Exception('Attachment file could not be read: ' . $a['path']);
+                }
+                // No type, as attach() gives none: the receiving side takes it
+                // from the name, as PHPMailer does for a path (fromTransfer()).
+                $a = array('data' => $bytes, 'name' => $a['name'], 'type' => '');
+            }
+            $a['data'] = base64_encode((string)$a['data']);
+            $attachments[] = $a;
+        }
+        return array(
+            'from' => $this->from, 'from_name' => $this->fromName, 'reply_to' => $this->replyTo,
+            'to' => $this->recipients, 'cc' => $this->ccRecipients, 'bcc' => $this->bccRecipients,
+            'subject' => $this->subject, 'html' => $this->htmlBody, 'text' => $this->textBody,
+            'attachments' => $attachments, 'headers' => $this->headers, 'metadata' => $this->metadata,
+            'message_id' => $this->messageId,
+        );
+    }
+
+    /** A file's type from its name, as PHPMailer gives one to a file attached by path. */
+    private static function typeFromName(string $name): string {
+        $autoload = PathHelper::getComposerAutoloadPath();
+        if (is_file($autoload)) {
+            require_once($autoload);
+        }
+        if (class_exists('\\PHPMailer\\PHPMailer\\PHPMailer')) {
+            return \PHPMailer\PHPMailer\PHPMailer::filenameToType($name);
+        }
+        return 'application/octet-stream';
+    }
+
+    /**
+     * A message from toTransfer()'s data. Every field is held to its shape;
+     * an attachment is bytes only, so nothing here reads a file.
+     *
+     * @throws InvalidArgumentException naming the field that is not as toTransfer() writes it
+     */
+    public static function fromTransfer(array $d): self {
+        $m = new self();
+        $text = function ($value, string $field) {
+            if ($value !== null && !is_string($value)) {
+                throw new InvalidArgumentException($field . ' must be text.');
+            }
+            return $value;
+        };
+        $people = function ($list, string $field) use ($text) {
+            if ($list === null) {
+                return array();
+            }
+            if (!is_array($list) || !array_is_list($list)) {
+                throw new InvalidArgumentException($field . ' must be a list.');
+            }
+            $out = array();
+            foreach ($list as $r) {
+                if (!is_array($r) || !is_string($r['email'] ?? null)) {
+                    throw new InvalidArgumentException('Each of ' . $field . ' needs an email address.');
+                }
+                $out[] = array('email' => $r['email'], 'name' => self::oneLine($text($r['name'] ?? null, $field . ' name')));
+            }
+            return $out;
+        };
+        $m->from = $text($d['from'] ?? null, 'from');
+        $m->fromName = self::oneLine($text($d['from_name'] ?? null, 'from_name'));
+        $m->replyTo = $text($d['reply_to'] ?? null, 'reply_to');
+        $m->recipients = $people($d['to'] ?? null, 'to');
+        $m->ccRecipients = $people($d['cc'] ?? null, 'cc');
+        $m->bccRecipients = $people($d['bcc'] ?? null, 'bcc');
+        $m->subject = self::oneLine($text($d['subject'] ?? null, 'subject'));
+        $m->htmlBody = $text($d['html'] ?? null, 'html');
+        $m->textBody = $text($d['text'] ?? null, 'text');
+        $m->messageId = $text($d['message_id'] ?? null, 'message_id');
+        foreach (array('headers', 'metadata') as $field) {
+            $value = $d[$field] ?? array();
+            if (!is_array($value)) {
+                throw new InvalidArgumentException($field . ' must be an object.');
+            }
+        }
+        foreach ((array)($d['headers'] ?? array()) as $name => $value) {
+            $m->header((string)$name, $value);
+        }
+        $m->metadata = (array)($d['metadata'] ?? array());
+        $list = $d['attachments'] ?? array();
+        if (!is_array($list) || !array_is_list($list)) {
+            throw new InvalidArgumentException('attachments must be a list.');
+        }
+        foreach ($list as $a) {
+            $bytes = is_array($a) && is_string($a['data'] ?? null) ? base64_decode($a['data'], true) : false;
+            if ($bytes === false || isset($a['path'])) {
+                throw new InvalidArgumentException('An attachment must be its bytes.');
+            }
+            $name = (string)$text($a['name'] ?? 'attachment', 'attachment name');
+            $type = (string)$text($a['type'] ?? '', 'attachment type');
+            $type = $type !== '' ? $type : self::typeFromName($name);
+            if (!empty($a['inline'])) {
+                $m->attachInlineData($bytes, (string)$text($a['cid'] ?? '', 'attachment cid'), $name, $type);
+            } else {
+                $m->attachData($bytes, $name, $type);
+            }
+        }
+        return $m;
+    }
 }

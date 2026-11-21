@@ -30,6 +30,7 @@
  *       {"name": "digest", "frequency": "daily", "time": "08:00"}
  *     ],
  *     "outbound_hosts": ["hooks.slack.com"],door 5: hosts it may call over HTTPS
+ *     "send_email": true,                   door 6: it sends mail through the site's EmailSender
  *     "settings": [ {"name", "label", "type", "secret", "default", "required", "options", "help"} ],
  *     "models": [ {"name": "SentLog", "label": "…", "fields": [ {"name", "type", "label", "required", "max_length", "index"} ]} ],
  *     "admin_pages":   [ {"slug", "title", "sections": [ … ]} ],   door 4; with no sections the
@@ -39,6 +40,7 @@
  *     "limits": {"memory_mb": 16, "timeout_ms": 5000}
  *   }
  *
+ * @version 1.5 - "send_email": true, the plugin sends mail with EmailSender as native code does (spec sandboxed_plugin_email)
  * @version 1.4 - a framed page's handlers: the only ones its frame may call (reviewer2 K1)
  * @version 1.3 - a page may be framed ("frame": true, design 9)
  * @version 1.2 - permissions.own_records (design 8)
@@ -162,7 +164,7 @@ class SandboxManifest {
 	public static function problems(array $d, ?string $expected_name = null): array {
 		$e = array();
 		$known = array('name', 'title', 'version', 'description', 'author', 'platform', 'permissions', 'signals',
-			'schedules', 'outbound_hosts', 'settings', 'models', 'admin_pages', 'profile_pages', 'menu', 'limits');
+			'schedules', 'outbound_hosts', 'send_email', 'settings', 'models', 'admin_pages', 'profile_pages', 'menu', 'limits');
 		foreach (array_keys($d) as $key) {
 			if (!in_array($key, $known, true)) {
 				$e[] = "unknown key '" . self::show($key) . "'";
@@ -196,6 +198,9 @@ class SandboxManifest {
 		self::checkList($d, 'signals', self::SIGNAL_PATTERN, 'a signal name such as event.registered', $e);
 		self::checkList($d, 'outbound_hosts', self::HOST_PATTERN, 'a hostname such as hooks.slack.com (no scheme, port, address or wildcard)', $e);
 		self::checkSchedules($d['schedules'] ?? array(), $e);
+		if (isset($d['send_email']) && !is_bool($d['send_email'])) {
+			$e[] = 'send_email must be true or false';
+		}
 		$settings = self::checkSettings($d['settings'] ?? array(), $e);
 		$models = self::checkModels($d['models'] ?? array(), is_string($name) ? $name : '', $e);
 		$slugs = array();
@@ -672,6 +677,9 @@ class SandboxManifest {
 
 	/** @return string[] */
 	public function outboundHosts(): array { return array_values($this->data['outbound_hosts'] ?? array()); }
+
+	/** Whether it sends mail (door 6). */
+	public function sendsEmail(): bool { return ($this->data['send_email'] ?? false) === true; }
 
 	/** @return array[] */
 	public function schedules(): array { return array_values($this->data['schedules'] ?? array()); }

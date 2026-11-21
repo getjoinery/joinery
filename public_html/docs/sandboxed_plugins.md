@@ -70,7 +70,7 @@ Write it the way a native plugin is written: models (`new Note()`,
 `new MultiNote([...])`), `Globalvars::get_instance()->get_setting()` for its
 own settings, `SessionControl::get_instance()` for who is viewing, FormWriter
 or plain HTML for forms. What it cannot do (raw SQL, a session write, the
-config file, the network beside an approved host) fails with a message that
+config file, the network beside an approved host, mail without `send_email`) fails with a message that
 says so; each part is under [Calls](#calls).
 
 The author's command, `utils/sandbox_plugin.php`:
@@ -161,6 +161,7 @@ manifest says can be code.
 | `signals` | no | Signal names delivered to it |
 | `schedules` | no | `name`, `frequency` (`hourly`, `daily`, `weekly`), `time` (`HH:MM`, daily and weekly), `day_of_week` (0-6, weekly) |
 | `outbound_hosts` | no | Hostnames it may call over HTTPS: no scheme, port, address or wildcard |
+| `send_email` | no | `true` when it sends mail (see [Mail](#mail)); `true` or `false` only |
 | `settings` | no | `name`, `label`, `type` (`text`, `textarea`, `number`, `boolean`, `select`, `url`, `email`), `secret` (text and url only, no default), `default`, `required`, `options` (select), `help` |
 | `models` | no | Up to 20; see [Data](#data) |
 | `admin_pages`, `profile_pages` | no | `slug`, `title`, `sections` (`text`, `table`, `form`, `settings`); a profile page holds no table or settings |
@@ -317,8 +318,9 @@ Activate, and `PluginManager::activate()` refuses it
 | Be told when these happen | `signals`, with each signal's label |
 | Run on a schedule | `schedules` |
 | Send data to these websites | `outbound_hosts` |
+| Send email | `send_email`: to any address, through the site's mail service, from any sender address it accepts (never a protected mailbox domain), using the site's email templates |
 | Add these pages to members' menus | `profile_pages`, saying which have a form members fill in and which the plugin draws |
-| Warning | personal records (all rows or own) beside outside websites: it could send those records there |
+| Warning | personal records (all rows or own) beside outside websites or email: it could send those records off the site |
 
 and, as its own, its models, its admin pages and its settings. A record grant
 reaches every record of the model ("All users: read only"), since the
@@ -589,7 +591,8 @@ stand-ins (`utils/sandbox_runtime.php`, `utils/sandbox_runtime_standins*.php`):
   settings by their full `sbx_{plugin}__{name}` names, and by their manifest
   names too unless core declares a setting of that name (a plugin's `debug`
   answers only as `sbx_{plugin}__debug`), and the site's `site_name`,
-  `webDir` and `default_timezone`. Every
+  `webDir`, `default_timezone` and `default_email_template` (the outer
+  template `quickSend()` names). Every
   other name is unset (null), a secret or not; `config_file_setting()` gives
   its default.
 - `SessionControl::get_instance()` answers who is viewing: `get_user_id()`,
@@ -645,6 +648,50 @@ code declares runs before the ask and may refuse the save, and an overridden
 `save()` runs as written; they bind only the plugin.
 On the site `SystemBase::$remote_store` is null and none of this applies.
 
+### Mail
+
+A plugin whose manifest says `"send_email": true`, once an admin approves it,
+sends mail with the site's own classes, written as native code writes them
+(see [Email System](email_system.md)):
+
+```php
+$message = EmailMessage::fromTemplate('welcome_email', $values)->to($email);
+(new EmailSender())->send($message);
+EmailSender::quickSend($to, 'Your note', '<p>Saved.</p>');
+EmailSender::sendTemplate('welcome_email', $to, $values);
+(new EmailSender())->sendBatch($message, $addresses);
+```
+
+In the fence `EmailSender::remote()` answers `SandboxRemoteMail`
+(`utils/sandbox_runtime_mail.php`), made at its first use however
+`EmailSender`'s file was loaded, so each send and each template fill is an
+ask, and the site runs it with the same `EmailSender` and
+`EmailTemplateRenderer`: the site's From and Reply-To defaults, the protected
+identity domains, test mode and dry run, the retry queue, Joinery Direct.
+`send()` answers true or false and `lastSendReport()` what the site reported,
+as on the site, and the From and Reply-To that `send()` filled in are on the
+plugin's message after it (test mode's rewriting of the recipients and subject
+is not copied back). A template is filled on the site, where the templates
+are, so the renderer's getters answer after `fill_template()`. A missing
+template throws from `fromTemplate()`, `sendTemplate()` and `quickSend()` as
+on the site; with `EmailTemplateRenderer` used directly it throws from
+`fill_template()`, where on the site it throws from the constructor. A
+`DateTime` among the values crosses as a date and is formatted as on the site.
+A footer given as text (`['body' => ...]`) is filled on the site, outside the
+fence's limits, so it may not hold a `{loop}`; a stored footer may.
+
+A message travels as `EmailMessage::toTransfer()`'s data. A file attached by
+path is read in the fence and sent as its bytes, so it can be only a file the
+plugin may read (its own `src/`); the site's side (`fromTransfer()`) takes an
+attachment only as bytes. A transport object is refused: the plugin sends
+through the site's mail service. The calls about the mail setup itself (the
+providers, their settings, `validateServiceConfiguration()`) need the
+provider's code and credentials, which are not in the fence, and fail there.
+
+Each send is a line of the call log (door `email`): the first three
+addresses, how many more, and the subject. Without the approval every send is refused, saying the plugin was
+not approved to send email. On the site `EmailSender::$remote` is null.
+
 | Ask | Arguments | Core does |
 |---|---|---|
 | `record.get` | `model`, `id` | `GET /api/v1/{Class}/{id}`; answers `record` |
@@ -655,6 +702,9 @@ On the site `SystemBase::$remote_store` is null and none of this applies.
 | `action` | `name`, `input` | `POST /api/v1/action/{name}`; answers `data` |
 | `http` | `method`, `url`, `headers`, `body` | an HTTPS request to an approved outbound host; answers `status`, `headers`, `body` (or `body_base64`) |
 | `log` | `level`, `message` | a line in the call's log |
+| `email.send` | `message`, `queue_on_failure` | `EmailSender::send()`; answers `sent`, `report` |
+| `email.batch` | `message`, `recipients` | `EmailSender::sendBatch()`; answers `success`, `failed_recipients` |
+| `email.render` | `inner`, `outer`, `footer`, `values` | `EmailTemplateRenderer` filled; answers `subject`, `html`, `text`, `has_content`, `set_values` |
 
 `model` is the plugin's own model by its short name (`SentLog`) or a core
 model it was approved for (`Event`). Record and action asks go to the site's

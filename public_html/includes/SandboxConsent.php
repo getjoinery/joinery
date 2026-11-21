@@ -14,7 +14,7 @@
  *
  * Grants (grantsOf()) are what a plugin can reach beyond itself: API actions
  * and other plugins' or core records (door 1), signals (door 2), scheduled
- * runs (door 3), outbound hosts (door 5), and pages it adds to members' menus
+ * runs (door 3), outbound hosts (door 5), sending mail (door 6), and pages it adds to members' menus
  * (door 4: a member page's form asks members for whatever it likes, and the
  * answers go to the plugin). Its own models, admin pages and settings are its
  * own, shown but not separately granted.
@@ -23,6 +23,8 @@
  * disabled or deleted. Once they cannot, the plugin's credential is switched
  * off (User::save()) and the plugin waits on another admin's approval.
  *
+ * @version 1.7 - email (door 6): send_email is a grant, described on the approval screen; the warning names it
+ *                beside outside websites, as another way out for personal records (spec sandboxed_plugin_email)
  * @version 1.6 - an own-rows line reads "each member's own notifications", not "own All notifications"
  * @version 1.5 - framed pages: a framed member page is its own ask; a framed admin page is a grant (design 12)
  * @version 1.4 - own_records, its own kind in grantsOf(), additions() and effective(); the approval screen warns
@@ -42,7 +44,7 @@ class SandboxConsent {
 	 * compared in.
 	 *
 	 * @return array{actions:string[], records:array<string,string[]>, signals:string[],
-	 *               schedules:array<string,string>, outbound_hosts:string[]}
+	 *               schedules:array<string,string>, outbound_hosts:string[], email:string[]}
 	 */
 	public static function grantsOf(SandboxManifest $m): array {
 		$actions = $m->permittedActions();
@@ -104,6 +106,8 @@ class SandboxConsent {
 			'signals'        => $signals,
 			'schedules'      => $schedules,
 			'outbound_hosts' => $hosts,
+			// A list, so it compares like the others: ['send'] or nothing.
+			'email'          => $m->sendsEmail() ? array('send') : array(),
 			'member_pages'   => $member_pages,
 			'framed_admin_pages' => $framed_admin_pages,
 		);
@@ -124,7 +128,7 @@ class SandboxConsent {
 	 */
 	public static function additions(array $asked, array $approved): array {
 		$out = array();
-		foreach (array('actions', 'signals', 'outbound_hosts') as $kind) {
+		foreach (array('actions', 'signals', 'outbound_hosts', 'email') as $kind) {
 			$more = array_values(array_diff($asked[$kind] ?? array(), $approved[$kind] ?? array()));
 			if ($more) {
 				$out[$kind] = $more;
@@ -161,7 +165,7 @@ class SandboxConsent {
 	 * approval covers. Nothing at all with no approval.
 	 */
 	public static function effective(string $plugin): array {
-		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'member_pages' => array(), 'framed_admin_pages' => array());
+		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'member_pages' => array(), 'framed_admin_pages' => array());
 		try {
 			$asked = self::grantsOf(SandboxPlugins::manifest($plugin));
 		} catch (SandboxManifestException $e) {
@@ -173,7 +177,7 @@ class SandboxConsent {
 		}
 		$approved = $row->consent();
 		$out = $none;
-		foreach (array('actions', 'signals', 'outbound_hosts') as $kind) {
+		foreach (array('actions', 'signals', 'outbound_hosts', 'email') as $kind) {
 			$out[$kind] = array_values(array_intersect($asked[$kind], $approved[$kind] ?? array()));
 		}
 		foreach (array('records', 'own_records') as $kind) {
@@ -308,13 +312,20 @@ class SandboxConsent {
 			$out["Each member's own records"] = $lines;
 		}
 		// The combination to say out loud (design 8): personal records it may
-		// read, and websites it may send data to.
+		// read, and a way to send them off the site (websites, or mail).
 		$personal = false;
 		foreach (array_keys($grants['records'] ?? array()) as $model) {
 			$personal = $personal || (class_exists((string)$model) && is_subclass_of((string)$model, 'SystemBase') && !$model::$api_public_read);
 		}
-		if (($personal || !empty($grants['own_records'])) && !empty($grants['outbound_hosts'])) {
-			$out['Warning'] = array('It can read personal records and send data to outside websites, so it could send those records there.');
+		$ways_out = array();
+		if (!empty($grants['outbound_hosts'])) {
+			$ways_out[] = 'send data to outside websites';
+		}
+		if (!empty($grants['email'])) {
+			$ways_out[] = 'send email to any address';
+		}
+		if (($personal || !empty($grants['own_records'])) && $ways_out) {
+			$out['Warning'] = array('It can read personal records and ' . implode(' and ', $ways_out) . ', so it could send those records off the site.');
 		}
 		if (!empty($grants['actions'])) {
 			$catalog = ApiLogicEndpoint::actionCatalog();
@@ -346,6 +357,13 @@ class SandboxConsent {
 		}
 		if (!empty($grants['outbound_hosts'])) {
 			$out['Send data to these websites'] = $grants['outbound_hosts'];
+		}
+		if (!empty($grants['email'])) {
+			// What is true: the site's mail service sends it as native code's
+			// mail, so any sender address that service accepts, except a
+			// protected mailbox domain; and it fills the site's stored
+			// templates (reviewer2 P1, P7c).
+			$out['Send email'] = array("To any address, through the site's mail service, from any sender address that service accepts (never a protected mailbox domain), using the site's email templates");
 		}
 		if (!empty($grants['framed_admin_pages'])) {
 			$out["Run its own script in admins' browsers, on these framed admin pages"] = array_values($grants['framed_admin_pages']);

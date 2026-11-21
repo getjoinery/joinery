@@ -14,6 +14,9 @@
  *   action        {name, input}                                POST   /api/v1/action/{name}
  *   http          {method, url, headers, body}                 HTTPS to an approved outbound host
  *   log           {level, message}                             a line in the call's log
+ *   email.send    {message, queue_on_failure}                  EmailSender::send() on the site
+ *   email.batch   {message, recipients}                        EmailSender::sendBatch() on the site
+ *   email.render  {inner, outer, footer, values}               EmailTemplateRenderer filled on the site
  *
  * Record and action asks go to this site's own API over this machine's
  * loopback, signed with the plugin's key, which is loaded here by plugin name
@@ -37,6 +40,18 @@
  * approved, on 443, with the archive host's header rules: no header that
  * steers the connection, and none whose name or value carries CR, LF or NUL.
  *
+ * An email ask is the plugin's EmailSender or EmailTemplateRenderer call,
+ * run here with those same classes, so every rule of the site's mail applies
+ * as for native code: its defaults, the protected identity domains, test mode,
+ * the retry queue. It is allowed only when the plugin was approved to send
+ * mail (send_email). The message arrives as EmailMessage::toTransfer()'s data
+ * and is rebuilt by fromTransfer(), which takes an attachment only as bytes:
+ * a path is read in the fence, where the plugin can read only what it may.
+ * A footer the plugin gives as text is template source run here, in the
+ * site's worker, outside the fence's limits, so it may not hold a loop
+ * (reviewer2 P3). A date in the values arrives tagged and is a DateTime again.
+ *
+ * @version 1.3 - email.send, email.batch and email.render (spec sandboxed_plugin_email)
  * @version 1.2 - own-rows grants: a record ask the plugin holds only as Model:verb:own goes as the member viewing
  *                (VIEWER_HEADER, from core's envelope), and is refused on a call with no viewer (design 8)
  * @version 1.1 - reviewer2 E1/E5: plain HTTP to port 80 says X-Forwarded-Proto https; one time budget across both
@@ -88,6 +103,14 @@ class SandboxRelay {
 	 * @var callable|null
 	 */
 	public static $outbound = null;
+
+	/**
+	 * Tests only: a callable (EmailSender $sender, EmailMessage $message) => void, called with the message as
+	 * the site rebuilt it, just before it is sent. Never set by the platform.
+	 *
+	 * @var callable|null
+	 */
+	public static $mail_seen = null;
 
 	/** @var string */
 	private $plugin;
@@ -144,6 +167,9 @@ class SandboxRelay {
 			}
 			if ($kind === 'log') {
 				return $this->log($ask);
+			}
+			if (in_array($kind, array('email.send', 'email.batch', 'email.render'), true)) {
+				return $this->email($kind, $ask);
 			}
 			return $this->refuse('ask', mb_substr($kind, 0, 40), 'There is no ask ' . mb_substr($kind, 0, 40) . '.');
 		} catch (Throwable $e) {
@@ -591,6 +617,139 @@ class SandboxRelay {
 			$out[$name] = $value;
 		}
 		return $out;
+	}
+
+	// ---- email -----------------------------------------------------------
+
+	/** The longest template name the site stores (emt_name). */
+	const MAX_TEMPLATE_NAME = 255;
+
+	private function email(string $kind, array $ask): array {
+		if (empty(SandboxConsent::effective($this->plugin)['email'])) {
+			return $this->refuse('email', $kind, 'This plugin was not approved to send email.');
+		}
+		if ($this->secondsLeft() < 1) {
+			$this->note('email', $kind, 'timeout', 'no time left');
+			return array('ok' => false, 'error' => 'The call ran out of time.');
+		}
+		if ($kind === 'email.render') {
+			return $this->emailRender($ask);
+		}
+		try {
+			$message = EmailMessage::fromTransfer(is_array($ask['message'] ?? null) ? $ask['message'] : array());
+		} catch (InvalidArgumentException $e) {
+			return $this->refuse('email', $kind, 'The message is not one EmailMessage wrote: ' . $e->getMessage());
+		}
+		$subject = mb_substr((string)$message->getSubject(), 0, 100);
+		$sender = new EmailSender();
+		if (self::$mail_seen !== null) {
+			call_user_func(self::$mail_seen, $sender, $message);
+		}
+		try {
+			if ($kind === 'email.batch') {
+				$recipients = $ask['recipients'] ?? null;
+				if (!is_array($recipients) || !array_is_list($recipients)) {
+					return $this->refuse('email', $kind, 'recipients must be a list of addresses.');
+				}
+				foreach ($recipients as $address) {
+					if (!is_string($address)) {
+						return $this->refuse('email', $kind, 'recipients must be a list of addresses.');
+					}
+				}
+				$result = $sender->sendBatch($message, $recipients);
+				$failed = array_values(array_map('strval', (array)($result['failed_recipients'] ?? array())));
+				$this->note('email', 'batch', !empty($result['success']) ? 'ok' : 'error',
+					self::addressWords($recipients) . ', ' . count($failed) . ' failed: ' . $subject);
+				return array('ok' => true, 'success' => !empty($result['success']), 'failed_recipients' => $failed,
+					'from' => $message->getFrom(), 'from_name' => $message->getFromName(), 'reply_to' => $message->getReplyTo());
+			}
+				$sent = $sender->send($message, !empty($ask['queue_on_failure']));
+		} catch (Exception $e) {
+			// What native code would catch: a protected identity domain, a
+			// missing address, a template that cannot be filled.
+			$this->note('email', $kind === 'email.batch' ? 'batch' : 'send', 'refused', mb_substr($e->getMessage(), 0, 300));
+			return array('ok' => false, 'error' => mb_substr($e->getMessage(), 0, 500));
+		}
+		$this->note('email', 'send', $sent ? 'ok' : 'error', self::addressWords(array_merge(
+			array_column($message->getRecipients() ?: array(), 'email'), array_column($message->getCc() ?: array(), 'email'),
+			array_column($message->getBcc() ?: array(), 'email'))) . ': ' . $subject);
+		$report = $sender->lastSendReport();
+		// What send() filled in on the message, as native code finds it after.
+		return array('ok' => true, 'sent' => (bool)$sent, 'from' => $message->getFrom(), 'from_name' => $message->getFromName(),
+			'reply_to' => $message->getReplyTo(), 'report' => array(
+			'direct_delivered' => array_values(array_map('strval', (array)($report['direct_delivered'] ?? array()))),
+			'transport' => isset($report['transport']) ? (string)$report['transport'] : null,
+			'receipt' => is_array($report['receipt'] ?? null) ? $report['receipt'] : null,
+			'error' => isset($report['error']) ? (string)$report['error'] : null,
+		));
+	}
+
+	private function emailRender(array $ask): array {
+		$inner = $ask['inner'] ?? null;
+		$outer = $ask['outer'] ?? null;
+		$footer = $ask['footer'] ?? null;
+		$values = $ask['values'] ?? array();
+		$name_ok = function ($v) {
+			return is_string($v) && $v !== '' && strlen($v) <= self::MAX_TEMPLATE_NAME;
+		};
+		if (!$name_ok($inner) || ($outer !== null && !$name_ok($outer))) {
+			return $this->refuse('email', 'email.render', 'A template is named by text.');
+		}
+		if ($footer !== null && !$name_ok($footer) && !(is_array($footer) && is_string($footer['body'] ?? null))) {
+			return $this->refuse('email', 'email.render', 'A footer is a template name or {body: text}.');
+		}
+		if (!is_array($values)) {
+			return $this->refuse('email', 'email.render', 'values must be an object.');
+		}
+		if (is_array($footer) && stripos($footer['body'], '{loop') !== false) {
+			return $this->refuse('email', 'email.render', 'A footer given as text may not hold a loop; use a stored footer template.');
+		}
+		$values = self::datesBack($values);
+		try {
+			$renderer = new EmailTemplateRenderer($inner, $outer, is_array($footer) ? array('body' => $footer['body']) : $footer);
+			$set_values = $renderer->fill_template($values);
+		} catch (EmailTemplateError $e) {
+			$this->note('email', 'render ' . mb_substr($inner, 0, 60), 'refused', mb_substr($e->getMessage(), 0, 300));
+			return array('ok' => false, 'error' => mb_substr($e->getMessage(), 0, 500), 'template_error' => true);
+		}
+		$this->note('email', 'render ' . mb_substr($inner, 0, 60), 'ok', '');
+		return array('ok' => true, 'subject' => $renderer->getSubject(), 'html' => $renderer->getHtml(),
+			'text' => $renderer->getText(), 'has_content' => (bool)$renderer->hasContent(),
+			'set_values' => is_array($set_values) ? $set_values : null);
+	}
+
+	/** The tag a date crosses the pipe in (SandboxRemoteMail::render()). */
+	const DATE_TAG = '__sbx_datetime';
+
+	/** Template values with each tagged date a DateTime again, as the renderer formats it. */
+	private static function datesBack(array $values): array {
+		foreach ($values as $key => $value) {
+			if (!is_array($value)) {
+				continue;
+			}
+			if (isset($value[self::DATE_TAG]) && is_string($value[self::DATE_TAG]) && is_string($value['tz'] ?? null)) {
+				try {
+					// EmailTemplateRenderer formats only a DateTime.
+					$date = DateTime::createFromFormat('Y-m-d\TH:i:s.u', $value[self::DATE_TAG], new DateTimeZone($value['tz']));
+				} catch (Exception $e) {
+					$date = false;
+				}
+				if ($date !== false) {
+					$values[$key] = $date;
+					continue;
+				}
+			}
+			$values[$key] = self::datesBack($value);
+		}
+		return $values;
+	}
+
+	/** Who a send went to, for the call log: the first three addresses and how many more. */
+	private static function addressWords(array $addresses): string {
+		$addresses = array_values(array_map('strval', $addresses));
+		$shown = implode(', ', array_map(function ($a) { return mb_substr($a, 0, 80); }, array_slice($addresses, 0, 3)));
+		$more = count($addresses) - 3;
+		return ($shown !== '' ? 'to ' . $shown : 'to no one') . ($more > 0 ? ' and ' . $more . ' more' : '');
 	}
 
 	// ---- the log ---------------------------------------------------------

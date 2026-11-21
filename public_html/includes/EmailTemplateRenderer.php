@@ -10,7 +10,21 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class EmailTemplateError extends Exception {}
 
+/**
+ * EmailTemplateRenderer - fills a stored email template (inner, outer and
+ * footer) with values.
+ *
+ * Inside a sandboxed plugin's fence (EmailSender::$remote set) the templates
+ * are not in this process: the constructor keeps the names, and
+ * fill_template() has the site fill them with this same class, so every
+ * getter answers as it would on the site.
+ *
+ * @version 1.1 - filled on the site when EmailSender::$remote is set (specs/sandboxed_plugin_email.md)
+ */
 class EmailTemplateRenderer {
+    /** @var array|null the template names, inside the fence only */
+    private $remote_names = null;
+
     // Properties for template storage
     protected $inner_template;
     protected $outer_template;
@@ -62,6 +76,12 @@ class EmailTemplateRenderer {
             );
         }
         $this->settings = Globalvars::get_instance();
+        if (EmailSender::remote() !== null) {
+            // The site loads and fills them (fill_template()).
+            $this->remote_names = array('inner' => (string)$inner_template,
+                'outer' => $outer_template === null ? null : (string)$outer_template, 'footer' => $footer);
+            return;
+        }
         
         // Load outer template
         if (!$outer_template) {
@@ -191,6 +211,15 @@ class EmailTemplateRenderer {
      * Process template with values (main template processing method)
      */
     public function fill_template($values) {
+        if ($this->remote_names !== null) {
+            $n = $this->remote_names;
+            $filled = EmailSender::$remote->render($n['inner'], $n['outer'], $n['footer'], (array)$values);
+            $this->email_subject = $filled['subject'];
+            $this->email_html = $filled['html'];
+            $this->email_text = $filled['text'];
+            $this->email_has_content = (bool)$filled['has_content'];
+            return $filled['set_values'];
+        }
         // Override tracking values if provided
         if (isset($values['utm_source'])) {
             $this->utm_source = $values['utm_source'];
