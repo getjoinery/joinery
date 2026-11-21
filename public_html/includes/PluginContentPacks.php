@@ -4,8 +4,9 @@
  *
  * A plugin keeps its packs in plugins/{name}/content_packs/{pack}/, each a
  * folder holding pack.json and the text files it names. After a plugin's
- * activation commits, and on every sync, each of its packs that has not been
- * applied since the plugin was last installed is applied with its plan's
+ * activation commits, and on every sync, each of its packs that this install
+ * of the plugin has not applied (its apply record's source names the install
+ * id, source()) is applied with its plan's
  * default ticks (ContentPack::apply_defaults): new rows are created and fields
  * that still hold a pack's value are kept current, while a field edited on
  * the site is left alone. So a pack lands once per install. A pack the plugin
@@ -18,15 +19,31 @@
  *
  * See specs/content_pack_feature.md §7 and docs/content_packs.md.
  *
+ * @version 1.1 - an apply record's source names the plugin's install id; a pack counts as applied when this
+ *               install applied it (was: applied since plg_installed_time)
  * @version 1.0
  */
 class PluginContentPacks {
 
 	const FOLDER = 'content_packs';
 
-	/** The apply record's source for a plugin's pack folder. */
+	/**
+	 * The apply record's source for a plugin's pack folder, under the
+	 * plugin's install: 'plugin:{plugin}/{folder}@{install id}'. A pack an
+	 * earlier install of the same name applied is not this install's
+	 * (spec plugin_install_identity). A plugin with no install id yet has the
+	 * bare form.
+	 */
 	public static function source(string $plugin, string $folder): string {
-		return 'plugin:' . $plugin . '/' . $folder;
+		$id = PluginInstallIdentity::idOf($plugin);
+		return 'plugin:' . $plugin . '/' . $folder . ($id !== null ? '@' . $id : '');
+	}
+
+	/** What an admin is shown for a source: 'store/welcome', without the install id. */
+	public static function shown(string $source): string {
+		$rest = strpos($source, 'plugin:') === 0 ? substr($source, 7) : $source;
+		$at = strpos($rest, '@');
+		return $at === false ? $rest : substr($rest, 0, $at);
 	}
 
 	/** Folder name => path of each pack the plugin ships, in name order. */
@@ -46,15 +63,11 @@ class PluginContentPacks {
 		return $packs;
 	}
 
-	/** Whether this pack has been applied since the plugin was last installed. */
+	/** Whether this install of the plugin has applied this pack. */
 	public static function applied_since_install(string $plugin, string $folder): bool {
-		$model = Plugin::get_by_plugin_name($plugin);
-		$installed = $model ? (string)$model->get('plg_installed_time') : '';
 		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
-			"SELECT 1 FROM cpa_content_pack_applies
-			 WHERE cpa_source = ? AND cpa_status = ? AND cpa_applied_time >= ?::timestamp LIMIT 1");
-		$stmt->execute(array(self::source($plugin, $folder), ContentPackApply::STATUS_APPLIED,
-			$installed !== '' ? $installed : '1970-01-01 00:00:00'));
+			"SELECT 1 FROM cpa_content_pack_applies WHERE cpa_source = ? AND cpa_status = ? LIMIT 1");
+		$stmt->execute(array(self::source($plugin, $folder), ContentPackApply::STATUS_APPLIED));
 		return (bool)$stmt->fetchColumn();
 	}
 

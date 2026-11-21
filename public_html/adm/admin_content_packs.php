@@ -2,6 +2,7 @@
 /** @joinery-admin level=10 */
 // Content packs: upload a pack, read what it would change, tick and apply.
 // specs/content_pack_feature.md.
+// @version 1.2 - a plugin pack's source is shown without its install id (PluginContentPacks::shown())
 // @version 1.1 - a summary of the plan, found rows in one list, records already right folded
 //                together, and a note naming the new records an item or line waits for
 // @version 1.0
@@ -88,7 +89,7 @@ if (!$apply) {
 		$page->disprow(array(
 			'<a href="/admin/admin_content_packs?cpa_id=' . (int)$row['apply_id'] . '">' . $e($row['pack']) . '</a>',
 			$e($row['version']),
-			$e(strpos((string)$row['source'], 'plugin:') === 0 ? 'Plugin ' . substr((string)$row['source'], 7) : 'Upload'),
+			$e(strpos((string)$row['source'], 'plugin:') === 0 ? 'Plugin ' . PluginContentPacks::shown((string)$row['source']) : 'Upload'),
 			$e($row['status']),
 			$e(LibraryFunctions::convert_time($row['checked'], 'UTC', $session->get_timezone())),
 			$row['applied'] ? $e(LibraryFunctions::convert_time($row['applied'], 'UTC', $session->get_timezone())) : '',
@@ -108,7 +109,7 @@ $checked = ($status === ContentPackApply::STATUS_CHECKED);
 echo '<div class="row"><div class="col-12">';
 echo '<p><strong>' . $e($apply->get('cpa_pack_name')) . '</strong>'
 	. (strpos((string)$apply->get('cpa_source'), 'plugin:') === 0
-		? ' from plugin ' . $e(substr((string)$apply->get('cpa_source'), 7)) . ', applied when it was installed' : '')
+		? ' from plugin ' . $e(PluginContentPacks::shown((string)$apply->get('cpa_source'))) . ', applied when it was installed' : '')
 	. ($apply->get('cpa_pack_version') !== '' ? ' version ' . $e($apply->get('cpa_pack_version')) : '')
 	. ' &middot; ' . $e($status)
 	. ' &middot; file sha256 <code>' . $e(substr((string)$apply->get('cpa_file_sha256'), 0, 16)) . '</code></p>';

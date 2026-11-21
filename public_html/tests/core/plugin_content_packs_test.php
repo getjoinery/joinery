@@ -41,13 +41,14 @@ $_SESSION['permission'] = 8;
 
 $store = Plugin::get_by_plugin_name('store');
 $installed_was = $store ? $store->get('plg_installed_time') : null;
-harness_defer(function () use ($db, $installed_was, $link, $run) {
-	$db->prepare("UPDATE plg_plugins SET plg_installed_time = ? WHERE plg_name = 'store'")->execute(array($installed_was));
+$install_id_was = $store ? $store->get('plg_install_id') : null;
+harness_defer(function () use ($db, $installed_was, $install_id_was, $link, $run) {
+	$db->prepare("UPDATE plg_plugins SET plg_installed_time = ?, plg_install_id = ? WHERE plg_name = 'store'")->execute(array($installed_was, $install_id_was));
 	foreach ($db->query("SELECT pro_product_id FROM pro_products WHERE pro_link LIKE 'pcp-%-" . $run . "'")->fetchAll(PDO::FETCH_COLUMN) as $id) {
 		$db->prepare("DELETE FROM cpv_content_pack_values WHERE cpv_target = ?")->execute(array('Product:' . (int)$id));
 		try { (new Product((int)$id, TRUE))->permanent_delete(); } catch (\Throwable $e) {}
 	}
-	$db->prepare("DELETE FROM cpa_content_pack_applies WHERE cpa_source LIKE ?")->execute(array('plugin:store/%' . $run));
+	$db->prepare("DELETE FROM cpa_content_pack_applies WHERE cpa_source LIKE ?")->execute(array('plugin:store/%' . $run . '%'));
 });
 
 $root = harness_scratch_dir('pcp');
@@ -94,8 +95,8 @@ section('The next install leaves edits alone');
 
 $product->set('pro_name', 'Renamed by the owner');
 $product->save();
-$db->exec("UPDATE plg_plugins SET plg_installed_time = now() + interval '1 second' WHERE plg_name = 'store'");
-sleep(2);
+// A reinstall is a new install id (PluginInstallIdentity).
+$db->prepare("UPDATE plg_plugins SET plg_installed_time = now(), plg_install_id = ? WHERE plg_name = 'store'")->execute(array(PluginInstallIdentity::newId()));
 $messages = PluginContentPacks::apply_pending('store', $root);
 check(count($messages) === 1 && strpos($messages[0], 'applied') !== false, 'a reinstall applies the pack again', implode(' | ', $messages));
 check((new Product($product->key, TRUE))->get('pro_name') === 'Renamed by the owner', 'the field edited on the site is left alone');

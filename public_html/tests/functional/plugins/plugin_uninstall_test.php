@@ -30,6 +30,7 @@
  *
  * Run:  php tests/functional/plugins/plugin_uninstall_test.php
  *
+ * @version 1.5 - a removal request carries the install id (spec plugin_install_identity A10)
  * @version 1.4 - the queue is where RootState says (specs/shell_command_audit.md D1)
  * @version 1.3 - a plugin with a host_remover queues run_plugin_remover, one request for the remover and the files (specs/plugin_host_removal.md WP5)
  * @version 1.2 - uninstall deletes the plugin's app credentials
@@ -173,8 +174,9 @@ check(count($queued) === 1, 'exactly one remove_plugin request is queued', implo
 check($request_id !== '' && $queued === array($request_id), 'and uninstall() returned its id');
 check($plugin->get_remove_request_id() === $request_id, 'the row records the request id');
 $body = json_decode((string)file_get_contents($queue_dir . '/' . $request_id . '.json'), true);
-check(($body['args'] ?? null) === array('name' => $NAME) && ($body['requested_by'] ?? 0) === 4500,
-    'the request carries the name and who asked, nothing else', json_encode($body['args'] ?? null));
+check(($body['args'] ?? null) === array('name' => $NAME, 'install_id' => (string)$plugin->get('plg_install_id'))
+    && preg_match('/^[0-9a-f]{32}$/', (string)$plugin->get('plg_install_id')) && ($body['requested_by'] ?? 0) === 4500,
+    'the request carries the name, the install id and who asked, nothing else', json_encode($body['args'] ?? null));
 check(!$plugin->is_active(), 'is_active() is false');
 check($queued_removals($NAME, 'run_plugin_remover') === array(), 'a plugin with no host_remover queues no run_plugin_remover request');
 $drop_queued();
@@ -201,8 +203,9 @@ $rem_queued = $queued_removals($REM, 'run_plugin_remover');
 check($rem_queued === array($rem_request) && $rem_request !== '', 'exactly one run_plugin_remover request is, and uninstall() returned its id', implode(',', $rem_queued));
 check($rem_plugin->get_remove_request_id() === $rem_request, 'the row records that id (one id, whichever kind)');
 $rem_body = json_decode((string)file_get_contents($queue_dir . '/' . $rem_request . '.json'), true);
-check(($rem_body['args'] ?? null) === array('plugin' => $REM) && ($rem_body['requested_by'] ?? 0) === 4500,
-    'the request carries the plugin name and who asked, nothing else', json_encode($rem_body['args'] ?? null));
+check(($rem_body['args'] ?? null) === array('plugin' => $REM, 'install_id' => (string)$rem_plugin->get('plg_install_id'))
+    && ($rem_body['requested_by'] ?? 0) === 4500,
+    'the request carries the plugin name, the install id and who asked, nothing else', json_encode($rem_body['args'] ?? null));
 check(is_dir($rem_dir), 'the directory is untouched (root runs the remover, then removes it)');
 $drop_queued();
 

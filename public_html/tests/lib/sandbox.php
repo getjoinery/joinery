@@ -41,7 +41,8 @@ function sandbox_fixture_plugin(array $manifest = array(), array $opts = array()
 	if (!is_dir($dir)) {
 		mkdir($dir, 0755);
 	}
-	$data = array_merge(array('name' => $name, 'title' => 'HarnessTest ' . $name, 'version' => '1.0.0', 'platform' => 1), $manifest);
+	// The same id for every version of one fixture (an upgrade), its own for each name.
+	$data = array_merge(array('name' => $name, 'id' => md5('fixture:' . $name), 'title' => 'HarnessTest ' . $name, 'version' => '1.0.0', 'platform' => 1), $manifest);
 	file_put_contents($dir . '/manifest.json', json_encode($data, JSON_PRETTY_PRINT));
 	mkdir($dir . '/' . SandboxPlugins::SOURCE_DIR, 0755);
 	foreach ($opts['files'] ?? array() as $path => $contents) {
@@ -83,6 +84,7 @@ function sandbox_fixture_plugin(array $manifest = array(), array $opts = array()
 				$receiver->permanent_delete();
 			}
 		}
+		$db->prepare('DELETE FROM pil_plugin_install_ledger WHERE pil_plugin = ?')->execute(array($name));
 		$db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($name));
 		if (!$keep) {
 			@unlink($dir . '/manifest.json');

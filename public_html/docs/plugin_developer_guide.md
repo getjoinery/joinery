@@ -647,25 +647,51 @@ class MultiMyData extends SystemMultiBase {
     protected function getMultiResults($only_count = false, $debug = false) {
         $filters = array();
 
-        // 1. Parameterized value (safe binding) — produces  mdt_usr_user_id = ?
+        // 1. The column equals a value — produces  mdt_usr_user_id = ?
         if (isset($this->options['user_id'])) {
             $filters['mdt_usr_user_id'] = array($this->options['user_id'], PDO::PARAM_INT);
         }
 
-        // 2. Literal condition appended as-is — produces  mdt_delete_time IS NULL
+        // 2. A condition with no value in it, written out — produces  mdt_delete_time IS NULL
         if (isset($this->options['active'])) {
-            $filters['mdt_delete_time'] = 'IS NULL';
+            $filters['mdt_delete_time'] = $this->options['active'] ? 'IS NULL' : 'IS NOT NULL';
         }
 
-        // 3. ILIKE / raw fragment — produces  mdt_name ILIKE '%term%'
+        // 3. Any other comparison with a value — produces  mdt_name ILIKE ?
         if (isset($this->options['name_like'])) {
-            $filters['mdt_name'] = "ILIKE '%" . $this->options['name_like'] . "%'";
+            $filters['mdt_name'] = SqlCondition::bind('ILIKE ?', '%' . $this->options['name_like'] . '%');
+        }
+
+        // A list fills one ? with a parameter per member — produces  mdt_status IN (?, ?, ?)
+        if (isset($this->options['statuses'])) {
+            $filters['mdt_status'] = SqlCondition::bind('IN (?)', (array)$this->options['statuses']);
         }
 
         return $this->_get_resultsv2(static::$model_class::$tablename, $filters, $this->order_by, $only_count, $debug);
     }
 }
 ```
+
+**A value never goes into the text of a condition.** A column name and a string condition
+are put into the query as they are, so `_get_resultsv2()` accepts each only when that exact
+text is a quoted string in the collection's own source file; anything joined together while
+the page runs (`'> ' . $n`, `"= '$name'"`, a `quote()`d value) throws
+`UnwrittenConditionException`. A condition that carries a value is a `SqlCondition`: its text
+is written, one `?` per value, and the values travel as bound parameters, typed by what they
+are (an integer as a number, `TRUE`/`FALSE` as a boolean, anything else as text). A column may
+also be any column the model declares. `tests/unit/multi_filter_option_sql_test.php` reads
+every data class for the same rule, so a filter that would be refused fails there first.
+`SqlCondition::trusted()` takes SQL another part of the code composed (an access rule's
+subquery); that test lists every caller.
+
+**Yes/no options take the words a request sends.** A query string carries text, and to PHP the
+text `"false"` is true. So the collection reads its own source for how each option is used: one
+the code only ever tests (`$this->options['active'] ? ... : ...`, `!empty(...)`, `if (...)`,
+`=== true`) is a yes/no, and `"true"`/`"1"` reach the code as `TRUE`, `"false"`/`"0"` as `FALSE`.
+An option the code only checks was passed (`isset(...)`, value never read) counts as not passed
+when the caller says no. An option whose value is used anywhere is left exactly as given, so a
+search for the word "false" still searches. Write a yes/no option as a plain test and it works
+from a URL with no further code.
 
 Construct and use it:
 
@@ -1301,19 +1327,33 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 **Uninstall** (`PluginManager::uninstall($name, $requested_by = null)`) — **destructive, cannot be undone.** Refused for an active plugin, for one other installed plugins depend on, and for one marked `is_system` (on its row or in its manifest).
 
 0. Deletes every app credential of the purposes its `appAccess` declares, live and revoked alike, so reinstalling the plugin brings none of them back. A purpose an active plugin declares is left alone.
-1. Deletes declared settings (from current `plugin.json`). Settings dropped from a later manifest version are left as orphans.
+1. Deletes declared settings (from current `plugin.json`). A setting an earlier version declared goes in step 7b.
 2. Deletes declared admin menus
 3. Removes deletion rules
 4. Deletes scheduled task records
 5. Deletes version, dependency, and migration records
 6. Runs `uninstall.php` hook if present. Tables are still available here for external teardown (e.g., revoking cached external state).
 7. Drops plugin tables and orphan sequences
-8. Marks the `plg_plugins` row `uninstalled` (`plg_uninstalled_time` set, `plg_active` cleared). The row stays as the record.
-9. Queues a `remove_plugin` root request (`RootRequest`) and records its id on the row (`plg_metadata._remove_request_id`). The tree belongs to root, so the files are root's to remove: the host timer carries the request out on its next tick, minutes not releases; a directory already gone by then is done, not refused. Returns the request id ('' when the directory was already gone).
+7b. Removes everything else the install's [ledger](#install-ids-and-the-install-ledger) names: settings an earlier version declared, app credentials of a purpose it no longer declares, tables a migration made, records under its name, and its model classes and actions in hand-made API key scopes. What could not be removed stays in the ledger and is named in `plg_install_error`; the next install of the plugin removes it first.
+8. Marks the `plg_plugins` row `uninstalled` (`plg_uninstalled_time` set, `plg_active` cleared). The row stays as the record, with its install id.
+9. Queues a `remove_plugin` root request (`RootRequest`), naming the plugin and its install id, and records its id on the row (`plg_metadata._remove_request_id`). The tree belongs to root, so the files are root's to remove: the host timer carries the request out on its next tick, minutes not releases; a directory already gone by then is done, not refused. Returns the request id ('' when the directory was already gone).
 
-Root does not trust the request (the queue is web-writable). Before deleting, `PluginRemoval::refusal()` checks that the name is a plugin name, that `plugins/<name>` is a real directory directly under `plugins/`, that the manifest does not say `is_system`, and that the row reads `uninstalled` and not active; any check failing leaves the directory and records why in the request's transcript. `PluginRemoval::remove()` never follows a symlink inside the plugin.
+Root does not trust the request (the queue is web-writable). Before deleting, `PluginRemoval::refusal()` checks that the name is a plugin name, that `plugins/<name>` is a real directory directly under `plugins/`, that the manifest does not say `is_system`, that the row reads `uninstalled` and not active, and that the row still holds the install id the request names (a later install of the name is never removed by an earlier one's request); any check failing leaves the directory and records why in the request's transcript. `PluginRemoval::remove()` never follows a symlink inside the plugin.
 
 **Hook failure is fatal.** If step 6 throws or returns false, steps 7 to 9 do NOT run — tables and the row remain intact. Steps 0–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
+
+#### Install ids and the install ledger
+
+A plugin's `plg_plugins` row outlives its uninstall and is taken back by the next install of that name, so neither the name nor the row id tells one install from the next. Each install has an **install id** (`plg_plugins.plg_install_id`, `PluginInstallIdentity`): made when install finds no row or an uninstalled one, kept through upgrades, activation and deactivation, never reused. Anything that belongs to one install and outlives its uninstall on purpose is keyed by the install id, never by the plugin's name, so a later plugin of the same name does not reach it.
+
+What a plugin makes that is a name by nature (a setting, a table, a credential purpose, a menu slug) goes in the install's **ledger** (`pil_plugin_install_ledger`), one row per thing, under the install id. Install, activation and sync record what the plugin holds after each step, and a migration's new tables and sequences are recorded as it makes them. Kinds: settings, app credential purposes, tables, sequences, model classes and actions (for API key scopes), menu slugs, scheduled tasks, version, dependency and migration records, deletion rules, signal receivers, and a sandboxed plugin's install row.
+
+- **Uninstall finishes the ledger** (step 7b): each thing is removed and its row struck only once it is confirmed gone, so a version that stopped declaring a setting still has it removed.
+- **A failed step is finished by the next install.** Rows left after an uninstall are what it could not remove. Install of the same name finishes every earlier install's ledger before it makes its own id, and refuses, naming what is left, when that fails. A surviving migration record is removed before the new install runs, so it never skips its own migrations.
+- **One owner per thing.** A thing another install's ledger holds is refused at install, activation and sync, naming the plugin that holds it.
+- **Hand-made scoped API keys** lose the entries naming a gone plugin's model classes (`Class:verb`) and actions (`plugin/action`); a key whose scope named nothing else is switched off rather than left unscoped. Each change is logged.
+
+A package is refused, when it is staged and by root before it moves, while the earlier plugin of its name still waits for root to remove its files (`PluginInstallIdentity::installRefusal()`).
 
 **After uninstall,** the Plugins page shows the row as **Uninstalled {date}**: "data removed; files being removed by the host" with the request's state while the directory exists, then "data and files removed" with one action, **Install** — the same `install_plugin` root request that fetches from the upgrade source, verifies and installs. For a plugin the source no longer publishes, Install is absent and the row says so. Install clears the stamp and the request record. Every list that means "installed plugins" leaves an `uninstalled` row out: `sync()` refreshes its metadata while the directory exists and never changes its status or adds a second row; the stale marker skips it; `getDependents()` ignores it; the management API's version list and the marketplace's local names omit it; activation refuses it.
 

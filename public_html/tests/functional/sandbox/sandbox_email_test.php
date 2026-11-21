@@ -262,7 +262,7 @@ try {
 	check(in_array('Invalid Cc or Bcc email: not an address', EmailMessage::create('a@example.com', 's', 'b')->cc('not an address')->validate(), true), 'A Cc that is not an address fails validation');
 
 	section('The manifest');
-	$base = array('name' => 'hts_mfx', 'title' => 'X', 'version' => '1.0.0', 'platform' => 1);
+	$base = array('name' => 'hts_mfx', 'title' => 'X', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef');
 	check(SandboxManifest::problems($base + array('send_email' => true)) === array(), 'send_email true is valid');
 	check(in_array('send_email must be true or false', SandboxManifest::problems($base + array('send_email' => 'yes')), true), 'send_email "yes" is refused');
 

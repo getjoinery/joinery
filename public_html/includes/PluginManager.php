@@ -13,6 +13,10 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.23 - every install has an install id and a ledger of what it made (PluginInstallIdentity, spec
+ *                plugin_install_identity): install finishes the earlier install's ledger before it makes its
+ *                own id, each step records what it made, uninstall removes everything in the ledger, and the
+ *                root removal request carries the id
  * @version 1.22 - activation runs the plugin's pending migrations, so one shipped while it was off does not wait for the next deploy; a migration whose up function returns false fails install and activation; lastActivationMigrations()
  * @version 1.21 - uninstall() queues run_plugin_remover in place of remove_plugin when the plugin's manifest declares a host_remover: one request runs the remover and then removes the files (specs/plugin_host_removal.md D6)
  * @version 1.20 - sync, syncTables, the namespace check and activation's hook pass iterate PluginHelper::activePluginRows(); runSyncHook() refuses a name that is not a plugin name (unseal_daemon.md C3)
@@ -81,6 +85,9 @@ class PluginManager extends AbstractExtensionManager {
     
     private static $instance = null;
     
+    /** @var array<string,string> plugin => the install id install() is making, before its row is saved */
+    private $installing_ids = array();
+
     public function __construct() {
         parent::__construct();
         $this->extension_type = 'plugin';
@@ -143,6 +150,11 @@ class PluginManager extends AbstractExtensionManager {
             if (SandboxPlugins::isSandboxedDir($candidate)) {
                 SandboxPlugins::demandEnabled();
                 $sandbox = SandboxManifest::fromFile($candidate . '/' . SandboxManifest::FILE);
+                // Said here, when the package is staged; root asks again before it moves it.
+                $why = PluginInstallIdentity::installRefusal($sandbox->name(), $this->getExtensionPath($sandbox->name()), $candidate);
+                if ($why !== '') {
+                    throw new Exception($why);
+                }
                 return array('root' => $candidate, 'manifest' => $sandbox->toArray(), 'name' => $sandbox->name());
             }
         }
@@ -388,6 +400,24 @@ class PluginManager extends AbstractExtensionManager {
         if (!is_dir($migration_dir)) {
             return $results;
         }
+
+        // What a migration makes (a table no class file names) goes in the
+        // install's ledger, so uninstall drops it (PluginInstallIdentity).
+        $install_id = $this->installing_ids[$plugin_name] ?? PluginInstallIdentity::idOf((string)$plugin_name);
+        $relations_before = $install_id !== null ? PluginInstallIdentity::relations() : null;
+        try {
+            $results = $this->runPendingMigrationFiles($plugin_name, $migration_dir);
+        } finally {
+            if ($install_id !== null && $relations_before !== null) {
+                PluginInstallIdentity::recordNewRelations((string)$plugin_name, $install_id, $relations_before);
+            }
+        }
+        return $results;
+    }
+
+    /** runPendingMigrations()'s two runners, PHP then SQL. */
+    private function runPendingMigrationFiles($plugin_name, $migration_dir) {
+        $results = array();
 
         // Run PHP migrations (migrations.php with return [] format). They run
         // before the plugin is activated on its first install, and they use
@@ -959,6 +989,7 @@ class PluginManager extends AbstractExtensionManager {
             $this->resumePluginTasks($name);
             $this->syncMenus($name, SandboxPluginManager::menus($name));
             $this->keepStoredMetadata($model);
+            PluginInstallIdentity::snapshot($name);
             return;
         }
 
@@ -1126,6 +1157,10 @@ class PluginManager extends AbstractExtensionManager {
         // Sync declarative menus (admin sidebar + user dropdown) from plugin.json
         $this->syncMenus($name);
         $this->keepStoredMetadata($model);
+
+        // What the activation made (settings, tasks, rules, menus), into the
+        // install's ledger.
+        PluginInstallIdentity::snapshot($name);
     }
 
     /**
@@ -1335,8 +1370,15 @@ class PluginManager extends AbstractExtensionManager {
             $plugin->set('plg_name', $name);
         }
 
+        // The install id: kept on an upgrade; on a fresh install the earlier
+        // install's ledger is finished first (refused when it cannot be), and
+        // a new id is made (spec plugin_install_identity).
+        $install_id = PluginInstallIdentity::begin($plugin, (string)$name);
+        $this->installing_ids[$name] = $install_id;
+
         try {
-            DbConnector::transaction(function () use ($name, $plugin) {
+            DbConnector::transaction(function () use ($name, $plugin, $install_id) {
+                $plugin->set('plg_install_id', $install_id);
                 // Validate dependencies
                 $validation = $this->validatePlugin($name);
                 if (!$validation['valid']) {
@@ -1396,8 +1438,13 @@ class PluginManager extends AbstractExtensionManager {
                     $this->syncMenus($name, SandboxPluginManager::menus($name));
                     $this->keepStoredMetadata($plugin);
                 }
+
+                // What this install holds now, into its ledger.
+                PluginInstallIdentity::snapshot($name, $install_id);
             });
+            unset($this->installing_ids[$name]);
         } catch (Throwable $e) {
+            unset($this->installing_ids[$name]);
             // Record error on plugin
             try {
                 $plugin->set('plg_status', 'error');
@@ -1452,6 +1499,23 @@ class PluginManager extends AbstractExtensionManager {
         $dependents = $this->getDependents($name);
         if (!empty($dependents)) {
             throw new Exception("Cannot uninstall plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
+        }
+
+        // The install's id and what it holds, so the ledger names everything
+        // the steps below and finish() remove. A row from before ids existed
+        // gets one here.
+        $install_id = PluginInstallIdentity::idOf((string)$name);
+        if ($install_id === null) {
+            $install_id = PluginInstallIdentity::newId();
+            Plugin::updateColumns((int)$plugin->key, array('plg_install_id' => $install_id));
+            $plugin->set('plg_install_id', $install_id);
+        }
+        // A thing another install's ledger holds is that install's: it stays
+        // out of this ledger and is not removed here (snapshot() refuses it).
+        try {
+            PluginInstallIdentity::snapshot((string)$name, $install_id);
+        } catch (Throwable $e) {
+            error_log("Plugin uninstall ('$name'): " . $e->getMessage());
         }
 
         // Step 0: Delete the app credentials of the purposes it declares. First,
@@ -1556,6 +1620,13 @@ class PluginManager extends AbstractExtensionManager {
                             );
                             $seq_stmt->execute([$tablename . '\_%']);
                             foreach ($seq_stmt->fetchAll(PDO::FETCH_COLUMN) as $seqname) {
+                                // A sequence of a longer-named table that is still
+                                // there (abc_things_archive_id_seq beside abc_things)
+                                // is that table's, not this one's.
+                                $owner = PluginInstallIdentity::tableOfSequence((string)$seqname);
+                                if ($owner !== null && strlen($owner) > strlen($tablename)) {
+                                    continue;
+                                }
                                 if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $seqname)) {
                                     $dblink->exec("DROP SEQUENCE IF EXISTS " . $seqname . " CASCADE");
                                 }
@@ -1571,16 +1642,31 @@ class PluginManager extends AbstractExtensionManager {
             DeletionRule::pruneOrphanedRules();
         }
 
+        // Step 7b: Everything else the install's ledger names: settings an
+        // earlier version declared, credentials of a purpose it no longer
+        // declares, tables a migration made, records under its name, and its
+        // classes and actions in hand-made API key scopes. What could not be
+        // removed stays in the ledger, and the next install of this name
+        // finishes it before it begins (PluginInstallIdentity::begin()).
+        $left = PluginInstallIdentity::finish($install_id);
+
         // Step 8: The row stays, as the record. Data is gone; the files are
         // root's to remove. sync() leaves an uninstalled row alone, so the
         // directory sitting there until root's next tick registers nothing.
+        // The row keeps the install id, which the removal request names and
+        // the next install's begin() reads.
         $plugin->set('plg_status', Plugin::STATUS_UNINSTALLED);
         $plugin->set('plg_active', 0);
         $plugin->set('plg_uninstalled_time', gmdate('Y-m-d H:i:s'));
-        $plugin->set('plg_install_error', null);
+        $plugin->set('plg_install_error', empty($left) ? null
+            : 'Uninstall could not remove: ' . implode(', ', $left) . '. The next install of this plugin removes them first.');
+        if (!empty($left)) {
+            error_log("Plugin uninstall ('$name'): could not remove " . implode(', ', $left));
+        }
 
         // Step 9: Ask root to remove the files. The request carries the name
-        // and nothing else; PluginRemoval::refusal() is what root checks. A
+        // and the install id; PluginRemoval::refusal() is what root checks, and
+        // it refuses once the row holds another install's id. A
         // plugin whose manifest declares a host_remover gets one request that
         // runs the remover (what its installer put on the machine goes) and
         // then removes the files: one request, not two, because two from one
@@ -1589,10 +1675,10 @@ class PluginManager extends AbstractExtensionManager {
         $plugin_dir = PathHelper::getAbsolutePath("plugins/{$name}");
         if (is_dir($plugin_dir)) {
             if (PluginRemoval::declared_remover($name, PathHelper::getAbsolutePath('plugins')) !== '') {
-                $request_id = RootRequest::submit('run_plugin_remover', array('plugin' => $name),
+                $request_id = RootRequest::submit('run_plugin_remover', array('plugin' => $name, 'install_id' => $install_id),
                     $requested_by === null ? null : (int)$requested_by);
             } else {
-                $request_id = RootRequest::submit('remove_plugin', array('name' => $name),
+                $request_id = RootRequest::submit('remove_plugin', array('name' => $name, 'install_id' => $install_id),
                     $requested_by === null ? null : (int)$requested_by);
             }
         }
@@ -1940,6 +2026,18 @@ class PluginManager extends AbstractExtensionManager {
         }
         if (!empty($content_pack_messages)) {
             $result['content_pack_messages'] = $content_pack_messages;
+        }
+
+        // What each active plugin holds after the sync, into its install's
+        // ledger. A conflict (a thing another install's ledger holds) is a
+        // warning here; install and activation refuse it.
+        foreach (PluginHelper::activePluginRows() as $plugin) {
+            $plugin_name = (string)$plugin->get('plg_name');
+            try {
+                PluginInstallIdentity::snapshot($plugin_name);
+            } catch (Throwable $e) {
+                $result['warnings'][] = "$plugin_name: install ledger - " . $e->getMessage();
+            }
         }
 
         return $result;

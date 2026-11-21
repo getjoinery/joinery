@@ -24,6 +24,7 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.12 - remove_plugin and run_plugin_remover pass the request's install id to PluginRemoval::refusal()
  * @version 1.11 - run_plugin_remover: the runner asks the checks remove_plugin asks (--check) before it runs an
  *                 uninstalled plugin's host_remover, and removes the files through the same function afterwards
  *                 (--remover-ran); the kind handed here whole is refused as run_plugin_installer is
@@ -129,7 +130,7 @@ function root_request_own(string $path): void {
  * (or may be removed, with $check_only), 3 already gone with $check_only (0
  * without), 1 refused with the reason on stderr.
  */
-function root_request_plugin_files(string $name, string $kind, bool $check_only): never {
+function root_request_plugin_files(string $name, string $kind, bool $check_only, ?string $install_id = null): never {
 	$plugins_dir = PathHelper::getAbsolutePath('plugins');
 	if (PluginRemoval::already_gone($name, $plugins_dir)) {
 		echo "plugins/$name is already gone\n";
@@ -139,7 +140,7 @@ function root_request_plugin_files(string $name, string $kind, bool $check_only)
 	if ($name !== '' && Plugin::is_valid_plugin_name($name)) {
 		$row = Plugin::get_by_plugin_name($name);
 	}
-	$why = PluginRemoval::refusal($name, $plugins_dir, $row);
+	$why = PluginRemoval::refusal($name, $plugins_dir, $row, $install_id);
 	if ($why !== '') {
 		fwrite(STDERR, "root_request: $kind refused: $why\n");
 		exit(1);
@@ -152,6 +153,10 @@ function root_request_plugin_files(string $name, string $kind, bool $check_only)
 	echo "removed plugins/$name ($count files and directories)\n";
 	exit(0);
 }
+
+// The install a plugin removal was asked for (its uninstall's id): root
+// removes the files only while the row still holds it (PluginRemoval::refusal()).
+$request_install_id = isset($args['install_id']) && is_string($args['install_id']) ? $args['install_id'] : null;
 
 echo "root request $request_id: $kind\n";
 
@@ -368,7 +373,7 @@ switch ($kind) {
 		// them failing leaves the directory and says why (exit 1). A directory
 		// already gone is done: a retried request, or files removed first by
 		// whoever made them (a test's scratch plugin).
-		root_request_plugin_files((string)($args['name'] ?? ''), $kind, false);
+		root_request_plugin_files((string)($args['name'] ?? ''), $kind, false, $request_install_id);
 
 	case 'run_plugin_remover':
 		// The uninstall moment of a plugin with a host_remover
@@ -387,10 +392,10 @@ switch ($kind) {
 		// because removing the files without the remover is the very thing
 		// one request exists to prevent.
 		if (in_array('--check', $argv, true)) {
-			root_request_plugin_files((string)($args['plugin'] ?? ''), $kind, true);
+			root_request_plugin_files((string)($args['plugin'] ?? ''), $kind, true, $request_install_id);
 		}
 		if (in_array('--remover-ran', $argv, true)) {
-			root_request_plugin_files((string)($args['plugin'] ?? ''), $kind, false);
+			root_request_plugin_files((string)($args['plugin'] ?? ''), $kind, false, $request_install_id);
 		}
 		fwrite(STDERR, "root_request: this kind is carried out by the host converger itself; this runner is older than the tree\n");
 		exit(2);

@@ -155,12 +155,12 @@ function sbx_fm_checks(array $result, string $label, string $name, array $values
 
 try {
 	check(SystemBase::$remote_store === null, 'On the site the model layer goes to the database (no remote store)');
-	$clash = SandboxManifest::fromArray(array('name' => 'hts_clash', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1,
+	$clash = SandboxManifest::fromArray(array('name' => 'hts_clash', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'models' => array(array('name' => 'Post', 'fields' => array(array('name' => 'x', 'type' => 'text'))))), 'hts_clash');
 	check(strpos(implode(' ', SandboxPluginManager::modelCollisions($clash)), 'taken by the site') !== false,
 		'A model named like a core class (Post) is refused at install', json_encode(SandboxPluginManager::modelCollisions($clash)));
 	$described = SandboxConsent::describe(SandboxConsent::grantsOf(SandboxManifest::fromArray(array('name' => 'hts_desc', 'title' => 'x', 'version' => '1.0.0',
-		'platform' => 1, 'permissions' => array('records' => array('Location' => array('read'), 'Page' => array('read')))), 'hts_desc')));
+		'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef', 'permissions' => array('records' => array('Location' => array('read'), 'Page' => array('read')))), 'hts_desc')));
 	check(isset($described['Read this program code']) && count($described['Read this program code']) === 1,
 		'Approving a native plugin\'s model names that plugin\'s code too, and core\'s none', json_encode($described['Read this program code'] ?? null));
 	try {

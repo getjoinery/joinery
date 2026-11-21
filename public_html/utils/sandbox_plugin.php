@@ -29,6 +29,7 @@
  * "A dev site" is one with the debug setting on: load writes into plugins/,
  * which the installer does everywhere else, and call fires real calls.
  *
+ * @version 1.6 - log PLUGIN shows this install's calls only
  * @version 1.5 - call ... ui --from=frame --page=SLUG: a framed page's handler, as its script calls it
  * @version 1.4 - call ... page: a page the plugin's view draws, and its body as core would show it; --as for the viewer
  * @version 1.3 - load and call say why a call would be unavailable (SandboxRunner::unavailable)
@@ -304,7 +305,7 @@ switch ($command) {
 		if (!preg_match(SandboxManifest::NAME_PATTERN, $plugin)) {
 			sbx_fail('Usage: sandbox_plugin.php log PLUGIN [COUNT]', 2);
 		}
-		foreach (new MultiSandboxLog(array('plugin' => $plugin), array('sbl_sandbox_log_id' => 'DESC'), max(1, (int)($args[1] ?? 20))) as $log) {
+		foreach (new MultiSandboxLog(array('plugin' => $plugin, 'install_id' => (string)PluginInstallIdentity::idOf($plugin)), array('sbl_sandbox_log_id' => 'DESC'), max(1, (int)($args[1] ?? 20))) as $log) {
 			sbx_out($log->get('sbl_create_time') . '  ' . $log->get('sbl_kind') . ' ' . $log->get('sbl_name') . '  '
 				. $log->get('sbl_status') . ($log->get('sbl_duration_ms') !== null ? ' ' . $log->get('sbl_duration_ms') . 'ms' : '')
 				. ($log->get('sbl_message') ? '  ' . $log->get('sbl_message') : ''));

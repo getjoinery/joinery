@@ -122,6 +122,7 @@ manifest says can be code.
 ```json
 {
   "name": "notifier",
+  "id": "3f9a1c2e7b4d4e0f9a6b8c1d2e3f4a5b",
   "title": "Notifier",
   "version": "1.0.0",
   "description": "Posts chosen signals to a chat webhook.",
@@ -154,6 +155,7 @@ manifest says can be code.
 | Key | Required | Rule |
 |---|---|---|
 | `name` | yes | The folder's name. 2-20 characters of `a-z` and `0-9`, starting with a letter, words joined by a single `_` (no `__`, none at the end); not one of `PluginManager::RESERVED_NAMES` (`core` and the system's URL segments) |
+| `id` | yes | 32 characters of `0-9` and `a-f`, made once when the plugin is first written (`php -r "echo bin2hex(random_bytes(16));"`) and kept the same in every version. It is what tells an upgrade from a different plugin of the same name (see [Installing](#installing)) |
 | `title` | yes | At most 80 characters |
 | `version` | yes | `x.y.z` |
 | `platform` | yes | The platform API version the plugin was built for (`SandboxManifest::PLATFORM_VERSION` is this site's) |
@@ -282,6 +284,25 @@ email to superadmins.
 Uploading a new version of an installed plugin replaces it like any package.
 When the plugin is active, everything it owns follows the new manifest at
 once, within what was approved (below).
+
+**An upgrade has the same `id`.** A package over an installed sandboxed plugin
+is an upgrade only when its manifest `id` is the installed one's; one with
+another `id` is a different plugin and is refused, when it is staged and again
+by root before anything moves: "A different plugin named notifier is
+installed; uninstall it first." (`PluginInstallIdentity::installRefusal()`).
+An installed copy whose manifest has no `id` takes the package's. Nothing in a
+package is secret, so the `id` tells two unrelated plugins of one name apart;
+it does not stop someone copying a real plugin's `id`.
+
+**One install, one id.** Each install of a plugin has an install id
+(`plg_plugins.plg_install_id`, see the
+[Plugin Developer Guide](plugin_developer_guide.md#install-ids-and-the-install-ledger)).
+What a sandboxed plugin keeps past its uninstall is keyed by it: the files it
+kept (`fil_install_id`) and its call log (`sbl_install_id`). A later plugin
+installed under the same name has a new id and reaches neither. A fresh
+install also removes any setting or table under its own prefix
+(`sbx_{name}__`) that no install's ledger holds, so it starts with its own
+defaults and empty tables, never an earlier install's.
 
 **Each member's own records.** `permissions.own_records`, beside
 `records`, asks for each member's own rows of a personal model:
@@ -765,9 +786,12 @@ record asks, as for any model. The site holds every file to these rules:
 
 Each file call is a line of the call log (door `file`). Without the approval
 every file call is refused, saying the plugin was not approved to take
-uploaded files, and a file input is dropped from its pages. The files stay
-when the plugin is uninstalled: they are the uploaders'. On the site
-`File::$remote` is null.
+uploaded files, and a file input is dropped from its pages. A file it keeps
+carries its install id (`fil_install_id`), and its reach to its own files is
+by tag and install id together. The files stay when the plugin is
+uninstalled: they are the uploaders'. A later plugin of the same name has
+another install id and reaches none of them. On the site `File::$remote` is
+null.
 
 ### The asks
 
@@ -840,7 +864,9 @@ answer and each door's use) and `log`.
 `signal`, `schedule`, `test`), the handler, signal or schedule, the outcome
 (`ok`, `error`, `timeout`, `unavailable`, `busy`), its message, how long it
 took, who asked (for a UI call) and what the plugin reached (`calls`, at
-most 200, each field cut to a set length). Rows are kept
-`sandbox_log_retention_days` days (default 14). An admin reads them on the
-plugin's call log page (`/admin/admin_sandbox_log?plugin=<name>`, permission
-8, from the Plugins page), filtered by kind or outcome.
+most 200, each field cut to a set length), under the plugin's install id
+(`sbl_install_id`). Rows are kept `sandbox_log_retention_days` days (default
+14). An admin reads them on the plugin's call log page
+(`/admin/admin_sandbox_log?plugin=<name>`, permission 8, from the Plugins
+page), filtered by kind or outcome: this install's calls only, never an
+earlier install's of the same name.

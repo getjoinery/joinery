@@ -33,7 +33,7 @@ $valid = array(
 	'name' => 'notifier',
 	'title' => 'Notifier',
 	'version' => '1.0.0',
-	'platform' => 1,
+	'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 	'description' => 'Posts chosen signals to a chat webhook.',
 	'permissions' => array('actions' => array('notification_unread_count'), 'records' => array('Post' => array('read'))),
 	'signals' => array('purchase.completed'),
@@ -83,7 +83,7 @@ check(SandboxManifest::tableFor('notifier', 'SentLog') === 'sbx_notifier__sent_l
 check(SandboxManifest::prefixFor('notifier', 'SentLog') === 'notifier__sent_log', 'Column prefix: plugin + __ + snake model');
 check(SandboxManifest::settingName('notifier', 'webhook_url') === 'sbx_notifier__webhook_url', 'Setting: sbx_ + plugin + __ + name');
 check($m->limits() === array('memory_mb' => 32, 'timeout_ms' => 8000), 'Limits are read');
-check(SandboxManifest::fromArray(array('name' => 'tiny', 'title' => 'Tiny', 'version' => '0.1.0', 'platform' => 1), 'tiny')->limits()
+check(SandboxManifest::fromArray(array('name' => 'tiny', 'title' => 'Tiny', 'version' => '0.1.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef'), 'tiny')->limits()
 	=== array('memory_mb' => SandboxManifest::DEFAULT_MEMORY_MB, 'timeout_ms' => SandboxManifest::DEFAULT_TIMEOUT_MS),
 	'A manifest with no limits gets the defaults');
 
@@ -204,7 +204,7 @@ foreach ($paths as $path) {
 check($threw === array(), 'No value in any place makes the validator throw (' . count($paths) . ' places)', implode(' | ', array_slice($threw, 0, 5)));
 $caught = '';
 try {
-	SandboxManifest::fromArray(array('name' => 'notifier', 'title' => 'T', 'version' => '1.0.0', 'platform' => 1,
+	SandboxManifest::fromArray(array('name' => 'notifier', 'title' => 'T', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'models' => array(array('name' => 'Item', 'fields' => array(array('name' => 'x', 'type' => array()))))), 'notifier');
 } catch (SandboxManifestException $e) {
 	$caught = $e->getMessage();

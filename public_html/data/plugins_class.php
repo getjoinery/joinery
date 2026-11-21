@@ -11,6 +11,8 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.9 - plg_install_id: one id per install of the plugin, kept while it stays installed and replaced
+ *               by the next install after an uninstall (PluginInstallIdentity, spec plugin_install_identity)
  * @version 1.8 - the list reads a not-yet-installed sandboxed plugin's manifest for its name, description and version
  * @version 1.7 - get_plugin_metadata() reads a sandboxed plugin's manifest.json (SandboxPluginManager)
  * @version 1.6 - get_status_badge() no longer asks plg_status whether a plugin is active: a row left at
@@ -74,6 +76,12 @@ class Plugin extends SystemBase {
 	    // the same acknowledgement and restrictions, release_transparency D6). Set by root at install from the verdict, never by a
 	    // page; NULL on a row that predates the record (specs/package_signing.md WP3).
 	    'plg_trust' => array('type'=>'varchar(16)', 'is_nullable'=>true),
+	    // This install of the plugin (PluginInstallIdentity): made when install
+	    // finds no row or an uninstalled one, kept through upgrades and
+	    // activation, never reused. What one install leaves behind on purpose
+	    // is keyed by it, and its ledger (pil_) by it, so the next install of
+	    // the same name reaches neither.
+	    'plg_install_id' => array('type'=>'varchar(32)', 'is_nullable'=>true),
 	    'plg_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	    'plg_update_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);

@@ -17,6 +17,8 @@
  *   {
  *     "name": "notifier",                   same as its folder; a-z, 0-9, single _ between words, 2-20
  *     "title": "Notifier",
+ *     "id": "3f9a1c…",                     32 hex characters the author makes once and keeps in every version:
+ *                                           an upgrade is a package with the same id (PluginInstallIdentity)
  *     "version": "1.0.0",
  *     "description": "…", "author": "…",
  *     "platform": 1,                        the platform API version it was built for
@@ -41,6 +43,8 @@
  *     "limits": {"memory_mb": 16, "timeout_ms": 5000}
  *   }
  *
+ * @version 1.8 - "id", required: 32 hex characters naming the plugin across its versions; a package with another
+ *                id is a different plugin, refused over an installed one (spec plugin_install_identity D4)
  * @version 1.7 - a call's memory may be up to what the site gives a page request (memoryCeilingMb()), not 64 MB
  * @version 1.6 - "accept_uploads": true, its drawn pages take files and it keeps them with File as native code does
  *                (spec sandboxed_plugin_uploads)
@@ -68,6 +72,10 @@ class SandboxManifest {
 
 	/** No double underscore and none at the end: '__' is the separator in derived names. */
 	const NAME_PATTERN    = '~^(?=.{2,20}$)[a-z][a-z0-9]*(_[a-z0-9]+)*$~D';
+
+	/** The plugin's own id: 32 hex characters ("id"). */
+	const ID_PATTERN      = '~^[0-9a-f]{32}$~D';
+
 	const MODEL_PATTERN   = '~^[A-Z][A-Za-z0-9]{1,19}$~D';
 	const FIELD_PATTERN   = '~^[a-z][a-z0-9_]{0,19}$~D';
 	const SLUG_PATTERN    = '~^[a-z][a-z0-9_]{0,29}$~D';
@@ -181,7 +189,7 @@ class SandboxManifest {
 	 */
 	public static function problems(array $d, ?string $expected_name = null): array {
 		$e = array();
-		$known = array('name', 'title', 'version', 'description', 'author', 'platform', 'permissions', 'signals',
+		$known = array('name', 'id', 'title', 'version', 'description', 'author', 'platform', 'permissions', 'signals',
 			'schedules', 'outbound_hosts', 'send_email', 'accept_uploads', 'settings', 'models', 'admin_pages', 'profile_pages', 'menu', 'limits');
 		foreach (array_keys($d) as $key) {
 			if (!in_array($key, $known, true)) {
@@ -196,6 +204,9 @@ class SandboxManifest {
 			$e[] = "name '" . $name . "' is reserved";
 		} elseif ($expected_name !== null && $name !== $expected_name) {
 			$e[] = "name '" . $name . "' does not match its folder '" . self::show($expected_name) . "'";
+		}
+		if (!is_string($d['id'] ?? null) || !preg_match(self::ID_PATTERN, $d['id'])) {
+			$e[] = 'id is required: 32 characters of 0-9 and a-f, made once (php -r "echo bin2hex(random_bytes(16));") and kept in every version';
 		}
 		if (!self::isText($d['title'] ?? null, 80, true)) {
 			$e[] = 'title is required, at most 80 characters';
@@ -678,6 +689,9 @@ class SandboxManifest {
 	// ------------------------------------------------------------------
 
 	public function name(): string { return $this->data['name']; }
+
+	/** The id the author gave the plugin, the same in every version of it. */
+	public function id(): string { return $this->data['id']; }
 	public function title(): string { return $this->data['title']; }
 	public function version(): string { return $this->data['version']; }
 	public function platform(): int { return (int)$this->data['platform']; }

@@ -34,7 +34,7 @@ class ContentPackApply extends SystemBase {
 		'cpa_pack_version'          => array('type'=>'varchar(50)'),
 		// 'upload' for a pack checked on the Content Packs page; 'plugin:{name}/{folder}'
 		// for one a plugin ships, applied when the plugin is installed.
-		'cpa_source'                => array('type'=>'varchar(150)', 'default'=>'upload'),
+		'cpa_source'                => array('type'=>'varchar(255)', 'default'=>'upload'),  // 'plugin:{name}/{folder}@{install id}' (PluginContentPacks::source())
 		'cpa_file_sha256'           => array('type'=>'varchar(64)', 'required'=>true),
 		// The pack as received, base64: the uploaded zip, or for a plugin's pack the
 		// JSON of its folder's files by name. A pack holds no credential.

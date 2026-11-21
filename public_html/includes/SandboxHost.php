@@ -45,6 +45,7 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.10 - a call's log row carries the plugin's install id (spec plugin_install_identity A5)
  * @version 1.9 - a page call's input carries files (the request's uploads, SandboxPages::requestFiles()); the public
  *                facts include upload_web_dir, which File::get_url() reads (spec sandboxed_plugin_uploads)
  * @version 1.8 - the site's public facts include default_email_template, which EmailSender::quickSend() names
@@ -299,6 +300,7 @@ class SandboxHost {
 		try {
 			$log = new SandboxLog(NULL);
 			$log->set('sbl_plugin', substr($plugin, 0, 20));
+			$log->set('sbl_install_id', PluginInstallIdentity::idOf($plugin));
 			$log->set('sbl_kind', $kind);
 			$log->set('sbl_name', mb_substr($name, 0, 100));
 			$log->set('sbl_status', $result['status']);

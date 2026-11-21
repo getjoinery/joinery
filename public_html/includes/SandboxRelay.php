@@ -57,7 +57,8 @@
  * A file ask is the plugin's File call, run here with File, allowed only when
  * the plugin was approved to take uploads (accept_uploads; spec
  * sandboxed_plugin_uploads). A file it makes is the viewer's, private, and
- * tagged as the plugin's (fil_source sbx_{plugin}); the only columns it may
+ * tagged as the plugin's (fil_source sbx_{plugin}) with its install id (fil_install_id),
+ * which its own-files reach checks; the only columns it may
  * set are the title and description. An upload is taken only when its path
  * is one of the uploads core put in this call's envelope, and PHP says it was
  * uploaded in this request. File is not a model the API serves, so its
@@ -66,6 +67,8 @@
  * approved records grant on File for the verb. Bytes cross in parts of
  * FILE_PART_BYTES, up to half the call's memory past the runtime's.
  *
+ * @version 1.7 - a file it keeps carries its install id (fil_install_id), and its own-files reach is by tag and id,
+ *               so a later plugin of the same name reaches none of them (spec plugin_install_identity A1)
  * @version 1.6 - a Drive file is read only to a plugin: rename and trash refused (reviewer2 B1, owner 2026-11-21)
  * @version 1.5 - a records grant on File reaches every file; bytes cross in parts, up to half the call's memory
  *                past the runtime's; the memory may be up to what the site gives a page request
@@ -162,6 +165,8 @@ class SandboxRelay {
 
 	/** @var string */
 	private $plugin;
+	/** @var string|null this install's id, read once (installId()) */
+	private $install_id = null;
 	/** @var float */
 	private $deadline;
 	/** @var array the call log's entries */
@@ -755,9 +760,21 @@ class SandboxRelay {
 
 	// ---- files ---------------------------------------------------------------
 
-	/** The origin tag on every file this plugin keeps. */
+	/** The origin tag on every file this plugin keeps (its label in the file catalog). */
 	private function fileTag(): string {
 		return 'sbx_' . $this->plugin;
+	}
+
+	/**
+	 * This install's id: the files it keeps carry it, and its own-files
+	 * reach is by it, so a later plugin of the same name reaches none of
+	 * them (spec plugin_install_identity A1). '' when the row has none.
+	 */
+	private function installId(): string {
+		if ($this->install_id === null) {
+			$this->install_id = (string)PluginInstallIdentity::idOf($this->plugin);
+		}
+		return $this->install_id;
 	}
 
 	private function uploadsApproved(): bool {
@@ -852,8 +869,13 @@ class SandboxRelay {
 			$this->dropPending();
 			return $this->refuse('file', $target, $columns);
 		}
+		if ($this->installId() === '') {
+			$this->dropPending();
+			return $this->refuse('file', $target, 'This plugin has no install id yet, so a file it kept would be no one\'s; an admin runs update_database.');
+		}
 		$columns['fil_private'] = true;
 		$columns['fil_source'] = $this->fileTag();
+		$columns['fil_install_id'] = $this->installId();
 		$name = self::oneLine($ask['name'] ?? '', 255);
 		$type = self::oneLine($ask['type'] ?? '', 255);
 
@@ -949,6 +971,12 @@ class SandboxRelay {
 		$this->dropPending();
 	}
 
+	/** Whether $file is one this install kept: its tag and its install id. */
+	private function ownFile(File $file): bool {
+		return $file->get('fil_source') === $this->fileTag() && $this->installId() !== ''
+			&& (string)$file->get('fil_install_id') === $this->installId();
+	}
+
 	/** A file this plugin's verb reaches, by id (fileReach()), or why not. @return File|string */
 	private function reachableFile($id, string $verb) {
 		$id = self::positiveInt($id);
@@ -957,7 +985,7 @@ class SandboxRelay {
 		}
 		$reach = $this->fileReach($verb);
 		$file = new File($id, TRUE);
-		if (!$file->key || $reach === null || ($reach === 'own' && $file->get('fil_source') !== $this->fileTag())) {
+		if (!$file->key || $reach === null || ($reach === 'own' && !$this->ownFile($file))) {
 			// A file out of its reach is not this plugin's to know of: the same answer as none.
 			return 'There is no file ' . $id . ($reach === 'all' ? '' : ' among this plugin\'s files') . '.';
 		}
@@ -998,8 +1026,9 @@ class SandboxRelay {
 			$params = array();
 			if ($this->fileReach('read') !== 'all') {
 				// Its own files only: a filter the plugin cannot change.
-				$where[] = 'fil_source = ?';
+				$where[] = 'fil_source = ? AND fil_install_id = ?';
 				$params[] = $this->fileTag();
+				$params[] = $this->installId();
 			}
 			foreach ($query as $key => $value) {
 				if (in_array($key, array('sort', 'sdirection', 'numperpage', 'page'), true)) {

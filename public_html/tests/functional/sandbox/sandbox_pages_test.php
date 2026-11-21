@@ -307,7 +307,7 @@ try {
 	check(isset($catalog['sandbox_page']), 'It is the API action sandbox_page');
 	check(isset($catalog['sandbox_page']) && !ApiLogicEndpoint::machineKeyCanCall($catalog['sandbox_page']['meta']),
 		'for a person\'s credential only, never a machine key');
-	$m = SandboxManifest::fromArray(array('name' => 'askspage', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1,
+	$m = SandboxManifest::fromArray(array('name' => 'askspage', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'permissions' => array('actions' => array('sandbox_page'))));
 	check(count(preg_grep('~sandbox_page~', SandboxCompatibility::problems($m))) === 1,
 		'so a sandboxed plugin cannot ask for it');

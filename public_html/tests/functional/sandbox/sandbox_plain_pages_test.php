@@ -198,7 +198,7 @@ try {
 	$member = make_user('SbxPagesMember', 0);
 
 	section('The manifest and the approval screen');
-	$m = SandboxManifest::fromArray(array('name' => 'hts_m', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1) + $manifest, 'hts_m');
+	$m = SandboxManifest::fromArray(array('name' => 'hts_m', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef') + $manifest, 'hts_m');
 	check(count($m->adminPages()) === 3 && SandboxPages::isPluginDrawn($m->adminPages()[0]), 'A page with no sections is a page the plugin draws');
 	$grants = SandboxConsent::grantsOf($m);
 	check(strpos((string)($grants['member_pages']['home'] ?? ''), 'drawn by the plugin') !== false, 'The approval screen says the member page is drawn by the plugin',

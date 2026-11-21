@@ -58,7 +58,7 @@ try {
 	harness_set_setting_mem(SandboxPlugins::ENABLED_SETTING, '1');
 	mkdir($dir, 0755);
 	file_put_contents($dir . '/manifest.json', json_encode(array(
-		'name' => $name, 'title' => 'HarnessTest sandboxed data', 'version' => '1.0.0', 'platform' => 1,
+		'name' => $name, 'title' => 'HarnessTest sandboxed data', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'models' => array(array('name' => 'Item', 'fields' => array(
 			array('name' => 'title', 'type' => 'string', 'max_length' => 80, 'required' => true),
 			array('name' => 'qty', 'type' => 'integer', 'index' => true),
@@ -185,7 +185,7 @@ try {
 	$long_model = 'Ab';
 	for ($c = 'C'; strlen($long_model) < 20; $c++) {
 		$try = $long_model . $c;
-		$probe = array('name' => $long, 'title' => 'T', 'version' => '1.0.0', 'platform' => 1,
+		$probe = array('name' => $long, 'title' => 'T', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 			'models' => array(array('name' => $try, 'fields' => array(array('name' => 'abcdefghijklmnopqrst', 'type' => 'string')))));
 		if (SandboxManifest::problems($probe, $long) !== array()) {
 			break;
@@ -210,7 +210,7 @@ try {
 	// profile page sharing the slug.
 	$long_slug = 'p' . str_repeat('x', 29);
 	$long_title = str_repeat('T', 80);
-	file_put_contents($long_dir . '/manifest.json', json_encode(array('name' => $long, 'title' => 'HarnessTest long', 'version' => '1.0.0', 'platform' => 1,
+	file_put_contents($long_dir . '/manifest.json', json_encode(array('name' => $long, 'title' => 'HarnessTest long', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'models' => array(array('name' => $long_model, 'fields' => array(array('name' => 'abcdefghijklmnopqrst', 'type' => 'string')))),
 		'admin_pages' => array(array('slug' => $long_slug, 'title' => $long_title, 'sections' => array(array('type' => 'text', 'text' => 'x')))),
 		'profile_pages' => array(array('slug' => $long_slug, 'title' => $long_title, 'sections' => array(array('type' => 'text', 'text' => 'x')))),

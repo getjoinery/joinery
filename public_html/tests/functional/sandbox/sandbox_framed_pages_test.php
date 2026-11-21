@@ -123,7 +123,7 @@ try {
 	section('The manifest and the approval screen');
 	$bad = function (array $page) {
 		try {
-			SandboxManifest::fromArray(array('name' => 'hts_fr', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'admin_pages' => array($page)), 'hts_fr');
+			SandboxManifest::fromArray(array('name' => 'hts_fr', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef', 'admin_pages' => array($page)), 'hts_fr');
 			return '';
 		} catch (SandboxManifestException $e) {
 			return $e->getMessage();
@@ -132,12 +132,12 @@ try {
 	check(strpos($bad(array('slug' => 'a', 'title' => 'A', 'frame' => true, 'sections' => array(array('type' => 'text', 'text' => 'x')))), 'no sections') !== false,
 		'A framed page with sections is refused');
 	check(strpos($bad(array('slug' => 'a', 'title' => 'A', 'frame' => 'yes')), 'true or false') !== false, 'frame is true or false');
-	$m = SandboxManifest::fromArray(array('name' => 'hts_fr', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1) + $manifest, 'hts_fr');
+	$m = SandboxManifest::fromArray(array('name' => 'hts_fr', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef') + $manifest, 'hts_fr');
 	$grants = SandboxConsent::grantsOf($m);
 	check(strpos((string)($grants['member_pages']['board'] ?? ''), 'framed page running the plugin') !== false, 'A framed member page says so on the approval screen');
 	check(($grants['framed_admin_pages'] ?? null) === array('board' => 'Board') && isset(SandboxConsent::describe($grants)["Run its own script in admins' browsers, on these framed admin pages"]),
 		'A framed admin page is a grant, listed in words', json_encode($grants['framed_admin_pages'] ?? null));
-	$plain = SandboxConsent::grantsOf(SandboxManifest::fromArray(array('name' => 'hts_fr', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1,
+	$plain = SandboxConsent::grantsOf(SandboxManifest::fromArray(array('name' => 'hts_fr', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'admin_pages' => array(array('slug' => 'board', 'title' => 'Board')), 'profile_pages' => array(array('slug' => 'board', 'title' => 'My board'))), 'hts_fr'));
 	$more = SandboxConsent::additions($grants, $plain);
 	check(isset($more['framed_admin_pages']['board'], $more['member_pages']['board']), 'Pages that become framed ask anew (design 12)', json_encode($more));

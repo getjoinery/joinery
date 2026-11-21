@@ -327,7 +327,7 @@ try {
 	check(count(SandboxPages::requestFiles(array('many' => $many))['many']['tmp_name'] ?? array()) === SandboxPages::MAX_FILES, 'At most ' . SandboxPages::MAX_FILES . ' files are carried');
 
 	section('The manifest');
-	$base = array('name' => 'hts_mfx', 'title' => 'X', 'version' => '1.0.0', 'platform' => 1);
+	$base = array('name' => 'hts_mfx', 'title' => 'X', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef');
 	check(SandboxManifest::problems($base + array('accept_uploads' => true)) === array(), 'accept_uploads true is valid');
 	check(in_array('accept_uploads must be true or false', SandboxManifest::problems($base + array('accept_uploads' => 1)), true), 'accept_uploads 1 is refused');
 	check(SandboxManifest::memoryCeilingMb() >= 16, 'The memory ceiling is the site\'s own page-request limit', SandboxManifest::memoryCeilingMb() . ' MB');
@@ -373,9 +373,9 @@ try {
 		$tags[] = 'sbx_' . $name;
 		// A file of the plugin's tag too large to read in the fence.
 		$big = File::createFromBytes(str_repeat('b', 2200000), 'big.bin', 'application/octet-stream', (int)$admin->key,
-			array('fil_private' => true, 'fil_source' => 'sbx_' . $name));
+			array('fil_private' => true, 'fil_source' => 'sbx_' . $name, 'fil_install_id' => PluginInstallIdentity::idOf($name)));
 		$huge = File::createFromBytes(str_repeat('h', 40000000), 'huge.bin', 'application/octet-stream', (int)$admin->key,
-			array('fil_private' => true, 'fil_source' => 'sbx_' . $name));
+			array('fil_private' => true, 'fil_source' => 'sbx_' . $name, 'fil_install_id' => PluginInstallIdentity::idOf($name)));
 		list($files, $paths) = sbx_up_post($scratch);
 		$allowed = $paths;
 		if (!$fenced) {
@@ -401,7 +401,7 @@ try {
 	section('Its files are its data, whoever is viewing');
 	$member = make_user('SbxUploadMember', 0);
 	$theirs = File::createFromBytes("the admin's\n", 'theirs.txt', 'text/plain', (int)$admin->key,
-		array('fil_private' => true, 'fil_source' => 'sbx_' . $name));
+		array('fil_private' => true, 'fil_source' => 'sbx_' . $name, 'fil_install_id' => PluginInstallIdentity::idOf($name)));
 	$relay = new SandboxRelay($name, array('input' => array('user' => array('id' => (int)$member->key, 'permission' => 0))));
 	$renamed = $relay->handle(array('ask' => 'record.update', 'model' => 'File', 'id' => $theirs->key, 'fields' => array('title' => 'Seen by a member')));
 	check(!empty($renamed['ok']) && ($renamed['record']['fil_title'] ?? null) === 'Seen by a member',
@@ -411,6 +411,24 @@ try {
 	$other = $relay->handle(array('ask' => 'record.update', 'model' => 'File', 'id' => $foreign->key, 'fields' => array('title' => 'x')));
 	check(empty($other['ok']) && ($other['status'] ?? null) === 404 && (new File($foreign->key, TRUE))->get('fil_title') === 'foreign.txt',
 		'but a file without its tag is not found, and is left as it was', json_encode($other));
+
+	// A file of its tag that an earlier install of the same name kept (another
+	// install id) is not its own (spec plugin_install_identity A1).
+	$earlier = File::createFromBytes("an earlier install's\n", 'earlier.txt', 'text/plain', (int)$admin->key,
+		array('fil_private' => true, 'fil_source' => 'sbx_' . $name, 'fil_install_id' => str_repeat('c', 32)));
+	harness_defer(function () use ($earlier) { $earlier->permanent_delete(); });
+	$got = $relay->handle(array('ask' => 'record.get', 'model' => 'File', 'id' => $earlier->key));
+	$read = $relay->handle(array('ask' => 'file.read', 'id' => $earlier->key, 'offset' => 0));
+	$listed = $relay->handle(array('ask' => 'record.list', 'model' => 'File', 'query' => array()));
+	$ids = array_map(function ($r) { return (int)($r['fil_file_id'] ?? 0); }, (array)($listed['records'] ?? array()));
+	$upd = $relay->handle(array('ask' => 'record.update', 'model' => 'File', 'id' => $earlier->key, 'fields' => array('title' => 'x')));
+	$del = $relay->handle(array('ask' => 'record.delete', 'model' => 'File', 'id' => $earlier->key));
+	$after = new File($earlier->key, TRUE);
+	check(empty($got['ok']) && ($got['status'] ?? null) === 404 && empty($read['ok']), 'A file of its tag kept by an earlier install is not found, nor read',
+		json_encode(array($got, $read)));
+	check(!empty($listed['ok']) && !in_array((int)$earlier->key, $ids, true), 'nor listed', json_encode($ids));
+	check(empty($upd['ok']) && empty($del['ok']) && $after->get('fil_title') === 'earlier.txt' && !$after->get('fil_delete_time'),
+		'nor renamed or trashed, and is left as it was', json_encode(array($upd, $del)));
 
 	section('A records grant on File reaches every file');
 	$granted = 'hts_' . bin2hex(random_bytes(3));
@@ -453,7 +471,7 @@ try {
 	$words = SandboxConsent::describe(SandboxConsent::grantsOf(SandboxPlugins::manifest($granted)));
 	check(strpos(implode(' ', $words['Records it may use: Site core'] ?? array()), "Every file on the site, every member's") !== false,
 		'The approval screen says it reaches every file on the site', json_encode($words));
-	$create = SandboxCompatibility::problems(SandboxManifest::fromArray(array('name' => 'hts_mfx', 'title' => 'X', 'version' => '1.0.0', 'platform' => 1,
+	$create = SandboxCompatibility::problems(SandboxManifest::fromArray(array('name' => 'hts_mfx', 'title' => 'X', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 		'permissions' => array('records' => array('File' => array('create'))))));
 	check(strpos(implode(' ', $create), 'createFromUpload()') !== false, 'A grant to create File records is refused, naming the way', json_encode($create));
 

@@ -21,6 +21,7 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.10 - the removal calls pass the request's install id (spec plugin_install_identity A10)
  * @version 1.9 - scratch queue and site are harness_scratch_dir(), removed however the run ends
  * @version 1.8 - the PHP-side checks run against a scratch RootState directory, with the outcomes beside the queue
  *                as root keeps them (specs/shell_command_audit.md D1)
@@ -144,21 +145,21 @@ check(in_array('remove_plugin', RootRequest::KINDS, true), "'remove_plugin' is a
 $remove_case = substr($dispatcher, strpos($dispatcher, 'function root_request_plugin_files('));
 $remove_case = substr($remove_case, 0, strpos($remove_case, "\n}\n"));
 check(strpos($dispatcher, "case 'remove_plugin':") !== false
-	&& preg_match("/case 'remove_plugin':.*?root_request_plugin_files\(\(string\)\(\\\$args\['name'\] \?\? ''\), \\\$kind, false\);/s", $dispatcher) === 1,
+	&& preg_match("/case 'remove_plugin':.*?root_request_plugin_files\(\(string\)\(\\\$args\['name'\] \?\? ''\), \\\$kind, false, \\\$request_install_id\);/s", $dispatcher) === 1,
 	'remove_plugin calls the shared file half with the request\'s name');
 $remover_case = substr($dispatcher, strpos($dispatcher, "case 'run_plugin_remover':"));
 $remover_case = substr($remover_case, 0, strpos($remover_case, "\tcase '", 5));
 check(strpos($remover_case, "in_array('--check', \$argv, true)") !== false
-	&& strpos($remover_case, "root_request_plugin_files((string)(\$args['plugin'] ?? ''), \$kind, true);") !== false,
+	&& strpos($remover_case, "root_request_plugin_files((string)(\$args['plugin'] ?? ''), \$kind, true, \$request_install_id);") !== false,
 	'run_plugin_remover --check asks the checks and removes nothing');
 check(strpos($remover_case, "in_array('--remover-ran', \$argv, true)") !== false
-	&& strpos($remover_case, "root_request_plugin_files((string)(\$args['plugin'] ?? ''), \$kind, false);") !== false,
+	&& strpos($remover_case, "root_request_plugin_files((string)(\$args['plugin'] ?? ''), \$kind, false, \$request_install_id);") !== false,
 	'run_plugin_remover --remover-ran asks them again and removes the files');
 check(strpos($remover_case, 'this runner is older than the tree') !== false && strpos($remover_case, 'exit(2)') !== false,
 	'and the kind handed over whole (a runner older than the tree) is refused, nothing removed');
 check(strpos($remove_case, "exit(\$check_only ? 3 : 0);") !== false,
 	'a directory already gone answers 3 to the check and done to a removal');
-$refusal_at = strpos($remove_case, 'PluginRemoval::refusal($name, $plugins_dir, $row)');
+$refusal_at = strpos($remove_case, 'PluginRemoval::refusal($name, $plugins_dir, $row, $install_id)');
 $remove_at  = strpos($remove_case, 'PluginRemoval::remove($name, $plugins_dir)');
 check($refusal_at !== false && $remove_at !== false && $refusal_at < $remove_at,
 	'the dispatcher asks PluginRemoval::refusal() before PluginRemoval::remove()');

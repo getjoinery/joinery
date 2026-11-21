@@ -21,6 +21,8 @@
  * test removing its own scratch plugin) are as removed as root would leave
  * them.
  *
+ * @version 1.3 - refusal() takes the install id the request names, and refuses a row holding another
+ *                (spec plugin_install_identity A10)
  * @version 1.2 - declared_remover(): the host_remover a plugin's manifest declares, which decides whether an
  *                uninstall queues run_plugin_remover (remover, then files) or remove_plugin (files alone)
  *                (specs/plugin_host_removal.md D6)
@@ -62,9 +64,12 @@ class PluginRemoval {
 	 * @param string      $name        The plugin name from the request
 	 * @param string      $plugins_dir The plugins directory to check under
 	 * @param Plugin|null $row         The plugin's database row, null when there is none
+	 * @param string|null $install_id  The install the request was made for (its uninstall); a row
+	 *                                 holding another install's id is a later install of the name,
+	 *                                 whose files are not this request's to remove
 	 * @return string '' or the refusal
 	 */
-	public static function refusal(string $name, string $plugins_dir, ?Plugin $row): string {
+	public static function refusal(string $name, string $plugins_dir, ?Plugin $row, ?string $install_id = null): string {
 		if ($name === '' || !Plugin::is_valid_plugin_name($name) || preg_match('/^[a-zA-Z]/', $name) !== 1) {
 			return "'$name' is not a plugin name";
 		}
@@ -98,6 +103,9 @@ class PluginRemoval {
 		}
 		if ((bool)$row->get('plg_is_system')) {
 			return "plugin '$name' is marked is_system on its row; this node cannot be without it";
+		}
+		if ($install_id !== null && $install_id !== '' && (string)$row->get('plg_install_id') !== $install_id) {
+			return "plugin '$name' was installed again since this removal was asked for; its files are the new install's";
 		}
 		return '';
 	}

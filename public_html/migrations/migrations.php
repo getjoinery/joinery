@@ -2069,3 +2069,13 @@
 	$migration['migration_file'] = 'sandboxed_plugins_old_shape_removed.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Every installed plugin gets an install id and a ledger of what it holds,
+	// and what it kept before ids existed carries the id (spec
+	// plugin_install_identity, design 4). Idempotent.
+	$migration = array();
+	$migration['database_version'] = '242';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'plugin_install_ids.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

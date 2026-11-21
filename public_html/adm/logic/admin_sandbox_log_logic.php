@@ -4,6 +4,7 @@
  * the plugin was told and asked, what it called through each door, and what
  * was refused and why, newest first, from SandboxLog.
  *
+ * @version 1.1 - only this install's calls: a log row of an earlier install of the same name is left out
  * @version 1.0
  */
 
@@ -21,7 +22,8 @@ function admin_sandbox_log_logic(array $input): LogicResult {
 	} catch (SandboxManifestException $e) {
 	}
 
-	$filters = array('plugin' => $plugin);
+	// This install's calls: an earlier install of the same name is not this plugin.
+	$filters = array('plugin' => $plugin, 'install_id' => (string)PluginInstallIdentity::idOf($plugin));
 	$kinds = array(SandboxLog::KIND_UI, SandboxLog::KIND_SIGNAL, SandboxLog::KIND_SCHEDULE, SandboxLog::KIND_TEST);
 	$statuses = array(SandboxLog::STATUS_OK, SandboxLog::STATUS_ERROR, SandboxLog::STATUS_TIMEOUT, SandboxLog::STATUS_UNAVAILABLE, SandboxLog::STATUS_BUSY);
 	if (in_array($input['kind'] ?? '', $kinds, true)) {

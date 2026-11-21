@@ -68,6 +68,8 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.18 - a plugin is refused while an earlier one of its name waits for its files to be removed, and a
+ *                 sandboxed package whose manifest id differs from the installed one's (PluginInstallIdentity)
  * @version 1.17 - on the publishing box a sandboxed plugin from disk is refused while they are off and recorded
  *                 plg_trust = 'sandboxed' (no email: the box's tree is its source), not 'signed'
  * @version 1.16 - a refused sandboxed plugin is told why: switched off, or a shared host (SandboxPlugins::offMessage())
@@ -775,6 +777,17 @@ try {
 		}
 
 		$target = $dest_parent . '/' . $staged_name;
+		// An earlier plugin of this name still waiting for its files to be
+		// removed, or a sandboxed package that is a different plugin from the
+		// one installed (another manifest id): refused before anything moves.
+		if ($type === 'plugin') {
+			$why = PluginInstallIdentity::installRefusal($staged_name, $target, $dir);
+			if ($why !== '') {
+				fwrite(STDERR, "install_extension: $why\n");
+				install_extension_rmtree($work);
+				exit(2);
+			}
+		}
 		if (is_dir($target)) {
 			// Refused rather than replaced unless the operator said so:
 			// replacing an installed extension in place is a different act

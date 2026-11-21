@@ -105,7 +105,7 @@ try {
 	$pm = PluginManager::getInstance();
 
 	section('Compatibility (Q13)');
-	$m = SandboxManifest::fromArray(array('name' => $name, 'title' => 'x', 'version' => '1.0.0', 'platform' => SandboxManifest::PLATFORM_VERSION + 1,
+	$m = SandboxManifest::fromArray(array('name' => $name, 'title' => 'x', 'version' => '1.0.0', 'id' => '0123456789abcdef0123456789abcdef', 'platform' => SandboxManifest::PLATFORM_VERSION + 1,
 		'permissions' => array('actions' => array('no_such_action_x'), 'records' => array('NoSuchModelX' => array('read'))),
 		'signals' => array('no.such_signal')));
 	$problems = SandboxCompatibility::problems($m);
@@ -128,7 +128,7 @@ try {
 		harness_skip('A native plugin\'s name is refused', 'no native plugin on disk here');
 	} else {
 		$taken = SandboxCompatibility::problems(SandboxManifest::fromArray(array('name' => $native, 'title' => 'x', 'version' => '1.0.0',
-			'platform' => SandboxManifest::PLATFORM_VERSION)));
+			'id' => '0123456789abcdef0123456789abcdef', 'platform' => SandboxManifest::PLATFORM_VERSION)));
 		check(count(preg_grep('~is a Joinery plugin~', $taken)) === 1, "A sandboxed plugin named $native, a native plugin's name, is refused",
 			implode(' | ', $taken));
 	}

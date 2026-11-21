@@ -133,19 +133,19 @@ try {
 	section('The manifest and the approval screen');
 	foreach (array('User' => 'no owner column', 'Page' => 'public content', 'Passkey' => 'sign-in or key details',
 		'ApiKey' => 'API does not show') as $model => $words) {
-		$m = SandboxManifest::fromArray(array('name' => 'hts_ow', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1,
+		$m = SandboxManifest::fromArray(array('name' => 'hts_ow', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
 			'permissions' => array('own_records' => array($model => array('read')))), 'hts_ow');
 		check(strpos(implode(' ', SandboxCompatibility::problems($m)), $words) !== false, 'An own-rows grant on ' . $model . ' is refused: ' . $words,
 			implode(' ', SandboxCompatibility::problems($m)));
 	}
-	$m = SandboxManifest::fromArray(array('name' => 'hts_ow', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1) + $manifest
+	$m = SandboxManifest::fromArray(array('name' => 'hts_ow', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef') + $manifest
 		+ array('outbound_hosts' => array('hooks.example.com')), 'hts_ow');
 	$words = SandboxConsent::describe(SandboxConsent::grantsOf($m));
 	check(strpos(json_encode($words["Each member's own records"] ?? null), 'only the rows of the member viewing') !== false, 'The approval screen names the own-rows grant');
 	check(strpos(json_encode($words["Each member's own records"] ?? null), "Each member's own notifications: read") !== false,
 		'in plain words: each member\'s own notifications', json_encode($words["Each member's own records"] ?? null));
 	check(isset($words['Warning']), 'and warns when personal records and an outside website go together', json_encode($words['Warning'] ?? null));
-	$before = SandboxConsent::grantsOf(SandboxManifest::fromArray(array('name' => 'hts_ow', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1), 'hts_ow'));
+	$before = SandboxConsent::grantsOf(SandboxManifest::fromArray(array('name' => 'hts_ow', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef'), 'hts_ow'));
 	check((SandboxConsent::additions(SandboxConsent::grantsOf($m), $before)['own_records'] ?? null) === array('Notification' => array('read')),
 		'An update adding an own-rows grant asks for it anew (design 12)');
 
