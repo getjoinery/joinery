@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.35 - the admin second-factor gate lets /services_connected through (the wizard's Connect return)
  * @version 1.34 - the setup-wizard gate asks shouldInterrupt() before interruptExempt(), so plugins' quiet pages are loaded when read
  * @version 1.33 - the setup-wizard interrupt remembers the page it took someone from (SetupSteps::rememberDestination)
  * @version 1.32 - set_return() and the sign-in session regenerate are safe on the command line (no REQUEST_URI, output already sent); a vault that fails to close on a network change is recorded
@@ -2008,8 +2009,11 @@ class SessionControl{
 		// enrollment impossible. Protected content over the API is already
 		// independently vault-gated.
 		if ($this->must_enable_totp_for_admin()) {
+			// /services_connected is the one-time return from the wizard's Connect
+			// button, carrying the site's new credential: turned away here, the link
+			// is made at the store and lost on this site.
 			if ($path !== '/profile/security' && $path !== '/setup'
-					&& $path !== '/logout'
+					&& $path !== '/logout' && $path !== '/services_connected'
 					&& strpos($path, '/api/v1/') !== 0) {
 				$msgtxt = urlencode('Your administrator account requires a second factor: an authenticator app or a passkey.');
 				return '/profile/security?msgtext=' . $msgtxt;

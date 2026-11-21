@@ -490,6 +490,26 @@ function cart_charge_complete_from_webhook($stripe_session): ?string {
 }
 
 /**
+ * The buyer's browser, back at the cart or the checkout after a card payment
+ * their bank confirmed was completed without it (by the webhook): the cart is
+ * emptied of what was paid for and the confirmation shown, as their own
+ * return would have done. Null when there is nothing of the kind.
+ */
+function cart_charge_settle_completed_card(): ?LogicResult {
+	$pending = _cart_charge_card_pending(null, true);
+	if (!$pending) {
+		return null;
+	}
+	$ref = (string)($pending['state']['awaiting'] ?? '');
+	$order = new Order((int)($pending['order_id'] ?? 0), TRUE);
+	if ($ref === '' || !$order->key || !$order->is_fulfilled()) {
+		return null;
+	}
+	_cart_charge_card_pending(null);
+	return _cart_charge_show_completed($ref);
+}
+
+/**
  * Complete a card checkout (the on-page form) from Stripe's webhook: the buyer
  * confirmed the payment with their bank, Stripe charged the subscription's
  * first invoice, and the browser has not posted back. $ref is what the bank

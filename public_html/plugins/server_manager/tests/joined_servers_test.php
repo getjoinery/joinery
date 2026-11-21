@@ -102,4 +102,18 @@ $gone = new ManagedNode((int)$mine[0]->key, TRUE);
 check(JoinedServers::for_user((int)$paying->key) === array() && !$gone->get('mgn_enabled')
 	&& trim((string)$gone->get('mgn_agent_public_key')) === '', 'it leaves their page, its agent forgotten and the node disabled');
 
+section('As the signed-in owner, on the rule the page checks');
+$again = jsv_request('jsv-again-' . $run . '.example.com', '198.51.100.' . random_int(2, 250));
+$_SESSION['loggedin'] = 1; $_SESSION['usr_user_id'] = (int)$paying->key; $_SESSION['permission'] = 0;
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$fp = (string)$again->get('ajr_fingerprint');
+$result = SystemBase::rule_checked_write(function () use ($fp, $paying) { return JoinedServers::claim($fp, $paying); });
+if ($result['node']) { harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $result['node']->key); }
+check($result['state'] === JoinedServers::STATE_APPROVED, 'a member\'s claim is written on the page\'s rule', json_encode($result['state']));
+$node_again = $result['node'];
+SystemBase::rule_checked_write(function () use ($node_again, $paying) { JoinedServers::let_go(new ManagedNode((int)$node_again->key, TRUE), (int)$paying->key); });
+check(JoinedServers::for_user((int)$paying->key) === array(), 'and so is letting it go');
+unset($_SERVER['REQUEST_METHOD']);
+$_SESSION = array();
+
 harness_finish();

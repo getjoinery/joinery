@@ -973,7 +973,8 @@ seen (`SetupSteps::markPastOnboarding()`). `SetupSteps::interruptExempt()` names
 paths it leaves alone: the wizard, logout, the API, the security page (where
 the encryption step sends a user to add a passkey that can derive a key),
 the step-up ceremony, the pages an emailed link opens (`/verify-email`, `/login`,
-`/recovery-verify`, so a signed-in person can confirm an address), and every page a plugin names with `SetupSteps::quietOn()`
+`/recovery-verify`, so a signed-in person can confirm an address), the return from the wizard's own Connect
+button (`/services_connected`), and every page a plugin names with `SetupSteps::quietOn()`
 from its bootstrap: a purchase under way (the store's cart and checkout pages,
 the hosting configure page, a buyer's Your Sites pages), so someone who signs up
 to buy pays, and reads what they bought, before the wizard starts. A quiet path

@@ -27,7 +27,7 @@ harness_boot();
 
 section('The login interrupt leaves the routes the wizard itself depends on alone');
 foreach (array('/setup', '/logout', '/profile/security', '/profile/verify-stepup', '/api/v1/passkey_register_options',
-		'/verify-email', '/login', '/recovery-verify') as $path) {
+		'/verify-email', '/login', '/recovery-verify', '/services_connected') as $path) {
 	check(SetupSteps::interruptExempt($path), "$path is exempt");
 }
 foreach (array('/', '/profile', '/profile/security/other', '/admin/server_manager', '/api/v2/x', '/setupx') as $path) {
@@ -205,7 +205,7 @@ check(SetupSteps::interruptExempt('/sw_quiet_tree/a') && SetupSteps::interruptEx
 check(!SetupSteps::interruptExempt('/sw_quiet_tree') && !SetupSteps::interruptExempt('/sw_quiet_tree_other'), 'and neither the page above it nor a neighbour');
 check(SetupSteps::isPageView('GET') && SetupSteps::isPageView('head'), 'a page being opened is a page view');
 check(!SetupSteps::isPageView('POST') && !SetupSteps::isPageView('PUT'), 'a form being sent is not: the wizard never swallows it');
-foreach (array('/cart', '/checkout', '/profile/server_manager/configure', '/profile/server_manager', '/profile/server_manager/connect_cloud') as $buy_path) {
+foreach (array('/cart', '/checkout', '/profile/server_manager/configure', '/profile/server_manager', '/profile/server_manager/connect_cloud', '/services/authorize') as $buy_path) {
 	if (PluginHelper::isPluginActive('store') && PluginHelper::isPluginActive('server_manager')) {
 		check(SetupSteps::interruptExempt($buy_path), "the purchase page $buy_path is quiet");
 	}

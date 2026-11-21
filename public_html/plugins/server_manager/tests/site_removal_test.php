@@ -107,4 +107,22 @@ check($result['kind'] === SiteRemoval::KIND_STOP && !empty($own->get('cvp_delete
 check(!$node->get('mgn_enabled') && trim((string)$node->get('mgn_agent_public_key')) === '' && !$node->get('mgn_uptime_enabled'),
 	'its agent is forgotten, its checks are off and the node is disabled');
 
+section('As the signed-in buyer, on the rule the page checks');
+// A member may not write a node or a provision; the page checks the site is
+// theirs and writes on that rule (profile_sites_logic remove_site).
+$node2 = srm_node('srm-mine-' . $run);
+$mine = srm_site($buyer, 'srm-mine-' . $run, 'done', 'customer', array('cvp_mgn_managed_node_id' => (int)$node2->key));
+$_SESSION['loggedin'] = 1; $_SESSION['usr_user_id'] = (int)$buyer->key; $_SESSION['permission'] = 0;
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$refused = false;
+try { SiteRemoval::remove(new CustomerCloudProvision((int)$mine->key, TRUE)); } catch (Throwable $e) { $refused = true; }
+check($refused, 'outside that rule a member\'s write is refused');
+$mine2 = new CustomerCloudProvision((int)$mine->key, TRUE);
+$done = SystemBase::rule_checked_write(function () use ($mine2) { return SiteRemoval::remove($mine2); });
+$mine2->load();
+check($done['kind'] === SiteRemoval::KIND_STOP && !empty($mine2->get('cvp_delete_time'))
+	&& !(new ManagedNode((int)$node2->key, TRUE))->get('mgn_enabled'), 'on it, the buyer\'s own site is let go');
+unset($_SERVER['REQUEST_METHOD']);
+$_SESSION = array();
+
 harness_finish();

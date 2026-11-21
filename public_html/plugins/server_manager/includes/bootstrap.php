@@ -21,6 +21,7 @@
  * @version 1.30 - two incident sources: a built site whose agent was never let in, and an email to a buyer that failed for good
  * @version 1.29 - Your Sites and the pages under it are quiet for the setup wizard too: a buyer reads the
  *                password shown once and the DNS records there straight after paying
+ * @version 1.29 - /services/authorize is quiet for the setup wizard: a site's Connect landed its owner in the wizard
  * @version 1.28 - the hosting configure page is quiet for the setup wizard (SetupSteps::quietOn): a buyer who
  *                 signed up configures and pays before the wizard starts
  * @version 1.27 - the joinery_services fulfilment provider registers beside customer_cloud (specs/services_phase3_selling_nudge.md §1)
@@ -108,6 +109,9 @@ if (class_exists('FulfillmentRegistry')) {
 // shown once, the DNS records to add, the Linode connection) ----
 SetupSteps::quietOn('/profile/server_manager');
 SetupSteps::quietOn('/profile/server_manager/*');
+// A self-hosted site's owner, sent here by their own site to link it to their
+// account for email and backups: the link is finished before the wizard starts.
+SetupSteps::quietOn('/services/authorize');
 
 // ---- A buyer who confirms their email lands on Your Sites: where the site
 // they are setting up, or just bought, is ----

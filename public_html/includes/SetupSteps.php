@@ -36,6 +36,7 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.33 - /services_connected, the return from the wizard's Connect button, is left alone by the login interrupt
  * @version 1.32 - the email links (/verify-email, /login?act_code=, /recovery-verify) are left alone by the login
  *                interrupt: a signed-in buyer who opened their confirmation link landed in the wizard, unconfirmed
  * @version 1.31 - Backups is done once the recovery key exists on a site its management node backs up (walkthrough 43, 52, 57)
@@ -362,6 +363,12 @@ class SetupSteps {
 		// address. Sent to the wizard instead, the press never happens and the
 		// address stays unconfirmed.
 		if ($path === '/verify-email' || $path === '/login' || $path === '/recovery-verify') {
+			return true;
+		}
+		// The way back from the wizard's own Connect button (email and backups
+		// from the store): it carries the site's new credential, once. Sent to
+		// the wizard instead, the link is made at the store and lost here.
+		if ($path === '/services_connected') {
 			return true;
 		}
 		// Quiet pages register from plugin bootstraps, which load lazily.

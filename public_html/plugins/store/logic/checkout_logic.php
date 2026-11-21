@@ -27,6 +27,17 @@ function checkout_logic(array $input): LogicResult{
 
 	$cart = ShoppingCart::current();
 
+	// Back after a card payment the webhook completed while this browser was
+	// away: the paid lines leave the cart and the confirmation is shown.
+	if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+		require_once(PathHelper::getIncludePath('plugins/store/logic/cart_charge_logic.php'));
+		require_once(PathHelper::getIncludePath('plugins/store/data/orders_class.php'));
+		$settled = cart_charge_settle_completed_card();
+		if ($settled !== null) {
+			return $settled;
+		}
+	}
+
 	// Handle item removal
 	// A POST, never a link: a link is a GET any site can send this browser to,
 	// and it would take a line out of the cart.

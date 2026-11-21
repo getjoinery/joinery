@@ -131,7 +131,13 @@ function profile_sites_logic(array $input): LogicResult {
 		return LogicResult::redirect($self_url . '?server=' . rawurlencode((string)parse_url($go, PHP_URL_HOST)));
 	}
 	if ($action === 'claim_server') {
-		$claimed = JoinedServers::claim((string)($input['fingerprint'] ?? ''), new User($user_id, TRUE));
+		// The request came from a machine whose own admin sent this buyer here
+		// with its fingerprint: claiming it, and the node it becomes for an
+		// account that pays us, are written on that rule.
+		$claim_fp = (string)($input['fingerprint'] ?? '');
+		$claimed = SystemBase::rule_checked_write(function () use ($claim_fp, $user_id) {
+			return JoinedServers::claim($claim_fp, new User($user_id, TRUE));
+		});
 		$name = htmlspecialchars($claimed['name'] !== '' ? $claimed['name'] : 'That server');
 		$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
 		switch ($claimed['state']) {
@@ -161,7 +167,8 @@ function profile_sites_logic(array $input): LogicResult {
 		try {
 			$mine = new ManagedNode((int)($input['mgn_managed_node_id'] ?? 0), TRUE);
 			$mine_name = (string)$mine->get('mgn_name');
-			JoinedServers::let_go($mine, (int)$user_id);
+			// let_go() refuses a server that is not this buyer's own.
+			SystemBase::rule_checked_write(function () use ($mine, $user_id) { JoinedServers::let_go($mine, (int)$user_id); });
 			$text = 'We have stopped managing ' . htmlspecialchars($mine_name) . ' and taken it off this page. Your server is untouched.';
 			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
 		} catch (Throwable $e) {
@@ -179,7 +186,9 @@ function profile_sites_logic(array $input): LogicResult {
 			return LogicResult::redirect($self_url);
 		}
 		try {
-			$removed = SiteRemoval::remove($gone);
+			// The site is this buyer's own (checked above): letting it go
+			// writes its node and its row, which a member may not otherwise.
+			$removed = SystemBase::rule_checked_write(function () use ($gone) { return SiteRemoval::remove($gone); });
 			$text = $removed['kind'] === SiteRemoval::KIND_STOP
 				? 'We have stopped managing ' . htmlspecialchars((string)$gone->get('cvp_domain')) . ' and taken it off this page. Your server is untouched.'
 					. ($removed['bundle_cancelled'] ? ' Its email and backups subscription is cancelled and runs to the end of the paid period.' : '')

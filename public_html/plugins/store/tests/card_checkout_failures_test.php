@@ -395,6 +395,7 @@ check($redirect !== '/checkout' && ccf_status($order) === Order::STATUS_PAID && 
 // The buyer confirms with their bank and the browser never posts back: Stripe
 // has charged, so its webhook completes the order from the record the stop
 // for the bank left (walkthrough finding 152).
+GatewayPaymentRecord::$session_id_stand_in = 'ccf-buyer-' . $run_id;   // the buyer's browser session
 ccf_cart(array($monthly_id), 'ds3');
 $w = ccf_watermark();
 $stripe = new CcfStripe();
@@ -426,6 +427,15 @@ $spent = GatewayPaymentRecord::GetByRef($awaiting);
 check($spent->get('gpr_state') === GatewayPaymentRecord::STATE_COMPLETED,
 	'and the record is spent', 'state ' . json_encode($spent->get('gpr_state')) . ' ref ' . $awaiting . ' order_err ' . (string)$order->get('ord_error'));
 check(cart_charge_complete_card_from_webhook($awaiting) === 'no open card checkout record', 'a second webhook for it completes nothing more');
+// Back at the cart before anything is posted: the paid line leaves it and the confirmation is shown.
+$_SESSION[StripeHelper::CARD_PENDING_KEY] = $buyers_session[StripeHelper::CARD_PENDING_KEY];
+$back = cart_charge_settle_completed_card();
+check($back !== null && $back->redirect === '/cart_confirm' && count(ShoppingCart::current()->items) === 0
+	&& empty($_SESSION[StripeHelper::CARD_PENDING_KEY]),
+	'the buyer back at the cart finds it settled and is shown the confirmation');
+check(cart_charge_settle_completed_card() === null, 'and there is nothing to settle twice');
+GatewayPaymentRecord::$session_id_stand_in = null;
+$_SESSION[StripeHelper::CARD_PENDING_KEY] = $buyers_session[StripeHelper::CARD_PENDING_KEY];
 $orders_before = ccf_watermark();
 list($redirect, $late_order, $messages) = ccf_confirm($stripe, $w);
 check($redirect === '/cart_confirm' && ccf_watermark() === $orders_before && count(ccf_items($order)) === 1
