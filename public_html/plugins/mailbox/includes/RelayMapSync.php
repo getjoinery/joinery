@@ -17,6 +17,8 @@
  * periodic reconcile (the relay reconcile scheduled task), so freshness beats the
  * reject_unmatched gate.
  *
+ * @version 2.7 - pushedHash(): the stored map hash includes the relay's identity pin, so a map pushed to one
+ *                machine is owed again to another (a moved slot's new shard never went without its addresses)
  * @version 2.6 - every push attempt records its outcome on the relay row (mrl_last_push_attempt_time,
  *                mrl_last_push_result, mrl_last_push_reason: a fixed code, never the relay's own words), so the
  *                relay_status agent word can say why a map is not moving (jeremytunnell, 2026-11-01)
@@ -78,7 +80,7 @@ class RelayMapSync {
 		$wait = 'Your mail relay has not switched to your new key yet. Try again in a minute: '
 			. 'finishing now would leave mail it is still sealing to the old key unreadable.';
 		try {
-			$hash = self::contentHash((new RelayMapExporter($relay))->build());
+			$hash = self::pushedHash($relay, (new RelayMapExporter($relay))->build());
 		} catch (\Throwable $e) {
 			error_log('RelayMapSync::rotationRefusal: map build failed: ' . $e->getMessage());
 			return $wait;
@@ -106,6 +108,18 @@ class RelayMapSync {
 	 */
 	public static function contentHash(array $artifacts): string {
 		return hash('sha256', (string)($artifacts['fragment'] ?? ''));
+	}
+
+	/**
+	 * What mrl_map_content_hash holds: this map AS PUSHED TO THIS MACHINE. The
+	 * relay's identity pin is part of it, so a map the row remembers pushing
+	 * never counts as pushed to a different machine (a slot moved to another
+	 * shard, a relay replaced): that machine holds none of this site's
+	 * addresses until the map is pushed to it. Every reader of the stored hash
+	 * compares against this, never against contentHash() alone.
+	 */
+	public static function pushedHash(MailboxRelay $relay, array $artifacts): string {
+		return hash('sha256', self::contentHash($artifacts) . "\n" . trim((string)$relay->get('mrl_identity_fingerprint')));
 	}
 
 	/**
@@ -185,7 +199,7 @@ class RelayMapSync {
 			return array('status' => 'error', 'message' => 'map build failed: ' . $e->getMessage());
 		}
 
-		$hash = self::contentHash($artifacts);
+		$hash = self::pushedHash($relay, $artifacts);
 		if (!$force && $hash === (string)$relay->get('mrl_map_content_hash')) {
 			return array('status' => 'skipped', 'message' => 'map unchanged',
 				'version' => intval($relay->get('mrl_map_version')));

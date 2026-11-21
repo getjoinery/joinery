@@ -837,8 +837,8 @@ try {
 		};
 		check(strpos($relay_refusal(), 'older version') === false, 'the add-on with Fortress is allowed on a 3.2 relay');
 		check(VaultUnlock::clientRotationCommitRefusal($owner_id, 'mail') !== null, 'a relay that never took this map refuses the commit');
-		$hash = RelayMapSync::contentHash((new RelayMapExporter(new MailboxRelay(intval($relay->key), TRUE)))->build());
 		$relay = new MailboxRelay(intval($relay->key), TRUE);
+		$hash = RelayMapSync::pushedHash($relay, (new RelayMapExporter($relay))->build());
 		$relay->set('mrl_map_content_hash', $hash);
 		$relay->set('mrl_last_push_time', gmdate('Y-m-d H:i:s', time() - 60));
 		$relay->set('mrl_last_pull_time', gmdate('Y-m-d H:i:s'));

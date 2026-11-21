@@ -108,4 +108,14 @@ $coords['identity_fingerprint'] = str_repeat('b', 43);
 $after = $client->applyCoordinates($coords);
 ok('a new pin: the map is owed again', (string)$after->get('mrl_map_content_hash') === '');
 
+section('A remembered push counts only for the machine it went to');
+// A save from a copy of the row loaded before the move can put the old hash
+// back; the pin inside the hash keeps that from reading as pushed.
+$art = array('fragment' => '{"recipients":{},"domains":{"example.test":{}}}');
+$stored = RelayMapSync::pushedHash($after, $art);
+ok('the same machine: the map reads as pushed', $stored === RelayMapSync::pushedHash(new MailboxRelay(intval($after->key), TRUE), $art));
+$after->set('mrl_identity_fingerprint', str_repeat('d', 43));
+ok('another machine: the same map is owed', $stored !== RelayMapSync::pushedHash($after, $art));
+ok('a changed map is owed on the same machine', RelayMapSync::pushedHash($after, $art) !== RelayMapSync::pushedHash($after, array('fragment' => '{}')));
+
 harness_finish();

@@ -20,6 +20,7 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.32 - checkRelayMapFresh() compares RelayMapSync::pushedHash(), the map as pushed to this relay
  * @version 1.31 - comments: the window lives in RamStore, not APCu (strategy/object_free_window_store.md WP4)
  * @version 1.30 - forwardingInUse(): the sending route is checked only while something forwards
  * @version 1.29 - relay fixes point at the Relay section on the Server tab
@@ -654,7 +655,7 @@ class InboundEmailHealth {
         } catch (\Throwable $e) {
             throw new ProvisioningCheckFailed('Could not build the relay alias map to check freshness: ' . $e->getMessage());
         }
-        if (RelayMapSync::contentHash($artifacts) === (string)$relay->get('mrl_map_content_hash')) {
+        if (RelayMapSync::pushedHash($relay, $artifacts) === (string)$relay->get('mrl_map_content_hash')) {
             return;
         }
 

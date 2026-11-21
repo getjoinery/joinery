@@ -3183,7 +3183,10 @@ reload` only when the output changed. Shard-policy limits
 (`tenants/<slug>/limits.json`) are stamped into the merged tenant block here,
 so a fragment can never raise its own caps.
 
-The tenant-side push is content-hashed and skipped when unchanged, and the
+The tenant-side push is content-hashed and skipped when unchanged. The stored
+hash (`RelayMapSync::pushedHash()`) includes the relay's identity pin, so a map
+pushed to one machine is owed again to another: a slot moved to a different
+shard sends its addresses there on the next pass. The
 verdict echoes the pushed fragment's version so the sync knows the merge saw
 this push. Every routing change (alias/domain/grant write, via a data-layer
 hook) triggers an immediate best-effort push, and the `SyncRelayMap` scheduled
