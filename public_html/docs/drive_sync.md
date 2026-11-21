@@ -1003,12 +1003,15 @@ key, not every pass.
 
 A device with no key never materializes a vault folder, but nothing stops the
 user making a directory of the vault's name and saving into it; what they save
-there is held for a key. That directory is the vault's by identity, not by
-name: the first time it is found at the folder's path it is recorded as the
-folder's **stand-in** (`stand_in` on the entry, kept apart from the agreed
-placement), and from then on it follows the server — renamed here when the
-vault is renamed or moved there, with the held files resolving their paths
-through it — and becomes the folder's directory when the key arrives. The
+there is held for a key. A file saved there and carried out before it was ever
+sent is held where it lands, as on a device that holds the key, and the same
+`held_outside_the_vault` issue says so; moved back, it waits for a key again.
+That directory is the vault's by identity, not by name: the first time it is
+found at the folder's path it is recorded as the folder's **stand-in**
+(`stand_in` on the entry, kept apart from the agreed placement), and from then
+on it follows the server — renamed here when the vault is renamed or moved
+there, with the held files resolving their paths through it — and becomes the
+folder's directory when the key arrives. The
 tie is deliberately not an agreement: a stand-in the user removes never held a
 byte of the vault, so its going deletes nothing anywhere and the tie simply
 lapses, where a materialized folder's directory going is the user deleting it.

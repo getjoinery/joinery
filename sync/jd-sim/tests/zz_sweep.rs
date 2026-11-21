@@ -8643,3 +8643,22 @@ fn frozen_a_queued_trash_never_takes_an_edit_made_after_it_seed() {
         );
     });
 }
+
+/// killplat-vault-onekey 82105, 82117, 82160: the keyless guest saves files in
+/// a folder of the vault's name and carries them out before they are sent.
+/// They waited for a key they do not need where they stand, silently, and the
+/// guest never matched the server. Held as on a key holder, and said.
+#[test]
+fn frozen_a_keyless_guests_file_carried_out_of_the_vault_is_held_and_said_seed() {
+    for seed in [82_105, 82_117, 82_160] {
+        workload_core(
+            seed,
+            30,
+            &[("holder", Platform::MacOs), ("guest", Platform::Windows)],
+            true,
+            Vault::OneKeyHolder,
+            true,
+            Names::Ordinary,
+        );
+    }
+}

@@ -28647,3 +28647,39 @@ fn a_file_edited_here_inside_a_folder_whose_trash_was_queued_is_not_trashed() {
     assert!(!live.is_empty(), "the edit reaches the server, live: {:?}", world.server.files().iter().map(|f| (f.name.clone(), f.trashed)).collect::<Vec<_>>());
     assert!(disk_tree(laptop).values().any(|h| h.as_deref() == Some(want.as_str())), "and stands here: {:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
 }
+
+#[test]
+fn a_file_a_keyless_guest_saved_in_the_vault_and_carried_out_is_held_and_said() {
+    // The guest has no key, makes a folder of the vault's name, saves a new
+    // file in it -- which waits for a key -- and then moves the file out to
+    // the top. It was saved somewhere private, so it is not sent in the clear
+    // now (owner decision D1, as on a device that holds the key); but it is
+    // never synced either, and that has to be said, not left silent.
+    let vault = SimVault::new(9_860);
+    let mut world = World::new(9_860, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_write("Private/note.txt", b"saved somewhere private");
+    assert!(world.settle().is_some());
+    guest.fs.user_rename("Private/note.txt", "note.txt");
+    assert!(world.settle().is_some(), "it goes quiet");
+
+    assert!(!world.server.tree().contains_key("note.txt"), "nothing is sent in the clear: {:?}", world.server.tree());
+    let held: Vec<_> = guest.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
+    assert_eq!(held.len(), 1, "the file kept here is said: {held:?}");
+    assert!(guest.fs.exists("note.txt"), "and it stays on this disk");
+    assert_converged(&world);
+
+    // Back into the vault's folder, it waits for a key again, and the notice
+    // that it is held outside goes.
+    guest.fs.user_rename("note.txt", "Private/note.txt");
+    assert!(world.settle().is_some(), "it goes quiet again");
+    let held: Vec<_> = guest.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
+    assert!(held.is_empty(), "nothing is held outside any more: {held:?}");
+    assert!(!world.server.tree().contains_key("note.txt"), "and nothing went up in the clear");
+}

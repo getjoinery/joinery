@@ -1553,6 +1553,14 @@ pub fn run_pass(
             && entry.id.entity_type == EntityType::Folder
             && entry.synced_placement.is_some();
         if entry.status == LocalStatus::PendingKey && !entry.remote_deleted && !locked_folder {
+            // Written in a vault on a device with no key, and carried out of
+            // it before it was ever sent: held as on a device that holds the
+            // key (owner decision D1), and said. Waiting for a key it does not
+            // need where it stands now, it was never synced and nothing told
+            // anyone (killplat-vault-onekey: forty seeds in three hundred).
+            if relative_path(env, &entry)?.is_some() && held_and_never_sent(env, &entry)? {
+                say_it_was_never_sent(env, &entry)?;
+            }
             declined!(traced_id);
         }
         // Bytes this device has already proven it cannot open: they arrived
