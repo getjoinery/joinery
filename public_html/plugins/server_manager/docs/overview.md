@@ -465,6 +465,15 @@ The first three and the fifth are database reads and run before the provider is 
 
 The panel shows, for a request that matches a provision, why it is still there ("no key was recorded from this provision's install", "the key does not match the one the install showed", and so on); a key that differs from the install's is flagged in red. Joins from machines this plane did not provision are always approved by a person. A person approving a join from a provisioned machine approves it as that machine's site node, its host's node, or a site in a container on it, and only once the provider reports the instance running at the join's address. Site copies approve their own agent. Setting `server_manager_auto_approve_joins` switches the automatic approval off.
 
+### A server its owner adds from their own account
+
+Where this management node sells hosting, a member can put a Joinery site they run themselves under its management, and take it out again, from Your Sites (`JoinedServers`, `SiteRemoval`).
+
+- **Add.** *Add a server I already run* takes the site's address and links to that site's own Management Node page with this node's address filled in (`?connect_to=`; shown as a link, since the script policy lets a form's answer go nowhere but this site). The owner presses Connect there, which files the ordinary join request, then *Add this server to my account there*, which opens `/profile/server_manager?claim=<fingerprint>` here. Signed in, they press **Add this server** (`claim_server`): the request is theirs (`ajr_usr_user_id`). Nothing is pasted, and a join can only start from inside the machine's own admin console.
+- **Approval.** An account that pays us (`JoinedServers::pays_us`: a current paid subscription at this store, or a business licence) has its claimed request approved at once (`adoptJoin`, `ajr_decided_by = owner`). Any other waits on *Agents asking to join*, tagged *member's server* with the account, for a person. A join from a machine this plane provisioned always waits for a person.
+- **Whose it is.** `approveJoin()` writes the claimer onto the node (`mgn_owner_usr_user_id`), and Your Sites lists it under *Servers you run*. One account may have `JoinedServers::LIMIT` of them.
+- **Let go.** *Stop managing and remove*, on such a server and on a built site on the buyer's own Linode, forgets the agent, switches off checks and backups, disables the node and closes its incidents (`InstanceTransferFinish::let_go_node`); an own-Linode site's bundle is cancelled to the end of its paid period and its row leaves the page. An order that never built and cost nothing has **Remove**. A site we host ends by cancelling its subscription, and a never-built order that was paid for is a person's to refund.
+
 ## Machines with no site
 
 Some machines a management node manages host no Joinery site at all — a mail relay, a Docker host. They run the same agent in a **machine posture**: no site root, no local database, no admin page, and no platform release ever delivered to them. Two things follow, and both are served by the same endpoint.
@@ -1111,7 +1120,9 @@ check and price and the registrant contact block — the site's internal name,
 the region (`server_manager_hosted_regions`; one region in the list means the
 field does not render), and the site admin email. **Save and continue**
 validates everything (`ManagedSiteDraft::save_and_freeze`, with the domain
-gates in `ManagedDomainIntake`) and writes a **draft provision**: a
+gates in `ManagedDomainIntake`; the admin email must be at a domain that
+receives mail, the rule the new site's account applies, since a refused address
+leaves that account as the username `admin`) and writes a **draft provision**: a
 `cvp_customer_cloud_provisions` row with `cvp_origin = buyer` at status
 `pending_payment`, carrying the domain source (`cvp_domain_source`: `own` |
 `register`), the frozen domain-year quote (`cvp_domain_quote`, `_time`) and
@@ -1130,6 +1141,10 @@ the freeze time (`managed_site_frozen`) in the line's form data plus, when
 registering, the frozen quote under the keys the registration guard reads
 (`managed_domain_price_line`, `managed_domain`), and `extra_cart_lines()` adds
 the domain-year line from that frozen quote without ever re-quoting.
+While another site of the same plan is in the cart the button gives way to a
+sentence saying so (`ManagedSiteDraft::other_site_in_cart`): the plan's product
+takes one line per cart (`pro_max_cart_count`), so sites are paid for one at a
+time.
 
 The draft's states:
 
@@ -1436,7 +1451,14 @@ If the buyer hasn't connected yet, they get an email pointing at the Connect
 page; the page's create-account link uses `server_manager_linode_referral_url`
 so new Linode signups carry the referral credit. A token-refresh failure or a
 provider 401 parks the provision back at `pending_connect` and flags the
-account link — a fresh grant resumes it automatically.
+account link — a fresh grant resumes it automatically. A refusal to create
+the server in the buyer's own account (its limit of services, an unpaid
+balance) parks it the same way with `cvp_error` beginning
+`CustomerCloudProvision::PROVIDER_REFUSED` and the provider's own words
+(`CloudComputeException::$provider_reason`): Your Sites shows those words above
+Connect, the buyer is sent `hosting_provider_refused`, and connecting again
+builds the site. The same refusal on one of our own accounts fails the
+provision and alerts the operator.
 
 **Customer-owned node semantics:** the resulting node is a normal
 `ManagedNode` (installs, upgrades, uptime checks, SSL all apply). Provisioning
@@ -1838,6 +1860,24 @@ own slice, for as long as a paid-through date on this plane says so. The
 customer's own Managed site uses the same legs because that is what Managed
 is; a self-hosted site *rents* them, and the difference is only how the
 credential reaches the box. The master keys never leave this machine.
+
+**Receiving on a buyer's own server.** A site on its buyer's own server that has
+its own mail server is told at the build to receive at its own domain
+(`install.sh site --mail-hostname=`, `mailbox_mail_hostname`), so the MX record
+is in its first DNS list. A domain that already receives email somewhere else
+keeps doing so, on every plan: the site's own MX
+(`ProvisionBuyerDns::site_records_for_buyer()`) and a hosted site's relay MX
+(`plane_inbound_records()`) are left out of the list and the publish box while
+the domain's MX names another host (`receives_elsewhere()`), and Your Sites
+says where the email goes now and which record would move it
+(`mx_left_alone()`).
+
+**Which store a site buys from.** A site's `services_url` setting names the
+deployment its Connect button goes to; its default is getjoinery.com. A
+management node that sells hosting names itself at every build
+(`install.sh site --services-url=`, from the `services_url` build parameter
+`ProvisionCustomerCloud` passes when `SmHosting::enabled()`), so a site's owner
+buys email and backups from the store that built the site.
 
 **The account link.** Nobody types a key. The site's setup wizard (Email or
 Backups step) shows a **Connect your getjoinery account** button; it mints a

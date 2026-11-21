@@ -453,6 +453,19 @@ class InstanceTransferFinish {
 			throw new InstanceTransferFlowException('We have already stopped managing this site.');
 		}
 
+		return self::let_go_node($node);
+	}
+
+	/**
+	 * Stop managing one node at its owner's word: the agent is forgotten,
+	 * backups and uptime checks are switched off, the node is disabled, its
+	 * open incidents close, and its backup storage row is released, which
+	 * starts the retention clock. Shared by a moved site's Stop managing and
+	 * a buyer removing a site on their own server (SiteRemoval).
+	 *
+	 * @return array{incidents: int, backups_released: bool}
+	 */
+	public static function let_go_node(ManagedNode $node): array {
 		AgentChannelEndpoint::forgetAgent($node);
 		$node->set('mgn_backup_policy', json_encode(array('enabled' => false)));
 		$node->set('mgn_uptime_enabled', false);

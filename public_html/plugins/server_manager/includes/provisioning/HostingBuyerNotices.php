@@ -29,6 +29,8 @@
  * site that fails, is retried, and fails again is told again; a plan state's
  * key carries its date, so a second grace period is a new key.
  *
+ * @version 1.4 - tell_refused(): a held order that was refused, with what was refunded
+ * @version 1.3 - provider_refused: a buyer whose own account would not make the server is sent the provider's words
  * @version 1.2 - told only when sent (B20); a cancel is told while it is still to come, and forgotten when taken
  *                back (B22) (hosting_after_purchase)
  * @version 1.1 - tell_domain_expiry(): a domain whose site is gone or shut down is told by email (hosting_after_purchase D2)
@@ -39,8 +41,10 @@ class HostingBuyerNotices {
 	/** Template per notice kind. */
 	const TEMPLATES = array(
 		'waiting_connect'  => 'hosting_waiting_connect',
+		'provider_refused' => 'hosting_provider_refused',
 		'held'             => 'hosting_held',
 		'failed'           => 'hosting_setup_failed',
+		'refused'          => 'hosting_order_refused',
 		'cancel_scheduled' => 'hosting_cancel_scheduled',
 		'grace_payment'    => 'hosting_grace_payment',
 		'grace_ended'      => 'hosting_grace_ended',
@@ -145,7 +149,14 @@ class HostingBuyerNotices {
 	public static function due(CustomerCloudProvision $provision, OrderItem $item): array {
 		$due = array();
 		$status = (string)$provision->get('cvp_status');
-		if (isset(self::SETUP_KINDS[$status])) {
+		$refusal = $provision->provider_refusal();
+		if ($refusal !== '') {
+			// Their own account would not make the server: told with the
+			// provider's words, once per refusal.
+			$due['setup:refused:' . substr(sha1($refusal), 0, 12)] = array('kind' => 'provider_refused',
+				// Another party's words, into an HTML template that does not escape.
+				'vars' => array('provider_reason' => htmlspecialchars($refusal, ENT_NOQUOTES, 'UTF-8')));
+		} elseif (isset(self::SETUP_KINDS[$status])) {
 			$due['setup:' . $status] = array('kind' => self::SETUP_KINDS[$status], 'vars' => array());
 		}
 
@@ -251,6 +262,21 @@ class HostingBuyerNotices {
 	}
 
 	/** The keys already told. */
+	/**
+	 * Tell the buyer of a held order that it was not accepted and what was
+	 * given back. Sent once, by the refusal itself (the row is gone after it,
+	 * so the pass never sees it). Returns whether the email went.
+	 */
+	public static function tell_refused(CustomerCloudProvision $provision, float $refunded): bool {
+		$to = trim((string)$provision->get('cvp_buyer_email'));
+		if ($to === '' || $provision->local_order_item() === null) {
+			return false;
+		}
+		return self::send($provision, 'refused', array(
+			'refund_amount' => $refunded > 0 ? ManagedSiteDraft::money(number_format($refunded, 2, '.', '')) : '',
+		), $to);
+	}
+
 	public static function told(CustomerCloudProvision $provision): array {
 		$list = json_decode((string)$provision->get('cvp_buyer_notices'), true);
 		return is_array($list) ? array_values(array_filter($list, 'is_string')) : array();

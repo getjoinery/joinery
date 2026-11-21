@@ -392,6 +392,60 @@ list($redirect, $order, $messages) = ccf_confirm($stripe, $w);
 check($redirect !== '/checkout' && ccf_status($order) === Order::STATUS_PAID && $stripe->client->subscriptions->calls('create') === 1,
 	'and completes with the same subscription once confirmed', $messages);
 
+// The buyer confirms with their bank and the browser never posts back: Stripe
+// has charged, so its webhook completes the order from the record the stop
+// for the bank left (walkthrough finding 152).
+ccf_cart(array($monthly_id), 'ds3');
+$w = ccf_watermark();
+$stripe = new CcfStripe();
+$stripe->subscription = array('incomplete', 0, 'requires_action', null);
+list($redirect, $order, $messages) = ccf_charge($stripe, $w);
+$awaiting = (string)($_SESSION[StripeHelper::CARD_PENDING_KEY]['state']['awaiting'] ?? '');
+$card_record = GatewayPaymentRecord::GetByRef($awaiting);
+if ($card_record) { harness_register_row('gpr_gateway_payment_records', 'gpr_cart_payment_record_id', $card_record->key); }
+check($awaiting !== '' && $card_record && $card_record->is_open() && $card_record->get('gpr_gateway') === 'stripe_regular'
+	&& strpos((string)$card_record->get('gpr_record'), 'pi_sub_secret') === false,
+	'the stop for the bank is recorded outside the session, without the client secret');
+check(cart_charge_complete_card_from_webhook('sub_nobody_knows') === 'no open card checkout record', 'a subscription with no record completes nothing');
+$stripe->subscription_later = array('active', 1299, 'succeeded', null);
+_cart_charge_gateway('StripeHelper', $stripe);
+harness_set_setting_mem('checkout_type', 'stripe_regular');
+// Stripe's request carries no browser session: nobody is signed in.
+$buyers_session = $_SESSION;
+$_SESSION = array();
+$_SERVER['REQUEST_METHOD'] = 'POST';
+try { $why = cart_charge_complete_card_from_webhook($awaiting); }
+finally { $_SESSION = $buyers_session; unset($_SERVER['REQUEST_METHOD']); }
+harness_set_setting_mem('checkout_type', 'none');
+$order = new Order((int)$order->key, TRUE);
+foreach (ccf_items($order) as $made) { harness_register_row('odi_order_items', 'odi_order_item_id', $made->key); }
+check($why === null && ccf_status($order) === Order::STATUS_PAID && count(ccf_items($order)) === 1
+	&& $stripe->client->subscriptions->calls('create') === 1,
+	'the webhook completes the order with the subscription already made', (string)$why . ' / status ' . ccf_status($order));
+$spent = GatewayPaymentRecord::GetByRef($awaiting);
+check($spent->get('gpr_state') === GatewayPaymentRecord::STATE_COMPLETED,
+	'and the record is spent', 'state ' . json_encode($spent->get('gpr_state')) . ' ref ' . $awaiting . ' order_err ' . (string)$order->get('ord_error'));
+check(cart_charge_complete_card_from_webhook($awaiting) === 'no open card checkout record', 'a second webhook for it completes nothing more');
+$orders_before = ccf_watermark();
+list($redirect, $late_order, $messages) = ccf_confirm($stripe, $w);
+check($redirect === '/cart_confirm' && ccf_watermark() === $orders_before && count(ccf_items($order)) === 1
+	&& $stripe->client->subscriptions->calls('create') === 1,
+	'the buyer coming back afterwards is shown the confirmation, with nothing made twice', (string)$redirect . ' ' . $messages);
+
+// The usual order: the buyer's return completes it, and the webhook that follows finds nothing to do.
+ccf_cart(array($monthly_id), 'ds4');
+$w = ccf_watermark();
+$stripe = new CcfStripe();
+$stripe->subscription = array('incomplete', 0, 'requires_action', null);
+ccf_charge($stripe, $w);
+$awaiting = (string)($_SESSION[StripeHelper::CARD_PENDING_KEY]['state']['awaiting'] ?? '');
+$card_record = GatewayPaymentRecord::GetByRef($awaiting);
+if ($card_record) { harness_register_row('gpr_gateway_payment_records', 'gpr_cart_payment_record_id', $card_record->key); }
+$stripe->subscription_later = array('active', 1299, 'succeeded', null);
+list($redirect, $order, $messages) = ccf_confirm($stripe, $w);
+check(ccf_status($order) === Order::STATUS_PAID && cart_charge_complete_card_from_webhook($awaiting) === 'no open card checkout record'
+	&& count(ccf_items($order)) === 1, 'a return that got there first leaves the webhook nothing to complete', $messages);
+
 $email = ccf_cart(array($one_time_id), 'cc');
 $w = ccf_watermark();
 $stripe = new CcfStripe();

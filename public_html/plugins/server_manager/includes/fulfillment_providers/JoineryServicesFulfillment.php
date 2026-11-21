@@ -32,6 +32,7 @@
  *
  * A Managed site never buys this: its hosting is the entitlement.
  *
+ * @version 1.5 - cancelNotice(): the cancel question says email and backups through us stop, and the site keeps running
  * @version 1.4 - a bundle bought with its site says it is set up for the buyer (after_purchase_message)
  * @version 1.3 - the buy button is the theme's primary button
  * @version 1.2 - a line bought with an own-Linode site names its draft: checked against the site's install line in
@@ -43,7 +44,7 @@
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/JoineryServiceRequirement.php'));
 
-class JoineryServicesFulfillment implements FulfillmentProvider {
+class JoineryServicesFulfillment implements FulfillmentProvider, FulfillmentCancelNotice {
 
 	const KEY = 'joinery_services';
 
@@ -223,6 +224,25 @@ class JoineryServicesFulfillment implements FulfillmentProvider {
 
 	private static function plus_days(string $from, int $days): string {
 		return gmdate('Y-m-d H:i:s', strtotime($from . ' UTC') + max(1, $days) * 86400);
+	}
+
+	/**
+	 * On the subscriptions page's cancel question: what stops for the site
+	 * this line pays for. The site is its owner's and keeps running; our
+	 * email sending and backups for it stop once the paid period has run out
+	 * (the date stops advancing and the ladder runs).
+	 */
+	public function cancelNotice(OrderItem $order_item): string {
+		$names = array();
+		foreach (new MultiServiceTenant(array('svt_odi_order_item_id' => (int)$order_item->key, 'deleted' => false)) as $row) {
+			$name = trim((string)$row->get('svt_host'));
+			if ($name !== '' && !in_array($name, $names, true)) {
+				$names[] = $name;
+			}
+		}
+		$site = count($names) === 1 ? $names[0] : 'your site';
+		return 'After that, email sent through us and backups stored with us stop for ' . $site . '. The site itself keeps '
+			. 'running on your server: set up an email provider and backup storage of your own on it before then.';
 	}
 
 	// ── The line a row follows ───────────────────────────────────────────────

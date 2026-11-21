@@ -144,6 +144,8 @@ class CustomerCloudProvisioningTest {
 		} catch (CloudComputeException $e) {
 			check($e->getCode() === 400 && strpos($e->getMessage(), 'region: region is not valid') !== false,
 				'400 raises with field context');
+			check(strpos($e->provider_reason, 'region is not valid') !== false && strpos($e->provider_reason, 'Linode API') === false,
+				'and carries the provider\'s own words apart from our framing', $e->provider_reason);
 		}
 
 		// getInstance running state.
@@ -222,6 +224,31 @@ class CustomerCloudProvisioningTest {
 		check($again->get('cvp_status') === 'booting' && (string)$again->get('cvp_instance_id') === '77009',
 			'and resumes waiting for that server to start', (string)$again->get('cvp_status'));
 		$again->permanent_delete();
+
+		// A server the buyer's own account refuses to make is the buyer's to
+		// put right: the site waits for them with the provider's words. The
+		// same refusal on our own account is a failure for us.
+		$refusal = new CloudComputeException('Linode API POST linode/instances failed (400): You have reached a limit.', 400);
+		$refusal->provider_reason = 'You have reached a limit.';
+		$fake->createRefusal = $refusal;
+		foreach (array('customer' => 'pending_connect', 'operator' => 'failed') as $mode => $lands) {
+			$refused = new CustomerCloudProvision(NULL);
+			$refused->set('cvp_origin', 'admin');
+			$refused->set('cvp_usr_user_id', $this->user_id);
+			$refused->set('cvp_domain', 'refused-' . $mode . '-' . $suffix . '.example.com');
+			$refused->set('cvp_slug', 'refused-' . $mode . '-' . $suffix);
+			$refused->set('cvp_hosting_mode', $mode);
+			$refused->set('cvp_status', 'ready');
+			$refused->save();
+			$probe->probeReady($refused);
+			$refused->load();
+			check((string)$refused->get('cvp_status') === $lands, "a refused server on a {$mode} account lands at {$lands}",
+				(string)$refused->get('cvp_status') . ' / ' . (string)$refused->get('cvp_error'));
+			check($refused->provider_refusal() === ($mode === 'customer' ? 'You have reached a limit.' : ''),
+				$mode === 'customer' ? 'and carries the provider\'s own words for its buyer' : 'and reads as no buyer\'s refusal');
+			$refused->permanent_delete();
+		}
+		$fake->createRefusal = null;
 
 		// B3 — handle_booting mints the container's placement record, so the
 		// host agent's later join has something to link and host-scope work has
@@ -1202,8 +1229,14 @@ class KeylessProbeDriver implements CloudComputeProvider {
 	public $lastCreateOpts = null;
 	public $getInstanceResult = ['id' => '77001', 'ip' => '', 'status' => 'provisioning'];
 
+	/** When set, createInstance is refused with this exception. */
+	public $createRefusal = null;
+
 	public function createInstance(array $opts): array {
 		$this->lastCreateOpts = $opts;
+		if ($this->createRefusal !== null) {
+			throw $this->createRefusal;
+		}
 		return ['id' => '77001', 'ip' => '', 'status' => 'provisioning'];
 	}
 	public function getInstance(string $instance_id): array { return $this->getInstanceResult; }

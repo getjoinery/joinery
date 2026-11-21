@@ -385,8 +385,11 @@ if ($_POST && in_array(($_POST['action'] ?? ''), array('approve_held_provision',
 			CustomerCloudFulfillment::approve_held($prov, (int)$session->get_user_id());
 			$done = $prov->get('cvp_domain') . ' approved: it is built as any paid order would be.';
 		} else {
-			CustomerCloudFulfillment::refuse_held($prov, (int)$session->get_user_id());
-			$done = $prov->get('cvp_domain') . ' refused. It built nothing, so nothing is left running.';
+			$refusal = CustomerCloudFulfillment::refuse_held($prov, (int)$session->get_user_id());
+			$done = $prov->get('cvp_domain') . ' refused. It built nothing, so nothing is left running. '
+				. ($refusal['lines'] === 0 ? 'Another store sold it: refund and cancel it there.'
+					: ManagedSiteDraft::money(number_format($refusal['refunded'], 2, '.', '')) . ' was refunded and its subscriptions are cancelled. '
+						. ($refusal['emailed'] ? 'The buyer was emailed.' : 'The buyer could NOT be emailed: write to them.'));
 		}
 		$session->save_message(new DisplayMessage($done, 'Done', $page_regex,
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
@@ -1087,6 +1090,15 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 					$jr_tag = ['provision', 'warning', 'Address belongs to provision #' . (int)$jr_prov->key . ' (' . $jr_prov->get('cvp_domain') . '). Approving asks the provider to confirm the instance is running at this address, then binds the agent to the provision\'s site node.'];
 				} else {
 					$jr_tag = ['new node', 'success', 'Approving makes a node record named ' . $jr_name . ' at ' . $jr_ip . '.'];
+					// Claimed by a member from the machine's own admin console
+					// (JoinedServers): theirs once approved, and listed on their page.
+					$jr_owner_id = (int)$jr->get('ajr_usr_user_id');
+					if ($jr_owner_id > 0) {
+						$jr_owner = new User($jr_owner_id, TRUE);
+						$jr_tag = ['member\'s server', 'primary', 'Claimed by ' . ($jr_owner->key ? $jr_owner->get('usr_email') : 'user #' . $jr_owner_id)
+							. ', who does not pay us, so it waits for you. Approving makes a node record named ' . $jr_name . ' at ' . $jr_ip
+							. ' and lists it on their Your Sites page.'];
+					}
 				}
 				if ($jr_verdict['key_mismatch']) {
 					$jr_tag = ['key mismatch', 'danger', 'This address is a machine this plane provisioned, but the key is not the one its install showed. Do not approve unless you know why.'];
@@ -1240,7 +1252,7 @@ $show_account_tabs = $account === CloudAccounts::TEST || $tab_nodes[CloudAccount
 								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
 								<?php echo SmAdminCsrf::field(); ?>
 								<button type="button" class="btn btn-sm btn-outline-danger"
-									<?php echo $confirm_submit('refuse_held_' . (int)$prov->key, 'Refuse ' . $prov->get('cvp_domain') . '? Refund the payment and cancel the subscription on its order page first: refusing moves no money, it only takes the order off this board.'); ?>>Refuse</button>
+									<?php echo $confirm_submit('refuse_held_' . (int)$prov->key, 'Refuse ' . $prov->get('cvp_domain') . '? Everything bought for this site is refunded in full, its subscription is cancelled, the buyer is emailed, and the order leaves this board. Nothing was built.'); ?>>Refuse</button>
 							</form>
 							<?php if ($held_order_id): ?><a href="/plugins/store/admin/admin_order?ord_order_id=<?php echo $held_order_id; ?>" class="svm-host-jump">order</a><?php endif; ?>
 						<?php endif; ?>

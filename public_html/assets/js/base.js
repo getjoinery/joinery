@@ -581,8 +581,15 @@ document.addEventListener('submit', function (e) {
     if (!form.hasAttribute || !form.hasAttribute('data-jy-confirm')) return;
     if (form.dataset.jyConfirmed === '1') { delete form.dataset.jyConfirmed; return; }
     e.preventDefault();
+    // The form's own words for the two buttons and the confirm's colour, as
+    // on a button or link that asks (data-jy-confirm-label, -cancel-label,
+    // -style): "Cancel" beside "Cancel this subscription?" reads both ways.
+    const opts = {};
+    if (form.getAttribute('data-jy-confirm-label')) opts.confirmLabel = form.getAttribute('data-jy-confirm-label');
+    if (form.getAttribute('data-jy-cancel-label')) opts.cancelLabel = form.getAttribute('data-jy-cancel-label');
+    if (form.getAttribute('data-jy-confirm-style')) opts.confirmStyle = form.getAttribute('data-jy-confirm-style');
     JoineryModal.confirm(form.getAttribute('data-jy-confirm'), function () {
         form.dataset.jyConfirmed = '1';
         if (form.requestSubmit) form.requestSubmit(); else form.submit();
-    });
+    }, opts);
 });

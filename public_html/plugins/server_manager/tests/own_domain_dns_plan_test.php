@@ -255,6 +255,43 @@ $consumer_src = (string)file_get_contents(PathHelper::getIncludePath('includes/o
 check(strpos($consumer_src, "\$payload['min_level']") !== false,
 	'the sign-in callback holds the grant to the floor the flow carried');
 
+section('A domain that already receives email elsewhere keeps its MX');
+$mx_site = array(array('type' => 'MX', 'name' => $domain, 'value' => $domain, 'priority' => 10, 'note' => 'Routes inbound mail to this server.'));
+$provision->set('cvp_site_dns_records', json_encode($mx_site));
+$has_mx = function ($provision) {
+	foreach (ProvisionBuyerDns::site_records_for_buyer($provision, array()) as $r) {
+		if ($r['type'] === 'MX') { return true; }
+	}
+	return false;
+};
+DnsResolver::setBackend(new FakeDnsBackend(array()));
+check($has_mx($provision) && ProvisionBuyerDns::mx_left_alone($provision) === null,
+	'a domain with no mail records is offered the site\'s own');
+DnsResolver::setBackend(new FakeDnsBackend(array(
+	$domain . '|' . DNS_MX => array(array('target' => 'aspmx.l.google.com', 'pri' => 1), array('target' => 'alt1.aspmx.l.google.com', 'pri' => 5)),
+)));
+$left = ProvisionBuyerDns::mx_left_alone($provision);
+check(!$has_mx($provision) && $left !== null && $left['hosts'] === array('aspmx.l.google.com', 'alt1.aspmx.l.google.com')
+	&& $left['value'] === $domain, 'one that receives elsewhere is not: the record is held back, with where its email goes now',
+	json_encode($left));
+$plan_types = array();
+$mx_plan = profile_sites_dns_plan($provision);
+foreach ($mx_plan ? $mx_plan->toArray()['records'] : array() as $r) { $plan_types[] = strtoupper((string)($r['type'] ?? '')); }
+check(count($plan_types) > 0 && !in_array('MX', $plan_types, true), 'and the publish box never writes it', json_encode($plan_types));
+DnsResolver::setBackend(new FakeDnsBackend(array(
+	$domain . '|' . DNS_MX => array(array('target' => $domain . '.', 'pri' => 10)),
+)));
+check(ProvisionBuyerDns::mx_left_alone($provision) === null && ProvisionBuyerDns::receives_elsewhere($domain, $domain) === array(),
+	'a domain already pointing at the site is not elsewhere');
+
+// The same guard on a hosted site's relay record.
+$guard_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/logic/profile_sites_logic.php'));
+check(strpos($guard_src, 'FleetService::site_inbound_records(') === false
+	&& substr_count($guard_src, 'ProvisionBuyerDns::plane_inbound_records($provision)') === 2,
+	'the buyer\'s list and publish box read the relay records through the guard, never straight from the fleet');
+$provision->set('cvp_inbound_dns_state', null);
+check(ProvisionBuyerDns::plane_inbound_records($provision) === array(), 'a site whose buyer adds no inbound records has none');
+
 DnsResolver::setBackend(null);
 
 harness_finish();

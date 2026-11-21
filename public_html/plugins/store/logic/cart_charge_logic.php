@@ -163,6 +163,10 @@ function _cart_charge_refused_after_payment(array $return, string $message, ?str
 	$order = null;
 	if ($return['service'] === 'stripe_checkout') {
 		$order = Order::GetByStripeSession($return['ref']);
+	} elseif ($return['service'] === 'stripe_regular') {
+		// A card checkout carried on by the webhook: the order its first pass made.
+		$made = new Order((int)($return['card']['order_id'] ?? 0), TRUE);
+		$order = $made->key ? $made : null;
 	} else {
 		foreach (new MultiOrder(array('ord_paypal_order_id' => $return['lock_ref'])) as $used_order) {
 			$order = $used_order;
@@ -486,6 +490,45 @@ function cart_charge_complete_from_webhook($stripe_session): ?string {
 }
 
 /**
+ * Complete a card checkout (the on-page form) from Stripe's webhook: the buyer
+ * confirmed the payment with their bank, Stripe charged the subscription's
+ * first invoice, and the browser has not posted back. $ref is what the bank
+ * was asked to confirm (the subscription's id), the key the stop for the bank
+ * recorded the cart under. Runs under that payment's lock, which the buyer's
+ * own return shares, so one of the two completes the order.
+ *
+ * @return string|null null when completion was run, else why there was nothing to complete
+ */
+function cart_charge_complete_card_from_webhook(string $ref): ?string {
+	$record = ShoppingCart::recorded_payment($ref);
+	if (!$record || ($record['gateway'] ?? '') !== 'stripe_regular' || !is_array($record['card'] ?? null)) {
+		return 'no open card checkout record';
+	}
+	$record_cart = ShoppingCart::hydrate($record);
+	$recorded = is_array($record['items'] ?? null) ? count($record['items']) : 0;
+	if ($recorded === 0 || count($record_cart->items) !== $recorded) {
+		return 'a recorded line no longer loads';
+	}
+	return Order::with_payment_lock($ref, function () use ($ref, $record, $record_cart) {
+		// Read again under the lock: the buyer's return may have spent it.
+		if (ShoppingCart::recorded_payment($ref) === null) {
+			return 'completed by the buyer\'s return';
+		}
+		_cart_charge_run(array(), array(
+			'service'      => 'stripe_regular',
+			'ref'          => $ref,
+			'lock_ref'     => $ref,
+			'record'       => $record,
+			'cart'         => $record_cart,
+			'card'         => $record['card'],
+			'order_fields' => array(),
+			'background'   => true,
+		));
+		return null;
+	});
+}
+
+/**
  * Start a hosted Stripe Checkout payment, from its button's POST: the cart is
  * checked as the checkout page checked it, the session made at Stripe and
  * recorded (ShoppingCart::record_payment()), and the buyer sent to Stripe's
@@ -654,18 +697,39 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// the checkout page has run that step; it carries on with the order and
 	// the Stripe objects it already made.
 	$card_resume = null;
+	$card_background = ($return !== null && $return['service'] === 'stripe_regular');
 	if($return === null && !empty($_POST['card_payment_confirm'])){
 		$card_resume = _cart_charge_card_pending(null, true);
 		if(!$card_resume){
 			return _checkout_error('That payment confirmation is no longer open. Nothing was charged; please try again.');
 		}
+		// The payment's lock, which Stripe's webhook shares: whichever of the
+		// buyer's return and the webhook arrives second finds the order made.
+		$card_lock_ref = (string)($card_resume['state']['awaiting'] ?? '');
+		if($card_lock_ref !== '' && empty($input['_card_locked'])){
+			return Order::with_payment_lock($card_lock_ref, function () use ($input) {
+				return _cart_charge_run($input + array('_card_locked' => 1));
+			});
+		}
 		$existing_order = new Order((int)$card_resume['order_id'], TRUE);
 		if(!$existing_order->key || $existing_order->is_fulfilled()){
 			_cart_charge_card_pending(null);
-			return LogicResult::redirect('/cart_confirm');
+			// Completed already (the webhook got here first): its receipt is shown.
+			return $card_lock_ref !== '' ? _cart_charge_show_completed($card_lock_ref) : LogicResult::redirect('/cart_confirm');
 		}
 	}
-	if($return !== null){
+	if($card_background){
+		// Stripe's webhook, for a card payment whose buyer confirmed with their
+		// bank and has not come back (cart_charge_complete_card_from_webhook()):
+		// it carries on exactly as the buyer's return would, from the record.
+		$card_resume = $return['card'];
+		$existing_order = new Order((int)$card_resume['order_id'], TRUE);
+		if(!$existing_order->key || $existing_order->is_fulfilled()){
+			return LogicResult::redirect('/cart_confirm');
+		}
+		$cart = $return['cart'];
+	}
+	else if($return !== null){
 		// Under the lock: a return that got here first has completed it.
 		if($return['service'] === 'stripe_checkout'){
 			$existing_order = Order::GetByStripeSession($return['ref']);
@@ -1006,7 +1070,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$payment_service = '';
 	$payment_method_id = null;
 	if($charge_total > 0){
-		if($return !== null){
+		if($return !== null && !$card_background){
 			// Verified with the gateway before anything was written
 			// (_cart_charge_verify_return()); its amount is the record's.
 			foreach($return['order_fields'] as $order_column => $order_value){
@@ -1018,7 +1082,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$order->save();
 			$payment_service = $return['service'];
 		}
-		else if($settings->get_setting('checkout_type') == 'stripe_regular'){
+		else if($card_background || $settings->get_setting('checkout_type') == 'stripe_regular'){
 
 			//THE CARD. The form posts a PaymentMethod (stripePaymentMethod);
 			//a token (stripeToken) still arrives from a page loaded before the
@@ -1091,8 +1155,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				foreach($card_state['subscriptions'] as $key => $subscription_id){
 					$stripe_subscriptions[$key] = $stripe_helper->get_regular_subscription($subscription_id);
 				}
-				_cart_charge_card_pending(null);
-				if($card_resume['cart_hash'] !== $cart->get_hash()){
+				if(!$card_background){
+					_cart_charge_card_pending(null);
+				}
+				// The webhook's cart IS the record of what was paid for; only
+				// the buyer's live cart can have changed since.
+				if(!$card_background && $card_resume['cart_hash'] !== $cart->get_hash()){
 					return $payment_refused('Your cart changed while your bank was confirming the payment. Please check out again.', false);
 				}
 			}
@@ -1110,6 +1178,15 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 					'client_secret' => $client_secret,
 					'time'          => time(),
 				));
+				// And outside the session (never the client secret): a buyer who
+				// confirms with their bank and whose browser never posts back is
+				// charged by Stripe all the same, so the webhook completes the
+				// order from this record (cart_charge_complete_card_from_webhook()).
+				$cart->record_payment((string)$object_id, 'stripe_regular', array('card' => array(
+					'order_id'  => (int)$order->key,
+					'cart_hash' => $cart->get_hash(),
+					'state'     => $card_state,
+				)));
 				return LogicResult::redirect('/checkout');
 			};
 
@@ -1734,6 +1811,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 	else{
+		if($card_resume && !empty($card_resume['state']['awaiting'])){
+			// The record the stop for the bank left: spent, so the webhook
+			// that follows finds nothing to complete.
+			ShoppingCart::forget_payment((string)$card_resume['state']['awaiting'], $order->key);
+		}
 		$cart->last_receipt = $receipts;
 		$cart->clear_cart();
 	}

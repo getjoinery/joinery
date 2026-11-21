@@ -58,6 +58,9 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.32 - a build tells the site that this node is where it buys email and backups (services_url), when it sells them
+ * @version 2.31 - a server the buyer's own account refused to make waits for its buyer with the provider's
+ *   words (PROVIDER_REFUSED), not as a failure only an operator sees
  * @version 2.30 - a parked site this store sold is told by the buyer notices, not a second email here (hosting_after_purchase B24)
  * @version 2.29 - a ready site that already has its server resumes at booting (or installing, with a node) instead of
  *                creating a second one (hosting_after_purchase B3)
@@ -603,6 +606,12 @@ class ProvisionCustomerCloud {
 			// On its buyer's own cloud account with no backups bought: this node
 			// keeps none for it, and the site is told so it offers its owner where they go.
 			'no_manager_backups' => self::own_linode_without_bundle($provision),
+			// A node that sells email and backups is where its sites buy them.
+			'services_url' => SmHosting::enabled() ? rtrim((string)LibraryFunctions::get_absolute_url(), '/') : '',
+			// A site on its buyer's own server, with its own mail server,
+			// receives at its own domain from the start (walkthrough Q39).
+			'mail_hostname' => (!$provision->is_operator_hosted() && $docker_mode === 'bare-metal'
+				&& !(bool)$provision->get('cvp_no_mail_server')) ? $domain : '',
 			'admin_email' => $admin_email,
 			'user_name'   => $provision->get('cvp_buyer_name'),
 			// The buyer's own name and timezone, for the site's admin account.
@@ -1321,6 +1330,17 @@ class ProvisionCustomerCloud {
 				}
 			}
 			$this->park_for_reconnect($provision, 'Provider rejected the grant (401).');
+			return 1;
+		}
+		if ($code >= 400 && $code < 500 && $code !== 429 && $phase === 'ready'
+				&& !$provision->is_operator_hosted() && trim((string)$provision->get('cvp_instance_id')) === '') {
+			// The buyer's own account would not make the server (its limit of
+			// services, an unpaid balance, a plan it may not use). Nobody here
+			// can put that right, so it is not a failure waiting on us: the
+			// site waits for its buyer, who is shown the provider's words and
+			// connects again once it is fixed.
+			$words = trim((string)$e->provider_reason) !== '' ? trim((string)$e->provider_reason) : $e->getMessage();
+			$this->park_for_reconnect($provision, CustomerCloudProvision::PROVIDER_REFUSED . $words);
 			return 1;
 		}
 		if ($code >= 400 && $code < 500 && $code !== 429) {

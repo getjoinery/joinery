@@ -1,4 +1,5 @@
 <?php
+	// @version 1.7 - a subscription's state is said in words (OrderItem::subscription_state_words), not the provider's code
 	// @version 1.6 - the cancel and undo questions name both buttons (Cancel subscription / Keep it)
 	// @version 1.5 - Undo cancel for a cancel waiting for the period end; the cancel question adds the provider's own
 	//                words on what happens to what the line pays for (hosting_after_purchase S2, S4)
@@ -86,7 +87,7 @@
                                     . '</form>';
                             }
                         } else {
-                            $status = $subscription->get('odi_subscription_status') ?: 'Active';
+                            $status = $subscription->subscription_state_words();
                             $blocker = $subscription->subscription_cancel_blocker();
                             if ($blocker !== null) {
                                 $action = '<span class="muted text-sm">' . htmlspecialchars($blocker) . '</span>';

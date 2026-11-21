@@ -223,4 +223,50 @@ $live_line = rf_line($live_order, '20.00');
 $why = rf_throws(function () use ($live_line) { $live_line->refund_payment(1); });
 check(strpos($why, 'live mode') !== false, 'a live order is not refunded from a site in test mode', $why);
 
+// ===========================================================================
+section('An order we will not fulfil: everything back, the subscription ended');
+// ===========================================================================
+$stripe->add_charge('ch_full_once', 39900);
+$stripe->add_charge('ch_full_inv', 999);
+$stripe->subscriptions->invoices['sub_full'] = array('id' => 'in_full', 'object' => 'invoice', 'charge' => 'ch_full_inv', 'number' => 'INV-9', 'created' => time());
+$full_order = rf_order(array('ord_stripe_charge_id' => 'ch_full_once', 'ord_total_cost' => '408.99'));
+$full_licence = rf_line($full_order, '399.00');
+$full_hosting = rf_line($full_order, '9.99', array('odi_is_subscription' => true, 'odi_stripe_subscription_id' => 'sub_full',
+	'odi_subscription_status' => 'active'));
+$cancels_before = count($stripe->cancels);
+check(abs($full_licence->refund_in_full('refused') - 399.00) < 0.001 && end($stripe->refunds) === array('ch_full_once', 399.0),
+	'a one-time line is refunded whole from the order\'s charge', json_encode(end($stripe->refunds)));
+check(abs($full_hosting->refund_in_full('refused') - 9.99) < 0.001 && end($stripe->refunds) === array('ch_full_inv', 9.99)
+	&& count($stripe->cancels) === $cancels_before + 1 && end($stripe->cancels)[0] === 'sub_full',
+	'a subscription line is refunded from its invoice and cancelled now', json_encode(array(end($stripe->refunds), end($stripe->cancels))));
+// The whole price back takes back what the line bought; a part refund does not.
+$own_full = new Ownership(NULL);
+$own_full->set('own_usr_user_id', $buyer->key); $own_full->set('own_tag', 'rf-test-licence');
+$own_full->set('own_odi_order_item_id', $full_licence->key); $own_full->set('own_ord_order_id', $full_order->key);
+$own_full->save(); $own_full->load();
+harness_register_row('own_ownerships', 'own_ownership_id', $own_full->key);
+$stripe->add_charge('ch_part', 5000);
+$part_order = rf_order(array('ord_stripe_charge_id' => 'ch_part', 'ord_total_cost' => '50.00'));
+$part_line = rf_line($part_order, '50.00');
+$own_part = new Ownership(NULL);
+$own_part->set('own_usr_user_id', $buyer->key); $own_part->set('own_tag', 'rf-test-part');
+$own_part->set('own_odi_order_item_id', $part_line->key); $own_part->set('own_ord_order_id', $part_order->key);
+$own_part->save(); $own_part->load();
+harness_register_row('own_ownerships', 'own_ownership_id', $own_part->key);
+$part_line->refund_payment(20);
+check(!(new Ownership($own_part->key, TRUE))->get('own_revoked_time'), 'a part refund leaves what the line bought');
+$part_line = new RfOrderItem((int)$part_line->key, TRUE);
+$part_line->refund_payment(30);
+check((bool)(new Ownership($own_part->key, TRUE))->get('own_revoked_time'), 'the rest of the price back revokes it');
+check((new RfOrderItem((int)$full_licence->key, TRUE))->revoke_ownerships() === 1
+	&& (bool)(new Ownership($own_full->key, TRUE))->get('own_revoked_time'), 'revoke_ownerships revokes what is still held, once');
+check((new RfOrderItem((int)$full_licence->key, TRUE))->revoke_ownerships() === 0, 'and nothing twice');
+
+$refunds_before = count($stripe->refunds);
+$again_licence = new RfOrderItem((int)$full_licence->key, TRUE);
+$again_hosting = new RfOrderItem((int)$full_hosting->key, TRUE);
+check($again_licence->refund_in_full('refused') === 0.0 && $again_hosting->refund_in_full('refused') === 0.0
+	&& count($stripe->refunds) === $refunds_before && count($stripe->cancels) === $cancels_before + 1,
+	'asked again, nothing is refunded or cancelled twice');
+
 harness_finish();

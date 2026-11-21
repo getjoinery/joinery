@@ -476,6 +476,11 @@ class ShoppingCart {
 
 			if($coupon_code_test){
 				if($coupon_code_test->is_valid()){
+					// A code that takes nothing off any line here is not taken as
+					// applied: the cart would show it beside an unchanged total.
+					if (count($this->items) > 0 && !$this->coupon_applies_here((string)$coupon_code_test->get('ccd_code'))) {
+						return 'That code does not apply to anything in your cart.';
+					}
 					$this->coupon_codes[] = $coupon_code_test->get('ccd_code');
 					$this->coupon_codes = array_unique($this->coupon_codes);
 					$this->update_items_for_coupon();
@@ -489,6 +494,19 @@ class ShoppingCart {
 			else{
 				return 'Coupon code not found.';
 			}
+	}
+
+	/** Is this code one any line in the cart accepts (global, or tied to the line's product)? */
+	private function coupon_applies_here(string $code): bool {
+		foreach ($this->items as $cart_item) {
+			list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+			foreach ($product->get_valid_coupons($product_version) as $coupon) {
+				if ((string)$coupon->get('ccd_code') === $code) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	public function remove_coupon($coupon_code){

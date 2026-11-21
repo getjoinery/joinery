@@ -411,6 +411,19 @@ $no_backups = $ssh(JobCommandBuilder::build_install_node($node, $base + array('d
 check(preg_match('/install\.sh -y -q site --bare-metal[^\n]*--no-manager-backups/', $no_backups) === 1,
 	'a site this node keeps no backups for is told so at install');
 check(strpos($own_mail, '--no-manager-backups') === false, 'and any other site is not');
+// A node that sells email and backups names itself as where the site buys them.
+$sold = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal', 'services_url' => 'https://store.example.com')));
+check(preg_match('#install\.sh -y -q site --bare-metal[^\n]*--services-url=.?https://store\.example\.com#', $sold) === 1,
+	'a site is told where it buys email and backups', $sold);
+$odd = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal', 'services_url' => 'https://x.example.com/path; rm -rf /')));
+$receives = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal', 'mail_hostname' => 'Mine.Example.com')));
+check(preg_match('#install\.sh -y -q site --bare-metal[^\n]*--mail-hostname=.?mine\.example\.com#', $receives) === 1,
+	'a site with its own mail server is told the name it receives at', $receives);
+$no_server = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal', 'mail_hostname' => 'mine.example.com', 'no_mail_server' => true)));
+check(strpos($no_server, '--mail-hostname') === false && strpos($own_mail, '--mail-hostname') === false,
+	'and a site with no mail server, or none named, is told nothing');
+check(strpos($own_mail, '--services-url') === false && strpos($odd, '--services-url') === false,
+	'none is named where the node does not sell them, and an address that is not a bare https one is dropped');
 $named = $ssh(JobCommandBuilder::build_install_node($node, $base + array('docker_mode' => 'bare-metal',
 	'admin_email' => 'owner@example.com', 'admin_first_name' => "Wanda O'Brien", 'admin_last_name' => 'Kestrel', 'admin_timezone' => 'America/New_York')));
 check(strpos($named, "--admin-first-name='Wanda O'\\''Brien'") !== false && strpos($named, "--admin-last-name='Kestrel'") !== false

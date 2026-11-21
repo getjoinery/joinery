@@ -664,7 +664,7 @@ settle on close, so Esc and Cancel resolve too instead of hanging.
 | `<button type="button" data-jy-confirm="Delete it?" data-jy-submit="" data-jy-submit-self>` | Checks the form's fields, asks, then submits its own form as that button, so its name and value are sent. Being `type="button"`, it posts nothing before the question. It may not carry `formaction`, `formmethod`, `formenctype` or `formtarget`: put those on the form. FormWriter's `submitbutton` with `'confirm'` writes this. |
 | `<a href="/x" data-jy-confirm="Leave?">` | Asks, then follows the link. |
 | `data-jy-confirm-typed="DELETE"` | Also makes the person type that word first. |
-| `data-jy-confirm-label="Remove"`, `data-jy-confirm-style="primary"` | The confirm button's words and style. |
+| `data-jy-confirm-label="Remove"`, `data-jy-cancel-label="Keep it"`, `data-jy-confirm-style="primary"` | The two buttons' words and the confirm button's style, on a button, a link or a form that asks. |
 | `<button type="button" data-jy-alert="Not now.">` | Shows the message. |
 | `<form data-jy-confirm="Sure?">` | Asks before the form submits. |
 | `<button data-jy-copy="text">` | Copies the text and confirms on the button. |
@@ -972,7 +972,8 @@ again. A test fixture or probe viewer is marked past onboarding with every step
 seen (`SetupSteps::markPastOnboarding()`). `SetupSteps::interruptExempt()` names the
 paths it leaves alone: the wizard, logout, the API, the security page (where
 the encryption step sends a user to add a passkey that can derive a key),
-the step-up ceremony, and every page a plugin names with `SetupSteps::quietOn()`
+the step-up ceremony, the pages an emailed link opens (`/verify-email`, `/login`,
+`/recovery-verify`, so a signed-in person can confirm an address), and every page a plugin names with `SetupSteps::quietOn()`
 from its bootstrap: a purchase under way (the store's cart and checkout pages,
 the hosting configure page, a buyer's Your Sites pages), so someone who signs up
 to buy pays, and reads what they bought, before the wizard starts. A quiet path

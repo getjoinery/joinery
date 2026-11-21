@@ -13,7 +13,12 @@ document.querySelectorAll('.sms-move [data-do]').forEach(function (button) {
 	var what = button.getAttribute('data-do');
 	button.addEventListener('click', function () {
 		if (button.dataset.confirm && window.JoineryModal) {
-			JoineryModal.confirm(button.dataset.confirm, go);
+			// The question's own words on the buttons: a bare Cancel beside
+			// "Cancel the move?" reads both ways.
+			var opts = {};
+			if (button.dataset.confirmLabel) { opts.confirmLabel = button.dataset.confirmLabel; }
+			if (button.dataset.cancelLabel) { opts.cancelLabel = button.dataset.cancelLabel; }
+			JoineryModal.confirm(button.dataset.confirm, go, opts);
 		} else if (!button.dataset.confirm || window.confirm(button.dataset.confirm)) {
 			go();
 		}

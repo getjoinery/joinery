@@ -12,7 +12,7 @@ The plugin is a **commercial extension** (`license: Joinery-Commercial`, `requir
 
 **Webhooks:** `/ajax/stripe_webhook` and `/ajax/paypal_subscription_webhook` (URLs registered with the payment providers; files live in `plugins/store/ajax/`). The Stripe endpoint handles `checkout.session.completed`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed` and `charge.refunded`; subscribe it to those seven in Stripe. `invoice.paid` covers an invoice marked paid by hand in Stripe's dashboard, which sends no `invoice.payment_succeeded`. `charge.refunded` records a refund of an order's own charge made anywhere, Stripe's dashboard included, on its order; without it, the order page folds the refund in when an admin opens it. `customer.subscription.updated` to `incomplete_expired` ends the line as `.deleted` does, and only one of the two sends `subscription.cancelled`.
 
-**Refunds:** the order page's [refund] on a line opens `admin_order_refund`, which refunds through `OrderItem::refund_payment()` from the payment that paid that line: a subscription line from its subscription's latest invoice, any other line from the order's charge (`StripeHelper::refundable_charge_for_item()`). A line refunds at most its own price and what is left on that charge (`OrderItem::refundable_amount()`). A subscription line's refund can cancel the subscription at once, through the same cancel as everywhere else; Stripe's `customer.subscription.deleted` then sends `subscription.cancelled`, as for any cancel. A refused cancel is reported beside the refund, which stands. `ord_refund_amount` is the order's total refunded: its lines' recorded refunds, with the order charge's part never below what Stripe reports refunded on it (`Order::refresh_refund_amount()`). A PayPal order is refunded in PayPal.
+**Refunds:** the order page's [refund] on a line opens `admin_order_refund`, which refunds through `OrderItem::refund_payment()` from the payment that paid that line: a subscription line from its subscription's latest invoice, any other line from the order's charge (`StripeHelper::refundable_charge_for_item()`). A line refunds at most its own price and what is left on that charge (`OrderItem::refundable_amount()`). A subscription line's refund can cancel the subscription at once, through the same cancel as everywhere else; Stripe's `customer.subscription.deleted` then sends `subscription.cancelled`, as for any cancel. A refused cancel is reported beside the refund, which stands. A line refunded in full revokes the ownerships it granted (`OrderItem::revoke_ownerships()`); a part refund leaves them. `OrderItem::refund_in_full()` gives back all that is left of a line and cancels its subscription, for an order that will not be fulfilled. `ord_refund_amount` is the order's total refunded: its lines' recorded refunds, with the order charge's part never below what Stripe reports refunded on it (`Order::refresh_refund_amount()`). A PayPal order is refunded in PayPal.
 
 ## Key Pieces
 
@@ -79,8 +79,20 @@ and the buyer is sent back to `/checkout`, where the card form runs the bank's
 confirmation as the page loads and posts `card_payment_confirm` back to
 `/cart_charge`. The checkout carries on with the same order, reading the
 outcome from Stripe, provided the cart is the one it paid for. A buyer who
-never comes back is charged nothing: an authorization never captured lapses,
+never confirms is charged nothing: an authorization never captured lapses,
 and an incomplete subscription expires.
+
+A buyer who confirms and whose browser never posts back is charged by Stripe
+all the same, so the stop for the bank also records the cart outside the
+session (`ShoppingCart::record_payment()`, gateway `stripe_regular`, keyed by
+the subscription the bank was asked about, without the client secret). When
+`invoice.paid` arrives for a subscription no order line names, the webhook
+completes the order from that record
+(`cart_charge_complete_card_from_webhook()`), carrying on exactly as the
+buyer's return would. The return and the webhook share that payment's lock
+(`Order::with_payment_lock()`): whichever arrives second finds the order made,
+and the buyer who comes back later is shown its receipt. A completion that
+throws is emailed to the operator.
 
 Any refusal takes back what the sequence made (an authorization released, a
 subscription cancelled and its first payment refunded), records the reason on
@@ -196,7 +208,9 @@ this is the whole of it.
 Because the price lives in the form data, **coupon repricing is free of side
 effects**: `ShoppingCart::update_items_for_coupon()` re-calls `get_price()`
 with the persisted form data and derives the same number, with no lookup and
-no second call to anything external.
+no second call to anything external. `ShoppingCart::add_coupon()` refuses a
+code that no line in the cart accepts (neither global nor tied to a product in
+it), so a cart never shows a code beside an unchanged total.
 
 ### The version's Stripe price
 
@@ -352,9 +366,10 @@ product carries it, and `*` reads "All products".
 filterable by tag, owner, and status. A row's detail view adds the license key
 if one was issued and lists the products the tag covers.
 
-**Revoking** an ownership re-opens purchase for that buyer — it is the
-companion action to a refund or chargeback, since the guards exclude revoked
-rows. **Granting** by hand mints a row with no order attached, for comps and
+**Revoking** an ownership re-opens purchase for that buyer, since the guards
+exclude revoked rows. A full refund of the line revokes on its own; the
+Ownership page revokes by hand (a chargeback) and restores one revoked by a
+goodwill refund. **Granting** by hand mints a row with no order attached, for comps and
 support; a grant to someone who already owns the tag is refused, so revocation
 always means what it says — one live row per person per tag. There is no
 reissue: a key string is written once.

@@ -140,9 +140,12 @@ abstract class PublicPageBase {
 		if ($counts === null) { return; }
 		$class_attr = $class !== '' ? ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '"' : '';
 		echo '<' . $tag . $class_attr . '>'
-			. '<a href="/setup" style="display:inline-block;padding:2px 10px;border-radius:999px;'
+			. '<a href="/setup" title="Finish setup" aria-label="Finish setup: ' . (int)$counts['done'] . ' of ' . (int)$counts['total']
+			. ' done" style="display:inline-block;padding:2px 10px;border-radius:999px;'
 			. 'background:#fef0c7;color:#93370d;font-size:0.85em;text-decoration:none;white-space:nowrap;">'
-			. 'Finish setup &mdash; ' . (int)$counts['done'] . ' of ' . (int)$counts['total']
+			// The words are their own span: the kit hides them on a phone, where
+			// the header has room for the count only.
+			. '<span class="jy-setup-pill-words">Finish setup &mdash; </span>' . (int)$counts['done'] . ' of ' . (int)$counts['total']
 			. '</a></' . $tag . '>';
 	}
 

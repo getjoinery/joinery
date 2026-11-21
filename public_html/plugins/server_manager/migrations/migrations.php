@@ -984,4 +984,40 @@ return [
 {support_email}<p>Questions? Write to <a href="mailto:*support_email*">*support_email*</a>.</p>{end}', 'hosting_domain_expiring'));
 		},
 	],
+	[
+		// The email a buyer gets when their own cloud account would not make
+		// the server (HostingBuyerNotices 'provider_refused').
+		'id' => 'sm_035_hosting_provider_refused_template',
+		'version' => '1.30.217',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			$insert->execute(array('hosting_provider_refused', 'Linode would not create the server for *domain*',
+				'<p>Hi *buyer_name*,</p>
+<p>We tried to create the server for <strong>*domain*</strong> in your Linode account, and Linode refused. Nothing was built.</p>
+<p>Linode said: <em>*provider_reason*</em></p>
+<p>Once that is put right with Linode, connect your account again from <a href="*sites_url*">your sites</a> and we build the site straight away.</p>
+{support_email}<p>Questions? Write to <a href="mailto:*support_email*">*support_email*</a>.</p>{end}', 'hosting_provider_refused'));
+		},
+	],
+	[
+		// The email a buyer gets when a held order is refused and refunded
+		// (CustomerCloudFulfillment::refuse_held, HostingBuyerNotices 'refused').
+		'id' => 'sm_036_hosting_order_refused_template',
+		'version' => '1.30.218',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			$insert->execute(array('hosting_order_refused', 'Your order for *domain* was not accepted',
+				'<p>Hi *buyer_name*,</p>
+<p>We looked at your order for <strong>*domain*</strong> and could not accept it. Nothing was built.</p>
+{refund_amount}<p>We have refunded <strong>*refund_amount*</strong> to the card you paid with. It usually shows within a few days.</p>{end}
+<p>Any subscription on this order is cancelled, and you will not be charged for it again.</p>
+{support_email}<p>If you think this is a mistake, write to <a href="mailto:*support_email*">*support_email*</a>.</p>{end}', 'hosting_order_refused'));
+		},
+	],
 ];

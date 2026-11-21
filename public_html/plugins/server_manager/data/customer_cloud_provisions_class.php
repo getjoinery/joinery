@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.46 - PROVIDER_REFUSED, provider_refusal(): a site waiting because its buyer's own account refused the server
  * @version 1.45 - cvp_site_dns_records, cvp_site_dns_time: the buyer's DNS list is held until it is whole (walkthrough Q16)
  * @version 1.44 - cvp_no_mail_server: a bare-metal site built with no mail server, receiving through the relay fleet
  * @version 1.43 - cvp_mail_retry_time: Retry email setup gives the settings push a fresh allowance (hosting_after_purchase B19);
@@ -545,6 +546,21 @@ class CustomerCloudProvision extends SystemBase {
 	 * buyer's to edit or delete; nothing in the pipeline can see it.
 	 */
 	const PRE_PAYMENT_STATUSES = array('draft', 'pending_payment');
+
+	/**
+	 * How cvp_error begins on a site waiting for its buyer because their own
+	 * cloud account would not make the server; the provider's words follow.
+	 */
+	const PROVIDER_REFUSED = 'Provider refused the server: ';
+
+	/** The provider's words when this site waits on a refusal by its buyer's own account, else ''. */
+	public function provider_refusal(): string {
+		$error = (string)$this->get('cvp_error');
+		if ((string)$this->get('cvp_status') !== 'pending_connect' || strpos($error, self::PROVIDER_REFUSED) !== 0) {
+			return '';
+		}
+		return trim(substr($error, strlen(self::PROVIDER_REFUSED)));
+	}
 
 	/** Is this row still before payment (draft or frozen for the cart)? */
 	public function is_pre_payment(): bool {

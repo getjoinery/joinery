@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
 # VERSION: 3.26 - JOINERY_ADMIN_FIRST_NAME / _LAST_NAME / _TIMEZONE name the admin account for its owner
+# VERSION: 3.26 - JOINERY_SERVICES_URL (install.sh site --services-url) writes services_url: where the site buys email
+#                 and backup storage; JOINERY_MAIL_HOSTNAME (--mail-hostname) writes mailbox_mail_hostname
 # VERSION: 3.25 - JOINERY_NO_MANAGER_BACKUPS=1 (install.sh site --no-manager-backups) writes manager_backups = none
 # VERSION: 3.24 - JOINERY_NO_MAIL_SERVER=1 (install.sh site --no-mail-server) writes local_mail_server = none in a
 #                bare-metal site's config: no mail server here, mail arrives through a relay
@@ -751,6 +753,31 @@ if [ "${JOINERY_BETA_ROOT_ACCESS:-}" = "1" ]; then
          WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'beta_root_access_offered');" \
         2>/dev/null || true
     log "Emergency root access is offered to the owner in the setup wizard"
+fi
+
+# The name this site's own mail server receives at (install.sh site
+# --mail-hostname): set at the build, the site's DNS list carries its MX
+# record from the start instead of after a second trip to the registrar.
+if [[ "${JOINERY_MAIL_HOSTNAME:-}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] && [ "${JOINERY_NO_MAIL_SERVER:-}" != "1" ]; then
+    psql -U postgres -d "$SITENAME" -q -v host="$(printf '%s' "$JOINERY_MAIL_HOSTNAME" | tr 'A-Z' 'a-z')" 2>/dev/null <<'SQL' || true
+UPDATE stg_settings SET stg_value = :'host' WHERE stg_name = 'mailbox_mail_hostname' AND coalesce(stg_value, '') = '';
+INSERT INTO stg_settings (stg_name, stg_value)
+  SELECT 'mailbox_mail_hostname', :'host' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname');
+SQL
+    log "This site's mail server receives at $JOINERY_MAIL_HOSTNAME"
+fi
+
+# Where this site buys email and backup storage (install.sh site
+# --services-url): a management node that sells them names itself, so the
+# site's Connect button goes to the store that built it, not to the default.
+# The address reaches SQL as a psql variable, never as text in the statement.
+if [[ "${JOINERY_SERVICES_URL:-}" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]]; then
+    psql -U postgres -d "$SITENAME" -q -v url="$JOINERY_SERVICES_URL" 2>/dev/null <<'SQL' || true
+UPDATE stg_settings SET stg_value = :'url' WHERE stg_name = 'services_url';
+INSERT INTO stg_settings (stg_name, stg_value)
+  SELECT 'services_url', :'url' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'services_url');
+SQL
+    log "Email and backup storage are bought from $JOINERY_SERVICES_URL"
 fi
 
 # The management node this site joins keeps no backup storage for it

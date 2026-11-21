@@ -19,6 +19,7 @@
  * aim_activity. The tool trace accumulates here and is saved on the assistant
  * row when the turn finishes.
  *
+ * @version 0.1.1 - the wait on the model is shown as Writing an answer, never by the model's name
  * @version 0.1.0
  */
 class SupportTurnContext implements ToolContext {
@@ -184,6 +185,11 @@ class SupportTurnContext implements ToolContext {
 	}
 
 	public function noteActivity(string $label): void {
+		// The agent loop names the model it waits on, which is an operator's
+		// detail: the person asking is told only that an answer is coming.
+		if (strpos($label, 'Waiting for ') === 0) {
+			$label = 'Writing an answer…';
+		}
 		if ($this->activity_stamper !== null) {
 			($this->activity_stamper)($label);
 		}

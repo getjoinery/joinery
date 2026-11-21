@@ -74,6 +74,8 @@
 .setup-card { background: var(--jy-card-bg, #fff); border: 1px solid var(--jy-border, #e4e7ec); border-radius: 10px; padding: 28px; }
 .setup-card h1 { margin-top: 0; font-size: 1.4em; }
 .setup-copy { color: var(--jy-muted, #475467); margin-bottom: 20px; }
+/* A button naming an address (Send me a test at ...) wraps on a phone instead of leaving the card. */
+.setup-card .btn { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
 .setup-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; }
 /* A step whose answer is one-or-the-other puts both answers on one row. */
 .setup-choice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

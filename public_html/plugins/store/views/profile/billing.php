@@ -125,9 +125,14 @@ $page->public_header([
                         <?php if ($version): ?>
                         <span class="jy-billing-bold">Current:</span>
                         <?php echo htmlspecialchars($version->get('prv_version_name'), ENT_QUOTES, 'UTF-8'); ?>
-                        &mdash; $<?php echo number_format($version->get('prv_version_price'), 2); ?>/<?php echo htmlspecialchars($version->get('prv_price_type'), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php // What this buyer pays (a coupon lowers it), not the version's list price.
+                        $paid_label = $item->subscription_price_label(); ?>
+                        &mdash; <?php echo $paid_label !== '' ? htmlspecialchars($paid_label, ENT_QUOTES, 'UTF-8')
+                            : '$' . number_format($version->get('prv_version_price'), 2) . '/' . htmlspecialchars($version->get('prv_price_type'), ENT_QUOTES, 'UTF-8'); ?>
                         <?php endif; ?>
-                        <?php if ($period_end !== ''): ?>
+                        <?php if (!$cancelled && $item->subscription_payment_failed()): // an unpaid renewal is not a date to look forward to ?>
+                        <div class="alert alert-warning jy-tight">The last payment for this did not go through. Update your payment method above and the payment is tried again.</div>
+                        <?php elseif ($period_end !== ''): ?>
                         <div class="muted text-sm"><?php echo $cancelled ? 'Ends' : 'Renews'; ?> <?php echo htmlspecialchars($period_end, ENT_QUOTES, 'UTF-8'); ?></div>
                         <?php endif; ?>
                     </div>

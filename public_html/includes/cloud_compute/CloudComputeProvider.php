@@ -17,6 +17,7 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.16 - CloudComputeException::$provider_reason: the provider's own words for a refusal
  * @version 1.15 - deleteInstance() names Discard test site among its callers
  * @version 1.14 - CloudInstanceTypes takes a region: the plans and the default plan are those it sells (B31)
  * @version 1.13 - CloudSwapWhileStopped: a swap that needs both servers off
@@ -276,7 +277,14 @@ interface CloudAddressSwap {
 	public function rebootInstance(string $instance_id): void;
 }
 
-class CloudComputeException extends Exception {}
+class CloudComputeException extends Exception {
+	/**
+	 * The provider's own words for a refusal, without our framing of the
+	 * call ('' when it gave none): what a person who owns the account can
+	 * be shown and act on.
+	 */
+	public $provider_reason = '';
+}
 
 /**
  * Optional capability: what happened to a machine at the provider, from its

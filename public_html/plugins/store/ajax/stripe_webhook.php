@@ -298,6 +298,23 @@ try {
                     error_log("Stripe webhook: payment succeeded for subscription $subscription_id"
                         . ($was_in_trouble ? ' (recovered)' : ''));
                 }
+                else {
+                    // No line yet: a card checkout whose buyer confirmed with
+                    // their bank and has not come back. Stripe has charged, so
+                    // the order is completed here from the checkout's record.
+                    require_once(PathHelper::getIncludePath('plugins/store/logic/cart_charge_logic.php'));
+                    try {
+                        $why = cart_charge_complete_card_from_webhook((string)$subscription_id);
+                        error_log("Stripe webhook: subscription $subscription_id paid with no order line: "
+                            . ($why === null ? 'completed from its card checkout record' : $why));
+                    } catch (\Throwable $e) {
+                        error_log("Stripe webhook: completing the card checkout for $subscription_id failed: " . $e->getMessage());
+                        _cart_charge_alert_operator('A paid card checkout could not be completed',
+                            "Stripe charged subscription $subscription_id after the buyer's bank confirmed it, the buyer's browser did not "
+                            . "come back, and completing the order from the webhook failed:\n\n" . $e->getMessage()
+                            . "\n\nFind the subscription in Stripe, then complete or refund it by hand.");
+                    }
+                }
             }
             break;
 

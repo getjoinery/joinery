@@ -8,6 +8,8 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.17 - ?connect_to= fills in the management node's address, and a waiting request links to that node's
+ *                account page so its owner can claim it with nothing copied
  * @version 1.16 - a site the operator hosts offers no Disconnect, and says why
  * @version 1.15 - the log list names the converger's log where root keeps it (specs/shell_command_audit.md D1)
  * @version 1.14 - The agent's on/off switch and the "Turn off the agent" card are gone: the agent runs on every machine,
@@ -150,6 +152,15 @@ if ($is_managed) {
 		   . htmlspecialchars((string)($state['url'] ?? $request['url'] ?? '')) . '</code>. This machine\'s key fingerprint:</p>';
 		echo '<p><code style="font-size:1.5em;">' . htmlspecialchars($fpr_display) . '</code></p>';
 		echo '<p class="text-muted">An administrator must approve it on the management node, <strong>only if the fingerprint there matches this one exactly</strong>.</p>';
+		// A management node that gives its members accounts ties this request
+		// to the account that claims it: the fingerprint rides in the link, so
+		// nothing is copied by hand, and its own sign-in decides whose it is.
+		$claim_at = rtrim((string)($state['url'] ?? $request['url'] ?? ''), '/');
+		if (preg_match('#^https://[^/\s]+$#', $claim_at)) {
+			echo '<p class="mb-1">Have an account at that management node? Sign in there and it is added to your account:</p>'
+			   . '<p><a class="btn btn-primary" href="' . htmlspecialchars($claim_at . '/profile/server_manager?claim=' . rawurlencode($fingerprint)) . '">'
+			   . 'Add this server to my account there</a></p>';
+		}
 	} elseif ($status === 'rejected') {
 		echo '<div class="alert alert-danger" role="alert">'
 		   . '<strong>The request was rejected.</strong> If that was a mistake, cancel below and ask again.</div>';
@@ -175,8 +186,15 @@ if ($is_managed) {
 	$formwriter = $page->getFormWriter('management_node_form');
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('action', '', array('value' => 'connect'));
+	// A management node that sent the owner here (its "Add a server I
+	// already run") names itself in the address: filled in, never submitted.
+	$prefill = trim((string)($_GET['connect_to'] ?? ''));
+	if (!preg_match('#^https://[a-z0-9.-]+(:\d+)?$#i', $prefill)) {
+		$prefill = '';
+	}
 	$formwriter->textinput('management_node_url', 'Management node URL', array(
 		'placeholder' => 'https://manage.example.com',
+		'value'       => $prefill,
 		'required'    => true,
 		'helptext'    => 'Just the address. Nothing secret goes here.',
 	));

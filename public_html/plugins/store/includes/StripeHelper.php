@@ -860,7 +860,7 @@ class StripeHelper {
 			}
 			$sub_id = $order_item ? trim((string)$order_item->get('odi_stripe_subscription_id')) : '';
 			if (!$pm && $sub_id !== '') {
-				$pm = $this->client()->subscriptions->retrieve($sub_id)->default_payment_method ?? null;
+				$pm = $this->subscription_payment_method($sub_id);
 			}
 			$session_id = trim((string)$order->get('ord_stripe_session_id'));
 			if (!$pm && $session_id !== '') {
@@ -868,7 +868,7 @@ class StripeHelper {
 				if (!empty($session->payment_intent)) {
 					$pm = $this->client()->paymentIntents->retrieve((string)$session->payment_intent)->payment_method ?? null;
 				} elseif (!empty($session->subscription)) {
-					$pm = $this->client()->subscriptions->retrieve((string)$session->subscription)->default_payment_method ?? null;
+					$pm = $this->subscription_payment_method((string)$session->subscription);
 				}
 			}
 			if (!$pm) {
@@ -881,6 +881,19 @@ class StripeHelper {
 			error_log('[StripeHelper] card_fingerprint_for_order ' . (int)$order->key . ': ' . $e->getMessage());
 			return null;
 		}
+	}
+
+	/**
+	 * The card a subscription was paid with. A subscription paid at our own
+	 * checkout carries no default of its own: the card is on its first
+	 * invoice's payment, and on the customer as the default for later ones.
+	 */
+	private function subscription_payment_method(string $subscription_id) {
+		$sub = $this->client()->subscriptions->retrieve($subscription_id,
+			['expand' => ['latest_invoice.payment_intent', 'customer']]);
+		return $sub->default_payment_method
+			?? ($sub->latest_invoice->payment_intent->payment_method ?? null)
+			?? ($sub->customer->invoice_settings->default_payment_method ?? null);
 	}
 
 	public function get_subscription($stripe_subscription_id){

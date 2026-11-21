@@ -263,7 +263,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if(isset($input['msgtext'])){
 		if (array_key_exists($input['msgtext'], $login_messages)) {
-			$message = new DisplayMessage(htmlspecialchars($login_messages[$input['msgtext']]), 'Login warning', '/\/login.*/', DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
+			// A confirmed email is good news, so it is not headed as a warning.
+			$confirmed = ($input['msgtext'] === 'email_verified');
+			$message = new DisplayMessage(htmlspecialchars($login_messages[$input['msgtext']]), $confirmed ? 'Email confirmed' : 'Login warning', '/\/login.*/', $confirmed ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "loginbox", TRUE);
 			$session->save_message($message);
 		}
 	}

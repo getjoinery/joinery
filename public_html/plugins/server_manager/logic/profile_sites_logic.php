@@ -32,6 +32,12 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.25 - a server the buyer already runs: add_server, claim_server (?claim= from the site's Management Node
+ *   page) and let_go_server (JoinedServers)
+ * @version 1.24 - remove_site: a buyer stops our management of a site on their own server, or removes an order that
+ *   never built and cost nothing (SiteRemoval; walkthrough Q36)
+ * @version 1.23 - provider_refusal: the provider's words when the buyer's own account would not make the server;
+ *   an expired Linode grant is not called connected
  * @version 1.22 - a buyer's own-domain records are listed once, whole, with the site's own (Joinery Direct among them);
  *                dns_pending while the list is held (ProvisionBuyerDns, walkthrough Q16)
  * @version 1.21 - a built site reads Finishing setup, with no password to show, until it has been told what it comes with
@@ -81,8 +87,11 @@ function profile_sites_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$user_id = (int)$session->get_user_id();
+	// A site's Management Node page sends its owner here with the fingerprint
+	// of the join it just filed (?claim=); it survives the sign-in.
+	$claim = strtolower(preg_replace('/[^0-9a-f]/i', '', (string)($input['claim'] ?? '')));
 	if (!$user_id) {
-		return LogicResult::redirect('/login?return=' . urlencode($self_url));
+		return LogicResult::redirect('/login?return=' . urlencode($self_url . ($claim !== '' ? '?claim=' . $claim : '')));
 	}
 
 	$is_post = (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) === 'POST');
@@ -106,6 +115,105 @@ function profile_sites_logic(array $input): LogicResult {
 		}
 		$session->save_message(new DisplayMessage($text, 'Confirm your email', $self_regex, $kind,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($self_url);
+	}
+
+	// ---- A server the buyer already runs: add, claim, let go (JoinedServers) ---
+	if ($action === 'add_server') {
+		$go = JoinedServers::site_connect_url((string)($input['server_address'] ?? ''));
+		if ($go === '') {
+			$session->save_message(new DisplayMessage('That does not look like a site address. Enter the address you open your site at, like example.com.',
+				'Add a server', $self_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect($self_url);
+		}
+		// Shown as a link on this page, not sent as a redirect: the page's
+		// script policy lets a form's answer go nowhere but this site.
+		return LogicResult::redirect($self_url . '?server=' . rawurlencode((string)parse_url($go, PHP_URL_HOST)));
+	}
+	if ($action === 'claim_server') {
+		$claimed = JoinedServers::claim((string)($input['fingerprint'] ?? ''), new User($user_id, TRUE));
+		$name = htmlspecialchars($claimed['name'] !== '' ? $claimed['name'] : 'That server');
+		$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
+		switch ($claimed['state']) {
+			case JoinedServers::STATE_APPROVED:
+				$text = $name . ' is connected and listed below. Its updates, alerts and health checks run from here from now on.';
+				break;
+			case JoinedServers::STATE_WAITING:
+				$text = $name . ' is added to your account and waits for one of us to approve it. Nothing more is needed from you; '
+					. 'it appears below once that is done.';
+				break;
+			case JoinedServers::STATE_LIMIT:
+				$text = 'Your account already has ' . JoinedServers::LIMIT . ' servers you added, the most one account can have. Write to us if you need more.';
+				$kind = DisplayMessage::MESSAGE_ERROR;
+				break;
+			case JoinedServers::STATE_TAKEN:
+				$text = 'That request already belongs to another account. Cancel it on your site\'s Management Node page and connect again.';
+				$kind = DisplayMessage::MESSAGE_ERROR;
+				break;
+			default:
+				$text = 'We could not find that request: it may have run out (a request lasts an hour). Press Connect again on your site\'s Management Node page.';
+				$kind = DisplayMessage::MESSAGE_ERROR;
+		}
+		$session->save_message(new DisplayMessage($text, 'Add a server', $self_regex, $kind, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($self_url);
+	}
+	if ($action === 'let_go_server') {
+		try {
+			$mine = new ManagedNode((int)($input['mgn_managed_node_id'] ?? 0), TRUE);
+			$mine_name = (string)$mine->get('mgn_name');
+			JoinedServers::let_go($mine, (int)$user_id);
+			$text = 'We have stopped managing ' . htmlspecialchars($mine_name) . ' and taken it off this page. Your server is untouched.';
+			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
+		} catch (Throwable $e) {
+			$text = 'That server could not be removed from here. Write to us and we will do it.';
+			$kind = DisplayMessage::MESSAGE_ERROR;
+		}
+		$session->save_message(new DisplayMessage($text, 'Your sites', $self_regex, $kind, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($self_url);
+	}
+
+	// ---- The buyer removes a site on their own server from this page ---------
+	if ($action === 'remove_site') {
+		$gone = new CustomerCloudProvision((int)($input['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
+		if (!$gone->key || (int)$gone->get('cvp_usr_user_id') !== (int)$user_id || $gone->get('cvp_delete_time')) {
+			return LogicResult::redirect($self_url);
+		}
+		try {
+			$removed = SiteRemoval::remove($gone);
+			$text = $removed['kind'] === SiteRemoval::KIND_STOP
+				? 'We have stopped managing ' . htmlspecialchars((string)$gone->get('cvp_domain')) . ' and taken it off this page. Your server is untouched.'
+					. ($removed['bundle_cancelled'] ? ' Its email and backups subscription is cancelled and runs to the end of the paid period.' : '')
+				: htmlspecialchars((string)$gone->get('cvp_domain')) . ' has been removed.';
+			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
+		} catch (Throwable $e) {
+			error_log('profile_sites_logic: remove_site #' . (int)$gone->key . ': ' . $e->getMessage());
+			$text = 'That site could not be removed from here. Write to us and we will do it.';
+			$kind = DisplayMessage::MESSAGE_ERROR;
+		}
+		$session->save_message(new DisplayMessage($text, 'Your sites', $self_regex, $kind, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($self_url);
+	}
+
+	// ---- Try again after the buyer's own account refused the server ---------
+	// While the connection is still good the site goes straight back to be
+	// built; once it has run out, the buyer connects again, which does the same.
+	if ($action === 'retry_refused') {
+		$refused = new CustomerCloudProvision((int)($input['cvp_customer_cloud_provision_id'] ?? 0), TRUE);
+		if (!$refused->key || (int)$refused->get('cvp_usr_user_id') !== (int)$user_id || $refused->get('cvp_delete_time')
+				|| $refused->provider_refusal() === '') {
+			return LogicResult::redirect($self_url);
+		}
+		$grant = CustomerCloudAccount::live_for_build((int)$user_id);
+		if ($grant === null) {
+			return LogicResult::redirect('/profile/server_manager/connect_cloud');
+		}
+		$refused->set('cvp_cca_customer_cloud_account_id', (int)$grant->key);
+		$refused->set('cvp_status', 'ready');
+		$refused->set('cvp_error', null);
+		$refused->save();
+		$session->save_message(new DisplayMessage('We are trying again to create the server for '
+			. htmlspecialchars((string)$refused->get('cvp_domain')) . '.', 'Trying again', $self_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		return LogicResult::redirect($self_url);
 	}
 
@@ -270,6 +378,11 @@ function profile_sites_logic(array $input): LogicResult {
 				&& !ProvisionBuyerDns::listed($provision),
 			'dns_record'      => $dns_record,
 			'mail_records'    => $mail_records,
+			// The site's own receiving record, held back because the domain
+			// already receives email somewhere else (ProvisionBuyerDns).
+			'mx_left_alone'   => (profile_sites_we_built($provision) && !$provision->is_pre_payment()
+				&& !JobResultProcessor::plane_registered_domain($provision) && ProvisionBuyerDns::listed($provision))
+				? ProvisionBuyerDns::mx_left_alone($provision) : null,
 			'dmarc_record'    => $dmarc_record,
 			'aaaa_record'     => $aaaa_record,
 			'dns_box'         => $dns_box,
@@ -296,12 +409,17 @@ function profile_sites_logic(array $input): LogicResult {
 			'password_state'  => ($status === 'done' || $provision->admin_password_state() === 'revealed')
 				? $provision->admin_password_state() : 'pending',
 			'transfer'        => $provision->is_pre_payment() ? null : profile_sites_transfer($provision, $session),
+			// A site on the buyer's own server can be let go from here (SiteRemoval).
+			'removal'         => ($removal_kind = SiteRemoval::offered($provision)),
+			'removal_question' => $removal_kind !== '' ? SiteRemoval::question($provision) : '',
 			'mail_state'      => (string)$provision->get('cvp_mail_state'),
 			// Waiting for the buyer's Linode connection, and whether a
 			// connection was tried and the provider refused it: the card says
 			// so, with the way to connect again.
 			'needs_connect'   => !$hosted && $status === 'pending_connect',
 			'connect_refused' => !$hosted && $status === 'pending_connect' && trim((string)$provision->get('cvp_error')) !== '',
+			'provider_refusal' => !$hosted ? $provision->provider_refusal() : '',
+			'grant_live'      => !$hosted && $status === 'pending_connect' && CustomerCloudAccount::live_for_build((int)$user_id) !== null,
 			// On its buyer's own Linode: the card says whose server it is, and
 			// whether our email and backups came with it.
 			'own_linode'      => !$provision->is_pre_payment() && ManagedSiteDraft::plan_of($provision) === 'own_linode',
@@ -327,7 +445,24 @@ function profile_sites_logic(array $input): LogicResult {
 		'email_unconfirmed' => ($viewer = new User($user_id, TRUE)) && SmHosting::email_unconfirmed($viewer)
 			? SmHosting::email_unconfirmed_line($viewer) : '',
 		'in_progress'       => $in_progress,
-		'account_connected' => $account !== null && $account->get('cca_status') === 'active',
+		// Servers the buyer runs and added themselves (JoinedServers): the
+		// ones we manage, the ones waiting for a person, and a request their
+		// site just sent them here to claim.
+		'joined_servers'    => array_map(function ($node) {
+			return array('id' => (int)$node->key, 'name' => (string)$node->get('mgn_name'),
+				'since' => (string)$node->get('mgn_agent_paired_time'),
+				'connected' => trim((string)$node->get('mgn_agent_public_key')) !== '');
+		}, JoinedServers::for_user((int)$user_id)),
+		'joined_waiting'    => JoinedServers::waiting_for_user((int)$user_id),
+		'claim_request'     => ($claim !== '' && ($claim_row = JoinedServers::request_for($claim)) !== null)
+			? array('fingerprint' => $claim, 'name' => (string)$claim_row->get('ajr_claimed_name'),
+				'instant' => JoinedServers::pays_us((int)$user_id)) : null,
+		'claim_missing'     => $claim !== '' && JoinedServers::request_for($claim) === null,
+		// The buyer named a site to add: the way to its own Management Node page.
+		'add_server_url'    => JoinedServers::site_connect_url((string)($input['server'] ?? '')),
+		// A grant that ran out is not a connection: the page must not say it is.
+		'account_connected' => $account !== null && $account->get('cca_status') === 'active'
+			&& !CustomerCloudAccount::grant_expired($account),
 		'managed_on_sale'   => count(ManagedSiteDraft::offered_plans()) > 0,
 		'configure_url'     => ManagedSiteDraft::CONFIGURE_URL,
 		'availability_html'   => ManagedDomainIntake::availabilityScript('alternate_domain', 'alternate_domain_status'),
@@ -519,9 +654,9 @@ function profile_sites_mail_records($provision): array {
 /** The sending and inbound records this plane lists for a site, placed or not. */
 function profile_sites_plane_mail_records($provision): array {
 	$mail = ProvisionHostedMail::records_of($provision);
-	if (class_exists('FleetService') && (string)$provision->get('cvp_inbound_dns_state') === 'buyer') {
-		$mail = array_merge(FleetService::site_inbound_records($provision), $mail);
-	}
+	// The relay's records, without the MX where the domain already receives
+	// email elsewhere (ProvisionBuyerDns::plane_inbound_records).
+	$mail = array_merge(ProvisionBuyerDns::plane_inbound_records($provision), $mail);
 	return $mail;
 }
 
@@ -595,7 +730,7 @@ function profile_sites_inbound_records($provision): array {
 		return array();
 	}
 	$missing = array();
-	foreach (FleetService::site_inbound_records($provision) as $record) {
+	foreach (ProvisionBuyerDns::plane_inbound_records($provision) as $record) {
 		$type = strtoupper((string)$record['type']);
 		$name = rtrim((string)$record['name'], '.');
 		$value = rtrim((string)$record['value'], '.');

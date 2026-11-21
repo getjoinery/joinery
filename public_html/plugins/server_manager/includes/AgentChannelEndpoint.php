@@ -1073,6 +1073,11 @@ class AgentChannelEndpoint {
 		$node->set('mgn_agent_last_poll', null);
 		$node->set('mgn_agent_left_time', null);
 		$node->set('mgn_agent_left_to', null);
+		// A request its owner claimed from the machine's own admin console
+		// makes a node listed under that account (JoinedServers).
+		if ((int)$request->get('ajr_usr_user_id') > 0 && !(int)$node->get('mgn_owner_usr_user_id')) {
+			$node->set('mgn_owner_usr_user_id', (int)$request->get('ajr_usr_user_id'));
+		}
 		if ($request->get('ajr_agent_version')) {
 			$node->set('mgn_agent_version', (string)$request->get('ajr_agent_version'));
 		}

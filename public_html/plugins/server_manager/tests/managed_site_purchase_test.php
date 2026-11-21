@@ -238,6 +238,13 @@ check($r['row'] === null && stripos(implode(' ', $r['errors']), 'too long') !== 
 	implode(' | ', $r['errors']));
 $r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_buyer_email' => 'nope')), $buyer);
 check($r['row'] === null && stripos(implode(' ', $r['errors']), 'email') !== false, 'a bad admin email is refused');
+// An address at a domain that takes no mail: the new site's account would
+// refuse it and be left as the username admin, with the buyer told otherwise.
+DnsResolver::setBackend(new class { public function getRecords($name, $type) { return array(); } });
+$r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_buyer_email' => 'owner@no-mail-here.example')), $buyer);
+DnsResolver::clearBackend();
+check($r['row'] === null && stripos(implode(' ', $r['errors']), 'does not receive email today') !== false,
+	'a sign-in email at a domain that takes no mail is refused on the setup form', implode(' | ', $r['errors']));
 $r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('phn_cco_country_code_id' => '')), $buyer);
 check($r['row'] === null && stripos(implode(' ', $r['errors']), 'country code') !== false,
 	'the registrant block is gated the same way the checkout field was');
@@ -753,9 +760,28 @@ CustomerCloudFulfillment::approve_held($l3, 1);
 $l3->load();
 check($l3->get('cvp_status') === 'ready' && $l3->get('cvp_mail_state') === 'pending' && trim((string)$l3->get('cvp_error')) === '',
 	'Approve releases it exactly as an activation under the limit');
-CustomerCloudFulfillment::refuse_held($c1, 1);
+// Refuse gives the money back, tells the buyer, and only then takes it off the board.
+$refund_calls = array();
+$refused_mail = array();
+HostingBuyerNotices::$mailer = function ($template, $to, $vars) use (&$refused_mail) { $refused_mail[] = array($template, $to, $vars); return true; };
+CustomerCloudFulfillment::$refund_stand_in = function ($line, $note) { throw new RuntimeException('card network down'); };
+$threw_refund = '';
+try { CustomerCloudFulfillment::refuse_held($c1, 1); } catch (RuntimeException $e) { $threw_refund = $e->getMessage(); }
+$c1->load();
+check(strpos($threw_refund, 'still on the board') !== false && empty($c1->get('cvp_delete_time')) && (string)$c1->get('cvp_status') === 'held'
+	&& $refused_mail === array(), 'a refund that cannot be made stops Refuse: the order stays, nobody is told', $threw_refund);
+CustomerCloudFulfillment::$refund_stand_in = function ($line, $note) use (&$refund_calls) { $refund_calls[] = (int)$line->key; return 9.99; };
+$c1_lines = CustomerCloudFulfillment::site_lines($c1);
+$refusal = CustomerCloudFulfillment::refuse_held($c1, 1);
+CustomerCloudFulfillment::$refund_stand_in = null;
+HostingBuyerNotices::$mailer = null;
 $c1->load();
 check(!empty($c1->get('cvp_delete_time')), 'Refuse takes it off the board');
+check(count($c1_lines) >= 1 && count($refund_calls) === count($c1_lines) && abs($refusal['refunded'] - 9.99 * count($c1_lines)) < 0.001,
+	'every line bought for the site is refunded', json_encode(array($refund_calls, $refusal)));
+check($refusal['emailed'] && count($refused_mail) === 1 && $refused_mail[0][0] === 'hosting_order_refused'
+	&& strpos((string)$refused_mail[0][2]['refund_amount'], '9.99') !== false,
+	'and the buyer is emailed what was refunded', json_encode($refused_mail));
 $threw = false;
 try { CustomerCloudFulfillment::approve_held($l1, 1); } catch (RuntimeException $e) { $threw = true; }
 check($threw, 'only a held order can be approved');
@@ -825,7 +851,19 @@ check(strpos($lic_said, 'Your licence:') !== false, 'a licence bought with the s
 $pending_row->set('cvp_license_choice', 'free');
 check(stripos(CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null), 'Your licence:') === false,
 	'a free licence is not');
+$pending_row->set('cvp_license_choice', BusinessLicense::HELD_PREFIX . '7');
+check(strpos(CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null), 'licence you already own covers this site') !== false,
+	'a licence already owned is named as the one covering the site');
+$pending_row->set('cvp_license_choice', 'free');
+$pending_row->set('cvp_status', 'held');
+$held_said = CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null);
+check(strpos($held_said, 'a person here needs to look at this order') !== false && stripos($held_said, 'being built now') === false
+	&& stripos($held_said, 'admin password') === false,
+	'an order held for a person says so, and nothing about a build that has not started', $held_said);
 $fresh->set('usr_is_activated', false);
+check(strpos(CustomerCloudFulfillment::after_purchase_message($pending_row, $fresh, null), 'Confirm your email address') !== false,
+	'a held order still tells an unconfirmed buyer to confirm their email');
+$pending_row->set('cvp_status', 'ready');
 
 section('The hosting emails are sent from an address this site can send from');
 $gv = Globalvars::get_instance();

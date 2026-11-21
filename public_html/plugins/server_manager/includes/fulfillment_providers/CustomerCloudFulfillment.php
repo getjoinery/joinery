@@ -49,6 +49,9 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.24 - Refuse refunds every line bought for the site, cancels its subscriptions, revokes a licence bought
+ *                with it and emails the buyer (walkthrough Q33); site_lines()
+ * @version 1.23 - the confirmation page says a held order is being checked, and names a licence already owned
  * @version 1.22 - the cancel question publishes the end of the paid period only, as Your Sites does (walkthrough 91)
  * @version 1.21 - the confirmation page says this order's own case (server, domain, licence), never the product's
  *                fixed text for every case (walkthrough 27, 64)
@@ -315,6 +318,16 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 		$password = '<p>Your admin password is shown on your sites page once, when the site is ready. We do not send it '
 			. 'by email, and we do not keep a copy after you have seen it.</p>';
 
+		// An order held for a person is not being built, so nothing below (the
+		// build time, the records, the password) is said yet.
+		$unconfirmed = ($buyer !== null && SmHosting::email_unconfirmed($buyer))
+			? '<p><strong>One more thing:</strong> ' . SmHosting::email_unconfirmed_line($buyer) . '</p>' : '';
+		if ((string)$provision->get('cvp_status') === 'held') {
+			return '<p>Thank you. Before we build ' . ($domain !== '' ? $domain : 'your site') . ', a person here needs to '
+				. 'look at this order. This happens now and then, for example when an account already has several sites. '
+				. 'We email you within one working day, and ' . $sites . ' shows where it stands. Nothing more is needed '
+				. 'from you now.</p>' . $unconfirmed;
+		}
 		if ((string)$provision->get('cvp_status') === 'pending_connect') {
 			$out = '<p><strong>One step is left before ' . $domain . ' is built: connect your Linode account.</strong></p>'
 				. '<p><a class="btn btn-primary" href="' . CustomerCloudConsumer::CONNECT_URL . '">Connect your Linode account</a></p>'
@@ -345,13 +358,13 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 		if (BusinessLicense::buys($choice)) {
 			$out .= '<p><strong>Your licence:</strong> the ' . htmlspecialchars(BusinessLicense::label($choice), ENT_QUOTES, 'UTF-8')
 				. ' bought with this site covers it. Its key is on your sites page.</p>';
+		} elseif (BusinessLicense::held_id($choice) > 0) {
+			$out .= '<p><strong>Your licence:</strong> the business licence you already own covers this site. Its key is on '
+				. 'your sites page.</p>';
 		}
 
 		// A buyer who has not confirmed their email cannot sign in again once they leave.
-		if ($buyer !== null && SmHosting::email_unconfirmed($buyer)) {
-			$out .= '<p><strong>One more thing:</strong> ' . SmHosting::email_unconfirmed_line($buyer) . '</p>';
-		}
-		return $out;
+		return $out . $unconfirmed;
 	}
 
 	/**
@@ -617,19 +630,80 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 		}
 	}
 
+	/** Tests only: callable(OrderItem $line, string $note): float, in place of the refund at the payment provider. */
+	public static $refund_stand_in = null;
+
 	/**
-	 * A person refuses a held order, after refunding and cancelling it on its
-	 * order page (nothing here moves money): the row leaves the board. It
-	 * built nothing, so nothing is left running.
+	 * Every line of the order that this site's purchase put there: the
+	 * hosting line, and with it the licence, the email and backups bundle and
+	 * the domain's first year bought for this site. Another product in the
+	 * same order is not this site's and is left alone. Empty for a site
+	 * another store sold.
+	 *
+	 * @return OrderItem[]
 	 */
-	public static function refuse_held(CustomerCloudProvision $prov, int $by_user_id): void {
+	public static function site_lines(CustomerCloudProvision $prov): array {
+		$paying = $prov->local_order_item();
+		if ($paying === null) {
+			return array();
+		}
+		$lines = array((int)$paying->key => $paying);
+		$draft_id = (int)$prov->key;
+		$domain = strtolower(trim((string)$prov->get('cvp_domain')));
+		$domain_product_id = ManagedDomainIntake::domainProductId();
+		foreach (new MultiOrderItem(array('order_id' => (int)$paying->get('odi_ord_order_id'))) as $item) {
+			$data = (array)$item->get_raw_data();
+			$named = self::draft_id_from($data) === $draft_id
+				|| BusinessLicense::draft_id_from_line($data) === $draft_id
+				|| JoineryServiceRequirement::draft_id_from($data) === $draft_id
+				|| ($domain !== '' && $domain_product_id > 0 && (int)$item->get('odi_pro_product_id') === $domain_product_id
+					&& strtolower(trim((string)($data['managed_domain']['answer'] ?? ''))) === $domain);
+			if ($named) {
+				$lines[(int)$item->key] = $item;
+			}
+		}
+		return array_values($lines);
+	}
+
+	/**
+	 * A person refuses a held order: every line bought for the site is
+	 * refunded in full and its subscription cancelled, a licence bought with
+	 * it is revoked, the buyer is emailed, and the row leaves the board. It
+	 * built nothing, so nothing is left running. A refund that cannot be made
+	 * stops the refusal with the order still on the board; pressing Refuse
+	 * again carries on from the lines already refunded.
+	 *
+	 * @return array ['refunded' => float, 'emailed' => bool, 'lines' => int]
+	 */
+	public static function refuse_held(CustomerCloudProvision $prov, int $by_user_id): array {
 		if ((string)$prov->get('cvp_status') !== 'held') {
 			throw new RuntimeException('Only a held provision can be refused.');
 		}
+		$note = 'Refused: the order for ' . (string)$prov->get('cvp_domain') . ' was held for a person and not accepted.';
+		$lines = self::site_lines($prov);
+		$refunded = 0.0;
+		foreach ($lines as $line) {
+			try {
+				$refunded += is_callable(self::$refund_stand_in)
+					? (float)(self::$refund_stand_in)($line, $note)
+					: $line->refund_in_full($note);
+			} catch (\Throwable $e) {
+				throw new RuntimeException('Refuse stopped, and the order is still on the board: the refund of '
+					. $line->buyer_label() . ' was not made (' . $e->getMessage() . ').'
+					. ($refunded > 0 ? ' ' . ManagedSiteDraft::money(number_format($refunded, 2, '.', '')) . ' was refunded before that.' : '')
+					. ' Put it right and press Refuse again.');
+			}
+			// What the line bought is given back with its price (a free line
+			// had no refund to do it).
+			$line->revoke_ownerships();
+		}
 		$prov->set('cvp_error', 'Refused by user #' . $by_user_id . ' (held for a person).');
 		$prov->save();
+		$emailed = HostingBuyerNotices::tell_refused($prov, $refunded);
 		$prov->soft_delete();
-		error_log('CustomerCloudFulfillment: held provision #' . $prov->key . ' refused by user #' . $by_user_id);
+		error_log('CustomerCloudFulfillment: held provision #' . $prov->key . ' refused by user #' . $by_user_id
+			. ', ' . number_format($refunded, 2, '.', '') . ' refunded over ' . count($lines) . ' line(s)');
+		return array('refunded' => $refunded, 'emailed' => $emailed, 'lines' => count($lines));
 	}
 
 	/**

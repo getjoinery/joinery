@@ -7,6 +7,13 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.30 - Servers you run: a server the buyer added themselves, the claim step and the Add a server card
+ * @version 2.29 - Stop managing and remove on a site on the buyer's own server; Remove on an order that never built
+ * @version 2.28 - the page does not reload itself while a one-time password is shown (another site building took it
+ *                away after 30 seconds); the password has a Copy button
+ * @version 2.27 - every DNS name and value has a Copy button (assets/js/profile-copy.js) and wraps on a phone
+ * @version 2.26 - a suspended or shut-down site reads as switched off: no Ready, no working email, no Visit, no move offer
+ * @version 2.25 - a site whose server the buyer's own Linode account refused shows Linode's words above Connect
  * @version 2.24 - the one-time admin password and Visit your site wait until the domain points at the site
  * @version 2.23 - Ask us tells the support desk which page, and which site, the buyer came from
  * @version 2.22 - Move to your own Linode account is one closed line on a card until a move is asked for
@@ -170,7 +177,12 @@ echo $page->render_messages();
 	<?php continue; endif; ?>
 		<dl class="sms-facts">
 			<dt>Setup</dt>
-			<dd><?php echo htmlspecialchars($status_labels[$site['status']] ?? $site['status']);
+			<dd><?php // A suspended or shut-down site is switched off, whatever state its build reached.
+				$sms_shut = (($site['plan_state'] ?? '') === HostedTrial::STATE_SHUTDOWN);
+				$sms_off = $site['suspended'] !== null || $sms_shut;
+				echo $site['suspended'] !== null ? 'Switched off while it is suspended'
+					: ($sms_shut ? 'Shut down'
+					: htmlspecialchars($status_labels[$site['status']] ?? $site['status']));
 				if (in_array($site['status'], array('failed', 'held'), true) && $support_email !== '') {
 					echo '. Questions? Write to <a href="mailto:' . htmlspecialchars($support_email) . '">'
 						. htmlspecialchars($support_email) . '</a>.';
@@ -186,9 +198,15 @@ echo $page->render_messages();
 			<dt>Email</dt>
 			<dd><?php
 				// Waiting on records only the buyer can add is said as that, not as work we are doing.
-				$mail_label = ($site['mail_state'] === 'records_published' && !empty($site['mail_records']))
-					? 'Waiting for the email records below'
-					: ($mail_labels[$site['mail_state']] ?? $site['mail_state']);
+				if ($site['suspended'] !== null) {
+					$mail_label = 'Stopped while the site is suspended';
+				} elseif ($sms_shut) {
+					$mail_label = 'Stopped: the site is shut down';
+				} elseif ($site['mail_state'] === 'records_published' && !empty($site['mail_records'])) {
+					$mail_label = 'Waiting for the email records below';
+				} else {
+					$mail_label = $mail_labels[$site['mail_state']] ?? $site['mail_state'];
+				}
 				echo htmlspecialchars($mail_label); ?></dd>
 			<?php endif; ?>
 			<?php if ($site['suspended'] !== null): ?>
@@ -207,15 +225,28 @@ echo $page->render_messages();
 
 		<?php if ($site['needs_connect']): // the one thing this site waits on, said on its own card ?>
 		<section class="sms-connect">
-			<?php if ($site['connect_refused']): ?>
+			<?php if ($site['provider_refusal'] !== ''): ?>
+			<p class="sms-error">Linode would not create the server in your account, so nothing was built and nothing
+				was charged there. Linode said: &ldquo;<?php echo htmlspecialchars($site['provider_refusal']); ?>&rdquo;
+				Once that is put right with Linode, <?php echo $site['grant_live'] ? 'try again' : 'connect again'; ?> and we build the site.</p>
+				<?php if ($site['grant_live']): ?>
+				<form method="post" action="/profile/server_manager">
+					<input type="hidden" name="action" value="retry_refused">
+					<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$site['id']; ?>">
+					<button type="submit" class="btn btn-primary">Try again</button>
+				</form>
+				<?php endif; ?>
+			<?php elseif ($site['connect_refused']): ?>
 			<p class="sms-error">Linode did not accept the last connection, so nothing was created in your account.
 				Connect again to continue.</p>
 			<?php endif; ?>
+			<?php if (!($site['provider_refusal'] !== '' && $site['grant_live'])): // a live connection needs no second one ?>
 			<p><strong>This site is not being built yet.</strong> It runs on a server in your own Linode account,
 				billed to you by Linode with no markup from us, and we cannot create that server until you connect
 				the account. We ask only for permission to create servers. The site is ready <?php echo SmHosting::BUILD_TIME; ?>
 				after you connect.</p>
 			<p><a href="/profile/server_manager/connect_cloud" class="btn btn-primary">Connect your Linode account</a></p>
+			<?php endif; ?>
 		</section>
 		<?php endif; ?>
 
@@ -279,6 +310,23 @@ echo $page->render_messages();
 		</section>
 		<?php endif; ?>
 
+		<?php if (!empty($site['mx_left_alone'])): $mx = $site['mx_left_alone']; ?>
+		<section class="sms-dns sms-dns-optional">
+			<h3>Your email stays where it is</h3>
+			<p><?php echo htmlspecialchars($mx['name']); ?> already receives its email at
+				<strong><?php echo htmlspecialchars(implode(', ', $mx['hosts'])); ?></strong>, so we have left that alone:
+				the record that brings email to your new site is not in the list above, and we never add it for you.
+				Until it is added, email sent to this domain does not reach your new site.</p>
+			<p>Only if you want email for this domain to arrive on your new site instead: replace those records, where your
+				domain is registered, with this one. Email stops arriving at the old place when you do.</p>
+			<dl class="sms-facts">
+				<dt>Type</dt><dd>MX</dd>
+				<dt>Name</dt><dd><code><?php echo htmlspecialchars($mx['name']); ?></code></dd>
+				<dt>Value</dt><dd><code><?php echo htmlspecialchars((int)$mx['priority'] . ' ' . $mx['value']); ?></code></dd>
+			</dl>
+		</section>
+		<?php endif; ?>
+
 		<?php if ($site['dmarc_record'] !== null): $d = $site['dmarc_record']; ?>
 		<section class="sms-dns">
 			<h3>Optional: a forgery policy for your domain</h3>
@@ -305,7 +353,7 @@ echo $page->render_messages();
 		</section>
 		<?php endif; ?>
 
-		<?php if ($site['status'] === 'done' && $site['dns_record'] === null && empty($site['dns_pending'])): ?>
+		<?php if ($site['status'] === 'done' && !$sms_off && $site['dns_record'] === null && empty($site['dns_pending'])): ?>
 			<p><a href="<?php echo htmlspecialchars($site['url']); ?>" class="btn btn-primary">Visit your site</a></p>
 		<?php endif; ?>
 		<?php if (!empty($site['links'])): ?>
@@ -352,7 +400,18 @@ echo $page->render_messages();
 				lost it, use the Forgot password link on your own site.</p>
 		<?php endif; ?>
 
-		<?php if ($site['transfer'] !== null): $t = $site['transfer']; ?>
+		<?php if ($site['removal'] !== ''): // letting go of a site on the buyer's own server ?>
+			<p class="sms-remove"><?php echo PublicPage::action_button(
+				$site['removal'] === SiteRemoval::KIND_STOP ? 'Stop managing and remove' : 'Remove',
+				'/profile/server_manager', array(
+					'hidden'  => array('action' => 'remove_site', 'cvp_customer_cloud_provision_id' => (int)$site['id']),
+					'confirm' => $site['removal_question'],
+					'class'   => 'btn btn-ghost btn-sm',
+				)); ?></p>
+		<?php endif; ?>
+
+		<?php // A move is not offered on a suspended site; one already under way is still shown.
+		if ($site['transfer'] !== null && !($sms_off && $site['transfer']['state'] === '')): $t = $site['transfer']; ?>
 		<section class="sms-move<?php echo $t['state'] === '' ? ' sms-move-quiet' : ''; ?>" data-provision="<?php echo (int)$site['id']; ?>">
 			<?php if ($t['state'] === ''): ?>
 				<details class="sms-move-offer">
@@ -416,7 +475,8 @@ echo $page->render_messages();
 			<?php endif; ?>
 			<?php if ($t['cancelable']): ?>
 				<button type="button" class="btn btn-secondary" data-do="cancel"
-					data-confirm="Cancel the move? Your site stays with us as it is.">Cancel the move</button>
+					data-confirm="Cancel the move? Your site stays with us as it is."
+					data-confirm-label="Cancel the move" data-cancel-label="Keep moving">Cancel the move</button>
 			<?php endif; ?>
 			<p class="sms-move-notice" role="status" aria-live="polite"></p>
 		</section>
@@ -429,6 +489,76 @@ echo $page->render_messages();
 <?php if (count($sites) > 0 && $managed_on_sale): ?>
 	<p class="sms-note"><a href="<?php echo htmlspecialchars($configure_url); ?>">Set up another site</a></p>
 <?php endif; ?>
+
+<?php // ---- Servers the buyer already runs (JoinedServers) -------------------- ?>
+<?php if ($joined_servers || $joined_waiting): ?>
+<section class="sms-joined">
+	<h2>Servers you run</h2>
+	<?php foreach ($joined_servers as $server): ?>
+	<article class="sms-site">
+		<h3><?php echo htmlspecialchars($server['name']); ?></h3>
+		<dl class="sms-facts">
+			<dt>Server</dt><dd>Your own. We do not host it or bill you for it.</dd>
+			<dt>Management</dt>
+			<dd><?php echo $server['connected'] ? 'Managed by us: updates, alerts and health checks' : 'Not connected'; ?></dd>
+		</dl>
+		<p class="sms-remove"><?php echo PublicPage::action_button('Stop managing and remove', '/profile/server_manager', array(
+			'hidden'  => array('action' => 'let_go_server', 'mgn_managed_node_id' => (int)$server['id']),
+			'confirm' => 'Stop our management of ' . $server['name'] . ' and remove it from this page? Your server keeps running and '
+				. 'nothing on it is changed. To have it managed again later, add it from this page.',
+			'class'   => 'btn btn-ghost btn-sm',
+		)); ?></p>
+	</article>
+	<?php endforeach; ?>
+	<?php foreach ($joined_waiting as $waiting_name): ?>
+	<article class="sms-site">
+		<h3><?php echo htmlspecialchars($waiting_name); ?></h3>
+		<p class="sms-note">Added to your account, and waiting for one of us to approve it. Nothing more is needed from you.</p>
+	</article>
+	<?php endforeach; ?>
+</section>
+<?php endif; ?>
+
+<?php if ($claim_request !== null): // sent here by their own site's Management Node page ?>
+<section class="sms-reveal">
+	<h2>Add <?php echo htmlspecialchars($claim_request['name'] !== '' ? $claim_request['name'] : 'this server'); ?> to your account?</h2>
+	<p>Your site asked to be managed from here. Adding it lists it on this page under your account<?php
+		echo $claim_request['instant'] ? ', and its updates, alerts and health checks start at once.'
+			: '. One of us then approves it, usually within a working day.'; ?>
+		Nothing on your server changes, and you can stop our management again from this page.</p>
+	<?php echo PublicPage::action_button('Add this server', '/profile/server_manager', array(
+		'hidden' => array('action' => 'claim_server', 'fingerprint' => $claim_request['fingerprint']),
+		'class'  => 'btn btn-primary',
+	)); ?>
+</section>
+<?php elseif ($claim_missing): ?>
+	<p class="sms-error">We could not find that request: it may have run out (a request lasts an hour). Press Connect again on
+		your site's Management Node page.</p>
+<?php endif; ?>
+
+<?php if ($add_server_url !== ''): $add_host = (string)parse_url($add_server_url, PHP_URL_HOST); ?>
+<section class="sms-reveal">
+	<h2>Next: connect <?php echo htmlspecialchars($add_host); ?></h2>
+	<p>Open its Management Node page (you sign in to your own site as its administrator), press <strong>Connect</strong>,
+		then <strong>Add this server to my account there</strong>. Our address is already filled in.</p>
+	<p><a class="btn btn-primary" href="<?php echo htmlspecialchars($add_server_url); ?>">Open <?php echo htmlspecialchars($add_host); ?></a></p>
+</section>
+<?php endif; ?>
+
+<details class="sms-add-server">
+	<summary>Add a server I already run</summary>
+	<p>A Joinery site you installed yourself can be looked after from here: updates, alerts and health checks, with
+		nothing of yours moved or copied. Enter its address and we send you to its own Management Node page, where one
+		press connects it. You need to be an administrator of that site.</p>
+	<?php
+	$add_form = $page->getFormWriter('add_server_form', array('action' => '/profile/server_manager'));
+	echo $add_form->begin_form();
+	$add_form->hiddeninput('action', '', array('value' => 'add_server'));
+	$add_form->textinput('server_address', 'Your site\'s address', array('placeholder' => 'example.com', 'required' => true));
+	$add_form->submitbutton('btn_add_server', 'Continue on my site', array('class' => 'btn btn-secondary'));
+	echo $add_form->end_form();
+	?>
+</details>
 
 <?php
 // Where a buyer gets help: the support chat, with a person behind it, and the
@@ -453,7 +583,12 @@ if ($chat_on || $support_email !== ''): ?>
 .sms-site { padding: 16px 0; border-bottom: 1px solid var(--jy-color-border); }
 .sms-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: .5em 0 1em; }
 .sms-facts dt { font-weight: 600; }
-.sms-facts dd { margin: 0; }
+.sms-add-server { margin: 1.5em 0; }
+.sms-add-server summary { cursor: pointer; color: var(--jy-color-text-muted, inherit); }
+.sms-remove { margin: .5em 0 0; }
+.sms-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.sms-facts code { overflow-wrap: anywhere; }
+.sms-copy { margin-left: .5em; padding: 0 .5em; font-size: .8em; background: none; border: 1px solid var(--jy-color-border); border-radius: 4px; color: var(--jy-color-text-muted, inherit); cursor: pointer; }
 .sms-links { font-size: .95em; }
 .sms-note { color: var(--jy-color-text-muted); font-size: .9em; }
 .sms-connect { padding: 12px 16px; margin: 1em 0; background: var(--jy-color-warning-bg); border: 1px solid var(--jy-color-warning); border-radius: 6px; }
@@ -475,9 +610,11 @@ if ($chat_on || $support_email !== ''): ?>
 </style>
 
 <?php echo PageScript::src('plugins/server_manager/assets/js/profile-move.js'); ?>
+<?php echo PageScript::src('plugins/server_manager/assets/js/profile-copy.js'); ?>
 
-<?php if ($in_progress): ?>
-<?php /* Follow setup progress while a site is mid-pipeline. */ ?>
+<?php if ($in_progress && $revealed === ''): ?>
+<?php /* Follow setup progress while a site is mid-pipeline. Never while a one-time
+         password is on the screen: the reload would take it away for good. */ ?>
 <span hidden data-jy-reload-after="30"></span>
 <?php endif; ?>
 

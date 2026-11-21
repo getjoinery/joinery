@@ -26,6 +26,8 @@
  * the buyer is shown the plane's records and the site is not asked again
  * every few minutes for ever.
  *
+ * @version 1.2 - an MX, the site's own or our relay's, is held back where the domain already receives email elsewhere
+ *                (receives_elsewhere(), mx_left_alone(); walkthrough Q39)
  * @version 1.1 - a site without the mailbox plugin is answered for, not re-asked for ever (Joinerydemo, 2026-11-18)
  * @version 1.0
  */
@@ -125,11 +127,93 @@ class ProvisionBuyerDns {
 					|| ($type === 'TXT' && stripos($value, 'v=spf1') === 0))) {
 				continue;
 			}
+			// A domain that already receives its email somewhere else keeps
+			// doing so: the site's own MX is never listed or published over
+			// it (mx_left_alone() says what was held back, and why).
+			if ($type === 'MX' && self::receives_elsewhere($name, $value) !== array()) {
+				continue;
+			}
 			$out[] = array('type' => $type, 'name' => $name, 'value' => $value,
 				'priority' => isset($record['priority']) && $record['priority'] !== null ? (int)$record['priority'] : null,
 				'note' => (string)($record['note'] ?? ''));
 		}
 		return $out;
+	}
+
+	/**
+	 * The mail hosts a name's email goes to now, when none of them is $ours:
+	 * the domain receives somewhere else. Empty when it has no MX, already
+	 * names ours, or cannot be read (an unread name is treated as free: the
+	 * record is listed, and the buyer sees it before adding it).
+	 *
+	 * @return string[]
+	 */
+	public static function receives_elsewhere(string $name, string $ours): array {
+		$ours = strtolower(rtrim(trim($ours), '.'));
+		try {
+			$found = DnsResolver::getMx(strtolower(rtrim(trim($name), '.')));
+		} catch (Throwable $e) {
+			return array();
+		}
+		$hosts = array();
+		foreach ($found as $mx) {
+			$host = strtolower(rtrim(trim((string)($mx['host'] ?? '')), '.'));
+			if ($host === '') {
+				continue;   // a null MX: the domain takes no mail
+			}
+			if ($host === $ours) {
+				return array();
+			}
+			$hosts[] = $host;
+		}
+		return array_values(array_unique($hosts));
+	}
+
+	/**
+	 * The receiving record (our relay's, or the site's own) held back because its domain already
+	 * receives email elsewhere, for the page to say so: array(name, value,
+	 * priority, hosts), or null when nothing was held back.
+	 */
+	/**
+	 * The relay records this plane lists for a site that receives through
+	 * the fleet (FleetService::site_inbound_records), without the MX where
+	 * the domain already receives email elsewhere: the same guard as the
+	 * site's own MX. Empty where the buyer adds no inbound records.
+	 */
+	public static function plane_inbound_records($provision): array {
+		if (!class_exists('FleetService') || (string)$provision->get('cvp_inbound_dns_state') !== 'buyer') {
+			return array();
+		}
+		$out = array();
+		foreach (FleetService::site_inbound_records($provision) as $record) {
+			if (strtoupper((string)($record['type'] ?? '')) === 'MX'
+					&& self::receives_elsewhere((string)($record['name'] ?? ''), (string)($record['value'] ?? '')) !== array()) {
+				continue;
+			}
+			$out[] = $record;
+		}
+		return $out;
+	}
+
+	public static function mx_left_alone($provision): ?array {
+		$candidates = (array)self::site_records($provision);
+		if (class_exists('FleetService') && (string)$provision->get('cvp_inbound_dns_state') === 'buyer') {
+			$candidates = array_merge(FleetService::site_inbound_records($provision), $candidates);
+		}
+		foreach ($candidates as $record) {
+			if (strtoupper(trim((string)($record['type'] ?? ''))) !== 'MX') {
+				continue;
+			}
+			$name = strtolower(rtrim(trim((string)($record['name'] ?? '')), '.'));
+			$value = rtrim(trim((string)($record['value'] ?? '')), '.');
+			$hosts = ($name !== '' && $value !== '') ? self::receives_elsewhere($name, $value) : array();
+			if ($hosts !== array()) {
+				return array('name' => $name, 'value' => $value,
+					'priority' => isset($record['priority']) && $record['priority'] !== null ? (int)$record['priority'] : 10,
+					'hosts' => $hosts);
+			}
+		}
+		return null;
 	}
 
 	/** One site. Returns 1 when its list was completed. */

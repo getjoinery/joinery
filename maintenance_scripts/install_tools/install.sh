@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.54 - site --services-url=URL: where this site buys email and backup storage (services_url), set by a
+#               management node that sells them, so its owner is sent to the store that built the site.
+#               site --mail-hostname=NAME: the name the site's own mail server receives at (mailbox_mail_hostname),
+#               so its first DNS list carries the MX record.
 #VERSION 3.53 - build-base builds the site containers' base with this host's package fixes ahead of Ubuntu
 #               (install_package_fixes.sh pinned --base): each pinned source's fix, list and pin are copied
 #               into the image at their final paths and stay there, and the image is labelled
@@ -860,6 +864,7 @@ SITE_INIT_ENV_INPUTS=(
     JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
     JOINERY_BACKUP_PROVIDER JOINERY_BACKUP_REGION JOINERY_BACKUP_ENDPOINT
     JOINERY_OUTBOUND_NOTICE_GB JOINERY_BETA_ROOT_ACCESS JOINERY_NO_MAIL_SERVER JOINERY_NO_MANAGER_BACKUPS
+    JOINERY_SERVICES_URL JOINERY_MAIL_HOSTNAME
 )
 
 # This script's own version, read from the newest #VERSION header above rather
@@ -947,6 +952,14 @@ NO_MAIL_SERVER=0
 # where backups go, instead of saying its management node takes them
 # (manager_backups = none).
 NO_MANAGER_BACKUPS=0
+# --services-url=URL (site): the Joinery deployment this site buys email and
+# backup storage from (services_url). A management node that sells them names
+# itself, so the site's Connect button goes to the store that built it.
+SERVICES_URL=""
+# --mail-hostname=NAME (site): the name this site's own mail server receives
+# at (mailbox_mail_hostname). Named at the build, the site's DNS list carries
+# its MX record from the start. Not for a site with no mail server of its own.
+MAIL_HOSTNAME=""
 # --beta-root-access (site): a management node that keeps this machine's root
 # password for the beta tells the site to offer its owner the checkbox
 # (beta_root_access_offered). Nothing here keeps or removes a password.
@@ -4787,6 +4800,18 @@ do_site_create() {
                 NO_MANAGER_BACKUPS=1
                 shift
                 ;;
+            --mail-hostname=*)
+                MAIL_HOSTNAME="${1#*=}"
+                [[ "$MAIL_HOSTNAME" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]] \
+                    || { print_error "--mail-hostname=${MAIL_HOSTNAME} is not a host name (mail.example.com)"; exit 1; }
+                shift
+                ;;
+            --services-url=*)
+                SERVICES_URL="${1#*=}"
+                [[ "$SERVICES_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$ ]] \
+                    || { print_error "--services-url=${SERVICES_URL} is not an https address with no path (https://example.com)"; exit 1; }
+                shift
+                ;;
             --admin-email)
                 ADMIN_EMAIL="$2"
                 shift 2
@@ -4886,6 +4911,8 @@ do_site_create() {
                 echo "                         receives through a relay (local_mail_server = none)."
                 echo "  --no-manager-backups   The management node keeps no backups for this site: the"
                 echo "                         site offers its owner where to store them."
+                echo "  --services-url=URL     Where the site buys email and backup storage (https://...)"
+                echo "  --mail-hostname=NAME   The name the site's own mail server receives at"
                 echo "  --beta-root-access     The site offers its owner the emergency root access"
                 echo "                         checkbox (a management node that keeps this machine's"
                 echo "                         root password for the beta passes it)."
@@ -5336,6 +5363,12 @@ do_site_create() {
     fi
     if [ "$NO_MANAGER_BACKUPS" -eq 1 ]; then
         export JOINERY_NO_MANAGER_BACKUPS=1
+    fi
+    if [ -n "$SERVICES_URL" ]; then
+        export JOINERY_SERVICES_URL="$SERVICES_URL"
+    fi
+    if [ -n "$MAIL_HOSTNAME" ] && [ "$NO_MAIL_SERVER" -ne 1 ]; then
+        export JOINERY_MAIL_HOSTNAME="$MAIL_HOSTNAME"
     fi
     export UPGRADE_SERVER
 

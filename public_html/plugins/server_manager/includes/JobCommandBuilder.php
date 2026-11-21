@@ -1046,6 +1046,8 @@ class JobCommandBuilder {
 			];
 		}
 
+		// Declared before the header callback that sets it takes it by reference.
+		$locked = false;
 		$ch = curl_init($site_url . '/api/v1/management/stats');
 		curl_setopt_array($ch, [
 			CURLOPT_RETURNTRANSFER => true,
@@ -1067,7 +1069,6 @@ class JobCommandBuilder {
 				return strlen($line);
 			},
 		]);
-		$locked = false;
 		$body = curl_exec($ch);
 		$errno = curl_errno($ch);
 		$errmsg = curl_error($ch);
@@ -5054,6 +5055,7 @@ class JobCommandBuilder {
 			throw new Exception("Node '{$owner->get('mgn_slug')}' has no backup storage to read from.");
 		}
 		$listing = [];
+		$chain_key = '';
 		foreach ($spaces as $space) {
 			$target = $space->target();
 			if (!$target) {
@@ -6686,6 +6688,15 @@ class JobCommandBuilder {
 			$no_mail_flag = !empty($params['no_mail_server']) ? ' --no-mail-server' : '';
 			// This node keeps no backups for the site (bought without them): the site says so.
 			$no_backups_flag = !empty($params['no_manager_backups']) ? ' --no-manager-backups' : '';
+			// Where the site buys email and backups: this node, when it sells them.
+			$services_url = trim((string)($params['services_url'] ?? ''));
+			$services_flag = preg_match('#^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$#', $services_url)
+				? ' --services-url=' . escapeshellarg($services_url) : '';
+			// The name the site's own mail server receives at, so its first DNS
+			// list carries the MX record. Never for a site with no mail server.
+			$mail_hostname = strtolower(trim((string)($params['mail_hostname'] ?? '')));
+			$mail_host_flag = (empty($params['no_mail_server']) && preg_match('/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/', $mail_hostname))
+				? ' --mail-hostname=' . escapeshellarg($mail_hostname) : '';
 			$lines[] = 'if command -v apache2 >/dev/null && command -v psql >/dev/null && command -v php >/dev/null; then'
 			         . " echo 'PREREQS_ALREADY_INSTALLED — skipping install.sh server';"
 			         . " test -s /root/.joinery_postgres_password || { echo 'FATAL: prerequisites are installed but /root/.joinery_postgres_password is missing — a machine this plane creates is bare; create the file with the postgres role password.'; exit 1; };"
@@ -6697,7 +6708,7 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server' . self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . $no_mail_flag . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}{$no_mail_flag}{$no_backups_flag}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}{$no_mail_flag}{$no_backups_flag}{$services_flag}{$mail_host_flag}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 

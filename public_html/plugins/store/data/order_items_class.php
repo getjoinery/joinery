@@ -20,6 +20,9 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.12 - a line refunded in full revokes the ownerships it granted (revoke_ownerships(); walkthrough Q35)
+ * @version 1.11 - refund_in_full(): all that is left of a line's payment, and its subscription cancelled
+ * @version 1.10 - subscription_state_words(), subscription_payment_failed(): a subscription's state in a buyer's words
  * @version 1.9 - the order_date_after filter's value is quoted, never joined into the condition
  * @version 1.8 - cancel_notice() (the provider's words on what a cancel does), can_resume() and
  *                resume_subscription_order_item() (take back a cancel at period end) (hosting_after_purchase S2, S4)
@@ -268,6 +271,30 @@ function get_order() {
 	 * merchant has no cancel for Apple's, and none is built for Google Play's.
 	 * One with no payment provider behind it has nothing to cancel.
 	 */
+	/**
+	 * A subscription's state in a buyer's words, never the payment
+	 * provider's code for it ('past_due').
+	 */
+	public function subscription_state_words(): string {
+		$words = array(
+			'active'             => 'Active',
+			'trialing'           => 'Trial',
+			'past_due'           => 'Payment failed. Update your payment method to keep it.',
+			'unpaid'             => 'Payment failed. Update your payment method to keep it.',
+			'incomplete'         => 'Payment not completed',
+			'incomplete_expired' => 'Payment not completed',
+			'canceled'           => 'Cancelled',
+			'paused'             => 'Paused',
+		);
+		$status = strtolower(trim((string)$this->get('odi_subscription_status')));
+		return $status === '' ? 'Active' : ($words[$status] ?? ucfirst(str_replace('_', ' ', $status)));
+	}
+
+	/** Is the last charge for this subscription unpaid? */
+	public function subscription_payment_failed(): bool {
+		return in_array(strtolower(trim((string)$this->get('odi_subscription_status'))), array('past_due', 'unpaid'), true);
+	}
+
 	public function subscription_cancel_blocker() {
 		switch ($this->get_payment_source()) {
 			case 'stripe':
@@ -479,6 +506,13 @@ function get_order() {
 		$this->set('odi_refund_time', 'now()');
 		$this->save();
 
+		// The whole price back takes back what it bought (a licence, a
+		// one-time product): money and ownership go together. A part refund
+		// leaves it, and a person can restore one on the Ownership page.
+		if (round((float)$this->get('odi_refund_amount'), 2) >= round((float)$this->get('odi_price'), 2)) {
+			$this->revoke_ownerships();
+		}
+
 		$order = $this->get_order();
 		// Stripe's own figure for the order's charge, this refund included, so
 		// an earlier dashboard refund stays counted.
@@ -500,6 +534,53 @@ function get_order() {
 			}
 		}
 		return array('refunded' => $amount, 'what' => $found['what'], 'cancelled' => $cancelled, 'cancel_error' => $cancel_error);
+	}
+
+	/** Revoke every ownership this line granted that is still held. Returns how many. */
+	public function revoke_ownerships(): int {
+		$revoked = 0;
+		foreach (new MultiOwnership(array('order_item_id' => (int)$this->key)) as $own) {
+			if (!$own->get('own_revoked_time')) {
+				$own->set('own_revoked_time', gmdate('Y-m-d H:i:s'));
+				$own->save();
+				$revoked++;
+			}
+		}
+		return $revoked;
+	}
+
+	/**
+	 * Give back all that is left of what this line was paid and, for a
+	 * subscription, cancel it now: an order we will not fulfil. A line with
+	 * nothing left to refund (free, or refunded already) is not an error, so
+	 * the call can be made again after a part-finished run.
+	 *
+	 * @return float what this call refunded
+	 */
+	public function refund_in_full(string $note): float {
+		$refunded = 0.0;
+		if ((float)$this->get('odi_price') > 0) {
+			try {
+				$found = $this->stripe_helper()->refundable_charge_for_item($this);
+			} catch (StripeHelperException $e) {
+				throw new SystemDisplayableError('The payment cannot be read: ' . $e->getMessage());
+			}
+			if (empty($found['charge'])) {
+				throw new SystemDisplayableError((string)$found['reason']);
+			}
+			$left = $this->refundable_amount($found['charge']);
+			if ($left > 0) {
+				$result = $this->refund_payment($left, $note, true);
+				if ($result['cancel_error'] !== null) {
+					throw new SystemDisplayableError('Refunded, but the subscription was not cancelled: ' . $result['cancel_error']);
+				}
+				return (float)$result['refunded'];
+			}
+		}
+		if ($this->get('odi_is_subscription') && !$this->get('odi_subscription_cancelled_time')) {
+			$this->cancel_subscription_order_item(true, 'immediate');
+		}
+		return $refunded;
 	}
 
 	/**

@@ -6,6 +6,7 @@
  * (start_enable / confirm_enable). Included by views/setup.php with $page,
  * $page_vars, $viewer, $settings, $next_key in scope.
  *
+ * @version 1.8 - says so when the site requires its administrators to have a second factor: skipping does not skip it
  * @version 1.7 - its scripts are assets/js/setup/signin_security.js (no inline script)
  * @version 1.6
  * @changelog 1.6 - An account whose second factor must be confirmed first is
@@ -32,10 +33,21 @@ $setup_passkeys = new MultiPasskey(array('user_id' => (int)$viewer->key));
 $setup_passkey_count = $setup_passkeys->count_all();
 $setup_totp_enabled = $viewer->has_totp_enabled();
 
+// This site asks its administrators for a second factor: until one is set
+// up, every page but this one and the security page sends them back here.
+// Said up front, because Skip for now does not skip that.
+$setup_factor_required = SessionControl::get_instance()->must_enable_totp_for_admin();
+
 $totp_just_enabled = !empty($page_vars['totp_just_enabled']);
 $totp_in_progress = !empty($page_vars['totp_setup_in_progress']);
 $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 ?>
+
+<?php if ($setup_factor_required) { ?>
+	<p class="alert alert-warning"><strong>This one is needed.</strong> As this site's administrator you need a passkey or
+		authenticator codes before you can use the rest of the site. You can skip the other steps; without one of
+		these two, every page brings you back to your security settings.</p>
+<?php } ?>
 
 <?php if ($totp_just_enabled) { ?>
 	<div class="jy-callout jy-callout-warning">

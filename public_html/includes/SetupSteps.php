@@ -36,6 +36,8 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.32 - the email links (/verify-email, /login?act_code=, /recovery-verify) are left alone by the login
+ *                interrupt: a signed-in buyer who opened their confirmation link landed in the wizard, unconfirmed
  * @version 1.31 - Backups is done once the recovery key exists on a site its management node backs up (walkthrough 43, 52, 57)
  * @version 1.30
  * @changelog 1.30 - the Backups step treats a site as backed up by its management node only when that node keeps
@@ -353,6 +355,13 @@ class SetupSteps {
 
 	public static function interruptExempt(string $path): bool {
 		if ($path === '/setup' || $path === '/logout') {
+			return true;
+		}
+		// A link from an email, opened while signed in: confirming the account's
+		// address (/login?act_code= hands on to /verify-email) or its recovery
+		// address. Sent to the wizard instead, the press never happens and the
+		// address stays unconfirmed.
+		if ($path === '/verify-email' || $path === '/login' || $path === '/recovery-verify') {
 			return true;
 		}
 		// Quiet pages register from plugin bootstraps, which load lazily.

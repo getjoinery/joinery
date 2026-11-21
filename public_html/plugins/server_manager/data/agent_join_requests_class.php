@@ -54,6 +54,8 @@ class AgentJoinRequest extends SystemBase {
 	 */
 	public static $foreign_key_actions = array(
 		'ajr_mgn_managed_node_id' => array('action' => 'null'),
+		// A request outlives the account that claimed it; it just stops naming it.
+		'ajr_usr_user_id' => array('action' => 'null'),
 	);
 
 	public static $field_specifications = array(
@@ -70,6 +72,9 @@ class AgentJoinRequest extends SystemBase {
 		'ajr_mgn_managed_node_id'   => array('type'=>'int8'),
 		// 'auto' when JoinAutoApproval approved it; empty when a person did.
 		'ajr_decided_by'    => array('type'=>'varchar(12)'),
+		// The account that claimed this request from the machine's own admin
+		// console (JoinedServers::claim), so the node it becomes is theirs.
+		'ajr_usr_user_id'   => array('type'=>'int4'),
 		'ajr_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ajr_update_time'   => array('type'=>'timestamp(6)'),
 		'ajr_delete_time'   => array('type'=>'timestamp(6)'),

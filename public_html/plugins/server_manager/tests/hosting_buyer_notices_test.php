@@ -94,6 +94,23 @@ $waiting = hbn_site($buyer, 'hbn-wait-' . $run, 'pending_connect', (int)$w_item-
 $sent = array();
 HostingBuyerNotices::tell($waiting);
 check(hbn_templates($sent) === array('hosting_waiting_connect'), 'an own-Linode site waiting for its connection', json_encode(hbn_templates($sent)));
+// Their own account would not make the server: the provider's words, once
+// per refusal, in place of the plain wait.
+$waiting->set('cvp_error', CustomerCloudProvision::PROVIDER_REFUSED . 'You have reached a limit <of services>.');
+$waiting->save();
+$waiting = new CustomerCloudProvision($waiting->key, TRUE);
+check($waiting->provider_refusal() === 'You have reached a limit <of services>.', 'the refusal is read off the waiting site');
+$sent = array();
+HostingBuyerNotices::tell($waiting);
+check(hbn_templates($sent) === array('hosting_provider_refused')
+	&& strpos(json_encode($sent), 'limit &lt;of services&gt;') !== false,
+	'a refusal by the buyer\'s own account is told with the provider\'s words, escaped', json_encode($sent));
+$sent = array();
+check(HostingBuyerNotices::tell(new CustomerCloudProvision($waiting->key, TRUE)) === 0, 'the same refusal is told once');
+$waiting = new CustomerCloudProvision($waiting->key, TRUE);
+$waiting->set('cvp_status', 'failed');
+$waiting->save();
+check((new CustomerCloudProvision($waiting->key, TRUE))->provider_refusal() === '', 'only a waiting site reads as refused');
 $h_item = hbn_line($buyer);
 $held = hbn_site($buyer, 'hbn-held-' . $run, 'held', (int)$h_item->key);
 $sent = array();

@@ -6,6 +6,7 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.24 - a refused call carries Linode's own words (CloudComputeException::$provider_reason)
  * @version 1.23 - every new instance is created with swap_size 0 unless the caller names one: Linode's default
  *                512 MB swap disk is plain disk swap, which keeps memory a vault key reached on a disk; the
  *                host's swap is compressed memory (host_swap.sh)
@@ -974,7 +975,9 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			if ($status === 401) {
 				throw new CloudComputeException('unauthorized: ' . $reason, 401, $e);
 			}
-			throw new CloudComputeException('Linode API ' . $method . ' ' . $path . ' failed (' . $status . '): ' . $reason, $status, $e);
+			$refusal = new CloudComputeException('Linode API ' . $method . ' ' . $path . ' failed (' . $status . '): ' . $reason, $status, $e);
+			$refusal->provider_reason = (string)$reason;
+			throw $refusal;
 		} catch (GuzzleException $e) {
 			// A timeout, a DNS failure, a refused connection: not a
 			// RequestException, and its message carries the full URL. Wrapped

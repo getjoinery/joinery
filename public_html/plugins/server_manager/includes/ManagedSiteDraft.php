@@ -21,6 +21,9 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.20 - the sign-in email must be at a domain that receives mail today, the rule the new site's account applies
+ * @version 1.19 - a second site of a plan is not offered payment while another is in the cart (other_site_in_cart);
+ *                the cart would refuse it with an error page
  * @version 1.18 - a new setup's registration contact starts from the buyer's last registered domain (walkthrough 97)
  * @version 1.17 - OWN_LINODE_SERVER: the own-Linode server's size and Linode's price for it, said on the review and Connect pages
  * @version 1.16 - the own-Linode plan says our management is at no charge, with no mention of a beta (walkthrough Q20)
@@ -420,6 +423,17 @@ class ManagedSiteDraft {
 		}
 		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
 			$errors[] = 'The site admin email address is not valid.';
+		} else {
+			// The new site's account refuses an address whose domain takes no
+			// mail (SystemBase's email rule) and is then left as the username
+			// admin, while everything the buyer is told says to sign in with
+			// this address. Refused here, where it can still be changed.
+			$email_domain = substr($email, strrpos($email, '@') + 1);
+			if (!DnsResolver::domainAcceptsMail($email_domain)) {
+				$errors[] = 'The sign-in email\'s domain, ' . $email_domain . ', does not receive email today, so your new site '
+					. 'could not take that address and you would have no way to sign in. Use an address that already works; '
+					. 'you can change it on the site later.';
+			}
 		}
 
 		// Who the site is for: a business needs a licence, on every plan.
@@ -845,6 +859,31 @@ class ManagedSiteDraft {
 		return '';
 	}
 
+	/**
+	 * The domain of another site of the same plan already in the cart, or ''.
+	 * The plan's product is limited to one in a cart (pro_max_cart_count).
+	 */
+	public static function other_site_in_cart(CustomerCloudProvision $row, $product): string {
+		if ($product === null || (int)$product->get('pro_max_cart_count') !== 1 || !class_exists('ShoppingCart') || !isset($_SESSION)) {
+			return '';
+		}
+		try {
+			foreach (ShoppingCart::current()->items as $item) {
+				$data = (array)($item[2] ?? array());
+				$product_id = isset($item[1]) && is_object($item[1]) ? (int)$item[1]->key : 0;
+				if ($product_id !== (int)$product->key || self::line_names_draft($data, (int)$row->key)) {
+					continue;
+				}
+				$answer = $data['managed_site'] ?? 0;
+				$other = new CustomerCloudProvision((int)(is_array($answer) ? ($answer['answer'] ?? 0) : $answer), TRUE);
+				return $other->key ? (string)$other->get('cvp_domain') : 'another setup';
+			}
+		} catch (Throwable $e) {
+			return '';
+		}
+		return '';
+	}
+
 	public static function in_cart(CustomerCloudProvision $row): bool {
 		if (!class_exists('ShoppingCart') || !isset($_SESSION)) {
 			return false;
@@ -881,6 +920,15 @@ class ManagedSiteDraft {
 		$version = self::managed_version($product);
 		if ($product === null || $version === null) {
 			return '';
+		}
+		// The cart takes one site of a plan at a time, and adding a second is
+		// refused there with an error page. Said here instead, with the way on.
+		$waiting = self::other_site_in_cart($row, $product);
+		if ($waiting !== '') {
+			return '<p class="sms-note">Another site, <strong>' . htmlspecialchars($waiting, ENT_QUOTES, 'UTF-8')
+				. '</strong>, is already in your cart, and sites are paid for one at a time. '
+				. '<a href="/cart">Finish that payment</a> (or remove it from the cart), then come back: this setup is saved on '
+				. '<a href="' . self::SITES_URL . '">your sites page</a>.</p>';
 		}
 		return '<form method="post" action="' . htmlspecialchars($product->get_url()) . '" class="sms-pay">'
 			. '<input type="hidden" name="product_id" value="' . (int)$product->key . '">'

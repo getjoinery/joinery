@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.78 - mgn_owner_usr_user_id: the account a server its owner added is listed under (JoinedServers)
  * @version 1.77 - hosting_billing_refusal(): a site whose hosting subscription still bills is not hidden or removed (hosting_after_purchase B10); reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.76 - prepare() lets an empty SSH user through to the column's default (root): a node made
  *                 without one (agent join, site copy, provisioning) logged a model-rule refusal on every save
@@ -175,6 +176,8 @@ class ManagedNode extends SystemBase {
 		'mgn_mtr_machine_transfer_id' => ['action' => 'null'],
 		// A copy outlives its source removed for good; it just stops naming it.
 		'mgn_copy_of_node_id' => ['action' => 'null', 'source_table' => 'mgn_managed_nodes'],
+		// A server its owner added stays managed when their account is removed; it is then nobody's on Your Sites.
+		'mgn_owner_usr_user_id' => ['action' => 'null', 'source_table' => 'usr_users'],
 	];
 
 	public static $field_specifications = array(
@@ -433,6 +436,9 @@ class ManagedNode extends SystemBase {
 		// row from reading as a dead agent afterwards. A new pairing clears them.
 		'mgn_agent_left_time'          => array('type'=>'timestamp(6)'),
 		'mgn_agent_left_to'            => array('type'=>'varchar(255)'),
+		// A server its owner runs and added to this plane themselves: the
+		// account it is listed under on Your Sites (JoinedServers).
+		'mgn_owner_usr_user_id'        => array('type'=>'int4'),
 
 		// A node a live test made on a throwaway test server: a live-proof
 		// build of the agent (AgentLiveProofRun, fleet_security_patching WP7),
