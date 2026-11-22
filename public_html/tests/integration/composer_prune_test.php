@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php --filter=composer_prune
  *
+ * @version 1.5 - a failed swap leaves no copy behind (B28)
  * @version 1.4 - a mount-point vendor/ is updated in place; a copy with another autoloader class is refused
  * @version 1.3 - the keep set is the lock alone: the plugin cases go with the plugin composer tier
  *   (specs/plugin_own_vendor.md WP4)
@@ -244,6 +245,7 @@ check($vs->pruneUnneededPackages() === false && is_file($site . '/vendor/gone/x/
 	'a stale marker in vendor/ and a swap that does nothing: reported as failed, not as swapped',
 	implode(' | ', $vs->getPruneLog()));
 check(!file_exists($site . '/vendor/.prune-new'), 'step 1 removes a stale marker from vendor/');
+check(!file_exists($site . '/vendor.prune-new'), 'a swap that fails leaves no copy behind (B28)');
 
 // B19a: every rename of the fallback fails after vendor/ moved aside.
 $site = cp_make_site($everything);

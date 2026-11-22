@@ -8,6 +8,8 @@
  * signature covers (specs/plugin_own_vendor.md); vendorOverlaps() checks that
  * two copies of one library agree.
  *
+ * @version 1.16 - a swap that fails removes its copy instead of leaving a whole vendor/ for the next run (B28,
+ *                seen on wd5 11-22)
  * @version 1.15 - a vendor/ that is a mount point (every site container's) is updated in place: the new
  *                autoloader files are renamed in one by one, opcache is given time, and only then do the
  *                removed packages go; a mount point cannot be renamed, so neither swap could ever work there
@@ -986,6 +988,12 @@ class ComposerValidator {
 
         // Step 6: swap.
         if (!$this->swapIn($vendor, $new, $old, $unneeded)) {
+            // The copy is a whole vendor/ (about 100 MB): never leave it for
+            // the next run to find (B28). Only while vendor/ itself is in
+            // place, since a swap that went wrong may need the copy back.
+            if (is_dir($vendor) && !$this->markerIsOurs($vendor) && (file_exists($new) || is_link($new))) {
+                $this->runShell('rm -rf -- ' . escapeshellarg($new));
+            }
             return false;
         }
         @unlink($vendor . '/.prune-new');
