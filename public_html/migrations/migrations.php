@@ -2079,3 +2079,15 @@
 	$migration['migration_file'] = 'plugin_install_ids.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// A removed passphrase's wrapping of a browser-held vault keeps its row and
+	// loses its blob: the vault's secret under a phrase can be guessed against
+	// a copy of the database for as long as the blob exists
+	// (VaultClientCustody::replaceRootPassphrase scrubs from here on; this
+	// reaches the ones retired before it did). Idempotent.
+	$migration = array();
+	$migration['database_version'] = '243';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE uew_user_encryption_wrappings SET uew_wrapped_secret_key = 'scrubbed' WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NOT NULL AND uew_wrapped_secret_key <> 'scrubbed' AND uew_uev_user_encryption_vault_id IN (SELECT uev_user_encryption_vault_id FROM uev_user_encryption_vaults WHERE uev_custody = 'client')";
+	$migrations[] = $migration;

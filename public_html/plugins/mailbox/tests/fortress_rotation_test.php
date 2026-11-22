@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php test-db --filter=fortress_rotation
  *
+ * @version 1.2 - the rotated key opens with a passkey: a content vault takes no passphrase
  * @version 1.1 - post-quantum sealing: keys from generateKeypair() (X-Wing), v2 seal prefixes
  * @version 1.0
  */
@@ -94,16 +95,12 @@ try {
 	// ------------------------------------------------------------ begin
 	section('begin');
 
-	// The new key opens with a passphrase, offered only to someone whose
-	// passkeys cannot hold a key.
+	// The new key opens with a passkey: a content vault never takes a passphrase.
 	$passkey = vault_fixture_passkey($owner_id);
-	$passkey->set('pkc_prf_capable', false);
-	$passkey->set('pkc_prf_failed_time', gmdate('Y-m-d H:i:s'));
-	$passkey->save();
 	$new_pair = $fx['box']->generateKeypair();
 	$new_pub = base64_encode(SealedBox::b64url_decode($new_pair['public']));
 	$began = VaultClientRotation::begin($owner_id, 'mail', $new_pub, array(
-		array('unlocker_type' => 'passphrase', 'wrapped_secret_key' => 'new-passphrase-wrapping', 'salt' => 'salt'),
+		array('unlocker_type' => 'passkey', 'wrapped_secret_key' => 'new-passkey-wrapping', 'credential_id' => (string)$passkey->get('pkc_credential_id')),
 		array('unlocker_type' => 'recovery', 'wrapped_secret_key' => 'new-recovery-wrapping', 'salt' => 'salt'),
 	));
 	check($began['pending_key_generation'] === 2, 'the new key is pending as generation 2');

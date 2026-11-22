@@ -189,6 +189,54 @@ $threw = false;
 try { $ceremonies->unlockWithPassphrase($fx['user'], $fx['vault'], $fp['passphrase_kek']); } catch (VaultCeremonyException $e) { $threw = true; }
 check($threw, 'a vault with no passphrase enrolled refuses');
 
+section('Nothing is kept under a root a passphrase opens');
+$fp_uid = (int)$fp['user']->key;
+$content_input = function () {
+	return array(
+		'public_key' => base64_encode(SealedBox::b64url_decode((new SealedBox())->generateKeypair()['public'])),
+		'salt'       => base64_encode(random_bytes(16)),
+		'wrappings'  => array(array('unlocker_type' => 'root', 'wrapped_secret_key' => base64_encode(random_bytes(80)))),
+	);
+};
+$make_content = function (int $uid) use ($content_input) {
+	try {
+		$made = null;
+		SealedEgressGuard::isolate(function () use (&$made, $uid, $content_input) {
+			$made = VaultClientCustody::createVault($uid, 'drive', $content_input());
+		});
+		harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', (int)$made->key);
+		return '';
+	} catch (VaultClientCustodyException $e) {
+		return $e->getMessage();
+	}
+};
+check(VaultClientCustody::rootOpensByPassphrase($fp_uid) && !VaultClientCustody::rootOpensByPassphrase((int)$fx['user']->key),
+	'a root with a passphrase wrapping is one a passphrase opens; a passkey root is not');
+check($make_content($fp_uid) === VaultClientCustody::NEEDS_CAPABLE_PASSKEY && !VaultClientCustody::hasContentVaults($fp_uid),
+	'a content vault is refused under a root a passphrase opens');
+
+// The phrase removed (as when a passkey that can hold the key arrives): the
+// retired wrapping keeps its row and loses its blob, and the root takes content.
+VaultClientCustody::replaceRootPassphrase($fp_uid, array());
+$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT uew_wrapped_secret_key FROM uew_user_encryption_wrappings
+	WHERE uew_uev_user_encryption_vault_id = ? AND uew_unlocker_type = 'passphrase'");
+$q->execute(array((int)$fp_root->key));
+$left = $q->fetchAll(PDO::FETCH_COLUMN);
+check($left === array(VaultClientCustody::SCRUBBED), 'a removed passphrase leaves its row without the wrapped secret', json_encode($left));
+check(!VaultClientCustody::rootOpensByPassphrase($fp_uid), 'and the root is no longer one a passphrase opens');
+check($make_content($fp_uid) === '' && VaultClientCustody::hasContentVaults($fp_uid), 'a content vault is then accepted');
+
+// With content under the root, the phrase cannot come back.
+$db_k4 = DbConnector::get_instance()->get_db_link();
+$db_k4->beginTransaction();
+$threw = '';
+try {
+	VaultClientCustody::replaceRootPassphrase($fp_uid, array(array('unlocker_type' => 'passphrase', 'salt' => $fp['root_salt'],
+		'wrapped_secret_key' => vault_fixture_wrap($fp['root_secret'], $fp_root_kek, 'vault:root:passphrase'))));
+} catch (VaultClientCustodyException $e) { $threw = $e->getMessage(); }
+$db_k4->rollBack();
+check($threw === VaultClientCustody::PASSPHRASE_REFUSED_OVER_CONTENT, 'a passphrase is refused on a root that holds content', $threw);
+
 section('Recovery unlock: one code, both halves, spent together');
 $root_twin_used = function (int $root_id, int $index) {
 	foreach (vault_live_wrappings($root_id) as $w) {

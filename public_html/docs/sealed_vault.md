@@ -152,11 +152,32 @@ account key offline.
 **One passphrase.** One Argon2id run over the phrase with the root salt and
 KDF params; HKDF splits the result into the account half
 (`joinery-vault:passphrase:account:v1`, posted as `passphrase_kek`) and the
-root half (`…:root:v1`, kept). What it costs, said plainly: a server that has
-been broken into holds the account half from the next passphrase unlock and
-can guess phrases offline; the same guess yields the end-to-end keys. For a
-passphrase account, end-to-end content is as strong as the phrase against a
-compromised server, and the passphrase form says so.
+root half (`…:root:v1`, kept). What it costs, said plainly: both wrappings sit
+in the database beside their salt, so a copy of the database is enough to guess
+phrases offline, one Argon2id run a guess. The account vault is therefore as
+strong as the phrase, and the passphrase form says so.
+
+**Nothing is kept under a root a passphrase opens.** What opens the root opens
+every content vault under it, so a guessable phrase must never be a way in to
+end-to-end content. Two rules in `VaultClientCustody` hold that, and neither
+depends on a consumer remembering it:
+
+- `createVault()` refuses a content vault (`mail`, `drive`, `passwords`, any
+  client-custody scope but the root) while `rootOpensByPassphrase()`: the
+  root's current key has a passphrase wrapping that still holds its blob. The
+  message tells the person to add a passkey that can hold a key.
+- `persistWrappings()` refuses a passphrase wrapping on a root whose owner
+  `hasContentVaults()`, and on any content vault.
+
+So a passphrase account has a root with nothing under it: Fortress mail,
+Fortress folders and the password manager need a passkey that can hold a key.
+When such a passkey arrives, the unlock removes the phrase
+(`vault_unlock_passkey`) and the root takes content from then on.
+
+**A removed passphrase leaves no blob.** `replaceRootPassphrase()` retires the
+old wrapping and replaces its `uew_wrapped_secret_key` with `scrubbed`: the row
+stays for the record, the secret under the phrase does not. Pinned by
+`tests/vault/vault_ceremonies_test.php`.
 
 **One setup.** The Security page and the setup wizard make the account vault,
 the root vault and the codes in one step (`VaultKeyring.setupVault()`, over

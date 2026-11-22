@@ -23,6 +23,9 @@
  * the root's secret — and nothing else. A passphrase wrapping is accepted only
  * on the root, and only for an account whose passkeys cannot hold a key (R8).
  *
+ * @version 1.9 - nothing is kept under a root a passphrase opens: createVault() refuses a content vault there,
+ *   persistWrappings() refuses a passphrase once content vaults exist, and a retired passphrase wrapping
+ *   loses its blob (rootOpensByPassphrase, hasContentVaults, scrubRetiredPassphrase)
  * @version 1.8 - rootKeyIsOld(), ROOT_FIRST and replaceRootKey() removed: every root key is X-Wing, and only an old one was replaced
  * @version 1.7 - replaceRootRecovery refuses wrappings the page made under a root key that is not the root's
  *               current one (a tab still holding the root from before a rotation; reviewer2 B3)
@@ -184,6 +187,12 @@ class VaultClientCustody {
 				if ($type === UserEncryptionWrapping::TYPE_PASSPHRASE && !self::passphraseAllowed($user_id)) {
 					throw new VaultClientCustodyException('Your passkey can hold your key, so a passphrase is not offered.');
 				}
+				// The other half of createVault()'s rule: a passphrase opens the
+				// root only while nothing is kept under it, and never a content
+				// vault directly.
+				if ($type === UserEncryptionWrapping::TYPE_PASSPHRASE && (!$is_root || self::hasContentVaults($user_id))) {
+					throw new VaultClientCustodyException(self::PASSPHRASE_REFUSED_OVER_CONTENT);
+				}
 				$salt = isset($w['salt']) ? (string)$w['salt'] : (string)$vault->get('uev_salt');
 				if ($type === UserEncryptionWrapping::TYPE_RECOVERY && isset($w['code_set'])) {
 					$code_set = strtolower((string)$w['code_set']);
@@ -283,6 +292,11 @@ class VaultClientCustody {
 			}
 		} elseif ($root < 1 || $root !== count($wrappings)) {
 			throw new VaultClientCustodyException('This vault opens through your vault. Open your vault first.');
+		} elseif (self::rootOpensByPassphrase($user_id)) {
+			// A phrase can be guessed against a copy of the database, and what
+			// opens the root opens every vault under it. So nothing is ever put
+			// under a root a passphrase opens.
+			throw new VaultClientCustodyException(self::NEEDS_CAPABLE_PASSKEY);
 		}
 
 		if (self::loadVault($user_id, $scope)) {
@@ -350,7 +364,49 @@ class VaultClientCustody {
 		foreach ($old as $row) {
 			$row->soft_delete();
 		}
+		// A retired row keeps its place in the record, not its blob: the root's
+		// secret under a phrase stays guessable for as long as the blob exists.
+		self::scrubRetiredPassphrase((int)$root->key);
 		self::persistWrappings($user_id, $root, $wrappings);
+	}
+
+	const NEEDS_CAPABLE_PASSKEY = 'This needs a passkey that can hold your key. Your vault opens with a passphrase, and a passphrase cannot protect what only your devices may open. Add a newer passkey on your security page, then try again.';
+	const PASSPHRASE_REFUSED_OVER_CONTENT = 'You keep content only your devices can open, and a passphrase cannot protect it. Use a passkey that can hold your key.';
+	/** What a retired passphrase wrapping holds in place of its blob. */
+	const SCRUBBED = 'scrubbed';
+
+	/**
+	 * Whether a passphrase opens, or could still be guessed against, $user_id's
+	 * root vault: a passphrase wrapping of the root's current key that still
+	 * holds its blob, live or retired.
+	 */
+	public static function rootOpensByPassphrase(int $user_id): bool {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$root = self::loadVault($user_id, VaultScopes::ROOT_SCOPE);
+		if (!$root) {
+			return false;
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT COUNT(*) FROM uew_user_encryption_wrappings
+			WHERE uew_uev_user_encryption_vault_id = ? AND uew_unlocker_type = ? AND uew_key_generation = ?
+			  AND uew_wrapped_secret_key NOT IN (?, ?)');
+		$stmt->execute(array((int)$root->key, UserEncryptionWrapping::TYPE_PASSPHRASE, (int)$root->get('uev_key_generation'), '', self::SCRUBBED));
+		return (int)$stmt->fetchColumn() > 0;
+	}
+
+	/** Whether $user_id holds any browser-held vault under the root. */
+	public static function hasContentVaults(int $user_id): bool {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT COUNT(*) FROM uev_user_encryption_vaults
+			WHERE uev_usr_user_id = ? AND uev_custody = ? AND uev_scope <> ?');
+		$stmt->execute(array($user_id, UserEncryptionVault::CUSTODY_CLIENT, VaultScopes::ROOT_SCOPE));
+		return (int)$stmt->fetchColumn() > 0;
+	}
+
+	/** Replace the blob of every retired passphrase wrapping of a vault with SCRUBBED. */
+	private static function scrubRetiredPassphrase(int $vault_id): void {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('UPDATE uew_user_encryption_wrappings SET uew_wrapped_secret_key = ?
+			WHERE uew_uev_user_encryption_vault_id = ? AND uew_unlocker_type = ? AND uew_delete_time IS NOT NULL');
+		$stmt->execute(array(self::SCRUBBED, $vault_id, UserEncryptionWrapping::TYPE_PASSPHRASE));
 	}
 
 	/**
@@ -743,11 +799,17 @@ class VaultClientRotation {
 			$recovery = 0;
 			foreach ($wrappings as $w) {
 				$t = (string)($w['unlocker_type'] ?? '');
-				if ($t === UserEncryptionWrapping::TYPE_PASSKEY || $t === UserEncryptionWrapping::TYPE_PASSPHRASE) $primary++;
+				// The root may take the passphrase while nothing is kept under it
+				// (persistWrappings() refuses it otherwise); a content vault with
+				// unlockers of its own takes a passkey.
+				if ($t === UserEncryptionWrapping::TYPE_PASSKEY
+						|| ($t === UserEncryptionWrapping::TYPE_PASSPHRASE && $scope === VaultScopes::ROOT_SCOPE)) $primary++;
 				if ($t === UserEncryptionWrapping::TYPE_RECOVERY) $recovery++;
 			}
 			if ($primary < 1) {
-				throw new VaultClientCustodyException('The new key needs a passkey or a passphrase to unlock it.');
+				throw new VaultClientCustodyException($scope === VaultScopes::ROOT_SCOPE
+					? 'The new key needs a passkey or a passphrase to unlock it.'
+					: 'The new key needs a passkey to unlock it.');
 			}
 			if ($recovery < 1) {
 				throw new VaultClientCustodyException('The new key needs at least one recovery code.');

@@ -55,13 +55,8 @@ $session = SessionControl::get_instance();
 
 $owner = make_user('ClientReseal');
 $owner_id = (int)$owner->key;
-// The new key is opened by a passphrase, which an account holds only when its
-// passkeys cannot hold a key (specs/one_vault_experience.md § R8): the owner's
-// one passkey has failed a real derivation.
+// The new key is opened by a passkey: a content vault never takes a passphrase.
 $owner_passkey = vault_fixture_passkey($owner_id);
-$owner_passkey->set('pkc_prf_capable', false);
-$owner_passkey->set('pkc_prf_failed_time', gmdate('Y-m-d H:i:s'));
-$owner_passkey->save();
 $other = make_user('ClientResealOther');
 
 // The browser's keypairs: the one in use, and the one the rotation makes.
@@ -71,7 +66,7 @@ $new_pair = $box->generateKeypair();
 $new_pub = base64_encode(SealedBox::b64url_decode($new_pair['public']));
 $vault_id = vault_fixture_client_vault($owner_id, $old_pub, 'drive');
 $db->prepare("INSERT INTO uew_user_encryption_wrappings (uew_uev_user_encryption_vault_id, uew_unlocker_type, uew_wrapped_secret_key, uew_salt, uew_key_generation)
-	VALUES (?, 'passphrase', 'old-passphrase-wrapping', 'salt', 1), (?, 'recovery', 'old-recovery-wrapping', 'salt', 1)")
+	VALUES (?, 'recovery', 'old-recovery-wrapping-a', 'salt', 1), (?, 'recovery', 'old-recovery-wrapping', 'salt', 1)")
 	->execute(array($vault_id, $vault_id));
 $other_pair = $box->generateKeypair();
 vault_fixture_client_vault((int)$other->key, base64_encode(SealedBox::b64url_decode($other_pair['public'])), 'drive');
@@ -125,7 +120,7 @@ $device->save();
 harness_register_row('sde_sync_devices', 'sde_sync_device_id', (int)$device->key);
 
 $new_wrappings = array(
-	array('unlocker_type' => 'passphrase', 'wrapped_secret_key' => 'new-passphrase-wrapping', 'salt' => 'salt'),
+	array('unlocker_type' => 'passkey', 'wrapped_secret_key' => 'new-passkey-wrapping', 'credential_id' => (string)$owner_passkey->get('pkc_credential_id')),
 	array('unlocker_type' => 'recovery', 'wrapped_secret_key' => 'new-recovery-wrapping', 'salt' => 'salt'),
 );
 
@@ -134,7 +129,12 @@ section('begin stores a pending generation and touches nothing in use');
 // ---------------------------------------------------------------------------
 check(crb_throws(function () use ($owner_id, $new_pub) {
 	VaultClientRotation::begin($owner_id, 'drive', $new_pub, array(array('unlocker_type' => 'recovery', 'wrapped_secret_key' => 'x')));
-}) !== null, 'a new key with no passkey or passphrase to open it is refused');
+}) !== null, 'a new key with no passkey to open it is refused');
+check(crb_throws(function () use ($owner_id, $new_pub) {
+	VaultClientRotation::begin($owner_id, 'drive', $new_pub, array(
+		array('unlocker_type' => 'passphrase', 'wrapped_secret_key' => 'p', 'salt' => 'salt'),
+		array('unlocker_type' => 'recovery', 'wrapped_secret_key' => 'x', 'salt' => 'salt')));
+}) !== null, 'a passphrase is not a way to open a content vault\'s new key');
 
 $began = VaultClientRotation::begin($owner_id, 'drive', $new_pub, $new_wrappings);
 check(($began['pending_key_generation'] ?? null) === 2, 'the pending generation is the next one');
@@ -280,7 +280,7 @@ $done = VaultClientRotation::commit($owner_id, 'drive');
 check(($done['key_generation'] ?? null) === 2, 'the vault is on generation 2');
 $st = VaultClientCustody::statusPayload($owner_id, 'drive');
 check($st['public_key'] === $new_pub && $st['pending_key_generation'] === null, 'the pending key is the key');
-check(array_map(function ($w) { return $w['wrapped_secret_key']; }, $st['wrappings']) === array('new-passphrase-wrapping', 'new-recovery-wrapping'),
+check(array_map(function ($w) { return $w['wrapped_secret_key']; }, $st['wrappings']) === array('new-passkey-wrapping', 'new-recovery-wrapping'),
 	'the old wrappings retired; the new ones unlock it');
 $dev = new SyncDevice((int)$device->key, true);
 check($dev->vault_scopes() === array('passwords'), 'the linked computer no longer holds the drive key');

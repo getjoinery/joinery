@@ -8,6 +8,7 @@
  *
  * Loaded deferred, after passkeys.js, vault-crypto.js and recovery-readiness.js.
  *
+ * @version 1.1 - the passphrase prompts say a vault a passphrase opens holds nothing only the devices may open
  * @version 1.0
  */
 (function () {
@@ -733,7 +734,7 @@ document.addEventListener('DOMContentLoaded', function () {
             // home. Eligibility stays server-decided: the action
             // refuses an account with any working passkey route.
             if (e.data && e.data.prf_unsupported) {
-                if (!await JoineryModal.confirmAsync('This passkey cannot hold an encryption key - a limit of the device or security key itself, not a setting. A passkey from a newer phone, laptop or password manager is the better route. If none of your passkeys can, you can unlock with a memorized passphrase instead - weaker than a passkey: everything in your vault, end-to-end content included, is then as safe from a broken-into server as the passphrase is hard to guess. If you forget it and lose your recovery codes, the data is gone for good. Use a passphrase?', { confirmLabel: 'Use a passphrase' })) return;
+                if (!await JoineryModal.confirmAsync('This passkey cannot hold an encryption key - a limit of the device or security key itself, not a setting. A passkey from a newer phone, laptop or password manager is the better route. If none of your passkeys can, you can unlock with a memorized passphrase instead - weaker than a passkey: what your vault holds is then as safe from a copied database as the passphrase is hard to guess. For that reason a vault opened by a passphrase cannot hold anything only your devices may open: Fortress mail, Fortress folders and the password manager need a passkey that can hold a key. If you forget it and lose your recovery codes, the data is gone for good. Use a passphrase?', { confirmLabel: 'Use a passphrase' })) return;
                 var phrase = await JoineryModal.promptAsync('Set a passphrase (12+ characters):', { inputType: 'password', confirmLabel: 'Create' });
                 if (!phrase) return;
                 if (phrase.length < 12) { JoineryModal.alert('Use a passphrase of at least 12 characters.'); return; }
@@ -777,7 +778,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     document.getElementById('vault-passphrase-enroll-btn').addEventListener('click', async function () {
-        if (!await JoineryModal.confirmAsync('Your passkeys cannot hold an encryption key, so your vault opens with a passphrase. It opens everything in your vault, end-to-end content included, which is then as safe from a broken-into server as the passphrase is hard to guess. Use something long and unique.', { confirmLabel: 'I understand' })) return;
+        if (!await JoineryModal.confirmAsync('Your passkeys cannot hold an encryption key, so your vault opens with a passphrase. What your vault holds is then as safe from a copied database as the passphrase is hard to guess, so use something long and unique. Fortress mail, Fortress folders and the password manager stay unavailable until you add a passkey that can hold a key.', { confirmLabel: 'I understand' })) return;
         var passphrase = await JoineryModal.promptAsync('Set a new passphrase (12+ characters):', { inputType: 'password', confirmLabel: 'Save' });
         if (!passphrase) return;
         if (passphrase.length < 12) { JoineryModal.alert('Use a passphrase of at least 12 characters.'); return; }
