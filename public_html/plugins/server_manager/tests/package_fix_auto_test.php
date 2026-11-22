@@ -282,6 +282,19 @@ check(($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'b
 	json_encode($r['state']['attempts'] ?? null));
 check(count(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; })) === 1, 'and the person was told once');
 
+section('Fixes of one package that could not go on are told in one email');
+
+$sent = array(); $issued = array(); $channel = array();
+$watch2 = $watch;
+$watch2['sources']['php8.5']['unfixed']['CVE-2026-115561'] = $watch2['sources']['php8.5']['unfixed']['CVE-2026-115560'];
+$watch2['sources']['php8.5']['unfixed']['CVE-2026-115562'] = $watch2['sources']['php8.5']['unfixed']['CVE-2026-115560'];
+$r = PackageFixAuto::run($opts(array('now' => $now, 'state' => array(), 'watch_state' => $watch2,
+	'write' => function () { return array('status' => 'written', 'failed' => array('CVE-2026-115561' => 'does not apply', 'CVE-2026-115562' => 'does not apply')); })));
+$needs = array_values(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; }));
+check(count($needs) === 1 && strpos($needs[0][1]['body'], 'CVE-2026-115561') !== false && strpos($needs[0][1]['body'], 'CVE-2026-115562') !== false
+	&& strpos($needs[0][1]['body'], '2 of its fixes') !== false, 'one email names both', json_encode(array_column(array_column($needs, 1), 'body')));
+check(($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'built', 'and the one that went on is built');
+
 section('reviewer2 B14: a person\'s recipe already carries it');
 
 $sent = array(); $issued = array(); $channel = array();

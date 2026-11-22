@@ -34,6 +34,8 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.4 - fixes of one package that could not go on with the rest are told in one email, not one each
+ *                (live on dev, 2026-11-22: 7 PostgreSQL CVEs sent 7 emails)
  * @version 1.3 - an attempt that needed a person is tried again once this tree's release changes (a key committed
  *                or a fix to the runner arrives with a release); the same failure again tells nobody twice
  *                (live check on dev, 2026-11-22)
@@ -354,11 +356,18 @@ class PackageFixAuto {
 				? 'built on upstream\'s fixed release' : 'built with upstream\'s fix commit');
 			// A CVE the writer could not carry is still owed; say so. Built on
 			// upstream's fixed release, the release carries every one.
+			// One email for the package, listing each fix it could not carry.
+			$left = array();
 			foreach (($w['fallback'] ?? null) === 'upstream_release' ? array() : (array)($w['failed'] ?? array()) as $cve => $why) {
 				if (isset($cves[$cve])) {
 					$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now, 'release' => $release);
-					$state = self::tellNeedsPerson($state, $source, array($cve), 'finding the fix', $why, $now, $dispatch);
+					$left[$cve] = $why;
 				}
+			}
+			if ($left) {
+				$state = self::tellNeedsPerson($state, $source, array_keys($left), 'finding the fix',
+					count($left) . ' of its fixes could not go on Ubuntu\'s build with the rest (the rest were built): '
+					. implode('; ', array_map(function ($c, $y) { return $c . ': ' . $y; }, array_keys($left), $left)), $now, $dispatch);
 			}
 			$said[] = 'built ' . $source . ' ' . $line['version'];
 		} catch (PackageFixAutoStop $e) {
