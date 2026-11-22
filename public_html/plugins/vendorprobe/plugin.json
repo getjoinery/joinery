@@ -1,9 +1,0 @@
-{
-    "name": "Vendor Probe",
-    "version": "1.0.0",
-    "description": "Test plugin for the live check of a plugin that ships its own PHP library. It carries psr/cache in its own vendor/ and shows where that library loaded from. Removed after the check; never activate it on a real site.",
-    "author": "System Developer",
-    "license": "PolyForm-Noncommercial-1.0.0",
-    "status": "experimental",
-    "included_in_publish": true
-}
