@@ -237,7 +237,7 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_install_mode'           => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'fresh', 'allowed_values'=>array('fresh', 'bare', 'copy', 'adopted')),
 		// A bare-metal site built with no mail server of its own (install.sh
 		// --no-mail-server): it receives through the relay fleet, as a
-		// container site does. Decided when the site is bought (Managed).
+		// container site does. No plan on sale asks for it.
 		'cvp_no_mail_server'         => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'cvp_source_node_id'         => array('type'=>'int8'),
 		// A copy's install: the release it is installed at, its source's exact

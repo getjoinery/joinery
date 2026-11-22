@@ -90,14 +90,13 @@ class FleetService {
 
 	/**
 	 * Whether a hosted site's plan grants it a relay slot of its own: a sold
-	 * site we host, Starter or Managed. Each is a Docker deployment (Starter in
-	 * a container on a shared host, Managed in a container on its own
-	 * instance), and a Docker deployment runs no mail server of its own
-	 * (mailbox_site_has_mail_server() keys on deployment_environment docker),
-	 * so the relay is how it receives. Not a landing test: Managed lands on
-	 * an instance. Only on our own account
-	 * (hosting mode operator): a buyer's site on their own cloud account, or a
-	 * Managed site moved to it, is not ours to host, and its buyer's tier
+	 * site we host that has no mail server of its own, so the relay is how it
+	 * receives. That is a Starter site, a container on a shared host (a Docker
+	 * deployment runs no mail server, mailbox_site_has_mail_server()), or a
+	 * site built without one (cvp_no_mail_server). A Managed site is
+	 * installed on a server of its own with its own mail server and takes no
+	 * place. Only on our own account (hosting mode operator): a buyer's site
+	 * on their own cloud account is not ours to host, and its buyer's tier
 	 * grants a slot as for anyone.
 	 */
 	public static function site_plan_grants_slot($provision): bool {

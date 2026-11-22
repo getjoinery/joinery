@@ -21,6 +21,7 @@
  * registration phase, which already refuses to buy from anything but a paid
  * row.
  *
+ * @version 1.21 - a Managed site is built with its own mail server and receives at its own domain, as a site on its buyer's Linode does
  * @version 1.20 - the sign-in email must be at a domain that receives mail today, the rule the new site's account applies
  * @version 1.19 - a second site of a plan is not offered payment while another is in the cart (other_site_in_cart);
  *                the cart would refuse it with an error page
@@ -493,11 +494,11 @@ class ManagedSiteDraft {
 		// A site with a server to itself is installed straight onto it (bare
 		// metal): one agent, the whole machine's memory, nothing between the
 		// site and its server. Only a Starter site, on a shared host, is a
-		// container. A Managed site is built with no mail server of its own
-		// and receives through our relay fleet; a site on its buyer's own
-		// Linode is not ours to give a relay place, so it keeps its own.
+		// container. A site with a server to itself has its own mail server
+		// and receives at its own domain; a Starter site, a container, has
+		// none and receives through our relay fleet.
 		$row->set('cvp_docker_mode', $plan === 'starter' ? 'docker' : 'bare-metal');
-		$row->set('cvp_no_mail_server', $plan === 'managed');
+		$row->set('cvp_no_mail_server', false);
 		// The size the buyer was told, pinned: not the shared customer-cloud default an operator may change.
 		$row->set('cvp_instance_type', $plan === 'own_linode' ? self::OWN_LINODE_TYPE : null);
 		// The email and backups bundle rides with an own-Linode site, when ticked and on sale.

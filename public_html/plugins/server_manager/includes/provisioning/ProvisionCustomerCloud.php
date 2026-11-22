@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.33 - a hosted site with its own mail server is told its mail hostname too (Managed receives at its own domain)
  * @version 2.32 - a build tells the site that this node is where it buys email and backups (services_url), when it sells them
  * @version 2.31 - a server the buyer's own account refused to make waits for its buyer with the provider's
  *   words (PROVIDER_REFUSED), not as a failure only an operator sees
@@ -608,9 +609,10 @@ class ProvisionCustomerCloud {
 			'no_manager_backups' => self::own_linode_without_bundle($provision),
 			// A node that sells email and backups is where its sites buy them.
 			'services_url' => SmHosting::enabled() ? rtrim((string)LibraryFunctions::get_absolute_url(), '/') : '',
-			// A site on its buyer's own server, with its own mail server,
-			// receives at its own domain from the start (walkthrough Q39).
-			'mail_hostname' => (!$provision->is_operator_hosted() && $docker_mode === 'bare-metal'
+			// A site with a server to itself and its own mail server, ours or
+			// its buyer's, receives at its own domain from the start
+			// (walkthrough Q39).
+			'mail_hostname' => ($docker_mode === 'bare-metal'
 				&& !(bool)$provision->get('cvp_no_mail_server')) ? $domain : '',
 			'admin_email' => $admin_email,
 			'user_name'   => $provision->get('cvp_buyer_name'),

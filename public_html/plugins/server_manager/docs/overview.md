@@ -1071,10 +1071,8 @@ See [Hosted tier § Abuse](hosted_tier.md#abuse-terms-reports-suspend).
     and `server_manager_starter_free_places_alert` free places or fewer are
     left (default 2), the operator is emailed to make another starter host.
     A starter host has no port 25, so a finished site gets its own slot on the
-    mailbox plugin's relay fleet (a Managed site gets one the same way: it runs
-    in a container with no mail server of its own; a Managed site moved to its
-    buyer's own Linode account loses it when the move finishes, which its move
-    card says): its fleet seeding is queued
+    mailbox plugin's relay fleet (a Managed site, on a server of its own, runs
+    its own mail server and takes no slot): its fleet seeding is queued
     (`cvp_fleet_seed_state`, see the mailbox overview, *Two ways a slot is
     granted*), the site enrolls itself, and **Inbound mail**
     (`ProvisionSiteInboundMail`, a phase of the umbrella) places the MX and

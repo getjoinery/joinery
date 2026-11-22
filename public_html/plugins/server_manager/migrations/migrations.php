@@ -1020,4 +1020,17 @@ return [
 {support_email}<p>If you think this is a mistake, write to <a href="mailto:*support_email*">*support_email*</a>.</p>{end}', 'hosting_order_refused'));
 		},
 	],
+	[
+		// A Managed site is built with its own mail server (ManagedSiteDraft
+		// 1.21). An order set up before that and not built yet carries the
+		// old choice; a built site keeps the way it was built.
+		'id' => 'sm_037_unbuilt_managed_gets_mail_server',
+		'version' => '1.30.226',
+		'up' => function($dbconnector) {
+			$dbconnector->get_db_link()->exec("UPDATE cvp_customer_cloud_provisions SET cvp_no_mail_server = false
+				WHERE cvp_no_mail_server AND cvp_plan = 'managed'
+				AND cvp_status IN ('draft', 'pending_payment', 'ready', 'held')
+				AND COALESCE(cvp_instance_id, '') = ''");
+		},
+	],
 ];

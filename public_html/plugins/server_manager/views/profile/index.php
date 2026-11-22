@@ -7,6 +7,8 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.33 - the move card says inbound mail stops only for a site that received through our relay
+ * @version 2.32 - a built site whose address or email records are still missing says it waits for them, not Ready and Working
  * @version 2.31 - a server the buyer added shows its bundle, and its stop question says the bundle is cancelled
  * @version 2.30 - Servers you run: a server the buyer added themselves, the claim step and the Add a server card
  * @version 2.29 - Stop managing and remove on a site on the buyer's own server; Remove on an order that never built
@@ -183,7 +185,10 @@ echo $page->render_messages();
 				$sms_off = $site['suspended'] !== null || $sms_shut;
 				echo $site['suspended'] !== null ? 'Switched off while it is suspended'
 					: ($sms_shut ? 'Shut down'
-					: htmlspecialchars($status_labels[$site['status']] ?? $site['status']));
+					// Built, but the name does not point here yet: nobody can open it.
+					: ($site['status'] === 'done' && $site['dns_record'] !== null
+						? 'Built. Waiting for the address record below'
+					: htmlspecialchars($status_labels[$site['status']] ?? $site['status'])));
 				if (in_array($site['status'], array('failed', 'held'), true) && $support_email !== '') {
 					echo '. Questions? Write to <a href="mailto:' . htmlspecialchars($support_email) . '">'
 						. htmlspecialchars($support_email) . '</a>.';
@@ -203,7 +208,7 @@ echo $page->render_messages();
 					$mail_label = 'Stopped while the site is suspended';
 				} elseif ($sms_shut) {
 					$mail_label = 'Stopped: the site is shut down';
-				} elseif ($site['mail_state'] === 'records_published' && !empty($site['mail_records'])) {
+				} elseif (in_array($site['mail_state'], array('records_published', 'done'), true) && !empty($site['mail_records'])) {
 					$mail_label = 'Waiting for the email records below';
 				} else {
 					$mail_label = $mail_labels[$site['mail_state']] ?? $site['mail_state'];
@@ -420,8 +425,8 @@ echo $page->render_messages();
 				<p>Your site runs on its own server in our Linode account. It can move into a Linode account of your
 					own — running, with the same address, nothing copied or rebuilt. Linode then bills you for the
 					server, and we stop billing you for hosting. Your outgoing email and backups keep working through us.
-					Email sent to your domain stops reaching your site when the move finishes: set up receiving of your
-					own before then.</p>
+					<?php if (!empty($t['relay_inbound'])): ?>Email sent to your domain stops reaching your site when the move finishes: set up receiving of your
+					own before then.<?php endif; ?></p>
 				<button type="button" class="btn btn-secondary" data-do="request">Move to my own Linode account</button>
 				</details>
 			<?php else: ?>
@@ -456,7 +461,7 @@ echo $page->render_messages();
 				<p><strong>Your server is now in your own Linode account.</strong>
 					<?php if ($t['was_shut_down']): ?>It moved powered off: boot it in Cloud Manager to bring the site back.<?php endif; ?></p>
 				<ul class="sms-steps">
-					<li>Email sent to your domain no longer reaches your site through us: set up receiving of your own.</li>
+					<?php if (!empty($t['relay_inbound'])): ?><li>Email sent to your domain no longer reaches your site through us: set up receiving of your own.</li><?php endif; ?>
 					<li>Your outgoing email and backups carry on through us<?php if ($t['paid_until'] !== ''): ?>, paid until
 						<?php echo htmlspecialchars($t['paid_until']); endif; ?>. See
 						<a href="/profile/server_manager/services">Connected sites</a>.</li>

@@ -155,4 +155,18 @@ check($done['kind'] === SiteRemoval::KIND_STOP && !empty($mine2->get('cvp_delete
 unset($_SERVER['REQUEST_METHOD']);
 $_SESSION = array();
 
+section('A built site whose name is not pointed yet is not called Ready');
+$wnode = srm_node('srm-wait-' . $run);
+$wnode->set('mgn_ssl_state', 'pending');
+$wnode->save();
+$waits = srm_site($buyer, 'srm-wait-' . $run, 'done', 'operator', array('cvp_mgn_managed_node_id' => (int)$wnode->key));
+check(SmHosting::awaits_address($waits), 'a built site on its buyer\'s own domain, still waiting for its certificate, waits for its address');
+$wnode->set('mgn_ssl_state', 'active');
+$wnode->save();
+check(!SmHosting::awaits_address($waits), 'once the certificate is issued it does not');
+$wnode->set('mgn_ssl_state', 'pending');
+$wnode->save();
+$waits->set('cvp_status', 'installing');
+check(!SmHosting::awaits_address($waits), 'nor while it is still being built');
+
 harness_finish();

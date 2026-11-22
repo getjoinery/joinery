@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.27 - the move card says inbound mail stops only for a site that received through our relay (relay_inbound)
  * @version 1.26 - let_go_server cancels a bundle bought for the server's site; joined_servers carries bundle_id
  * @version 1.25 - a server the buyer already runs: add_server, claim_server (?claim= from the site's Management Node
  *   page) and let_go_server (JoinedServers)
@@ -803,6 +804,9 @@ function profile_sites_transfer($provision, $session): ?array {
 		'was_shut_down' => $row !== null && (bool)$row->get('itx_deletion_withdrawn'),
 		'paid_until'   => $paid_until !== '' ? LibraryFunctions::convert_time($paid_until, 'UTC', $tz, 'F j, Y') : '',
 		'managed'      => $node !== null && (bool)$node->get('mgn_enabled'),
+		// A site with no mail server of its own received through our relay,
+		// which a moved site leaves; one with its own keeps receiving.
+		'relay_inbound' => $provision->is_container() || (bool)$provision->get('cvp_no_mail_server'),
 		'signup_url'   => strpos($referral, 'https://') === 0 ? $referral : 'https://www.linode.com/',
 		'label'        => InstanceTransfers::label_hint($provision),
 	);

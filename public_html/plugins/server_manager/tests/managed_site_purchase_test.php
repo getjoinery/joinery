@@ -790,13 +790,13 @@ check(SmActionLevels::level('index', 'approve_held_provision') === 10 && SmActio
 $_SESSION['permission'] = 0;
 $_SESSION['usr_user_id'] = (int)$buyer->key;
 
-section('A site with a server to itself is bare metal; Managed has no mail server of its own');
+section('A site with a server to itself is bare metal, with its own mail server');
 $r = ManagedSiteDraft::save_and_freeze(null, msp_post(array('cvp_domain' => 'msp-bare-' . bin2hex(random_bytes(3)) . '.com')), $buyer);
 if ($r['row']) {
 	harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $r['row']->key);
 }
-check($r['row'] && (string)$r['row']->get('cvp_docker_mode') === 'bare-metal' && (bool)$r['row']->get('cvp_no_mail_server'),
-	'a Managed setup is bare metal with no mail server: it receives through the relay fleet', implode(' | ', $r['errors']));
+check($r['row'] && (string)$r['row']->get('cvp_docker_mode') === 'bare-metal' && !(bool)$r['row']->get('cvp_no_mail_server'),
+	'a Managed setup is bare metal with its own mail server: it receives at its own domain', implode(' | ', $r['errors']));
 
 section('The Dashboard shows a buyer their sites (walkthrough Q8)');
 require_once(PathHelper::getIncludePath('includes/ProfileDashboardRegistry.php'));

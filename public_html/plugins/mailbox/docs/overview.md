@@ -3828,9 +3828,10 @@ Settings tab.
 
 - **A hosted site's plan.** A sold site we host, on our own account (hosting
   mode operator), gets a slot of its own (`FleetService::site_plan_grants_slot()`):
-  a Starter site in a container on a shared host, or a Managed site in a
-  container on its own instance. Neither runs a mail server of its own. A site
-  on its buyer's own cloud account, or a Managed site moved to it, has none from
+  a site with no mail server of its own, which is a Starter site in a
+  container on a shared host (or a site built with `cvp_no_mail_server`). A
+  Managed site, installed on a server of its own, runs its own mail server
+  and takes no slot. A site on its buyer's own cloud account has none from
   its plan. Its key is named for its
   provision (`Fleet enrollment #<id>`) and recorded there
   (`cvp_fleet_apk_api_key_id`); re-seeding the site retires only that key.

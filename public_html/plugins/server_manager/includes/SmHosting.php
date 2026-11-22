@@ -15,6 +15,7 @@
  * not count. Every hosting page asks here, so they appear and disappear
  * together; the menus follow the setting.
  *
+ * @version 1.13 - awaits_address(): the Dashboard says a built site whose name is not pointed yet waits for its DNS records
  * @version 1.12 - DNS_WAIT_SECONDS is fifteen minutes: a site answers within about five, and a stuck leg held the whole list for thirty
  * @version 1.11 - support_lines() says each site's state in a buyer's words (re-run: the assistant read raw status codes)
  * @version 1.10 - support_lines(): a buyer's sites as the support desk is told them (walkthrough Q25)
@@ -106,6 +107,25 @@ class SmHosting {
 		return $ended === '' || (time() - strtotime($ended . ' UTC')) > self::TOLD_WAIT_SECONDS;
 	}
 
+	/**
+	 * Is this built site still without its name: the domain is its buyer's
+	 * to point, and the server still waits to get its certificate (issued
+	 * once the name reaches the server). Recorded facts only, no
+	 * lookup.
+	 */
+	public static function awaits_address($provision): bool {
+		if ((string)$provision->get('cvp_status') !== 'done' || !class_exists('ProvisionBuyerDns')
+				|| !ProvisionBuyerDns::applies($provision)) {
+			return false;
+		}
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+		if ($node_id <= 0) {
+			return false;
+		}
+		$node = new ManagedNode($node_id, TRUE);
+		return $node->key && !$node->get('mgn_delete_time') && (string)$node->get('mgn_ssl_state') === 'pending';
+	}
+
 	/** The Dashboard's words for where a site stands. */
 	const DASHBOARD_STATES = array(
 		'draft'           => 'Not finished',
@@ -144,6 +164,9 @@ class SmHosting {
 				$status = 'installing';
 			}
 			$words = self::DASHBOARD_STATES[$status] ?? $status;
+			if ($status === 'done' && self::awaits_address($row)) {
+				$words = 'Waiting for your DNS records';
+			}
 			$domain = (string)$row->get('cvp_domain');
 			$items[] = new ProfileDashboardItem(
 				array('domain' => $domain, 'state' => $words),

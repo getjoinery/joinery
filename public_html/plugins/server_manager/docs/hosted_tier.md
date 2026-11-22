@@ -15,10 +15,9 @@ A hosted site lands in one of two places, and this is the buyer's choice of
 
 - **Managed** — an instance of its own on this operator's account
   (fulfillment reference 1). The site is installed straight onto the server
-  (bare metal, one agent), with no mail server of its own
-  (`cvp_no_mail_server`, `install.sh --no-mail-server`): it receives through
-  the relay fleet, which grants a place to a sold site on our account that has
-  no mail server (`FleetService::site_plan_grants_slot`).
+  (bare metal, one agent), with its own mail server, and is told its domain
+  as its mail hostname (`install.sh site --mail-hostname=`): it receives at
+  its own domain, and its MX is in the buyer's first DNS list.
 - **Starter** — a container on one of this operator's shared starter hosts
   (fulfillment reference 2; `cvp_landing` `container`). Its row never holds
   an instance id, and it lands only on a host whose tier is `starter`.
@@ -31,8 +30,7 @@ The configure page offers a third plan beside them that is not hosted:
   (`CustomerCloudAccount::live_for_build`, an hour left) waits at
   `pending_connect`, and Your Sites offers Connect. The server (1 GB, us-east,
   the customer-cloud defaults) is created in their account with their grant and
-  built bare metal as Managed is, but with its own mail server: it is not
-  ours to give a relay place. The grant is asked for `linodes:read_write`
+  built bare metal as Managed is, with its own mail server. The grant is asked for `linodes:read_write`
   only, whenever the buyer has an own-Linode site to build, and is let go once
   per site after the build, when none of the buyer's sites is still being
   built or retried, when the server's agents have been admitted (admitting
@@ -563,9 +561,9 @@ outgrown its disk).
    container's row, once the domain reaches the new server. Its place on the
    starter host comes back.
 6. Mail: a copy onto a new server is installed bare metal, and a bare-metal
-   site receives its own mail rather than through a relay slot
-   (`FleetService::site_plan_grants_slot`). Until that is settled, check the
-   site's Mail setup after the switch and publish what it asks for.
+   site receives its own mail, as a Managed site does, where the Starter site
+   received through a relay slot (`FleetService::site_plan_grants_slot`).
+   Check the site's Mail setup after the switch and publish what it asks for.
 
 **O2. Moving one Starter site to another starter host.**
 
