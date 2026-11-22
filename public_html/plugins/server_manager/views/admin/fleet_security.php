@@ -16,6 +16,8 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.5 - Security fixes ahead of Ubuntu: the package fix channel, its soak, what the automatic runner did,
+ *                and a Withdraw per fix (specs/package_fixes_automatic.md WP8, WP9)
  * @version 1.4 - a machine's package fixes ahead of Ubuntu are listed under its name (specs/package_fixes_ahead_of_ubuntu.md WP6)
  * @version 1.3 - the key names the amber for a service that does not serve the sites (B25)
  * @version 1.2 - the page-load tick is the server's own write (server_initiated_write): a page view may move a running run
@@ -49,6 +51,17 @@ if ($_POST) {
 			$flash('Installing security updates in ' . count($r->steps()) . ' step(s), one at a time.', 'ok');
 		} catch (FleetSecurityRunException $e) {
 			$flash($e->getMessage(), 'error');
+		}
+	} elseif ($action === 'withdraw_fix') {
+		$source = (string)($_POST['source'] ?? '');
+		$version = (string)($_POST['version'] ?? '');
+		if (preg_match('/^[a-z0-9][a-z0-9.+-]+$/', $source) && preg_match('/^([0-9]+:)?[0-9][A-Za-z0-9.+~-]*\+joinery[0-9]+$/', $version)) {
+			$asked = json_decode((string)Globalvars::get_instance()->get_setting(PackageFixAuto::WITHDRAW_SETTING), true);
+			$asked = is_array($asked) ? $asked : array();
+			$asked[$source] = $version;
+			Setting::put(PackageFixAuto::WITHDRAW_SETTING, json_encode($asked, JSON_UNESCAPED_SLASHES));
+			$flash('Withdrawing ' . $source . ' ' . $version . ': within ten minutes every machine is told, and each one holding it '
+				. 'goes back to the build before it within the hour.', 'ok');
 		}
 	} elseif ($action === 'stop_run') {
 		$running = FleetSecurityRun::running();
@@ -167,6 +180,68 @@ if (!$latest || !$latest->is_running()) {
 		}
 		echo '</ul></details>';
 	}
+}
+?>
+
+<?php
+// Security fixes ahead of Ubuntu: the channel this site issues or mirrors, and the runner's record.
+$pf_role = PackageFixAuto::role();
+$pf_channel = PackageFixChannel::read(PackageFixChannel::dir(PathHelper::getSiteRoot()));
+if ($pf_role !== 'none' || $pf_channel !== null) {
+	$pf = PackageFixAuto::state();
+	echo '<div class="border rounded p-3 mb-3"><div><strong>Security fixes ahead of Ubuntu</strong></div>';
+	echo '<p class="small text-muted mb-2">When a project we run ships a critical or high security fix Ubuntu has not, our own build is made '
+		. 'automatically, goes to the machines this site serves directly first, and to every machine once they have stayed healthy for '
+		. (int)PackageFixAuto::soakHours() . ' hours. ' . ($pf_role === 'mirror' ? 'This site passes on each set once its upstream sends it to every machine.' : '')
+		. ' Withdraw sends a build back: every machine holding it returns to the build before it.</p>';
+	if ($pf_channel === null) {
+		echo '<div class="small">No set has been issued yet; machines take the fixes their release names.</div>';
+	} else {
+		echo '<div class="small mb-2">Set ' . (int)$pf_channel['serial'] . ', ' . ($pf_channel['wide'] ? 'for every machine' : 'for the test machines first')
+			. ($pf_channel['issued'] !== '' ? ', issued ' . $h($ago(strtotime($pf_channel['issued']))) : '') . '.</div>';
+		if (!empty($pf['soak'])) {
+			echo '<div class="small mb-2">On the test machines since ' . $h($ago((int)$pf['soak']['started'])) . ': '
+				. $h(implode(', ', array_map(function ($s, $v) { return IncidentSourceFixAheadOfUbuntu::package_name($s) . ' ' . $v; },
+					array_keys($pf['soak']['sources']), $pf['soak']['sources']))) . '.</div>';
+		}
+		if ($pf_channel['lines']) {
+			echo '<div class="table-responsive"><table class="table table-sm mb-2"><thead><tr><th>Package</th><th>Our build</th><th>Fixes</th><th>Made</th><th></th></tr></thead><tbody>';
+			foreach ($pf_channel['lines'] as $source => $l) {
+				$auto = (($pf['automatic'][$source]['version'] ?? null) === $l['version']);
+				$fid = 'withdraw-' . preg_replace('/[^a-z0-9]/', '-', $source);
+				echo '<tr><td>' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source)) . '</td><td class="small">' . $h($l['version']) . '</td>'
+					. '<td class="small">' . $h($l['cves']) . '</td><td class="small">' . ($auto ? 'automatically' : 'by a person') . '</td><td>';
+				if ($pf_role === 'issuer') {
+					echo '<form id="' . $fid . '" method="post" action="' . $self_url . '" class="m-0">' . SmAdminCsrf::field()
+						. '<input type="hidden" name="action" value="withdraw_fix"><input type="hidden" name="source" value="' . $h($source) . '">'
+						. '<input type="hidden" name="version" value="' . $h($l['version']) . '">'
+						. '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="' . $h('Withdraw ' . $l['version']
+							. '? Every machine holding it goes back to the build before it, and the fixes it carries are missing again until another build or Ubuntu brings them.')
+						. '" data-jy-submit="' . $fid . '">Withdraw</button></form>';
+				}
+				echo '</td></tr>';
+			}
+			echo '</tbody></table></div>';
+		}
+		foreach ($pf_channel['withdrawn'] as $source => $versions) {
+			echo '<div class="small text-muted">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions)) . '</div>';
+		}
+	}
+	$pf_people = array();
+	foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
+		if (($a['status'] ?? '') === 'needs_person') {
+			$pf_people[] = $key . ': stopped at ' . ($a['step'] ?? '?') . ' - ' . ($a['reason'] ?? '');
+		}
+	}
+	if ($pf_people) {
+		echo '<div class="small text-danger mt-2"><strong>A person is needed</strong><ul class="mb-0">';
+		foreach (array_slice($pf_people, 0, 20) as $p) { echo '<li>' . $h($p) . '</li>'; }
+		echo '</ul></div>';
+	}
+	if (!empty($pf['last_run'])) {
+		echo '<div class="small text-muted mt-2">Last run ' . $h($ago((int)$pf['last_run'])) . ': ' . $h($pf['last_message'] ?? '') . '</div>';
+	}
+	echo '</div>';
 }
 ?>
 

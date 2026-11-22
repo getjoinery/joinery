@@ -17,6 +17,7 @@
  * no release row carrying the same statement was logged and never shipped;
  * this row, with its statement, is what explains it (O5's canary reads this).
  *
+ * @version 1.2 - rle_version holds 40: a package fix set is <release>+fixes.<serial> (reviewer2 B16)
  * @version 1.1 - rle_seen_in_log_time: when ReleaseLogTail, reading the log, found this entry there (O5)
  * @version 1.0
  */
@@ -40,7 +41,7 @@ class ReleaseLogEntry extends SystemBase {
 	public static $field_specifications = array(
 		'rle_release_log_entry_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		// The release version the statement names.
-		'rle_version'    => array('type'=>'varchar(20)', 'is_nullable'=>false),
+		'rle_version'    => array('type'=>'varchar(40)', 'is_nullable'=>false),
 		// Where it is: the log's origin and the entry's index there.
 		'rle_log_origin' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'unique_with'=>array('rle_log_index')),
 		'rle_log_index'  => array('type'=>'int8', 'is_nullable'=>false),

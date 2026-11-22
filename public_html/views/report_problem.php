@@ -11,6 +11,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.1.1 - the sign-in requirement is here, not in the shared logic: the admin page's header is its gate
  * @version 1.1.0 - the body is shared (report_problem_form.php); administrators go to the admin page
  * @version 1.0.3 - a form posted here natively is still sent (report_problem_logic 1.1.0); the script is not deferred
  * @version 1.0.2 - the form's script is assets/js/report-problem.js (no inline script)
@@ -21,6 +22,8 @@ require_once(PathHelper::getIncludePath('logic/report_problem_logic.php'));
 require_once(PathHelper::getIncludePath('includes/report_problem_form.php'));
 
 $session = SessionControl::get_instance();
+// Signed in to report. The admin page shares the logic and its header gates it.
+$session->check_permission(0);
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $session->is_logged_in() && Access::permits(Access::staffLevel(), $session)) {
 	// Only the page's own fields: the raw query string carries the router's __route.
 	$query = http_build_query(array_intersect_key($_GET, array_flip(array('ref', 'from', 'msg'))));

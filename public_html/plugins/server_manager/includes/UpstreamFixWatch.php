@@ -25,6 +25,7 @@
  * A source the tracker could not be read for keeps its last answer, and says
  * since when.
  *
+ * @version 1.3 - recipes() counts the package fix channel's fixes, the automatic ones included (package_fixes_automatic WP6)
  * @version 1.2 - curl, libxml2, glibc and imagemagick are watched too (owner Q4); a CVE a machine finds
  *                missing from Ubuntu's newer build is missing whatever the tracker says, so the recipe is
  *                to rebuild, never to retire (owner Q6)
@@ -276,13 +277,22 @@ class UpstreamFixWatch {
 		return array('build' => $build, 'unrated' => $unrated, 'recipes' => $recipes, 'blind' => $blind, 'driver_errors' => $driver_errors);
 	}
 
-	/** The active recipes this tree's release carries, by source (fixes/ACTIVE). */
+	/**
+	 * The fixes this site's machines are given, by source: the package fix
+	 * channel this site serves when it has one (automatic builds included,
+	 * specs/package_fixes_automatic.md WP6), over this tree's fixes/ACTIVE.
+	 */
 	public static function recipes(): array {
 		$lines = PackageFixPublisher::readStamp(PathHelper::getSiteRoot() . '/' . PackageFixPublisher::SOURCE_SUBDIR);
-		return is_array($lines) ? $lines : array();
+		$lines = is_array($lines) ? $lines : array();
+		$channel = PackageFixChannel::read(PackageFixChannel::dir(PathHelper::getSiteRoot()));
+		if ($channel !== null) {
+			$lines = $channel['lines'] + $lines;
+		}
+		return $lines;
 	}
 
-	/** Each live node's package_fixes, as its last host report gave it. */
+	/** Each live node's package_fixes, as its last host report gave it, and when that report came. */
 	public static function node_summary(): array {
 		$out = array();
 		foreach (new MultiManagedNode(array('deleted' => false), array('mgn_name' => 'ASC')) as $node) {
@@ -291,8 +301,12 @@ class UpstreamFixWatch {
 			if (is_string($hr)) { $hr = json_decode($hr, true); }
 			if (!is_array($hr)) { continue; }
 			$pf = JobResultProcessor::sanitise_host_report($hr)['package_fixes'] ?? null;
-			if (is_array($pf) && $pf['fixes']) {
-				$out[] = array('id' => (int)$node->key, 'name' => (string)$node->get('mgn_name'), 'fixes' => $pf['fixes']);
+			// Every machine that reports a fix state, one with no fix too: the
+			// soak waits for a machine that has not taken its set (reviewer2 B27).
+			if (is_array($pf)) {
+				$t = strtotime((string)$node->get('mgn_last_host_report_time') . ' UTC');
+				$out[] = array('id' => (int)$node->key, 'name' => (string)$node->get('mgn_name'), 'fixes' => $pf['fixes'],
+					'reported_at' => $t === false ? 0 : $t, 'channel' => $pf['channel'] ?? null);
 			}
 		}
 		return $out;

@@ -7,6 +7,8 @@
  * fix it (vulnerabilities[].patched_versions: "8.5.13"). One unauthenticated
  * call an hour, well inside GitHub's 60 an hour for an address.
  *
+ * @version 1.1 - each advisory's GHSA id ('ids'), and ids(): PHP's fix commits name the GHSA
+ *                (specs/package_fixes_automatic.md WP2)
  * @version 1.0
  */
 class UpstreamAdvisoryPhp implements UpstreamAdvisoryDriver {
@@ -15,6 +17,9 @@ class UpstreamAdvisoryPhp implements UpstreamAdvisoryDriver {
 
 	/** @var callable(string $url): ?string */
 	protected $fetcher;
+
+	/** @var array|null the last advisories read, which ids() answers from */
+	protected $read = null;
 
 	/** @param callable|null $fetcher tests only: fn(string $url): ?string */
 	public function __construct($fetcher = null) {
@@ -59,9 +64,15 @@ class UpstreamAdvisoryPhp implements UpstreamAdvisoryDriver {
 				'fixed'    => count($fixed_in) > 0,
 				'fixed_in' => implode(', ', $fixed_in),
 				'url'      => is_string($a['html_url'] ?? null) && strpos($a['html_url'], 'https://github.com/') === 0 ? $a['html_url'] : '',
+				'ids'      => is_string($a['ghsa_id'] ?? null) && preg_match('/^GHSA(-[0-9a-z]{4}){3}$/i', $a['ghsa_id']) ? array($a['ghsa_id']) : array(),
 			);
 		}
-		return $out;
+		return $this->read = $out;
+	}
+
+	public function ids(string $cve): array {
+		$a = $this->read ?? $this->advisories();
+		return is_array($a) && isset($a[$cve]) ? $a[$cve]['ids'] : array();
 	}
 }
 ?>

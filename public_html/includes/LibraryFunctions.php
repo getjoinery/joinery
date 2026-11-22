@@ -447,7 +447,7 @@ class LibraryFunctions {
 	private static function remember_protocol($observed) {
 		$settings = Globalvars::get_instance();
 		$known = strtolower(trim((string)$settings->get_setting('protocol_observed_scheme', true, true)));
-		if ($known === $observed) {
+		if (self::next_observed_scheme($known, $observed) === $known) {
 			return; // already recorded — the common case, and it costs nothing
 		}
 		try {
@@ -463,6 +463,29 @@ class LibraryFunctions {
 		} catch (Throwable $e) {
 			error_log('LibraryFunctions: could not record the observed protocol — ' . $e->getMessage());
 		}
+	}
+
+	/**
+	 * What protocol_observed_scheme should hold after a request on $observed,
+	 * given it holds $known. Pure.
+	 *
+	 * https is written whenever a request arrives on it; http only while
+	 * nothing better is known. Once a site has served https, one request that
+	 * reaches PHP over plain http (a health check or probe on the origin) does
+	 * not teach headless code to build http links: it did, and the management
+	 * node then failed to find its own row by URL for a minute and cleared its
+	 * own incidents, which came back and mailed every superadmin again. A site
+	 * moved from https back to http states it with protocol_mode.
+	 */
+	public static function next_observed_scheme($known, $observed) {
+		$known = strtolower(trim((string)$known));
+		if ($observed === 'https') {
+			return 'https';
+		}
+		if ($observed === 'http' && $known !== 'https') {
+			return 'http';
+		}
+		return $known;
 	}
 
 	//GENERATES ABSOLUTE URLS USING PROTOCOL_MODE SETTING

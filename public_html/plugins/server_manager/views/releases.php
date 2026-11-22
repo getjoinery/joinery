@@ -4,6 +4,7 @@
  * logged under the Joinery release key, and how far the public log has been
  * read for any it does not account for. See logic/releases_logic.php.
  *
+ * @version 1.2 - a security fix set (package fix channel) is named as one, not as a release logged and not shipped
  * @version 1.1 - the keys each release installs, each log key checked against Sigstore's trusted root
  * @version 1.0
  */
@@ -63,7 +64,7 @@ $link = function ($url, $text) use ($h) {
 		<tbody>
 		<?php foreach ($releases as $r): ?>
 			<tr>
-				<td><?php echo $h($r['version']); ?><?php if (!$r['shipped']): ?><br><small>logged, not shipped</small><?php endif; ?></td>
+				<td><?php echo $h($r['version']); ?><?php if (!empty($r['fixes_set'])): ?><br><small>security fix set (package fixes ahead of Ubuntu)</small><?php elseif (!$r['shipped']): ?><br><small>logged, not shipped</small><?php endif; ?></td>
 				<td><?php echo $h(substr($r['published_at'], 0, 10)); ?></td>
 				<td><code><?php echo $link(ReleaseProvenance::commit_url(ReleaseProvenance::CORE_REPO, $r['core_commit']), substr($r['core_commit'], 0, 12)); ?></code></td>
 				<td><code><?php echo $link(ReleaseProvenance::commit_url(ReleaseProvenance::AGENT_REPO, $r['agent_commit']), substr($r['agent_commit'], 0, 12)); ?></code></td>

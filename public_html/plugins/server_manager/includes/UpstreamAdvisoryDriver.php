@@ -11,6 +11,8 @@
  * (as Ubuntu's tracker mirrors it) and Ubuntu's priority once it is past
  * triage.
  *
+ * @version 1.1 - ids(): the project's own ids for a CVE, which its fix commits may name instead
+ *                (specs/package_fixes_automatic.md WP2)
  * @version 1.0
  */
 interface UpstreamAdvisoryDriver {
@@ -26,8 +28,17 @@ interface UpstreamAdvisoryDriver {
 	 * medium, low) and whether it has released a fix, with the releases
 	 * that carry it. Null when the advisories cannot be read.
 	 *
-	 * @return array<string, array{rating:string, fixed:bool, fixed_in:string, url:string}>|null
+	 * @return array<string, array{rating:string, fixed:bool, fixed_in:string, url:string, ids?:list<string>}>|null
 	 */
 	public function advisories(): ?array;
+
+	/**
+	 * The project's own ids for $cve, which its fix commits may name instead of
+	 * the CVE: PHP's GHSA-xxxx-xxxx-xxxx. Empty when it has none, or its
+	 * advisories cannot be read.
+	 *
+	 * @return list<string>
+	 */
+	public function ids(string $cve): array;
 }
 ?>

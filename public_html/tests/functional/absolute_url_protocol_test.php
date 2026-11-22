@@ -147,6 +147,13 @@ check(strpos($hk, 'SetEnvIfExpr "true" JOINERY_FORWARDER_KNOWN=1') !== false
 
 section('Observation');
 
+// What a request records: https always; http only while https was never seen.
+check(LibraryFunctions::next_observed_scheme('', 'http') === 'http', 'an http-only site records http');
+check(LibraryFunctions::next_observed_scheme('http', 'https') === 'https', 'an https request records https');
+check(LibraryFunctions::next_observed_scheme('https', 'http') === 'https',
+	'once https was seen, a stray http request (an origin probe) does not make headless links http');
+check(LibraryFunctions::next_observed_scheme('https', 'https') === 'https', 'https stays https');
+
 // Recording cannot be faked from here. observe_protocol() refuses to treat a CLI
 // process as a web request — deliberately, since believing otherwise is how a
 // scheduled task would record its own non-existent scheme — so the only honest way

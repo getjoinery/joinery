@@ -271,7 +271,7 @@ chk "the journal cap absent: written" "$(grep -c '^SystemMaxUse=100M$' "$RH/etc/
 chk "php.ini absent: rebuilt from php.ini-production and tuned" "$(grep -cE '^(upload_max_filesize = 32M|date.timezone = UTC)$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "2"
 chk "the tuning leaves the PostgreSQL extensions to conf.d" "$(grep -c '^;extension=pdo_pgsql$' "$RH/etc/php/8.3/fpm/php.ini" 2>/dev/null)" "1"
 chk "a php.ini that exists keeps its own settings" "$(grep -c '^memory_limit = 999M$' "$RH/etc/php/8.1/fpm/php.ini")" "1"
-chk "and gains only ffi.enable = On (post-quantum sealing)" "$(grep -vcE '^(memory_limit = 999M|\[ffi\]|ffi\.enable = On|)$' "$RH/etc/php/8.1/fpm/php.ini"):$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.1/fpm/php.ini")" "0:1"
+chk "and gains only ffi.enable = On (post-quantum sealing) and upload progress off (CVE-2026-115560)" "$(grep -vcE '^(memory_limit = 999M|\[ffi\]|ffi\.enable = On|\[Session\]|session\.upload_progress\.enabled = Off|)$' "$RH/etc/php/8.1/fpm/php.ini"):$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.1/fpm/php.ini"):$(grep -c '^session.upload_progress.enabled = Off$' "$RH/etc/php/8.1/fpm/php.ini")" "0:1:1"
 chk "and says so" "$(printf '%s\n' "$out" | grep -c '8.1/fpm/php.ini: ffi.enable = On')" "1"
 chk "the rebuilt php.ini has ffi.enable = On from the tuning" "$(grep -c '^ffi.enable = On$' "$RH/etc/php/8.3/fpm/php.ini")" "1"
 # A new PHP version arrives with its php.ini an untouched copy of the template.

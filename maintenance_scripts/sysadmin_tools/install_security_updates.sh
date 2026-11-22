@@ -4,6 +4,8 @@
 # automatic-update policy allows, and say what changed as ONE JSON object on
 # stdout.
 #
+# Version: 1.5 - a withdrawn package fix build is installed back down after converge (install_package_fixes.sh
+#                rollback, specs/package_fixes_automatic.md WP8)
 # Version: 1.4 - Package fixes ahead of Ubuntu are converged first (install_package_fixes.sh converge, as
 #                the hourly check does), outside a container: a fix whose download failed is fetched and
 #                pinned, so pressing the button installs it at once rather than after the next hourly
@@ -173,6 +175,8 @@ PACKAGE_FIXES="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/in
 [[ "$EUID" -ne 0 && -n "${INSTALL_SECURITY_UPDATES_PACKAGE_FIXES:-}" ]] && PACKAGE_FIXES="$INSTALL_SECURITY_UPDATES_PACKAGE_FIXES"
 if [[ ! -f /.dockerenv && ! -f /run/.containerenv && -f "$PACKAGE_FIXES" ]]; then
     timeout --kill-after=10 900 bash "$PACKAGE_FIXES" converge >/dev/null 2>&1 < /dev/null || true
+    # A withdrawn build goes back down before the install (install_package_fixes.sh rollback).
+    timeout --kill-after=60 1800 bash "$PACKAGE_FIXES" rollback >/dev/null 2>&1 < /dev/null || true
 fi
 
 BEFORE="$(installed)"

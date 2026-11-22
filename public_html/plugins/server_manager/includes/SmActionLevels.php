@@ -87,7 +87,7 @@ final class SmActionLevels {
 		'incident' => array('triage' => 8, 'analyze' => 8, 'note' => 8),
 		'incidents' => array('triage' => 8),
 		'rollouts' => array('start_rollout' => 8, 'stop_rollout' => 8),
-		'fleet_security' => array('start_run' => 8, 'stop_run' => 8),
+		'fleet_security' => array('start_run' => 8, 'stop_run' => 8, 'withdraw_fix' => 8),
 	);
 
 	/** The level a page's action needs; one not named for the page needs 10. */

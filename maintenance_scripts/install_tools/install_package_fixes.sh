@@ -4,6 +4,21 @@
 # names, and gives each back to Ubuntu once Ubuntu's own build carries the same
 # fixes (specs/package_fixes_ahead_of_ubuntu.md WP3).
 #
+# Version: 1.5 - reviewer2's review: a withdrawn build is only recorded by converge (rollback_due) and
+#                installed back down by `rollback`, which the hourly check and the press-the-button install
+#                run with their own bounds, non-interactive and with no stdin (B7); with no fix and no
+#                -security build to go back to, Ubuntu's newest build in any pocket (B8); a download that
+#                failed is its own state (source_refused 2), not apt refusing the source (B9); every
+#                server's channel is looked at and the highest serial that verifies is taken, and a first
+#                channel issued before this tree's release is refused (B12); a machine with no agent identity
+#                file lists its fix servers again (under pipefail the missing file ended the list empty);
+#                a box that issues or mirrors the channel (by role: the signing key, upgrade_server_active)
+#                takes its own served copy only; any other box never reads a local folder (reviewer2 B20,
+#                B29, B30); a site whose database cannot be asked takes no channel that run (B31)
+# Version: 1.4 - the package fix channel (specs/package_fixes_automatic.md WP6, WP8): converge first takes
+#                static_files/fixes/channel/ from the fix servers, checked as a release is (signed, logged),
+#                never one with a lower serial than the copy in force; its ACTIVE is the set, its
+#                WITHDRAWN builds are installed back down to Ubuntu's (or our previous) build at once
 # Version: 1.3 - an archive is fetched first from the site's own upgrade server (its upgrade_source
 #                setting): a box installed from dev with no agent asked only getjoinery.com (B19)
 # Version: 1.2 - a fix is handed back only when Ubuntu's newer source carries every fingerprint of every
@@ -18,14 +33,23 @@
 # Version: 1.0
 #
 # A package fix is our build of one Ubuntu source package with upstream's
-# security patches added, for a fix Ubuntu has not shipped yet. fixes/ACTIVE,
-# beside this script and covered by the release's signed manifest, names each
-# one: its archive, the archive's SHA-256, the version, the CVEs it carries,
+# security patches added, for a fix Ubuntu has not shipped yet. The set this
+# machine takes is the package fix channel's ACTIVE (below), or, before this
+# machine has taken a channel, fixes/ACTIVE beside this script, covered by the
+# release's signed manifest. Each line names one fix: its archive, the archive's SHA-256, the version, the CVEs it carries,
 # the Ubuntu build it was made from, and the binary whose changelog says what
 # a build fixes.
 #
 #   install_package_fixes.sh converge [SERVER]
-#       For each ACTIVE line that applies here (this machine has a binary of
+#       First the channel: static_files/fixes/channel/ (ACTIVE, WITHDRAWN,
+#       CHANNEL, its signed manifest and its logged release statement),
+#       from this tree's own static_files, then the fix servers below. It is
+#       checked as a release is (utils/verify_package.php where this copy has
+#       a site, `joinery-agent verify-package` where it has none) and taken
+#       when it is ours and its serial is at least the one in force
+#       (/var/lib/joinery/package-fixes/channel/): an old channel replayed
+#       never undoes a withdrawal. None reachable: the copy in force stays.
+#       Then for each ACTIVE line that applies here (this machine has a binary of
 #       that source installed, or is a container host and the source is one
 #       the site containers' base installs):
 #         1. the archive is fetched (this tree's own static_files, then
@@ -46,7 +70,10 @@
 #            would downgrade it);
 #         6. handed back where Ubuntu has caught up (below).
 #       A source no longer in ACTIVE has its list, pin and directory removed.
-#       Installing is not done here: the hourly security check installs
+#       A build the channel's WITHDRAWN names that is installed here is
+#       installed back down at once: to the fix ACTIVE still offers for that
+#       source, else to Ubuntu's newest -security build (rolled_back).
+#       Installing anything else is not done here: the hourly security check installs
 #       anything from the Joinery-Fixes origin at once.
 #   install_package_fixes.sh handback
 #       For each fix in place: when Ubuntu offers the changelog_from binary at
@@ -61,6 +88,12 @@
 #       missing from either: the pin stays (ubuntu_lacks). A changelog or a
 #       source that cannot be read: the pin stays (unreadable). The verdict is
 #       kept per source and Ubuntu version, so each is read once.
+#   install_package_fixes.sh rollback
+#       Install back down each withdrawn build converge found installed here
+#       (/var/lib/joinery/package-fixes/rollback_due): to the fix the set
+#       still offers for its source, else Ubuntu's newest -security build,
+#       else Ubuntu's newest build in any pocket. Non-interactive. The hourly
+#       check and install_security_updates.sh run it after converge.
 #   install_package_fixes.sh status
 #       Print the state host_report.sh reads.
 #   install_package_fixes.sh pinned [--base]
@@ -73,7 +106,8 @@
 # 1001 pin aside and takes Ubuntu's newer build, even one lacking our fix.
 #
 # State: /var/lib/joinery/package-fixes/state, one line per fix:
-#   fix=<source>|<version>|<installed 0/1>|<handed_back version>|<ubuntu_lacks version:CVE,CVE>|<ahead_of_build version>|<source_refused 0/1>|<for_base 0/1>|<unreadable version>
+#   fix=<source>|<version>|<installed 0/1>|<handed_back version>|<ubuntu_lacks version:CVE,CVE>|<ahead_of_build version>|<source_refused 0/1/2>|<for_base 0/1>|<unreadable version>
+# source_refused: 1 apt refused the fix's package source, 2 its archive could not be downloaded.
 # with "-" where a field does not apply. for_base: a container host taking a
 # fix only for its site containers' base (it runs none of the source itself).
 # unreadable: Ubuntu's build whose changelog could not be read; ours stays.
@@ -100,6 +134,8 @@ LISTS="${TROOT}/etc/apt/sources.list.d"
 PREFS="${TROOT}/etc/apt/preferences.d"
 ORIGIN_CONF="${TROOT}/etc/apt/apt.conf.d/52joinery-package-fixes"
 LOCAL_STATIC="$(cd "$HERE/../.." 2>/dev/null && pwd)/static_files/fixes"
+CHANNEL_DIR="${LIB}/channel"
+CHANNEL_FILES="ACTIVE WITHDRAWN CHANNEL RELEASE_MANIFEST RELEASE_MANIFEST.sig RELEASE_STATEMENT"
 # The source packages install.sh server installs in the site containers' base
 # (Dockerfile.base): a container host takes a fix for one of these though it
 # runs none of them itself. Never Postfix: the base holds none.
@@ -110,8 +146,8 @@ UBUNTU_KEYRING=/usr/share/keyrings/ubuntu-archive-keyring.gpg
 say() { echo "package fixes: $*"; }
 die() { echo "package fixes: $*" >&2; exit 1; }
 
-case "$CMD" in converge|handback|status|pinned) ;; *)
-    echo "usage: install_package_fixes.sh converge [SERVER] | handback | status | pinned [--base]" >&2; exit 2 ;;
+case "$CMD" in converge|handback|status|pinned|rollback) ;; *)
+    echo "usage: install_package_fixes.sh converge [SERVER] | handback | rollback | status | pinned [--base]" >&2; exit 2 ;;
 esac
 
 if [[ "$CMD" == status ]]; then
@@ -210,7 +246,7 @@ fix_servers() {  # [SERVER]
     local plane upgrade fallback="${UPGRADE_SERVER:-https://getjoinery.com}"
     upgrade="$(site_upgrade_source)"
     plane="$(sed -n 's|^[[:space:]]*"plane_url":[[:space:]]*"\(https://[^"/[:space:]]*\)/\{0,1\}"[[:space:]]*,\{0,1\}[[:space:]]*$|\1|p' \
-        "${TROOT}/etc/joinery-agent/node_identity.json" 2>/dev/null | head -1)"
+        "${TROOT}/etc/joinery-agent/node_identity.json" 2>/dev/null | head -1)" || plane=""
     printf '%s\n' "$upgrade" "$plane" "${fallback%/}" | awk 'NF && !seen[$0]++'
 }
 
@@ -261,6 +297,163 @@ place_fix() {  # SOURCE VERSION ARCHIVE SHA [SERVER]
     mv "$dir.new" "$dir"
     rm -rf "$dl"
     say "placed ${source} ${version} (from ${got})"
+}
+
+# The serial of a channel directory, or nothing when it is not whole.
+channel_serial() {  # DIR
+    [[ -f "$1/CHANNEL" && -f "$1/ACTIVE" && -f "$1/WITHDRAWN" ]] || return 0
+    sed -n 's/^serial=\([0-9]\{1,12\}\)$/\1/p' "$1/CHANNEL" | head -n 1
+}
+
+# Is this channel directory one we issued? 0 yes; 1 no (the verdict on
+# stderr); 2 nothing here can tell. The site's own verifier where this copy
+# has a site (the release keys and log the node holds), else the agent's.
+verify_channel() {  # DIR
+    local site out
+    if [[ -n "$TROOT" ]]; then
+        [[ -n "${PACKAGE_FIXES_VERIFY:-}" ]] || return 2
+        out="$("$PACKAGE_FIXES_VERIFY" "$1" 2>&1)" && return 0
+        echo "$out" >&2; return 1
+    fi
+    site="$(cd "$HERE/../.." 2>/dev/null && pwd)"
+    if [[ -f "$site/public_html/utils/verify_package.php" ]] && command -v php > /dev/null 2>&1; then
+        out="$(php "$site/public_html/utils/verify_package.php" "$1" 2>&1)" && return 0
+        echo "$out" >&2; return 1
+    fi
+    if command -v joinery-agent > /dev/null 2>&1 && joinery-agent help 2>&1 | grep -q 'verify-package'; then
+        out="$(joinery-agent verify-package "$1" 2>&1)" && return 0
+        echo "$out" >&2; return 1
+    fi
+    return 2
+}
+
+# This copy's site's role for the channel, by what it is, not by what folder
+# happens to exist: issuer (it holds the release signing key: the box that
+# logs releases), mirror (its site serves releases others upgrade from:
+# upgrade_server_active), none (a node, a container host's bundle copy), or
+# unknown: the copy has a site whose database could not be asked now.
+channel_role() {
+    local site config name user pass value
+    if [[ -n "$TROOT" ]]; then
+        printf '%s' "${PACKAGE_FIXES_ROLE:-none}"; return 0
+    fi
+    site="$(cd "$HERE/../.." 2>/dev/null && pwd)" || { echo none; return 0; }
+    [[ -f "$site/config/agent_signing_key" ]] && { echo issuer; return 0; }
+    config="$site/config/Globalvars_site.php"
+    if [[ -f "$config" && -f "$HERE/_config_value.php" ]] && command -v php > /dev/null && command -v psql > /dev/null; then
+        name="$(php "$HERE/_config_value.php" "$config" dbname 2>/dev/null)"
+        user="$(php "$HERE/_config_value.php" "$config" dbusername 2>/dev/null)"
+        pass="$(php "$HERE/_config_value.php" "$config" dbpassword 2>/dev/null)"
+        if [[ -n "$name" && -n "$user" ]]; then
+            # Asked and off is none; not asked at all is unknown (reviewer2 B31).
+            if ! value="$(PGPASSWORD="$pass" PGCONNECT_TIMEOUT=10 psql -h localhost -U "$user" -d "$name" -tAX \
+                    -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'upgrade_server_active'" 2>/dev/null)"; then
+                echo unknown; return 0
+            fi
+            value="$(printf '%s' "$value" | tr -d '[:space:]')"
+            [[ "$value" == 1 || "$value" == true ]] && { echo mirror; return 0; }
+        else
+            echo unknown; return 0
+        fi
+    fi
+    echo none
+}
+
+# Where the channel is looked for. A box that issues or mirrors the channel
+# takes its own served copy only, and none before its runner has served one: a
+# mirror serves the set every machine has, and must never take its upstream's
+# set for the test machines (reviewer2 B20, B29). Any other box asks the fix
+# servers, whatever a stale local folder holds (B30).
+channel_sources() {  # [SERVER]
+    if [[ -n "${1:-}" ]]; then
+        fix_servers "$1"; return 0
+    fi
+    case "$(channel_role)" in
+        issuer|mirror) [[ -f "$LOCAL_STATIC/channel/CHANNEL" ]] && echo local; return 0 ;;
+        # Its role cannot be told now: no channel this run, the set in force stays.
+        unknown) say "the site's database could not be asked whether it serves releases; the channel in force stays this run" >&2; return 0 ;;
+    esac
+    fix_servers ""
+}
+
+# This tree's release, from public_html/VERSION; empty where the copy has none
+# (a container host's bundle copy).
+tree_release() {
+    local v
+    v="$(cat "$HERE/../../public_html/VERSION" 2>/dev/null | tr -d '[:space:]')"
+    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo "$v"
+    return 0
+}
+
+# Take the newest channel this machine can reach and verify, into
+# CHANNEL_DIR: every source is looked at, and the highest serial that verifies
+# wins. A lower serial than the one in force is refused, and said; a first
+# channel issued before this tree's release is refused (an old one replayed to
+# a machine that never took one).
+take_channel() {  # [SERVER]
+    local have got tmp f src ok why vrc best="" best_serial="" best_src="" rel tree
+    have="$(channel_serial "$CHANNEL_DIR")"
+    tree="$(tree_release)"
+    mkdir -p "${TROOT}/var/tmp"
+    while IFS= read -r src; do
+        tmp="$(mktemp -d "${TROOT}/var/tmp/package-fix-channel.XXXXXX")"
+        ok=1
+        for f in $CHANNEL_FILES; do
+            if [[ "$src" == local ]]; then
+                cp "$LOCAL_STATIC/channel/$f" "$tmp/$f" 2>/dev/null || { ok=0; break; }
+            else
+                curl -sfL --max-time 120 -o "$tmp/$f" "${src%/}/static_files/fixes/channel/${f}" < /dev/null || { ok=0; break; }
+            fi
+        done
+        got="$(channel_serial "$tmp")"
+        if [[ "$ok" == 0 || -z "$got" ]]; then
+            rm -rf "$tmp"; continue
+        fi
+        if [[ -n "$have" ]] && (( got < have )); then
+            say "WARNING - the channel from ${src} is serial ${got}, older than serial ${have} in force; refused"
+            rm -rf "$tmp"; continue
+        fi
+        if [[ -n "$best_serial" ]] && (( got <= best_serial )); then
+            rm -rf "$tmp"; continue
+        fi
+        if [[ -n "$have" ]] && (( got == have )); then
+            rm -rf "$tmp"; best_serial="$got"; continue
+        fi
+        if [[ -z "$have" && -n "$tree" ]]; then
+            rel="$(sed -n 's/^release=\([0-9.]*\)$/\1/p' "$tmp/CHANNEL" | head -n 1)"
+            if [[ -z "$rel" ]] || dpkg --compare-versions "$rel" lt "$tree"; then
+                say "WARNING - the channel from ${src} was issued on release ${rel:-?}, before this tree's ${tree}; refused"
+                rm -rf "$tmp"; continue
+            fi
+        fi
+        vrc=0; why="$(verify_channel "$tmp" 2>&1)" || vrc=$?
+        case "$vrc" in
+            0) ;;
+            2) say "WARNING - nothing on this machine can check the channel from ${src} (no site verifier, no agent that verifies packages); the set in force stays"
+               rm -rf "$tmp"; continue ;;
+            *) say "WARNING - the channel from ${src} is not ours: ${why}"; rm -rf "$tmp"; continue ;;
+        esac
+        [[ -n "$best" ]] && rm -rf "$best"
+        best="$tmp"; best_serial="$got"; best_src="$src"
+    done < <(channel_sources "${1:-}")
+    [[ -n "$best" ]] || return 0
+    chmod 755 "$best"; chmod 644 "$best"/*
+    rm -rf "${CHANNEL_DIR}.new"
+    mv "$best" "${CHANNEL_DIR}.new"
+    rm -rf "${CHANNEL_DIR}"
+    mv "${CHANNEL_DIR}.new" "${CHANNEL_DIR}"
+    say "took the package fix channel, serial ${best_serial} (from ${best_src})"
+    return 0
+}
+
+# Ubuntu's newest build of BINARY in any pocket, never ours or a file: source.
+ubuntu_any_newest() {  # BINARY
+    apt-cache madison "$1" 2>/dev/null | awk -F'|' '{gsub(/ /, "", $2); print $2 "|" $3}' \
+        | { grep -v '^[^|]*+joinery[0-9]' || true; } | { grep -v '| *file:' || true; } | cut -d'|' -f1 \
+        | { best=""; while IFS= read -r v; do
+                [[ -z "$v" ]] && continue
+                if [[ -z "$best" ]] || dpkg --compare-versions "$v" gt "$best"; then best="$v"; fi
+            done; echo "$best"; }
 }
 
 write_if_changed() {  # PATH (content on stdin)
@@ -428,6 +621,35 @@ verdict() {  # SOURCE BINARY BASE UBUNTU_VERSION CVES(comma) FIX_DIR
     echo "$v"
 }
 
+# --- rollback ---------------------------------------------------------------------
+# Install back down what converge found withdrawn and installed (rollback_due:
+# "<source> <withdrawn version> <binary>=<target> ..." per line). Run by the
+# hourly check and install_security_updates.sh after converge, each with its
+# own bound: never inside converge, whose bound is for reading, not installing.
+if [[ "$CMD" == rollback ]]; then
+    mkdir -p "$LIB"
+    exec 8> "${LIB}/.lock"
+    flock -w 600 8 || die "another run holds ${LIB}/.lock"
+    due="${LIB}/rollback_due"
+    [[ -s "$due" ]] || exit 0
+    export DEBIAN_FRONTEND=noninteractive
+    left=""
+    while read -r wsource wversion targets; do
+        [[ -n "${wsource:-}" && -n "${targets:-}" ]] || continue
+        # shellcheck disable=SC2086
+        if apt-get install -y -qq --allow-downgrades -o DPkg::Lock::Timeout=300 \
+                -o Dpkg::Options::=--force-confold $targets < /dev/null > "${LIB}/.rollback.log" 2>&1; then
+            say "rolled back ${wsource} ${wversion}, which was withdrawn: ${targets}"
+            echo "rolled_back=${wsource}|${wversion}|$(printf '%s' "${targets%% *}" | cut -d= -f2)" >> "${LIB}/rolled_back"
+        else
+            say "WARNING - ${wsource}: could not roll back withdrawn ${wversion} ($(grep -E '^(E|W): ' "${LIB}/.rollback.log" | head -n 2 | tr '\n' ' '))"
+            left+="${wsource} ${wversion} ${targets}"$'\n'
+        fi
+    done < "$due"
+    printf '%s' "$left" > "${due}.new" && mv "${due}.new" "$due"
+    exit 0
+fi
+
 # --- converge / handback --------------------------------------------------------
 mkdir -p "$LIB"
 exec 8> "${LIB}/.lock"
@@ -438,6 +660,15 @@ ACTIVE_SOURCES=()
 INSTALLED_SOURCES="$(installed_sources)"
 CONTAINER_HOST=0
 is_container_host && CONTAINER_HOST=1
+
+# The channel, when this machine has taken one, is the set; otherwise the
+# release's fixes/ACTIVE.
+[[ "$CMD" == converge ]] && take_channel "${2:-}"
+WITHDRAWN_FILE=""
+if [[ -n "$(channel_serial "$CHANNEL_DIR")" ]]; then
+    STAMP="${CHANNEL_DIR}/ACTIVE"
+    WITHDRAWN_FILE="${CHANNEL_DIR}/WITHDRAWN"
+fi
 
 # Read whole before anything changes: a line that is not whole stops the run
 # here, never after fixes it did not name were removed.
@@ -464,7 +695,7 @@ while read -r source version base archive sha from cves; do
     if [[ "$CMD" == converge ]]; then
         if ! out="$(place_fix "$source" "$version" "$archive" "$sha" "${2:-}" 2>&1)"; then
             say "WARNING - ${source}: ${out}"
-            row "$source" "$version" 0 - - - 1 "$for_base" -
+            row "$source" "$version" 0 - - - 2 "$for_base" -
             continue
         fi
         [[ -n "$out" ]] && echo "$out"
@@ -552,9 +783,33 @@ if [[ "$CMD" == converge ]]; then
     for d in "${LIB}"/*/; do
         [[ -d "$d" ]] || continue
         s="$(basename "$d")"
-        [[ "$s" == verdicts ]] && continue
+        [[ "$s" == verdicts || "$s" == channel ]] && continue
         [[ " ${ACTIVE_SOURCES[*]} " == *" $s "* ]] || { rm -rf "$d"; say "removed ${s}'s fix: no longer in this release"; }
     done
+    # A withdrawn build installed here is recorded for `rollback`, which the
+    # hourly check runs next: to the fix the set still offers for its source,
+    # else Ubuntu's newest -security build, else its newest in any pocket.
+    due=""
+    if [[ -n "$WITHDRAWN_FILE" && -f "$WITHDRAWN_FILE" ]]; then
+        while read -r wsource wversion; do
+            [[ -z "${wsource:-}" || "$wsource" == \#* ]] && continue
+            [[ "$wsource" =~ ^[a-z0-9][a-z0-9.+-]+$ && "$wversion" =~ ^([0-9]+:)?[0-9][A-Za-z0-9.+~-]*\+joinery[0-9]+$ ]] || continue
+            offered="$(awk -v s="$wsource" '$1 == s {print $2}' <<< "$ACTIVE_TEXT" | head -n 1)"
+            targets=""
+            while read -r b v; do
+                [[ -n "${b:-}" && "$v" == "$wversion" ]] || continue
+                t="${offered:-$(ubuntu_newest "$b")}"
+                [[ -n "$t" ]] || t="$(ubuntu_any_newest "$b")"
+                if [[ -z "$t" ]]; then
+                    say "WARNING - ${wsource}: ${b} ${wversion} was withdrawn and no build to go back to is offered here"
+                    continue
+                fi
+                targets+="${targets:+ }${b}=${t}"
+            done < <(installed_binaries "$wsource" < /dev/null)
+            [[ -n "$targets" ]] && due+="${wsource} ${wversion} ${targets}"$'\n' && say "withdrawn ${wsource} ${wversion} is installed here; it goes back to ${targets}"
+        done < "$WITHDRAWN_FILE"
+    fi
+    printf '%s' "$due" > "${LIB}/rollback_due.new" && mv "${LIB}/rollback_due.new" "${LIB}/rollback_due"
     # Automatic updates take our origin while any fix is listed. Without this
     # unattended-upgrades sets the 1001 pin aside ("not in an allowed origin")
     # and installs Ubuntu's newer build, one lacking our fix included.
@@ -573,6 +828,9 @@ fi
 
 {
     echo "updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    cs="$(channel_serial "$CHANNEL_DIR")"
+    [[ -n "$cs" ]] && echo "channel=${cs}"
+    [[ -f "${LIB}/rolled_back" ]] && tail -n 20 "${LIB}/rolled_back"
     for s in "${ACTIVE_SOURCES[@]}"; do
         [[ -n "${ROW[$s]:-}" ]] && echo "${ROW[$s]}"
     done

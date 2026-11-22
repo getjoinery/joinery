@@ -17,6 +17,7 @@
  *
  * See specs/implemented/bug_reports.md.
  *
+ * @version 1.1.2 - no check_permission() of its own: /report_problem requires a sign-in, /admin/admin_report_problem's header gates it
  * @version 1.1.1 - a sent report redirects to the page, which says so once (no resend on reload)
  * @version 1.1.0 - a form posted to the page itself is submitted through report_problem_submit
  * @version 1.0.0
@@ -24,7 +25,6 @@
 
 function report_problem_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
-	$session->check_permission(0);
 	$session->set_return();
 
 	$reporter = ProblemReport::reporter($session);

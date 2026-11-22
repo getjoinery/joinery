@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.44 - session.upload_progress.enabled = Off on every converge (_host_files.sh 1.7): the way in for
+#                CVE-2026-115560, and nothing on the platform reads upload progress
 # Version: 1.43 - the hourly security check is installed on a developer's box too (security_check.sh 1.4 trusts the
 #                recorded tree owner, as the converger does); a refusal there is said, not counted
 # Version: 1.42 - Package fixes ahead of Ubuntu (section 6): install_package_fixes.sh converge runs on every
@@ -752,6 +754,17 @@ if [[ -f "${SCRIPT_DIR}/_host_files.sh" ]]; then
                     restart_php_fpm "${php_ver}" "ffi.enable applies"
                 else
                     warn "${php_ini}: could not set ffi.enable = On - PHP-FPM cannot seal with post-quantum keys"
+                fi
+            fi
+            # Upload progress off on every converge, as ffi.enable above: a
+            # server tuned before the setting existed keeps PHP's default (On).
+            if [[ -f "${php_ini}" ]] && ! host_files_upload_progress_off "${php_ini}"; then
+                host_files_ensure_upload_progress_off "${php_ini}"
+                if host_files_upload_progress_off "${php_ini}"; then
+                    say "${php_ini}: session.upload_progress.enabled = Off (nothing reads it; CVE-2026-115560 comes in through it)"
+                    restart_php_fpm "${php_ver}" "session.upload_progress.enabled applies"
+                else
+                    warn "${php_ini}: could not set session.upload_progress.enabled = Off"
                 fi
             fi
             continue

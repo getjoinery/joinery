@@ -812,7 +812,7 @@ STATE
 pf "$T/pf/state" > "$T/pf.json"
 chk "when it was looked at" "$(jv "$T/pf.json" updated)" "2026-11-20T03:00:00Z"
 chk "ours installed, Ubuntu's newer build lacking two CVEs, for the base, a changelog unread (a 7-field line from 1.0 reads both as false/null)" "$(jv "$T/pf.json" fixes.0)" \
-    '{"source":"php8.5","version":"8.5.4-0ubuntu1.5+joinery1","installed":true,"handed_back":null,"ubuntu_lacks":{"version":"8.5.4-0ubuntu1.6","cves":"CVE-2026-129289,CVE-2026-115560"},"ahead_of_build":null,"source_refused":false,"for_base":true,"unreadable":"8.5.4-0ubuntu1.7"}'
+    '{"source":"php8.5","version":"8.5.4-0ubuntu1.5+joinery1","installed":true,"handed_back":null,"ubuntu_lacks":{"version":"8.5.4-0ubuntu1.6","cves":"CVE-2026-129289,CVE-2026-115560"},"ahead_of_build":null,"source_refused":false,"fetch_failed":false,"for_base":true,"unreadable":"8.5.4-0ubuntu1.7"}'
 chk "handed back, ahead of our build, refused by apt" "$(jv "$T/pf.json" fixes.1.handed_back)|$(jv "$T/pf.json" fixes.2.ahead_of_build)|$(jv "$T/pf.json" fixes.3.source_refused)" \
     "3.10.6-4ubuntu2.3|3.5.5-1ubuntu3.8|true"
 chk "a hostile name or version is reduced to the characters Debian allows" "$(jv "$T/pf.json" fixes.4.source)|$(jv "$T/pf.json" fixes.4.version)" "evilx|1b"

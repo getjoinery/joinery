@@ -13,6 +13,8 @@
  * Every call returns null when the tracker cannot be read; callers decide
  * what an unknown means for them.
  *
+ * @version 1.1 - cvesForPackage() leaves out a CVE that does not list the package: the tracker's
+ *                package search matches by prefix, so "postfix" also returned postfixadmin's CVEs
  * @version 1.0
  */
 
@@ -91,6 +93,11 @@ class UbuntuCveTracker {
 			}
 			foreach ($data['cves'] as $c) {
 				if (!is_array($c) || !isset($c['id'])) {
+					continue;
+				}
+				// The search matches by prefix ("postfix" finds postfixadmin):
+				// a CVE that does not list this package is another package's.
+				if (!in_array($source, array_column(array_filter((array)($c['packages'] ?? array()), 'is_array'), 'name'), true)) {
 					continue;
 				}
 				$st = self::statusIn($c, $source, $codename);

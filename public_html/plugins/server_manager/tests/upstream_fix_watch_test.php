@@ -105,11 +105,16 @@ check(array_column($c['build'], 'cve') === array('CVE-2026-115560', 'CVE-2026-12
 	json_encode(array_column($c['build'], 'cve')));
 check(array_column($c['unrated'], 'cve') === array('CVE-2026-129999'), 'one with no advisory and no rating is listed as not rated yet', json_encode(array_column($c['unrated'], 'cve')));
 $inc = IncidentSourceFixAheadOfUbuntu::from_state($state, $now);
-check(($inc['severity'] ?? '') === IncidentRecord::SEVERITY_CRITICAL && strpos($inc['title'] ?? '', '2 serious security fixes upstream has shipped and Ubuntu has not, for php8.5') === 0,
+check(($inc['severity'] ?? '') === IncidentRecord::SEVERITY_CRITICAL && strpos($inc['title'] ?? '', '2 security fixes Ubuntu has not shipped yet: PHP 8.5 (2 critical)') === 0,
 	'the incident opens at once, critical (Q2: no wait)', $inc['title'] ?? 'none');
-check(strpos($inc['detail']['CVEs'], 'CVE-2026-129289 (critical, rated by PHP; Ubuntu: needs-triage; fixed upstream in 8.2.36, 8.3.37, 8.4.28, 8.5.13') !== false,
-	'it names each CVE, its rating and who gave it, Ubuntu\'s status and upstream\'s fix', $inc['detail']['CVEs']);
-check(strpos($inc['detail']['What to do'], 'fixes/<source>/RECIPE') !== false, 'and says how to write the recipe');
+check(strpos($inc['detail']['Each fix'], 'CVE-2026-129289: PHP 8.5, critical (PHP\'s rating), fixed upstream in 8.2.36, 8.3.37, 8.4.28, 8.5.13; Ubuntu: needs-triage') !== false,
+	'it names each CVE, its rating and who gave it, upstream\'s fix and Ubuntu\'s status', $inc['detail']['Each fix']);
+check(strpos($inc['detail']['Packages'], 'PHP 8.5: 2 critical (CVE-2026-115560, CVE-2026-129289)') !== false, 'one plain line per package', $inc['detail']['Packages']);
+check(strpos($inc['detail']['What happens'], 'automatically') !== false, 'and says what happens next');
+check(IncidentSourceFixAheadOfUbuntu::package_name('postgresql-18') === 'PostgreSQL 18' && IncidentSourceFixAheadOfUbuntu::package_name('imagemagick') === 'ImageMagick'
+	&& IncidentSourceFixAheadOfUbuntu::package_name('apache2') === 'Apache' && IncidentSourceFixAheadOfUbuntu::package_name('weird') === 'weird',
+	'packages go by the names people know them by');
+check(new IncidentSourceFixAheadOfUbuntu() instanceof IncidentSourceQuiet, 'the incident is quiet: the runner tells what is new, once');
 
 section('A source no driver reads: NVD and Ubuntu past triage');
 
@@ -130,7 +135,7 @@ check(in_array('CVE-2026-7001', array_column($c['build'], 'cve'), true) && in_ar
 	&& !in_array('CVE-2026-7003', array_column($c['build'], 'cve'), true), 'high from either is to build; medium waits for Ubuntu');
 check(in_array('CVE-2026-7004', array_column($c['unrated'], 'cve'), true), 'the unrated one is listed as not rated yet', json_encode(array_column($c['unrated'], 'cve')));
 $inc = IncidentSourceFixAheadOfUbuntu::from_state($state, $now);
-check(strpos($inc['detail']['Not rated yet'], 'CVE-2026-7004 (not rated yet') !== false, 'beside the critical ones, the incident lists it');
+check(strpos($inc['detail']['Not rated yet'], 'PostgreSQL 18: 1 not rated yet (CVE-2026-7004)') !== false, 'beside the critical ones, the incident lists it', $inc['detail']['Not rated yet']);
 
 section('Only the unrated: a warning, "not rated yet"');
 

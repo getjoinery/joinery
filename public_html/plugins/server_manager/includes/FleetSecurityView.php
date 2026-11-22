@@ -33,6 +33,7 @@
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * @version 1.7 - a package fix whose archive could not be downloaded says so, apart from apt refusing it (reviewer2 B9)
  * @version 1.6 - a machine's package fixes ahead of Ubuntu (host report package_fixes): each said in words, and one
  *                apt refused is red (specs/package_fixes_ahead_of_ubuntu.md WP6); one waiting to install is
  *                red through the critical list already, since a fix from our origin is critical
@@ -121,6 +122,9 @@ class FleetSecurityView {
 
 	/** One package fix on a machine, in words (host report package_fixes). */
 	public static function package_fix_words(array $f): string {
+		if (!empty($f['fetch_failed'])) {
+			return 'our build of ' . $f['source'] . ' ' . $f['version'] . ': could not be downloaded yet; tried again every hour';
+		}
 		if ($f['source_refused']) {
 			return 'our build of ' . $f['source'] . ' ' . $f['version'] . ': apt refused its package source';
 		}
@@ -249,7 +253,9 @@ class FleetSecurityView {
 			if (is_array($pf)) {
 				foreach ($pf['fixes'] as $f) {
 					$row['package_fixes'][] = self::package_fix_words($f);
-					if ($f['source_refused']) {
+					if (!empty($f['fetch_failed'])) {
+						$red[] = 'our build of ' . $f['source'] . ' ' . $f['version'] . ' could not be downloaded';
+					} elseif ($f['source_refused']) {
 						$red[] = 'apt refused our build of ' . $f['source'] . ' ' . $f['version'];
 					}
 					// On an Ubuntu build newer than ours that lacks our fix: exposed.

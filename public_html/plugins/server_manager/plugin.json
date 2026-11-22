@@ -649,6 +649,21 @@
       "helptext": "Which security fixes upstream has shipped that Ubuntu 26.04 has not, for each package the nodes run, and what Ubuntu has released of each package fix of ours, as JSON. Written by the Watch Upstream Security Fixes task; read by the fix-ahead-of-Ubuntu incidents."
     },
     {
+      "name": "server_manager_package_fix_withdraw",
+      "default": "",
+      "managed": true,
+      "helptext": "Fix builds a person asked to pull back from every machine, from the Fleet Security page, as JSON (source => version). The automatic runner issues the withdrawal on its next run, within ten minutes."
+    },
+    {
+      "name": "server_manager_package_fix_soak_hours",
+      "default": "6",
+      "group": "publishing",
+      "label": "Hours a new security fix build stays on the test machines first",
+      "helptext": "A package fix built ahead of Ubuntu goes to the machines this box serves directly first. After this many hours, with every one that holds it reporting it installed and no failed services, every other machine is offered it.",
+      "type": "number",
+      "validation": {"number": true, "min": 1, "messages": {"min": "Must be at least 1."}}
+    },
+    {
       "name": "server_manager_release_log_tail",
       "default": "",
       "managed": true,
@@ -962,6 +977,45 @@
         "default_email": true,
         "title_template": "Critical, {node_name}: {title}",
         "body_template": "{summary}\n\n{detail}",
+        "link_template": "{link}"
+      }
+    },
+    "package_fix.news": {
+      "label": "Security fix news: built ahead of Ubuntu, or a person is needed",
+      "description": "A critical or high security fix a project shipped and Ubuntu has not: told once when it is found and our own build starts, and once more only if the automatic build or rollout stops and needs a person. Never repeated for the same fix.",
+      "category": "Server Manager",
+      "payload": {
+        "kind": "found or needs_person",
+        "title": "The subject, in plain words",
+        "body": "What was found, what happens now, and what (if anything) a person must do",
+        "link": "The Fleet Security page"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "audience": "superadmins",
+        "default_email": true,
+        "title_template": "{title}",
+        "body_template": "{body}",
+        "link_template": "{link}"
+      }
+    },
+    "package_fix.rolled_out": {
+      "label": "A security fix built ahead of Ubuntu reached every machine",
+      "description": "Our own build of a package, made because Ubuntu had not shipped a security fix yet, held on the test machines and is now offered to every machine. Bell only by default: nothing is needed.",
+      "category": "Server Manager",
+      "payload": {
+        "title": "Which fix, in plain words",
+        "body": "How it held on the test machines",
+        "link": "The Fleet Security page"
+      },
+      "notify": {
+        "ntf_type": "system",
+        "supports_topic": true,
+        "audience": "superadmins",
+        "default_email": false,
+        "title_template": "{title}",
+        "body_template": "{body}",
         "link_template": "{link}"
       }
     },

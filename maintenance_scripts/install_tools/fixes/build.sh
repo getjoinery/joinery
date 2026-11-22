@@ -4,6 +4,9 @@
 # plus upstream's security patches, as every binary package that source makes
 # (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.4 - made_by= (who wrote the recipe, into FIXINFO) and upstream_release= (a fix built on
+#                upstream's signed point release under Ubuntu's debian/; specs/package_fixes_automatic.md
+#                WP3, WP4)
 # Version: 1.3 - test_skip: a recipe may leave out test folders of a part no node uses (php's
 #                MySQL tests each wait out a 60-second timeout: about 50 minutes a build)
 # Version: 1.2 - each patch's fingerprint (owner Q6, reviewer2 H1): a few of its added code lines found
@@ -48,6 +51,14 @@
 #                                         suite leaves them out: tests of a part
 #                                         no node uses that hang without a
 #                                         server (php's MySQL tests)
+#                 made_by=automatic|person
+#                                         optional, person when left out: who
+#                                         wrote the recipe; FIXINFO carries it
+#                                         when the recipe says it
+#                 upstream_release=<version> <tarball URL> <signature URL>
+#                                         optional: build on upstream's point
+#                                         release <version> instead of Ubuntu's
+#                                         upstream source (below)
 #   patches/    NNNN-CVE-YYYY-N.patch, one per fix, each applying with -p1.
 #               Each carries, above the diff, a line
 #                 Origin: <upstream fix commit URL>
@@ -67,6 +78,29 @@
 # line of every patch: a changelog that names a CVE is Ubuntu's claim, its
 # source is what it ships.
 #
+# upstream_release: the fix is upstream's own release, where no single commit
+# applies. After Ubuntu's source is fetched and checked as always, build.sh
+# fetches upstream's tarball and its detached signature (https only; the
+# tarball's file name carries <version> and ends .tar.gz, .tar.xz or .tar.bz2;
+# the signature's ends .asc or .sig) and checks the signature with gpgv against
+# the project's key, upstream_keys/<source>.asc beside this script, committed
+# by a person once per project: with no key there, the build stops. Upstream's
+# files then take the place of Ubuntu's upstream files, Ubuntu's debian/ is
+# kept, and the tarball, as fetched, is the orig tarball. Each patch of
+# Ubuntu's debian/patches/series, in order: one that applies in reverse is
+# already upstream and leaves the series; one that applies is kept; one that
+# does neither stops the build, named. The recipe's own patches/ then apply
+# on top as always, and may be none.
+#
+# The version is then <epoch:><version>-<Ubuntu's debian revision>+joinery<N>
+# (openssl 3.5.5-1ubuntu3.7 on upstream 3.5.6: 3.5.6-1ubuntu3.7+joinery1).
+# The changelog's upstream part is the orig tarball's, as dpkg-source needs;
+# <version> must sort above Ubuntu's upstream part, so the whole sorts above
+# Ubuntu's base, and the +joinery<N> tail is the one every fix carries.
+# Ubuntu's next security build of the same upstream (3.5.5-1ubuntu3.8) sorts
+# below it. Its FIXINFO carries upstream_release=<version> <tarball SHA-256>,
+# and a fingerprint only for a patch of the recipe's own.
+#
 # Leaves in OUT_DIR, and nothing else:
 #   joinery-fix-<source>-<version>-<arch>.tar.xz
 #       joinery-fix-<source>-<version>-<arch>/
@@ -83,22 +117,68 @@
 # <version> drops any epoch, as .deb file names do.
 #
 # Refuses (exit 1, OUT_DIR left as it was) when the recipe is not whole, the
-# fetched .dsc is not the recipe's, the source is not 3.0 (quilt), a patch does
+# fetched .dsc is not the recipe's, the source is not 3.0 (quilt), an
+# upstream_release's signature does not verify or its key is not committed, an
+# Ubuntu patch neither applies to it nor is in it, a patch does
 # not apply cleanly or names no Origin, a patch has no fingerprint, the build or a test fails, a binary does
 # not carry the new version, the new version does not sort above Ubuntu's, or
 # changelog_from's .deb lacks the new entry.
 #
 # For the safe-tier gate only: FIX_BUILD_TEST=1 with FIX_BUILD_SOURCE_DIR set to
 # a directory holding the .dsc and its files builds as any user on any release,
-# from that directory instead of apt, and installs no build dependencies.
+# from that directory instead of apt, and installs no build dependencies;
+# FIX_BUILD_UPSTREAM_DIR holds an upstream_release's tarball and signature,
+# named as their URLs end, in place of the download.
+#
+# Sourced (". build.sh"), it defines its functions and runs nothing, for the gate.
 
 set -euo pipefail
 
-RECIPE_DIR="${1:-}"
-OUT="${2:-}"
-
 die() { echo "package fix build: $*" >&2; exit 1; }
 say() { echo "package fix build: $*"; }
+
+# Ubuntu's debian/patches/series on upstream's release, in TREE (upstream's
+# files and Ubuntu's debian/, no patch applied): a patch that applies in
+# reverse is upstream's already and leaves the series; one that applies is
+# applied, so the next one sees it, and kept; one that does neither stops the
+# build, named. Fuzz 0 both ways, as dpkg-source applies them. Comments and
+# blank lines stay. Walk a copy: the kept patches are left applied in TREE.
+series_walk() {  # TREE UPSTREAM_VERSION
+    local tree="$1" uver="$2" series="$1/debian/patches/series" line name opts strip
+    [[ -f "$series" ]] || return 0
+    : > "$series.walked"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        read -r name opts <<< "${line%%#*}" || true
+        if [[ -z "${name:-}" ]]; then
+            printf '%s\n' "$line" >> "$series.walked"
+            continue
+        fi
+        case "${opts:-}" in
+            "")        strip=1 ;;
+            -p[0-9])   strip="${opts#-p}" ;;
+            *)         die "Ubuntu's series gives ${name} the option '${opts}', which build.sh does not read" ;;
+        esac
+        [[ "$name" != */* && "$name" != .* && -f "$tree/debian/patches/$name" ]] \
+            || die "Ubuntu's series names ${name}, which is not a file in debian/patches/"
+        if (cd "$tree" && patch -p"$strip" -R -f -F 0 --dry-run -s < "debian/patches/$name") > /dev/null 2>&1; then
+            say "left out Ubuntu's ${name}: upstream's ${uver} has it already"
+        elif (cd "$tree" && patch -p"$strip" -N -f -F 0 --dry-run -s < "debian/patches/$name") > /dev/null 2>&1; then
+            (cd "$tree" && patch -p"$strip" -N -f -F 0 -E -s --no-backup-if-mismatch < "debian/patches/$name") > /dev/null 2>&1 \
+                || die "Ubuntu's ${name} would not apply to upstream's ${uver}"
+            printf '%s\n' "$line" >> "$series.walked"
+        else
+            die "Ubuntu's ${name} neither applies to upstream's ${uver} nor is in it already; a person reworks it for ${uver}"
+        fi
+    done < "$series"
+    mv "$series.walked" "$series"
+}
+
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+RECIPE_DIR="${1:-}"
+OUT="${2:-}"
 
 [[ -n "$RECIPE_DIR" && -n "$OUT" ]] || die "usage: build.sh RECIPE_DIR OUT_DIR"
 [[ -f "$RECIPE_DIR/RECIPE" ]] || die "no RECIPE in ${RECIPE_DIR}"
@@ -113,6 +193,9 @@ fi
 # --- The recipe ---------------------------------------------------------------
 recipe_value() {  # KEY
     sed -n "s/^$1=//p" "$RECIPE_DIR/RECIPE" | tail -n 1
+}
+recipe_has() {  # KEY
+    grep -q "^$1=" "$RECIPE_DIR/RECIPE"
 }
 STATE="$(recipe_value state)"
 [[ "$STATE" == "active" ]] || die "the recipe's state is '${STATE:-missing}', not active; nothing to build"
@@ -142,7 +225,40 @@ for d in $TEST_SKIP; do
     [[ "$d" =~ ^[A-Za-z0-9_][A-Za-z0-9_./+-]*/tests$ && "$d" != *..* ]] || die "test_skip: '${d}' is not a source path ending in /tests"
 done
 
-VERSION="${BASE_VERSION}+joinery${REVISION}"
+MADE_BY=""
+if recipe_has made_by; then
+    MADE_BY="$(recipe_value made_by)"
+    [[ "$MADE_BY" == "automatic" || "$MADE_BY" == "person" ]] || die "made_by must be automatic or person, not '${MADE_BY}'"
+fi
+UVER=""
+if recipe_has upstream_release; then
+    read -r UVER UTAR_URL USIG_URL UEXTRA <<< "$(recipe_value upstream_release)" || true
+    [[ -n "${UVER:-}" && -n "${UTAR_URL:-}" && -n "${USIG_URL:-}" && -z "${UEXTRA:-}" ]] \
+        || die "upstream_release must be '<version> <tarball URL> <signature URL>'"
+    [[ "$UVER" =~ ^[0-9][A-Za-z0-9.+~]*$ ]] || die "upstream_release: '${UVER}' is not an upstream version (no epoch, no '-')"
+    for u in "$UTAR_URL" "$USIG_URL"; do
+        [[ "$u" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._~%/+=-]+$ ]] || die "upstream_release: '${u}' is not an https URL to a file"
+    done
+    UTAR="$(basename "$UTAR_URL")"
+    USIG="$(basename "$USIG_URL")"
+    [[ "$UTAR" =~ \.tar\.(gz|xz|bz2)$ ]] || die "upstream_release: ${UTAR} is not a .tar.gz, .tar.xz or .tar.bz2"
+    UTAR_EXT="${BASH_REMATCH[1]}"
+    [[ "$UTAR" == *"$UVER"* ]] || die "upstream_release: ${UTAR} does not carry the version ${UVER} in its name"
+    [[ "$USIG" =~ \.(asc|sig)$ ]] || die "upstream_release: ${USIG} is not a detached signature (.asc or .sig)"
+    [[ "$USIG" != "$UTAR" ]] || die "upstream_release: the tarball and its signature are one file"
+    BASE_NOEPOCH="${BASE_VERSION#*:}"
+    [[ "$BASE_NOEPOCH" == *-* ]] || die "upstream_release: ${SOURCE} ${BASE_VERSION} is a native package, with no upstream part to replace"
+    BASE_UPSTREAM="${BASE_NOEPOCH%-*}"
+    dpkg --compare-versions "$UVER" gt "$BASE_UPSTREAM" || die "upstream_release: ${UVER} does not sort above Ubuntu's upstream ${BASE_UPSTREAM}"
+    UKEY="$HERE/upstream_keys/${SOURCE}.asc"
+    [[ -f "$UKEY" ]] || die "upstream_release: no signing key for ${SOURCE}; a person checks upstream's release key and commits it as maintenance_scripts/install_tools/fixes/upstream_keys/${SOURCE}.asc"
+    grep -q '^-----BEGIN PGP PUBLIC KEY BLOCK-----' "$UKEY" || die "upstream_release: upstream_keys/${SOURCE}.asc is not an armored public key"
+    EPOCH=""
+    [[ "$BASE_VERSION" == *:* ]] && EPOCH="${BASE_VERSION%%:*}:"
+    VERSION="${EPOCH}${UVER}-${BASE_NOEPOCH##*-}+joinery${REVISION}"
+else
+    VERSION="${BASE_VERSION}+joinery${REVISION}"
+fi
 dpkg --compare-versions "$VERSION" gt "$BASE_VERSION" || die "${VERSION} does not sort above ${BASE_VERSION}"
 FILE_VERSION="${VERSION#*:}"
 ARCH="$(dpkg --print-architecture)"
@@ -152,7 +268,7 @@ PATCHES=()
 if [[ -d "$RECIPE_DIR/patches" ]]; then
     while IFS= read -r p; do PATCHES+=("$p"); done < <(find "$RECIPE_DIR/patches" -maxdepth 1 -type f -name '*.patch' | sort)
 fi
-[[ ${#PATCHES[@]} -gt 0 ]] || die "the recipe has no patches/*.patch"
+[[ ${#PATCHES[@]} -gt 0 || -n "$UVER" ]] || die "the recipe has no patches/*.patch"
 for p in "${PATCHES[@]}"; do
     [[ "$(basename "$p")" =~ ^[0-9]{4}-[A-Za-z0-9._+-]+\.patch$ ]] || die "$(basename "$p") is not named NNNN-<name>.patch"
     # The header is everything above the first diff line.
@@ -182,6 +298,10 @@ else
     apt-get update -qq
     (cd "$WORK/fetch" && apt-get source -qq --download-only "${SOURCE}=${BASE_VERSION}") \
         || die "apt could not fetch ${SOURCE} ${BASE_VERSION} (is there a deb-src line for resolute?)"
+    if [[ -n "$UVER" ]] && ! { command -v curl && command -v gpg && command -v gpgv; } > /dev/null; then
+        apt-get install -y -qq --no-install-recommends curl gpg gpgv > "$WORK/tools.log" 2>&1 \
+            || { tail -n 20 "$WORK/tools.log" >&2; die "could not install curl, gpg and gpgv for upstream_release"; }
+    fi
 fi
 DSC="$WORK/fetch/${SOURCE}_${BASE_VERSION#*:}.dsc"
 [[ -f "$DSC" ]] || die "no ${SOURCE}_${BASE_VERSION#*:}.dsc was fetched"
@@ -204,9 +324,13 @@ SRC="$WORK/src"
 normal_form() { sed -E '/^-/d; s/^[+ ]//; s/[[:space:]]+/ /g; s/^ //; s/ $//'; }
 units() { awk '{ print; if (NR > 2) print a "\036" b "\036" $0; a = b; b = $0 }'; }
 # Every unit of Ubuntu's base source, as unpacked (its own patches applied).
-find "$SRC" -type f -size -8M -not -path '*/.pc/*' -print0 | xargs -0 -r grep -hIs '' \
-    | normal_form | units > "$WORK/base.units"
+# An upstream_release's own patches are told apart from it too: a machine
+# hands a fix back to Ubuntu's newer source, not to upstream's.
 declare -A FINGERPRINT=()
+if [[ ${#PATCHES[@]} -gt 0 ]]; then
+    find "$SRC" -type f -size -8M -not -path '*/.pc/*' -print0 | xargs -0 -r grep -hIs '' \
+        | normal_form | units > "$WORK/base.units"
+fi
 for p in "${PATCHES[@]}"; do
     pb="$(basename "$p")"
     # The patch's candidates, outside tests and docs: each added line of 20
@@ -253,7 +377,58 @@ for p in "${PATCHES[@]}"; do
 done
 rm -f "$WORK/base.units" "$WORK/candidates" "$WORK/common"
 
+# --- 2b. Upstream's release, when the recipe builds on one ---------------------
+if [[ -n "$UVER" ]]; then
+    UP="$WORK/upstream"
+    mkdir -p "$UP/dl" "$UP/x" "$UP/gnupg"
+    chmod 700 "$UP/gnupg"
+    if [[ "$TEST_MODE" == "1" ]]; then
+        [[ -d "${FIX_BUILD_UPSTREAM_DIR:-}" ]] || die "FIX_BUILD_TEST with upstream_release needs FIX_BUILD_UPSTREAM_DIR"
+        cp "$FIX_BUILD_UPSTREAM_DIR/$UTAR" "$FIX_BUILD_UPSTREAM_DIR/$USIG" "$UP/dl/" 2> /dev/null \
+            || die "FIX_BUILD_UPSTREAM_DIR holds no ${UTAR} and ${USIG}"
+    else
+        say "fetching upstream's ${SOURCE} ${UVER}"
+        for u in "$UTAR_URL" "$USIG_URL"; do
+            curl -fsSL --proto '=https' --proto-redir '=https' --max-time 1800 -o "$UP/dl/$(basename "$u")" "$u" \
+                || die "could not fetch ${u}"
+        done
+    fi
+    GNUPGHOME="$UP/gnupg" gpg --batch --quiet --dearmor < "$UKEY" > "$UP/keyring.gpg" 2> "$UP/gpg.log" \
+        || { cat "$UP/gpg.log" >&2; die "upstream_keys/${SOURCE}.asc would not read as a key"; }
+    GNUPGHOME="$UP/gnupg" gpgv --keyring "$UP/keyring.gpg" "$UP/dl/$USIG" "$UP/dl/$UTAR" > "$UP/gpgv.log" 2>&1 \
+        || { cat "$UP/gpgv.log" >&2; die "${UTAR}'s signature does not verify against upstream_keys/${SOURCE}.asc"; }
+    say "${UTAR}'s signature verifies against upstream_keys/${SOURCE}.asc"
+    # A second orig tarball of Ubuntu's (orig-<part>) has no counterpart upstream.
+    ! grep -qE ' [^ ]+\.orig-[^ ]+\.tar\.[a-z0-9]+$' "$DSC" || die "upstream_release: ${SOURCE} ${BASE_VERSION} has more than one orig tarball; build.sh replaces only one"
+    tar -C "$UP/x" --no-same-owner --no-same-permissions -xf "$UP/dl/$UTAR" || die "${UTAR} would not unpack"
+    tops=("$UP/x"/* "$UP/x"/.[!.]*)
+    top=""
+    for t in "${tops[@]}"; do [[ -e "$t" ]] && { [[ -z "$top" ]] || die "${UTAR} holds more than one top folder"; top="$t"; }; done
+    [[ -n "$top" && -d "$top" && ! -L "$top" ]] || die "${UTAR} holds no single top folder"
+    # Upstream's files, Ubuntu's debian/: a debian/ of upstream's own is not used.
+    rm -rf "${top:?}/debian"
+    cp -a "$SRC/debian" "$top/debian"
+    rm -rf "${SRC:?}"
+    mv "$top" "$SRC"
+    cp "$UP/dl/$UTAR" "$WORK/${SOURCE}_${UVER}.orig.tar.${UTAR_EXT}"
+    UTAR_SHA="$(sha256sum "$UP/dl/$UTAR" | awk '{print $1}')"
+    # The walk on a copy; its series on the tree, where dpkg-source applies it.
+    cp -a "$SRC" "$UP/walk"
+    ( series_walk "$UP/walk" "$UVER" ) > "$UP/walk.log" 2>&1 \
+        || { cat "$UP/walk.log" >&2; die "Ubuntu's patches would not go on upstream's ${UVER}"; }
+    cat "$UP/walk.log"
+    if [[ -f "$SRC/debian/patches/series" ]]; then
+        cp "$UP/walk/debian/patches/series" "$SRC/debian/patches/series"
+    fi
+    DROPPED="$(sed -n "s/^package fix build: left out Ubuntu's \([^:]*\): .*/\1/p" "$UP/walk.log")"
+    rm -rf "${UP:?}/walk" "$UP/x"
+    (cd "$SRC" && dpkg-source --before-build . > "$WORK/patch.log" 2>&1) \
+        || { tail -n 20 "$WORK/patch.log" >&2; die "dpkg-source would not apply Ubuntu's patches on upstream's ${UVER}"; }
+fi
+
 # --- 3. The patches -----------------------------------------------------------
+ON_UPSTREAM=""
+[[ -z "$UVER" ]] || ON_UPSTREAM=" on upstream's ${UVER}"
 mkdir -p "$SRC/debian/patches"
 touch "$SRC/debian/patches/series"
 [[ -z "$(tail -c 1 "$SRC/debian/patches/series")" ]] || echo >> "$SRC/debian/patches/series"
@@ -265,7 +440,7 @@ for p in "${PATCHES[@]}"; do
     [[ ! -e "$SRC/debian/patches/$pname" ]] || die "debian/patches/${pname} already exists in Ubuntu's source"
     cp "$p" "$SRC/debian/patches/$pname"
     (cd "$SRC" && patch -p1 -F 0 -N --dry-run -s < "debian/patches/$pname" > "$WORK/patch.log" 2>&1) \
-        || { tail -n 20 "$WORK/patch.log" >&2; die "$(basename "$p") does not apply cleanly to ${SOURCE} ${BASE_VERSION}"; }
+        || { tail -n 20 "$WORK/patch.log" >&2; die "$(basename "$p") does not apply cleanly to ${SOURCE} ${BASE_VERSION}${ON_UPSTREAM}"; }
     echo "$pname" >> "$SRC/debian/patches/series"
     (cd "$SRC" && dpkg-source --before-build . > "$WORK/patch.log" 2>&1) \
         || { tail -n 20 "$WORK/patch.log" >&2; die "dpkg-source would not apply $(basename "$p")"; }
@@ -287,6 +462,10 @@ done
     echo "${SOURCE} (${VERSION}) resolute-joinery; urgency=high"
     echo
     echo "  * SECURITY UPDATE built by Joinery ahead of Ubuntu, on Ubuntu's ${BASE_VERSION}"
+    if [[ -n "$UVER" ]]; then
+        echo "    - upstream's release ${UVER}, its signature checked: ${UTAR_URL}"
+        for d in $DROPPED; do echo "    - debian/patches/${d}: left out, in upstream's ${UVER}"; done
+    fi
     for p in "${PATCHES[@]}"; do
         origin="$(awk '/^(--- |diff |Index: )/ {exit} /^Origin: / {print $2; exit}' "$p")"
         echo "    - debian/patches/joinery-$(basename "$p"): ${origin}"
@@ -388,6 +567,8 @@ grep -qE '^ [0-9a-f]{64} [0-9]+ Packages$' "$STAGE/Release" || die "the Release 
     echo "cves=${CVES}"
     echo "changelog_from=${CHANGELOG_FROM}"
     echo "binaries=$(printf '%s\n' "${BINARIES[@]}" | sort -u | paste -sd ' ')"
+    [[ -z "$MADE_BY" ]] || echo "made_by=${MADE_BY}"
+    [[ -z "$UVER" ]] || echo "upstream_release=${UVER} ${UTAR_SHA}"
     for p in "${PATCHES[@]}"; do
         while IFS= read -r line; do
             printf 'fingerprint=%s %s\n' "$(basename "$p")" "$(printf '%s' "$line" | base64 -w0)"

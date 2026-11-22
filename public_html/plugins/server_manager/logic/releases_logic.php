@@ -11,6 +11,7 @@
  * Each release lists the keys it installs on nodes; each log key carries the
  * last daily check against Sigstore's trusted root (ReleaseLogTail).
  *
+ * @version 1.2 - a security fix set (version <release>+fixes.<serial>) counts as shipped, and says what it is
  * @version 1.1 - the keys each release installs, and Sigstore's answer for each log key (D7)
  * @version 1.0
  */
@@ -59,7 +60,9 @@ function releases_logic(array $input): LogicResult {
 			'log_origin'   => (string)$row->get('rle_log_origin'),
 			'log_index'    => (int)$row->get('rle_log_index'),
 			'seen_in_log'  => (string)$row->get('rle_seen_in_log_time'),
-			'shipped'      => $shipped->fetchColumn() !== false,
+			// A package fix set (PackageFixChannel) ships on its own, never as a release row.
+			'fixes_set'    => (bool)preg_match('/^\d+\.\d+\.\d+\+fixes\.\d+$/', (string)$row->get('rle_version')),
+			'shipped'      => $shipped->fetchColumn() !== false || preg_match('/^\d+\.\d+\.\d+\+fixes\.\d+$/', (string)$row->get('rle_version')),
 			'keys'         => $keys,
 		);
 	}

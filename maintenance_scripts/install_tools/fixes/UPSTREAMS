@@ -1,0 +1,45 @@
+# UPSTREAMS - where each watched source's upstream project keeps its code and its
+# releases, for the automatic package fixes (specs/package_fixes_automatic.md WP2, WP4).
+# Read by UpstreamFixFinder and PackageFixRecipeWriter (server_manager includes).
+#
+# Version: 1.0
+#
+# One line per Ubuntu source package, as space-separated key=value fields (no value
+# holds a space; an empty value is written key=):
+#
+#   source=       the Ubuntu source package (UpstreamFixWatch::WATCHED_SOURCES)
+#   git=          the project's public git; empty when it has none
+#   tag=          how a release tag is spelled. {v} is the upstream version as
+#                 Ubuntu's version carries it (8.5.4, 10.2p1); {major} {minor}
+#                 {patch} {build} are its first four numbers (7.1.2.18 is
+#                 7, 1, 2, 18)
+#   line=         how many leading numbers name a release line: a fix is looked
+#                 for between Ubuntu's base and the fixed release on the same line
+#                 (2: 8.5.4 and 8.5.13; 1: PostgreSQL's 18.1 and 18.2). Default 2
+#   branch=       optional: the line's branch, searched up to its head when the line
+#                 has no release newer than the base (glibc makes no point releases)
+#   version=      optional, for a tag= with no {v}: how a release's version is
+#                 spelled from its numbers (OpenSSH: {major}.{minor}p{patch}).
+#                 Default: the numbers joined by dots
+#   ids=          optional: the kinds of id the project's commits name besides the
+#                 CVE, which a driver supplies (UpstreamAdvisoryDriver::ids()), comma
+#                 separated: GHSA for PHP
+#   release_url=  upstream's release tarball, same placeholders; empty when the
+#                 project publishes no signed tarball
+#   sig_url=      that tarball's detached signature; empty when none
+#
+# Every git URL here answered `git ls-remote` on 2026-11-22, and every release and
+# signature URL answered for the version Ubuntu runs. Postfix has no official git:
+# its line is the mirror a Postfix maintainer keeps, tagged per release. PostgreSQL
+# and libxml2 sign no tarball (a checksum only). ImageMagick's and Postfix's signed
+# tarballs did not answer from here on that day, so neither is listed yet.
+source=php8.5        git=https://github.com/php/php-src.git              tag=php-{v}                     line=2 ids=GHSA release_url=https://www.php.net/distributions/php-{v}.tar.xz sig_url=https://www.php.net/distributions/php-{v}.tar.xz.asc
+source=postgresql-18 git=https://git.postgresql.org/git/postgresql.git  tag=REL_{major}_{minor}         line=1 release_url= sig_url=
+source=openssl       git=https://github.com/openssl/openssl.git          tag=openssl-{v}                 line=2 release_url=https://github.com/openssl/openssl/releases/download/openssl-{v}/openssl-{v}.tar.gz sig_url=https://github.com/openssl/openssl/releases/download/openssl-{v}/openssl-{v}.tar.gz.asc
+source=apache2       git=https://github.com/apache/httpd.git             tag={v}                         line=2 release_url=https://archive.apache.org/dist/httpd/httpd-{v}.tar.bz2 sig_url=https://archive.apache.org/dist/httpd/httpd-{v}.tar.bz2.asc
+source=postfix       git=https://github.com/vdukhovni/postfix.git        tag=v{v}                        line=2 release_url= sig_url=
+source=openssh       git=https://github.com/openssh/openssh-portable.git tag=V_{major}_{minor}_P{patch}  line=1 version={major}.{minor}p{patch} release_url=https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-{v}.tar.gz sig_url=https://cdn.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-{v}.tar.gz.asc
+source=curl          git=https://github.com/curl/curl.git                tag=curl-{major}_{minor}_{patch} line=1 release_url=https://curl.se/download/curl-{v}.tar.xz sig_url=https://curl.se/download/curl-{v}.tar.xz.asc
+source=libxml2       git=https://gitlab.gnome.org/GNOME/libxml2.git      tag=v{v}                        line=2 release_url= sig_url=
+source=glibc         git=https://sourceware.org/git/glibc.git            tag=glibc-{major}.{minor}       line=2 branch=release/{major}.{minor}/master release_url= sig_url=
+source=imagemagick   git=https://github.com/ImageMagick/ImageMagick.git  tag={major}.{minor}.{patch}-{build} line=2 release_url= sig_url=

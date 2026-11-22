@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.44 - package_fixes: fetch_failed, a fix whose archive could not be downloaded (source_refused 2),
+#                told apart from apt refusing its source (reviewer2 B9)
+# Version: 1.43 - package_fixes carries channel: the serial of the package fix channel this machine took
+#                (install_package_fixes.sh 1.4, specs/package_fixes_automatic.md WP7), null before it took one
 # Version: 1.42 - package_fixes: our own builds of Ubuntu packages this machine takes ahead of Ubuntu
 #                (install_package_fixes.sh), each with its version, whether it is installed, and whether it
 #                was handed back, Ubuntu's build lacks a CVE of it, the machine is ahead of it, or apt
@@ -1495,12 +1499,15 @@ emit_package_fixes() {
         list+=",\"handed_back\":$([[ -n "$handed" && "$handed" != - ]] && json_version "$handed" || echo null)"
         list+=",\"ubuntu_lacks\":$([[ -n "$lv" ]] && printf '{"version":%s,"cves":%s}' "$(json_version "$lv")" "$(json_text "$(printf '%s' "$lc" | tr -cd 'A-Z0-9,-')")" || echo null)"
         list+=",\"ahead_of_build\":$([[ -n "$ahead" && "$ahead" != - ]] && json_version "$ahead" || echo null)"
-        list+=",\"source_refused\":$([[ "$refused" == 1 ]] && echo true || echo false)"
+        list+=",\"source_refused\":$([[ "$refused" == 1 || "$refused" == 2 ]] && echo true || echo false)"
+        list+=",\"fetch_failed\":$([[ "$refused" == 2 ]] && echo true || echo false)"
         list+=",\"for_base\":$([[ "$for_base" == 1 ]] && echo true || echo false)"
         list+=",\"unreadable\":$([[ -n "$unread" && "$unread" != - ]] && json_version "$unread" || echo null)}"
         sep=","
     done < <(head -n 60 "$f" 2>/dev/null)
-    printf '{"updated":%s,"fixes":[%s]}' "$(json_text "$(sed -n 's/^updated=//p' "$f" | head -n 1 | tr -cd '0-9TZ:-')")" "$list"
+    local ch
+    ch="$(sed -n 's/^channel=\([0-9]\{1,12\}\)$/\1/p' "$f" | head -n 1)"
+    printf '{"updated":%s,"channel":%s,"fixes":[%s]}' "$(json_text "$(sed -n 's/^updated=//p' "$f" | head -n 1 | tr -cd '0-9TZ:-')")" "${ch:-null}" "$list"
 }
 
 # The services still running code an upgrade replaced on disk (WP1): needrestart's

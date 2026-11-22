@@ -3,6 +3,10 @@
 # build_root.sh - the Ubuntu 26.04 build root the publishing machine builds
 # package fixes in (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.4 - build copies upstream_keys/ into the root beside build.sh (the upstream_release check)
+# Version: 1.3 - source: Ubuntu's source for one exact version, fetched and unpacked in the root,
+#                with its .dsc's SHA-256; newest: the newest Ubuntu version of a source; both for
+#                the automatic recipe writer (specs/package_fixes_automatic.md WP3)
 # Version: 1.2 - a build never holds the build lock past its end: the build runs without the lock's
 #                descriptor, and whatever it left running inside its root is stopped when it ends
 #                (php's curl tests left an openssl s_server that kept the lock and refused the next
@@ -40,6 +44,23 @@
 #                                           time; the kernel mounts it makes for
 #                                           the build are gone when it ends,
 #                                           however it ends.
+#   build_root.sh source SRC VERSION OUT_DIR
+#                                           Root. Fetches Ubuntu's source SRC at
+#                                           exactly VERSION inside the root (apt
+#                                           checks it against the signed archive
+#                                           index), unpacks it there, and leaves
+#                                           OUT_DIR/DSC_SHA256 (the .dsc's SHA-256,
+#                                           as a recipe's dsc_sha256) and
+#                                           OUT_DIR/tree (the unpacked source,
+#                                           Ubuntu's patches applied). Takes the
+#                                           build lock: never during a build.
+#   build_root.sh newest SRC                Root. Prints the newest version of
+#                                           source SRC in 26.04's -security pocket
+#                                           (the release pocket when -security has
+#                                           none), from the root's deb-src indexes;
+#                                           never a +joinery build. One line, and
+#                                           nothing else on stdout; exit 1 with the
+#                                           reason when it cannot tell.
 #
 # ROOT is /var/lib/joinery-package-fixes-build/resolute: about 1 GB, and it
 # keeps each source's build dependencies once installed (PHP's and
@@ -188,6 +209,9 @@ build() {  # RECIPE_DIR OUT_DIR
     mount_for_run
     mkdir -p "$TARGET/root/fixes"
     cp "$HERE/build.sh" "$TARGET/root/fixes/"
+    # The projects' release keys a person committed: build.sh checks an
+    # upstream_release tarball's signature against upstream_keys/<source>.asc.
+    [[ -d "$HERE/upstream_keys" ]] && cp -r "$HERE/upstream_keys" "$TARGET/root/fixes/"
     cp -r "$recipe" "$TARGET/root/fixes/$source"
     # Without the lock's descriptor: nothing the build starts can hold the lock.
     in_root bash /root/fixes/build.sh "/root/fixes/$source" /root/fix-out 9>&-
@@ -201,9 +225,77 @@ build() {  # RECIPE_DIR OUT_DIR
     say "built $(basename "$built")"
 }
 
+fetch_source() {  # SRC VERSION OUT_DIR
+    need_root
+    local src="$1" version="$2" out="$3" fetch dsc sha
+    [[ "$src" =~ ^[a-z0-9][a-z0-9.+-]+$ ]] || die "'${src}' is not a source package name"
+    [[ "$version" =~ ^([0-9]+:)?[0-9][A-Za-z0-9.+~-]*$ ]] || die "'${version}' is not a package version"
+    is_root_ready || die "no build root at ${ROOT}; the owner makes it once with: ${CREATE_CMD}"
+    mkdir -p "$out"
+    out="$(cd "$out" && pwd)"
+    exec 9> "$LOCK"
+    flock -n 9 || die "a package fix build is running"
+    TARGET="$ROOT"
+    fetch="/var/tmp/source-fetch.$$"
+    trap 'unmount_all; rm -rf "'"$ROOT$fetch"'"' EXIT
+    mount_for_run
+    rm -rf "${ROOT:?}$fetch"
+    mkdir -p "$ROOT$fetch"
+    # apt fetches as _apt: a folder only root can enter makes it fall back to root, with a warning.
+    chmod 755 "$ROOT$fetch"
+    in_root apt-get update -qq
+    in_root sh -c 'cd "$1" && apt-get source -qq --download-only "$2=$3"' sh "$fetch" "$src" "$version" \
+        || die "apt could not fetch ${src} ${version} (is it still in Ubuntu's archive?)"
+    dsc="${ROOT}${fetch}/${src}_${version#*:}.dsc"
+    [[ -f "$dsc" ]] || die "no ${src}_${version#*:}.dsc was fetched"
+    sha="$(sha256sum "$dsc" | awk '{print $1}')"
+    # dpkg-source checks each file against the checksums the .dsc lists.
+    in_root sh -c 'cd "$1" && dpkg-source -q -x "$2" tree' sh "$fetch" "$(basename "$dsc")" > /dev/null 2>&1 \
+        || die "${src} ${version} would not unpack"
+    rm -rf "${out:?}/tree" "$out/DSC_SHA256"
+    mv -T "${ROOT}${fetch}/tree" "$out/tree" 2>/dev/null || cp -a "${ROOT}${fetch}/tree" "$out/tree"
+    echo "$sha" > "$out/DSC_SHA256"
+    unmount_all
+    rm -rf "${ROOT:?}$fetch"
+    trap - EXIT
+    say "${src} ${version}: .dsc ${sha}, unpacked in ${out}/tree"
+}
+
+newest() {  # SRC
+    need_root
+    local src="$1" pocket v best
+    [[ "$src" =~ ^[a-z0-9][a-z0-9.+-]+$ ]] || die "'${src}' is not a source package name"
+    is_root_ready || die "no build root at ${ROOT}; the owner makes it once with: ${CREATE_CMD}"
+    exec 9> "$LOCK"
+    flock -n 9 || die "a package fix build is running"
+    TARGET="$ROOT"
+    trap unmount_all EXIT
+    mount_for_run
+    in_root apt-get update -qq >&2 || die "apt could not read Ubuntu's archive indexes"
+    # madison's source lines: " php8.5 | 8.5.4-0ubuntu1.6 | http://... resolute-security/main Sources"
+    local listing
+    listing="$(in_root apt-cache madison "$src" 2>/dev/null | awk -F' [|] ' -v s="$src" '$1 ~ ("^ *" s "$") && $3 ~ / Sources$/ {print $2 "\t" $3}')"
+    unmount_all
+    trap - EXIT
+    for pocket in resolute-security resolute; do
+        best=""
+        while IFS=$'\t' read -r v where; do
+            [[ -n "$v" && "$where" == *" ${pocket}/"* && "$v" != *+joinery* ]] || continue
+            if [[ -z "$best" ]] || dpkg --compare-versions "$v" gt "$best"; then best="$v"; fi
+        done <<< "$listing"
+        if [[ -n "$best" ]]; then
+            echo "$best"
+            return 0
+        fi
+    done
+    die "Ubuntu's archive lists no ${src} source in resolute-security or resolute"
+}
+
 case "${1:-}" in
     create) create ;;
     check)  check ;;
     build)  [[ $# -eq 3 ]] || die "usage: build_root.sh build RECIPE_DIR OUT_DIR"; build "$2" "$3" ;;
-    *)      die "usage: build_root.sh create | check | build RECIPE_DIR OUT_DIR" ;;
+    source) [[ $# -eq 4 ]] || die "usage: build_root.sh source SRC VERSION OUT_DIR"; fetch_source "$2" "$3" "$4" ;;
+    newest) [[ $# -eq 2 ]] || die "usage: build_root.sh newest SRC"; newest "$2" ;;
+    *)      die "usage: build_root.sh create | check | build RECIPE_DIR OUT_DIR | source SRC VERSION OUT_DIR | newest SRC" ;;
 esac

@@ -3,6 +3,12 @@
 # security_check.sh - which security fixes this machine is waiting for, looked
 # for every hour (specs/fleet_security_patching.md WP1, Q3).
 #
+# Version: 1.7 - after converge, a withdrawn build is installed back down by install_package_fixes.sh rollback,
+#                under its own 30-minute bound (reviewer2 B7); the runner's timer only where this box issues
+#                or mirrors the package fix channel (B10)
+# Version: 1.6 - install also writes joinery-package-fix-auto.timer where this tree carries the automatic
+#                package fix runner (the Server Manager plugin's package_fix_auto.php) and PHP: every ten
+#                minutes, root, under the same owner rule (specs/package_fixes_automatic.md WP9)
 # Version: 1.5 - a running site behind the base on a critical package (site_refresh.sh 1.7 sites_behind:
 #                a site stopped through a cycle and started later) is replaced at once too (B24)
 # Version: 1.4 - the timer installs where the tree is its owner's alone, the owner the host converger trusts
@@ -79,6 +85,8 @@ PACKAGE_FIXES="${HERE}/../install_tools/install_package_fixes.sh"
 # before the colon in a simulated Inst line is the repository's Label.
 FIXES_ORIGIN="Joinery-Fixes"
 INSTALL_UPDATES="${HERE}/install_security_updates.sh"
+# The automatic package fix runner, where this tree carries the Server Manager plugin.
+PACKAGE_FIX_AUTO="${HERE}/../../public_html/plugins/server_manager/includes/package_fix_auto.php"
 LISTS_MAX_AGE="${SECURITY_CHECK_LISTS_MAX_AGE:-2700}"   # 45 minutes
 UPDATE_TIMEOUT=300
 SIMULATE_TIMEOUT=300
@@ -100,6 +108,24 @@ if [ "$CMD" = status ]; then
     [ -f "$STATE" ] && cat "$STATE" || echo "no check has run on this machine"
     exit 0
 fi
+
+# Does this box issue or mirror the package fix channel? It holds the release
+# signing key (config/agent_signing_key: the box that logs releases), or its
+# site serves releases (the upgrade_server_active setting).
+pfa_role_here() {
+    local site config name user pass value
+    site="$(cd "${HERE}/../.." 2> /dev/null && pwd)" || return 1
+    [ -f "$site/config/agent_signing_key" ] && return 0
+    config="$site/config/Globalvars_site.php"
+    [ -f "$config" ] && [ -f "${HERE}/../install_tools/_config_value.php" ] && command -v psql > /dev/null 2>&1 || return 1
+    name="$(php "${HERE}/../install_tools/_config_value.php" "$config" dbname 2> /dev/null)"
+    user="$(php "${HERE}/../install_tools/_config_value.php" "$config" dbusername 2> /dev/null)"
+    pass="$(php "${HERE}/../install_tools/_config_value.php" "$config" dbpassword 2> /dev/null)"
+    [ -n "$name" ] && [ -n "$user" ] || return 1
+    value="$(PGPASSWORD="$pass" PGCONNECT_TIMEOUT=10 psql -h localhost -U "$user" -d "$name" -tAX \
+        -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'upgrade_server_active'" 2> /dev/null | tr -d '[:space:]')"
+    [ "$value" = 1 ] || [ "$value" = true ]
+}
 
 # --- install: the hourly timer --------------------------------------------------
 if [ "$CMD" = install ]; then
@@ -128,6 +154,18 @@ if [ "$CMD" = install ]; then
     run_paths=("$HERE" "${HERE}/security_check.sh" "$SITE_REFRESH" "$INSTALL_UPDATES")
     # Run when present (a tree from before package fixes has none).
     [ -e "$PACKAGE_FIXES" ] && run_paths+=("$PACKAGE_FIXES")
+    # The package fix runner runs only where this box issues the fix channel
+    # (it holds the release signing key) or mirrors it (it serves releases
+    # others upgrade from): anywhere else a root timer booting the site every
+    # ten minutes to learn it has nothing to do is root for nothing.
+    PFA_PHP=""
+    if [ -e "$PACKAGE_FIX_AUTO" ] && command -v php > /dev/null 2>&1 && pfa_role_here; then
+        PFA_PHP="$(command -v php)"
+        # What the run loads, as root, must be the owner's alone too.
+        pfa_pub="$(cd "${HERE}/../../public_html" && pwd)"
+        run_paths+=("$PACKAGE_FIX_AUTO" "$(dirname "$PACKAGE_FIX_AUTO")" "$pfa_pub" "$pfa_pub/includes" "$pfa_pub/data"
+            "$pfa_pub/plugins" "$pfa_pub/plugins/server_manager" "$pfa_pub/plugins/server_manager/data")
+    fi
     for p in "${run_paths[@]}"; do
         [ -e "$p" ] || refuse_tree "${p} is missing; the timer was not installed"
         read -r owner mode < <(stat -L -c '%u %a' "$p")
@@ -198,6 +236,59 @@ EOF
         systemctl reenable joinery-security-check.service > /dev/null 2>&1 || die "the run after the nightly updates could not be enabled"
         changed=1
     fi
+    # The automatic package fix runner: root, every ten minutes, one run at a
+    # time (it holds its own lock through an hour-long build). It does nothing
+    # on a site that neither logs nor serves releases.
+    if [ -e "$PACKAGE_FIX_AUTO" ] && [ -n "$PFA_PHP" ]; then
+        pfa_svc="$(cat <<EOF
+# Written by security_check.sh install (specs/package_fixes_automatic.md WP9).
+[Unit]
+Description=Joinery: build and ship security fixes ahead of Ubuntu
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${PFA_PHP} ${PACKAGE_FIX_AUTO}
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=6h
+EOF
+)"
+        pfa_tmr="$(cat <<'EOF'
+# Written by security_check.sh install: every ten minutes.
+[Unit]
+Description=Joinery: the automatic package fix runner, every ten minutes
+
+[Timer]
+OnCalendar=*:0/10
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+)"
+        before="$changed"; changed=0
+        write_unit "${UNIT_DIR}/joinery-package-fix-auto.service" "$pfa_svc"
+        write_unit "${UNIT_DIR}/joinery-package-fix-auto.timer" "$pfa_tmr"
+        pfa_changed="$changed"
+        [ "$before" -eq 1 ] && changed=1
+        if [ "$pfa_changed" -eq 1 ]; then
+            systemctl daemon-reload || die "systemd did not reload"
+        fi
+        if ! systemctl is-enabled --quiet joinery-package-fix-auto.timer 2> /dev/null || ! systemctl is-active --quiet joinery-package-fix-auto.timer 2> /dev/null; then
+            systemctl enable --now joinery-package-fix-auto.timer > /dev/null 2>&1 || die "the package fix runner's timer could not be enabled"
+            changed=1
+        fi
+    elif [ -e "${UNIT_DIR}/joinery-package-fix-auto.timer" ]; then
+        systemctl disable --now joinery-package-fix-auto.timer > /dev/null 2>&1 || true
+        rm -f "${UNIT_DIR}/joinery-package-fix-auto.timer" "${UNIT_DIR}/joinery-package-fix-auto.service"
+        systemctl daemon-reload || true
+        say "the package fix runner's timer is removed: this tree no longer carries it"
+        changed=1
+    fi
     if [ ! -f "$STATE" ]; then
         mkdir -p "$STATE_DIR" && chmod 755 "$STATE_DIR" && printf 'installed_at=%s\n' "$(now)" > "$STATE" && chmod 644 "$STATE"
     fi
@@ -237,6 +328,15 @@ S[checked_at]="$(now)"; S[check_error]=""; S[lists_error]=""
 if [ -z "$TROOT" ] && [ -f "$PACKAGE_FIXES" ]; then
     if ! out="$(timeout --kill-after=10 900 bash "$PACKAGE_FIXES" converge 7>&- 2>&1 < /dev/null)"; then
         say "package fixes: $(tail -1 <<< "$out")"
+    fi
+    # A withdrawn build converge found installed goes back down now, under an
+    # install's bound, not converge's (install_package_fixes.sh rollback).
+    if [ -s /var/lib/joinery/package-fixes/rollback_due ]; then
+        if ! out="$(DEBIAN_FRONTEND=noninteractive timeout --kill-after=60 1800 bash "$PACKAGE_FIXES" rollback 7>&- 2>&1 < /dev/null)"; then
+            say "package fixes: $(tail -1 <<< "$out")"
+        else
+            [ -n "$out" ] && say "$out"
+        fi
     fi
 fi
 # When the lists were last fetched: this check's own last refresh, or the

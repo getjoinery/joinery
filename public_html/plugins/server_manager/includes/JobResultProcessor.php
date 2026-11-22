@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.144 - host_report_package_fixes keeps fetch_failed (host_report 1.44)
+ * @version 1.143 - host_report_package_fixes keeps the channel serial a machine took (host_report 1.43, package_fixes_automatic WP7)
  * @version 1.142 - process_log_table_tail keeps an error read's kind (agent 1.127.0)
  * @version 1.141 - a container inventory's packages and base_fixes (container_inventory 1.5): what each site runs of the
  *                sources a package fix can cover, and the fixes its base took
@@ -5974,6 +5976,8 @@ HTML;
 				'ubuntu_lacks'   => $lacks,
 				'ahead_of_build' => self::package_word($f['ahead_of_build'] ?? null) !== '' ? self::package_word($f['ahead_of_build']) : null,
 				'source_refused' => ($f['source_refused'] ?? false) === true,
+				// Its archive could not be downloaded (host_report 1.44): waiting, not apt refusing it.
+				'fetch_failed'   => ($f['fetch_failed'] ?? false) === true,
 				// A container host taking it only for its site containers' base.
 				'for_base'       => ($f['for_base'] ?? false) === true,
 				// Ubuntu's build whose changelog could not be read; ours stays.
@@ -5981,8 +5985,11 @@ HTML;
 			);
 		}
 		$updated = $in['updated'] ?? null;
+		$channel = $in['channel'] ?? null;
 		return array(
 			'updated' => (is_string($updated) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $updated)) ? $updated : '',
+			// The package fix channel serial the machine took (host_report 1.43); null before it took one.
+			'channel' => (is_int($channel) && $channel > 0) ? $channel : null,
 			'fixes'   => $fixes,
 		);
 	}

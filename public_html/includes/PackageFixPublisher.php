@@ -46,6 +46,9 @@
  * the origin's, so it fetches each archive ACTIVE names from its upstream (the
  * upgrade_source setting), keeps it only when the hash is ACTIVE's, and serves
  * it from its own static_files/fixes/.
+ * @version 1.5 - buildRecipe(): one recipe from a folder outside the tree (the automatic runner's,
+ *                specs/package_fixes_automatic.md WP9) built with this tree's build scripts, the same cache
+ *                and checks, and served from static_files/fixes/
  * @version 1.4 - serveReceived(): a site other sites upgrade from serves the received ACTIVE's archives while it
  *                applies the release, before its tree (and the support bundle in it) goes live, so a machine
  *                that takes the new bundle at once never asks for an archive not served yet (B21)
@@ -173,6 +176,33 @@ class PackageFixPublisher {
 			$say($msg);
 			return self::result(self::STATUS_FAILED, $msg);
 		}
+	}
+
+	/**
+	 * Build one recipe from $recipes_root/<source>/ (a folder outside the
+	 * tree: the automatic runner's) with this tree's build scripts, into the
+	 * same cache, reusing a build of the same recipe files, and serve it from
+	 * static_files/fixes/. Its ACTIVE line. Throws, saying why, on any failure.
+	 *
+	 * @param array $opts tests only: 'builder', 'cache_dir'
+	 */
+	public static function buildRecipe($full_site_dir, $recipes_root, $source, array $opts = array()) {
+		$root = rtrim($full_site_dir, '/');
+		$tree = $root . '/' . self::SOURCE_SUBDIR;
+		$static_dir = $root . '/' . self::STATIC_SUBDIR;
+		$recipes = self::recipes($recipes_root);
+		$recipe = $recipes[$source] ?? null;
+		if ($recipe === null || $recipe['state'] !== 'active') {
+			throw new Exception($source . ': no active recipe at ' . rtrim($recipes_root, '/') . '/' . $source);
+		}
+		$hash = self::recipeHash($recipes_root, $source);
+		$cache_dir = $opts['cache_dir'] ?? self::CACHE_DIR;
+		$reused = self::cachedBuild($cache_dir, $static_dir, $source, $recipe, $hash);
+		if ($reused !== null) {
+			return $reused;
+		}
+		$builder = $opts['builder'] ?? function ($recipe_dir, $dir) use ($tree) { self::buildInRoot($tree, $recipe_dir, $dir); };
+		return self::build($recipes_root, $source, $recipe, $hash, $cache_dir, $static_dir, $builder);
 	}
 
 	/**

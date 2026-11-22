@@ -47,6 +47,7 @@
  * whose alerts are off (ManagedNode::sends_alerts()) sends neither: its
  * incidents open and wait in the inbox.
  *
+ * @version 1.12 - a source that is an IncidentSourceQuiet tells nobody: its incidents wait in the inbox
  * @version 1.11 - a source that is an IncidentSourceEveryOccurrenceNew is never reopened: each occurrence opens anew
  * @version 1.10 - the notification carries the incident's evidence (detail), so the email says what was seen
  * @version 1.9 - a node whose alerts are off (ManagedNode::sends_alerts(): a test cloud box unless turned on)
@@ -448,6 +449,10 @@ class IncidentReconciler {
 	 */
 	private static function notify(IncidentRecord $inc, ManagedNode $node, string $summary): void {
 		if (!$node->sends_alerts()) {
+			return;
+		}
+		// A quiet source's news is told elsewhere (IncidentSourceQuiet).
+		if (IncidentSources::get((string)$inc->get('inc_source')) instanceof IncidentSourceQuiet) {
 			return;
 		}
 		$payload = array(

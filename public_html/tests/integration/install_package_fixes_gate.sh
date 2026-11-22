@@ -7,6 +7,10 @@
 # timeout: 180
 # covers: [maintenance_scripts/install_tools/install_package_fixes.sh]
 #
+# The package fix channel (specs/package_fixes_automatic.md WP6, WP8): taken only
+# when it verifies (a stand-in verifier here) and its serial is not lower than
+# the one in force; its withdrawn builds are installed back down.
+#
 # Package fixes ahead of Ubuntu (specs/package_fixes_ahead_of_ubuntu.md WP3).
 # install_package_fixes.sh converge takes each fix the release's fixes/ACTIVE
 # names that applies to this machine: fetched and checked against ACTIVE's
@@ -205,7 +209,7 @@ printf '%s\n' "$header" "$LA" "$(sed "s/sha256=[0-9a-f]*/sha256=$(printf 'd%.0s'
 rm -rf "$LIB/jfb" "$LISTS"/joinery-fix-jfb-* "$PREF/joinery-fix-jfb.pref"
 chk "converge succeeds for the rest" "$(run converge "$SERVER")" "0"
 chk "the bad one is not placed, listed or pinned" "$(ls "$LIB/jfb" "$LISTS"/joinery-fix-jfb-* "$PREF/joinery-fix-jfb.pref" 2>/dev/null | wc -l | tr -d ' ')" "0"
-chk "state: jfb refused" "$(st jfb 7)" "1"
+chk "state: jfb could not be fetched with ACTIVE's hash (2), not refused by apt (1)" "$(st jfb 7)" "2"
 chk "says why" "$(grep -c "jfb: could not fetch .* with ACTIVE's hash" "$T/out")" "1"
 
 echo "A fix removed from ACTIVE"
@@ -408,6 +412,94 @@ run converge "$SERVER" > /dev/null
 
 echo "status"
 chk "prints the state" "$(bash "$TREE/install_package_fixes.sh" status | grep -c '^fix=jfa|1.0-0ubuntu1+joinery2|')" "1"
+
+echo "The package fix channel (specs/package_fixes_automatic.md WP6, WP8)"
+CH="$T/srv/static_files/fixes/channel"
+mkdir -p "$CH"
+cat > "$T/bin/verify-stub" <<'EOF2'
+#!/bin/bash
+[ -f "$STUB/verify_ok" ] && { echo "verdict: signed: ok"; exit 0; }
+echo "verdict: unknown_key: not signed by a key this machine trusts"; exit 1
+EOF2
+chmod 755 "$T/bin/verify-stub"
+export PACKAGE_FIXES_VERIFY="$T/bin/verify-stub"
+LW1="$(mkfix jfw 5.0-1+joinery1 5.0-1 'CVE-2026-7777' jfw)"
+LW2="$(mkfix jfw 5.0-1+joinery2 5.0-1 'CVE-2026-7777 CVE-2026-7778' jfw)"
+mkchannel() {  # SERIAL WITHDRAWN-LINE ACTIVE-LINES...
+    local serial="$1" w="$2"; shift 2
+    printf '%s\n' "# channel" "$@" > "$CH/ACTIVE"
+    printf '%s\n' "# withdrawn" ${w:+"$w"} > "$CH/WITHDRAWN"
+    printf 'serial=%s\nissued=2026-11-22T12:00:00Z\nwide=yes\nrelease=0.8.641\n' "$serial" > "$CH/CHANNEL"
+    for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig RELEASE_STATEMENT; do echo x > "$CH/$f"; done
+}
+printf '%s\n' "$header" "$LA2" > "$ACTIVE"
+printf 'jfa jfa 1.0-0ubuntu1+joinery2\njfw jfw 5.0-1+joinery2\n' > "$STUB/dpkg"
+mkchannel 3 "" "$LA2" "$LW2"
+rm -f "$STUB/verify_ok"
+chk "a channel that does not verify is not taken" "$(run converge "$SERVER")|$(grep -c 'is not ours: verdict: unknown_key' "$T/out")|$([ -d "$LIB/channel" ] && echo taken || echo none)" "0|1|none"
+touch "$STUB/verify_ok"
+chk "one that verifies is taken" "$(run converge "$SERVER")|$(grep -c 'took the package fix channel, serial 3' "$T/out")" "0|1"
+chk "and its ACTIVE is the set: a fix only it names is placed and pinned" "$(sed -n 's/^Pin: //p' "$PREF/joinery-fix-jfw.pref")" "version 5.0-1+joinery2"
+chk "the state carries the channel serial" "$(grep -c '^channel=3$' "$LIB/state")" "1"
+chk "the channel folder is kept across runs, never removed as a stale fix" "$(run converge "$SERVER")|$(cat "$LIB/channel/CHANNEL" | sed -n 's/^serial=//p')" "0|3"
+mkchannel 2 "" "$LA2"
+chk "a lower serial (an old channel replayed) is refused, the one in force stays" \
+    "$(run converge "$SERVER")|$(grep -c 'serial 2, older than serial 3 in force; refused' "$T/out")|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")|$(ls "$PREF" | grep -c jfw)" "0|1|3|1"
+: > "$STUB/calls"
+mkchannel 4 "jfw 5.0-1+joinery2" "$LA2" "$LW1"
+chk "a withdrawal is taken" "$(run converge "$SERVER")|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")" "0|4"
+chk "the build offered instead is pinned" "$(sed -n 's/^Pin: //p' "$PREF/joinery-fix-jfw.pref")" "version 5.0-1+joinery1"
+chk "converge only records the withdrawn build, installing nothing" "$(grep -c 'allow-downgrades' "$STUB/calls")|$(cat "$LIB/rollback_due")" "0|jfw 5.0-1+joinery2 jfw=5.0-1+joinery1"
+chk "rollback installs it back down, non-interactive, with no stdin" "$(bash "$TREE/install_package_fixes.sh" rollback < "$CH/WITHDRAWN" > "$T/out" 2>&1; echo $?)|$(grep -c 'install -y -qq --allow-downgrades .* jfw=5.0-1+joinery1' "$STUB/calls")|$([ -s "$LIB/rollback_due" ] && echo left || echo done)" "0|1|done"
+run converge "$SERVER" > /dev/null
+chk "the state records it" "$(grep -c '^rolled_back=jfw|5.0-1+joinery2|5.0-1+joinery1$' "$LIB/state")" "1"
+: > "$STUB/calls"
+mkchannel 5 "jfw 5.0-1+joinery2" "$LA2"
+echo " jfw | 5.0-1ubuntu0.1 | http://archive.ubuntu.com/ubuntu resolute-security/main amd64 Packages" > "$STUB/madison_jfw"
+printf 'jfa jfa 1.0-0ubuntu1+joinery2\njfw jfw 5.0-1+joinery2\n' > "$STUB/dpkg"
+chk "with no fix left for the source, it goes back to Ubuntu's newest -security build" \
+    "$(run converge "$SERVER")|$(bash "$TREE/install_package_fixes.sh" rollback > /dev/null 2>&1; grep -c 'install -y -qq --allow-downgrades .* jfw=5.0-1ubuntu0.1' "$STUB/calls")|$(ls "$PREF" | grep -c jfw)" "0|1|0"
+: > "$STUB/calls"
+printf 'jfa jfa 1.0-0ubuntu1+joinery2\njfw jfw 5.0-1+joinery2\n' > "$STUB/dpkg"
+echo " jfw | 5.0-1 | http://archive.ubuntu.com/ubuntu resolute/main amd64 Packages" > "$STUB/madison_jfw"
+mkchannel 6 "jfw 5.0-1+joinery2" "$LA2"
+chk "with no -security build either, Ubuntu's newest in any pocket (reviewer2 B8)" \
+    "$(run converge "$SERVER")|$(cat "$LIB/rollback_due")" "0|jfw 5.0-1+joinery2 jfw=5.0-1"
+printf 'jfa jfa 1.0-0ubuntu1+joinery2\n' > "$STUB/dpkg"
+run converge "$SERVER" > /dev/null
+
+echo "The highest serial any server offers wins (reviewer2 B12)"
+SRV2="$T/srv2/static_files/fixes/channel"
+mkdir -p "$SRV2"
+cp "$CH"/* "$SRV2/"
+sed -i 's/^serial=.*/serial=9/' "$SRV2/CHANNEL"
+chk "a later server with a higher serial is taken over an earlier one" \
+    "$(PACKAGE_FIXES_UPGRADE_SOURCE="$SERVER" UPGRADE_SERVER="file://$T/srv2" run converge)|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")" "0|9"
+echo "A first channel issued before this tree's release is refused"
+mkdir -p "$T/tree/public_html"; echo "0.8.700" > "$T/tree/public_html/VERSION"
+mv "$LIB/channel" "$T/channel.kept"
+chk "refused, saying why" "$(run converge "$SERVER")|$(grep -c "issued on release 0.8.641, before this tree's 0.8.700; refused" "$T/out")|$([ -d "$LIB/channel" ] && echo taken || echo none)" "0|1|none"
+rm -f "$T/tree/public_html/VERSION"; mv "$T/channel.kept" "$LIB/channel"
+printf 'jfa jfa 1.0-0ubuntu1+joinery2\n' > "$STUB/dpkg"
+unset PACKAGE_FIXES_VERIFY
+
+echo "A box that serves a channel takes its own copy only (reviewer2 B20)"
+export PACKAGE_FIXES_VERIFY="$T/bin/verify-stub"
+LOC="$T/tree/static_files/fixes/channel"
+mkdir -p "$LOC"
+cp "$CH"/* "$LOC/"; sed -i 's/^serial=.*/serial=10/' "$LOC/CHANNEL"
+cp "$CH"/* "$SRV2/"; sed -i 's/^serial=.*/serial=11/' "$SRV2/CHANNEL"
+chk "a mirror takes its own serial 10, not its upstream's 11" \
+    "$(PACKAGE_FIXES_ROLE=mirror PACKAGE_FIXES_UPGRADE_SOURCE="file://$T/srv2" run converge)|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")" "0|10"
+chk "a box that serves nothing ignores a stale local folder and asks its servers (reviewer2 B30)" \
+    "$(PACKAGE_FIXES_ROLE=none PACKAGE_FIXES_UPGRADE_SOURCE="file://$T/srv2" run converge)|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")" "0|11"
+rm -rf "$LOC"
+sed -i 's/^serial=.*/serial=12/' "$SRV2/CHANNEL"
+chk "a site whose role cannot be told (database down) takes no channel this run (reviewer2 B31)" \
+    "$(PACKAGE_FIXES_ROLE=unknown PACKAGE_FIXES_UPGRADE_SOURCE="file://$T/srv2" run converge)|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")" "0|11"
+chk "a mirror whose runner has served nothing yet takes nothing from its upstream (reviewer2 B29)" \
+    "$(PACKAGE_FIXES_ROLE=mirror PACKAGE_FIXES_UPGRADE_SOURCE="file://$T/srv2" run converge)|$(sed -n 's/^serial=//p' "$LIB/channel/CHANNEL")" "0|11"
+unset PACKAGE_FIXES_VERIFY
 
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

@@ -1,0 +1,16 @@
+Upstream release signing keys, one file per source package: <source>.asc
+(for example openssl.asc, php8.5.asc), named as the source is in fixes/<source>/.
+
+build.sh reads a key here only for a recipe with upstream_release=: it checks
+the signature of upstream's release tarball against <source>.asc with gpgv,
+and stops when the file is missing. Nothing else trusts these keys.
+
+A person adds a project's key, once per project:
+
+  1. Take the keys from the project's own published list of release keys.
+  2. Check each fingerprint against a second place the project publishes it.
+  3. Save the keys, ASCII-armored, as <source>.asc here: several keys may sit
+     in one file, as releases are signed by different release managers.
+  4. Commit it.
+
+A key is never written here by the automatic recipe writer.

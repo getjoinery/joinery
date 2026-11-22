@@ -3,6 +3,10 @@
 # converge, and the repair of reclaim_managed_file). Functions only; sourcing
 # it runs nothing.
 #
+# Version: 1.7 - host_files_tune_php_ini() sets session.upload_progress.enabled = Off, and
+#                host_files_ensure_upload_progress_off() is the step housekeeping re-asserts on every
+#                converge: nothing on the platform reads upload progress, and the feature is the way in
+#                for CVE-2026-115560 (PHP rated critical; fixed upstream in 8.5.13)
 # Version: 1.6 - host_files_tune_php_ini() sets ffi.enable = On, and host_files_ensure_ffi_enable() is the
 #                idempotent step housekeeping re-asserts on every converge (specs/post_quantum_sealing.md R4)
 # Version: 1.5 - host_files_write_release_verify_keys() leaves the release and statement keys alone on a node
@@ -67,6 +71,33 @@ host_files_tune_php_ini() {
     sed -i 's/memory_limit = .*/memory_limit = 128M/' "$ini"
     sed -i 's/;date.timezone =/date.timezone = UTC/' "$ini"
     host_files_ensure_ffi_enable "$ini"
+    host_files_ensure_upload_progress_off "$ini"
+}
+
+# True when the php.ini at $1 states session.upload_progress.enabled = Off.
+host_files_upload_progress_off() {
+    grep -qiE '^[[:space:]]*session\.upload_progress\.enabled[[:space:]]*=[[:space:]]*"?(off|0|false|no)"?[[:space:]]*$' "$1"
+}
+
+# session.upload_progress.enabled = Off. PHP's default is On, and nothing on
+# the platform reads upload progress; the feature writes request data into
+# the session store, which is how CVE-2026-115560 (rated critical by PHP)
+# reaches a site. Idempotent, written as host_files_ensure_ffi_enable()
+# writes: an existing line rewritten in place, otherwise under the commented
+# default, otherwise under a [Session] section appended at the end. A write
+# that fails is not an error here: the caller checks afterwards.
+host_files_ensure_upload_progress_off() {
+    local ini="$1"
+    [[ -f "${ini}" ]] || return 0
+    host_files_upload_progress_off "${ini}" && return 0
+    if grep -qE '^[[:space:]]*session\.upload_progress\.enabled[[:space:]]*=' "${ini}"; then
+        sed -i --follow-symlinks -E 's/^[[:space:]]*session\.upload_progress\.enabled[[:space:]]*=.*$/session.upload_progress.enabled = Off/' "${ini}" 2>/dev/null || true
+    elif grep -qE '^;[[:space:]]*session\.upload_progress\.enabled[[:space:]]*=' "${ini}"; then
+        sed -i --follow-symlinks -E '0,/^;[[:space:]]*session\.upload_progress\.enabled[[:space:]]*=.*$/s//&\nsession.upload_progress.enabled = Off/' "${ini}" 2>/dev/null || true
+    else
+        printf '\n[Session]\nsession.upload_progress.enabled = Off\n' >> "${ini}" 2>/dev/null || true
+    fi
+    return 0
 }
 
 # True when the php.ini at $1 states ffi.enable = On.

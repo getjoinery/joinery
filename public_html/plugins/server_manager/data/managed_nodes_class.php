@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.80 - self_node() and is_self() match this site's address on either scheme and in any letter case
+ *                (package_fixes_automatic.md B1, reviewer2 B17)
  * @version 1.79 - holds_site_address(): a row with no agent key that was let go or whose agent left holds its site address against nobody (adopt_reported_site_domain, ManagedSiteDraft::serves_already)
  * @version 1.78 - mgn_owner_usr_user_id: the account a server its owner added is listed under (JoinedServers)
  * @version 1.77 - hosting_billing_refusal(): a site whose hosting subscription still bills is not hidden or removed (hosting_after_purchase B10); reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
@@ -1114,9 +1116,10 @@ class ManagedNode extends SystemBase {
 
 	/** Whether this record is this management node's own — the rule self_node() finds it by. */
 	public function is_self(): bool {
-		$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
-		$site_url = rtrim(trim((string)$this->get('mgn_site_url')), '/');
-		return $own_url !== '' && $site_url === $own_url;
+		// Either scheme, as self_node() matches.
+		$own = preg_replace('#^https?://#i', '', rtrim((string)LibraryFunctions::get_absolute_url(), '/'));
+		$site = preg_replace('#^https?://#i', '', rtrim(trim((string)$this->get('mgn_site_url')), '/'));
+		return $own !== '' && strcasecmp($site, $own) === 0;
 	}
 
 	/** The rule is_management_node() applies, over a status-data array or its JSON. */
@@ -1142,14 +1145,22 @@ class ManagedNode extends SystemBase {
 		return is_array($status_data) && array_key_exists('server_manager_active', $status_data);
 	}
 
+	/**
+	 * This site's own node: the row whose site URL is this site's address, on
+	 * either scheme. The scheme is left out of the match because headless code
+	 * learns it from what requests arrived on (LibraryFunctions::detect_protocol()):
+	 * matched with it, one plain-http request made a scheduled pass miss its own
+	 * row, and every incident only this node raises cleared and came back.
+	 */
 	public static function self_node() {
-		$own_url = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
-		if ($own_url === '') {
+		$own = strtolower(preg_replace('#^https?://#i', '', rtrim((string)LibraryFunctions::get_absolute_url(), '/')));
+		if ($own === '') {
 			return null;
 		}
-		foreach ([$own_url, $own_url . '/'] as $url) {
-			$nodes = new MultiManagedNode(['mgn_site_url' => $url, 'deleted' => false]);
-			foreach ($nodes as $node) {
+		// Host names are not case-sensitive: matched as is_self() matches.
+		foreach (new MultiManagedNode(['deleted' => false], ['mgn_managed_node_id' => 'ASC']) as $node) {
+			$site = strtolower(preg_replace('#^https?://#i', '', rtrim(trim((string)$node->get('mgn_site_url')), '/')));
+			if ($site === $own) {
 				return $node;
 			}
 		}
