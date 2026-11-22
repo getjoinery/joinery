@@ -17,6 +17,7 @@
  *     or Fortress file would put its plaintext in the editor's memory and temp
  *     files, outside the promise those levels make.
  *
+ * @version 0.5.0 - openerAvailable(): the opener's `available`, so a feature outside Drive can offer to open a copy
  * @version 0.4.0 - creatorAvailable(): greyed with the reason instead of hidden; refusedHere()
  * @version 0.3.0 - memberMay(): on unless the member's tier switches office_editing off
  * @version 0.2.0 - hostCommand(): the plugin's deactivate and uninstall hooks switch the editor off and remove it
@@ -117,6 +118,23 @@ class OfficeEditor {
 			return 'Editing documents in Drive isn\'t part of your plan. Download to edit.';
 		}
 		return null;
+	}
+
+	/**
+	 * DriveHelper opener `available`: may $user_id open a file in the editor
+	 * once it is in their Drive? Asked before any file exists (the mail
+	 * reader's "Open in editor" on an attachment). Null where the editor is
+	 * not installed: a mailbox is not the place to advertise an editor the
+	 * site lacks, and Drive's New menu already says so.
+	 */
+	public static function openerAvailable($user_id) {
+		if (!self::installed()) {
+			return null;
+		}
+		if (!self::memberMay($user_id)) {
+			return 'Editing documents isn\'t part of your plan.';
+		}
+		return true;
 	}
 
 	/**

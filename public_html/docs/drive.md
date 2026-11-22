@@ -465,6 +465,7 @@ DriveHelper::registerOpener('office_editor', array(
 	'extensions' => array('docx', 'xlsx'),
 	'url'        => array('OfficeEditor', 'openerUrl'),     // ($file, $user_id) => page URL, or null
 	'explain'    => array('OfficeEditor', 'openerExplain'), // optional: why url() said null
+	'available'  => array('OfficeEditor', 'openerAvailable'), // optional: ($user_id) => true, a reason, or null
 ));
 DriveHelper::registerCreator('office_document', array(
 	'label'     => 'Document',
@@ -481,6 +482,16 @@ client or the app, which hold an API key, and never for the bulk sync exports
 that mint no URLs). Only Drive's own live files are asked; a file another
 feature stored stays download-only, and nothing is offered in Trash. An opener
 that throws is logged and skipped.
+
+An opener's `available` answers a question about the member, not a file: could
+they open such a file once it is in their Drive? `DriveHelper::opener_offers($user_id)`
+asks every opener that declares it and answers `{key, label, extensions}`, or
+`{key, label, extensions, explain}` when the member cannot (their plan); an
+opener whose `available` answers null, or that declares none, is not offered,
+and nothing is offered while Drive is off. A feature outside Drive uses it to
+offer to put a file in Drive so it can be opened: the mail reader's **Open in
+editor** on an attachment ([Mailbox](../plugins/mailbox/docs/overview.md)) saves a
+copy to the member's Drive and follows the copy's `open_with`.
 
 `drive_list` carries `create_options` for a folder of the member's own tree:
 each creator as `{key, label, action, params}`, or `{key, label, explain}` when

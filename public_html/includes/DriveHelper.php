@@ -872,6 +872,12 @@ class DriveHelper {
 	 *   - explain:    optional callable($file, $user_id) => one line saying why
 	 *                 url() gave null, for a reason the member should see; null
 	 *                 or '' when there is nothing to say
+	 *   - available:  optional callable($user_id) => true when this member could
+	 *                 open such a file, a one-line reason they cannot, or null for
+	 *                 "do not offer this here". Asked before any file exists, by
+	 *                 a feature that offers to put a file in Drive so it can be
+	 *                 opened (opener_offers()); an opener without it is offered
+	 *                 nowhere but on Drive's own files
 	 */
 	public static function registerOpener($key, array $spec) {
 		$exts = array();
@@ -883,6 +889,7 @@ class DriveHelper {
 			'extensions' => $exts,
 			'url'        => $spec['url'],
 			'explain'    => isset($spec['explain']) ? $spec['explain'] : null,
+			'available'  => isset($spec['available']) ? $spec['available'] : null,
 		);
 	}
 
@@ -960,6 +967,41 @@ class DriveHelper {
 				}
 			} catch (Throwable $e) {
 				error_log('DriveHelper: opener ' . $key . ' failed for file ' . (int)$file->key . ': ' . $e->getMessage());
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * What $user_id could open once a file is in their Drive, for a feature
+	 * that offers to put one there (the mail reader's "Open in editor" on an
+	 * attachment): one entry per opener that declares `available` and did not
+	 * answer null, as {key, label, extensions} or, where the member cannot,
+	 * {key, label, extensions, explain}. Nothing while Drive is off.
+	 *
+	 * @return array<int,array{key:string,label:string,extensions:array,explain?:string}>
+	 */
+	public static function opener_offers($user_id) {
+		if (!Globalvars::get_instance()->get_setting('drive_active')) {
+			return array();
+		}
+		self::load_registrations();
+		$out = array();
+		foreach (self::$openers as $key => $op) {
+			if (!$op['available']) {
+				continue;
+			}
+			try {
+				$ok = call_user_func($op['available'], (int)$user_id);
+			} catch (Throwable $e) {
+				error_log('DriveHelper: opener ' . $key . ' availability failed: ' . $e->getMessage());
+				continue;
+			}
+			$entry = array('key' => (string)$key, 'label' => $op['label'], 'extensions' => $op['extensions']);
+			if ($ok === true) {
+				$out[] = $entry;
+			} elseif (is_string($ok) && $ok !== '') {
+				$out[] = $entry + array('explain' => $ok);
 			}
 		}
 		return $out;

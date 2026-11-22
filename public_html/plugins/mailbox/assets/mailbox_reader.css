@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.55 — .mbx-catchup-banner[hidden] stays hidden; @version 2.54 — .mbx-relay-switching (a mailbox's move to Fortress reaching the relay)
+ * Vanilla CSS, no framework. @version 2.56 — .mbx-attachment-edit (Open in editor, beside the eye) and .mbx-copy-progress; @version 2.55 — .mbx-catchup-banner[hidden] stays hidden; @version 2.54 — .mbx-relay-switching (a mailbox's move to Fortress reaching the relay)
  * @version 2.53 — contacts pane: .mbx-contact-edit pencils, .mbx-contacts-locked;
  *   the add/import controls and the delete button are gone (the Contacts page has them)
  * @version 2.52 — .mbx-thread-purge removed (Trash rows show the received date)
@@ -786,6 +786,29 @@
 }
 .mbx-attachment-preview:hover { background: #dbe8fb; color: #1d4ed8; }
 .mbx-attachment-preview:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+/* Open in editor: the same small button as the eye; only the last button in
+ * the chip takes the rounded corner. Greyed (with its reason as the title)
+ * when the member's plan has no editing. */
+.mbx-attachment-edit {
+	flex: 0 0 auto;
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 34px;
+	border: 0; border-left: 1px solid #dde4ec;
+	border-radius: 0 8px 8px 0;
+	background: transparent; color: #52606d;
+	cursor: pointer; padding: 0;
+	transition: background .12s, color .12s;
+}
+.mbx-attachment-edit:hover { background: #dbe8fb; color: #1d4ed8; }
+.mbx-attachment-edit:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
+.mbx-attachment-edit--off, .mbx-attachment-edit--off:hover { color: #b8c0ca; background: transparent; cursor: help; }
+.mbx-attachment > button:not(:last-child) { border-radius: 0; }
+.mbx-copy-progress {
+	height: 6px; margin: 0 0 .75rem;
+	border-radius: 3px; background: #e4e7eb; overflow: hidden;
+}
+.mbx-copy-progress[hidden] { display: none; }
+.mbx-copy-progress > span { display: block; height: 100%; width: 0; background: #2563eb; transition: width .15s; }
 .mbx-attachment-icon {
 	flex: 0 0 auto; width: 30px; height: 30px;
 	object-fit: contain;

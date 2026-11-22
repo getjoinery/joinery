@@ -1595,6 +1595,30 @@ are sealed, so a locked vault answers `{locked:true}` and the modal offers the o
 unlock. Nothing is cached: extracted text from a sealed message is exactly as sensitive
 as the sealed body, and re-reading costs milliseconds.
 
+**Open in editor saves a copy to Drive.** A Drive opener that declares `available` (the
+document editor) is offered in the reader config as `attachmentOpeners`
+(`DriveHelper::opener_offers()`), and an attachment whose extension one takes gets a
+second chip button beside the eye, titled with the opener's label; greyed with the
+opener's reason where the member's plan has no editing, absent on a locked Fortress
+placeholder. Pressing it saves a copy of the attachment into the member's Drive, in a
+top-level **Mail attachments** folder (made Standard on first use), and opens the copy
+in a new tab; the email's own attachment is never changed. The copy is an ordinary
+Standard Drive file the server can read, so on a Private or Fortress mailbox (or mail
+with no mailbox of its own) the member is first asked, naming the file; a Standard
+mailbox does not ask. The bytes always travel through the browser
+(`MailboxFortress.attachmentBytes()` on Fortress, the download endpoint otherwise, after
+the unlock on a locked Private thread) and go up with the Drive page's own transport
+(`assets/js/drive-upload.js`, `JoineryDriveUpload.send`), so every Drive check (size,
+quota, room, name) applies. A name already in the folder offers **Open that one** or
+**Save another copy** (*Budget (2).xlsx*, counting up). A Private or Fortress "Mail
+attachments" folder stops the copy with a sentence: the editor opens Standard files only.
+The editor's tab is opened empty on the press, because a browser blocks one opened after
+the upload; it says what is happening while the copy is saved, closes on any way out of
+the dialog, and where it was refused or closed the dialog ends with an Open in editor
+link. On a locked Private thread the vault is unlocked first, from the focused page the
+passkey prompt needs, and a second press opens the tab. A vault lock closes the dialog
+of an end-to-end attachment and its tab.
+
 **Forward** re-attaches the original's parts in one manifest-driven loop dispatching per
 row: a file-backed row reads its `File`, `remote` fetches from IMAP, a legacy raw row
 extracts the section. An inline (`cid:`) part is **re-embedded** with its original
@@ -1993,6 +2017,31 @@ rows on an admin view carry `sealed.foreign` and read "Only the mailbox owner's 
 can open it". A lock blanks every body, revokes the blob URLs, ends the search worker
 and returns the list to placeholders. A vault a tab opened reopens after a reload of
 that tab (docs/sealed_vault.md § Sessions and the lock).
+
+**A Fortress attachment's text preview is read on the device.** The server holds only
+ciphertext, so `mailbox/attachment_text` refuses a Fortress attachment, and the eye
+button on one is the browser's: `MailboxDocText` (`mailbox_doc_text.js`, loaded with the
+Fortress scripts) reads Word, Excel and PowerPoint (OOXML), OpenDocument and the plain-text
+family out of the bytes `MailboxFortress.attachmentBytes()` opened, and
+`MailboxFortress.attachmentText()` hands the reader the same answer shape the endpoint
+gives. Each format's reader follows `DocumentText`'s line for line, under the same limits
+(12 MiB per zip entry counted as it inflates, 40 MiB in all, 200:1 above 1 MiB, 400
+parts, 50 sheets; `MailboxService::previewMaxBytes()` and `PREVIEW_MAX_CHARS`, sent in the
+reader config as `previewMaxBytes` and `previewMaxChars`). Its XML reader refuses any
+`<!DOCTYPE`; an encrypted zip entry or an OLE file (a password-protected Office document)
+reads as secured. PDF, RTF, HTML, saved emails, calendar files, EPUB and zip listings are
+not read here and offer no eye on Fortress mail. A declared type it cannot read (some
+mailers declare every Office file `application/zip`) gives way to the filename, as the
+server's sniff would. An XML part is read in its byte-order mark's or declared encoding
+(UTF-16 is legal in OOXML). It does not check zip CRCs, refuses ZIP64, and does not
+refuse what libxml alone refuses (nesting past 256, raw control characters, duplicate
+attributes), so a damaged file the server calls unreadable may show text here; no file
+an office program writes reads differently. Trimming and the character cap walk the
+text once, so no whitespace run a sender chooses costs more than its length. The modal
+says "Text only, read on this device", sends nothing anywhere, refuses a part over the
+limit from its recorded size before fetching it, and closes when the vault locks.
+`plugins/mailbox/tests/doc_text_gate.sh` holds the browser reader's output to the
+server's over `plugins/mailbox/tests/fixtures/doc_text/` (rebuilt from PHP with `node doc_text.mjs --write`).
 
 **Search** runs in the browser. Each browser builds a sealed word index of the
 owner's Fortress mail once, in IndexedDB (`jy_mailsearch_{user_id}`), and afterwards

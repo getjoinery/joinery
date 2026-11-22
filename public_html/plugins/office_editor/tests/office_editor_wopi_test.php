@@ -100,6 +100,16 @@ if (!OfficeEditor::installed() && !OfficeEditor::refusedHere()) {
 		'a tier switched off: New lists Document greyed with the reason');
 	check(OfficeEditor::creatorAvailable(null, $owner->key) === true, 'an allowed member may make a document');
 }
+// The opener's `available`: asked before a file exists (the mail reader's
+// Open in editor on an attachment). Not offered at all where the editor is not
+// installed; greyed with the reason when the plan has it off.
+if (!OfficeEditor::installed()) {
+	check(OfficeEditor::openerAvailable($owner->key) === null, 'not installed: Open in editor is not offered outside Drive');
+} else {
+	check(OfficeEditor::openerAvailable($off->key) === 'Editing documents isn\'t part of your plan.',
+		'a tier switched off: Open in editor is greyed with the reason');
+	check(OfficeEditor::openerAvailable($owner->key) === true, 'an allowed member is offered Open in editor');
+}
 $members_ok = true;
 try { OfficeEditorHealth::checkMembersMay(); } catch (ProvisioningCheckFailed $e) { $members_ok = $e->getMessage(); }
 check($members_ok === true, 'members-may-use check passes while a member with no tier exists');

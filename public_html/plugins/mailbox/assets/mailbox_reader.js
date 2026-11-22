@@ -1,5 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
+ * @version 3.5 - an end-to-end attachment's text preview is read on this device (MailboxFortress.attachmentText) and its
+ *   modal closes when the vault locks; "Open in editor" on an attachment a Drive opener takes saves a copy to the
+ *   member's "Mail attachments" folder and opens it (asked first on Private and Fortress mail)
  * @version 3.4 - a list read hands its fortress_pending count to MailboxFortress.showPending: the waiting line
  *   shows it, and mail that arrived while the page was open is opened now
  * @version 3.3 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
@@ -2575,7 +2578,7 @@
 
 		// Gmail-style attachment chips below the content area.
 		if (m.attachments && m.attachments.length) {
-			wrap.appendChild(attachmentsBlock(m.attachments, !!m.source_gone));
+			wrap.appendChild(attachmentsBlock(m.attachments, !!m.source_gone, m));
 		}
 
 		return wrap;
@@ -2585,7 +2588,7 @@
 	// a link: the download is the link inside it, and an eye button sits beside
 	// it for anything we can read as text (a button cannot legally nest inside
 	// a link, which is why the chip itself is a div).
-	function attachmentsBlock(atts, sourceGone) {
+	function attachmentsBlock(atts, sourceGone, m) {
 		var box = el('div', 'mbx-attachments');
 		box.appendChild(el('div', 'mbx-attachments-label',
 			atts.length + (atts.length === 1 ? ' attachment' : ' attachments')));
@@ -2651,6 +2654,24 @@
 					openAttachmentPreview(a, open.href);
 				});
 				chip.appendChild(eye);
+			}
+
+			var offer = openerFor(a);
+			if (offer) {
+				var edit = el('button', 'mbx-attachment-edit' + (offer.explain ? ' mbx-attachment-edit--off' : ''));
+				edit.type = 'button';
+				edit.title = offer.explain || offer.label;
+				edit.setAttribute('aria-label', offer.label + ': ' + name + (offer.explain ? '. ' + offer.explain : ''));
+				if (offer.explain) edit.setAttribute('aria-disabled', 'true');
+				edit.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">'
+					+ '<path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" '
+					+ 'd="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
+				edit.addEventListener('click', function (ev) {
+					ev.preventDefault();
+					ev.stopPropagation();
+					copyToEditor(a, m, offer, open.href);
+				});
+				chip.appendChild(edit);
 			}
 
 			grid.appendChild(chip);
@@ -2735,9 +2756,15 @@
 		overlay.addEventListener('click', function (e) { if (e.target === overlay) dismiss(); });
 		document.body.appendChild(overlay);
 
+		// An end-to-end attachment's decrypted text or picture does not outlive
+		// the vault: a lock closes the modal.
+		var offLock = (att.fortress && window.MailboxFortress && MailboxFortress.onLock)
+			? MailboxFortress.onLock(function () { dismiss(); }) : null;
+
 		// The blob URL holds the picture's bytes in memory until it is revoked,
 		// so every way out of this modal goes through here.
 		function dismiss() {
+			if (offLock) { offLock(); offLock = null; }
 			if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
 			document.removeEventListener('keydown', onKey);
 			closeModal(overlay);
@@ -2790,6 +2817,7 @@
 			copy.disabled = false;
 
 			var what = (data.category === 'archive') ? 'Contents' : 'Text only';
+			if (att.fortress) what = 'Text only, read on this device';
 			note.textContent = what + '. Nothing in this file is opened or run. '
 				+ fmtBytes(data.size_bytes)
 				+ (data.truncated ? ' — shown in part; the download has the rest.' : '.');
@@ -2851,6 +2879,14 @@
 		}
 
 		function load() {
+			// End-to-end: the server holds ciphertext, so the words are read
+			// here, from the bytes this browser opens (MailboxDocText).
+			if (att.fortress) {
+				MailboxFortress.attachmentText(att).then(render).catch(function (err) {
+					note.textContent = (err && err.message) || 'This attachment could not be read.';
+				});
+				return;
+			}
 			apiV1(CFG.attachmentTextUrl, { attachment_id: String(att.id) })
 				.then(render)
 				.catch(function (err) {
@@ -2862,6 +2898,397 @@
 		}
 
 		if (isImage) loadImage(); else load();
+	}
+
+	// ---- Open a copy in the editor (Drive's opener offers) ----
+	//
+	// A Drive opener (the document editor) opens Drive files only, so an
+	// attachment is opened by saving a copy of it into the member's Drive, in a
+	// top-level "Mail attachments" folder made Standard on first use, and opening
+	// that. The email's own attachment is never changed. The copy is an ordinary
+	// Standard Drive file the server can read, so on a Private or Fortress
+	// mailbox the member is told so, naming the file, before anything is saved.
+	// The bytes travel through this browser on every level: an end-to-end
+	// attachment can only be opened here, so that is the one path.
+
+	var COPY_FOLDER = 'Mail attachments';
+
+	// Office types by extension: the copy's type comes from its name, never
+	// from what the sender declared.
+	var OFFICE_MIME = {
+		docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+		odt: 'application/vnd.oasis.opendocument.text',
+		ods: 'application/vnd.oasis.opendocument.spreadsheet',
+		odp: 'application/vnd.oasis.opendocument.presentation',
+		doc: 'application/msword',
+		xls: 'application/vnd.ms-excel',
+		ppt: 'application/vnd.ms-powerpoint',
+		rtf: 'application/rtf',
+		txt: 'text/plain',
+		csv: 'text/csv'
+	};
+
+	function extensionOf(name) {
+		name = String(name || '').toLowerCase();
+		var dot = name.lastIndexOf('.');
+		return dot > 0 ? name.slice(dot + 1) : '';
+	}
+
+	/** The opener offer for this attachment, by its extension, or null. */
+	function openerFor(a) {
+		var offers = CFG.attachmentOpeners || [];
+		// A locked placeholder has no filename to go by.
+		if (!offers.length || a.fortress_locked || !window.JoineryDriveUpload) return null;
+		var ext = extensionOf(a.filename);
+		if (!ext) return null;
+		for (var i = 0; i < offers.length; i++) {
+			if ((offers[i].extensions || []).indexOf(ext) !== -1) return offers[i];
+		}
+		return null;
+	}
+
+	/** 'fortress', 'private', 'standard', or '' when no mailbox says (a catch-all). */
+	function attachmentLevel(a, m) {
+		if (a.fortress) return 'fortress';
+		var box = (m && m.alias_id != null) ? mailboxById(m.alias_id) : null;
+		if (box) return box.security_level || 'standard';
+		return '';
+	}
+
+	/** The attachment's plaintext as a Blob, on any level. */
+	async function attachmentCopyBlob(a, downloadUrl) {
+		if (a.fortress) {
+			return new Blob([await MailboxFortress.attachmentBytes(a)]);
+		}
+		// A sealed (Private) attachment opens only inside an open window.
+		if (state.threadLocked) {
+			if (!(await unlockVault())) throw new Error('Your vault is locked, so this attachment stays sealed.');
+			state.threadLocked = false;
+		}
+		var res = await fetch(downloadUrl, { credentials: 'same-origin' });
+		var type = res.headers.get('content-type') || '';
+		// The download endpoint renders an HTML page for its own refusals.
+		if (!res.ok || /text\/html/i.test(type)) throw new Error('This attachment could not be fetched.');
+		return res.blob();
+	}
+
+	/** Every item of one Drive folder (0 = the top), paging past the listing cap. */
+	async function driveItems(folderId) {
+		var items = [];
+		for (var guard = 0; guard < 100; guard++) {
+			var body = { view: 'mine', offset: items.length };
+			if (folderId) body.folder_id = folderId;
+			var r = await apiV1('drive_list', body);
+			var page = (r && r.items) || [];
+			items = items.concat(page);
+			if (!r || !r.truncated || !page.length) break;
+		}
+		return items;
+	}
+
+	/** The member's "Mail attachments" folder, made Standard when there is none. */
+	async function copyFolder() {
+		var found = null;
+		(await driveItems(0)).forEach(function (it) {
+			if (!found && it.entity_type === 'folder' && !it.deleted && it.name === COPY_FOLDER) found = it;
+		});
+		if (!found) {
+			try {
+				found = (await apiV1('drive_folder_create', { name: COPY_FOLDER, protection_level: 'standard' })).folder;
+			} catch (err) {
+				// Made a moment ago, in another tab: use that one.
+				if (!(err && err.data && err.data.reason === 'name_taken')) throw err;
+				(await driveItems(0)).forEach(function (it) {
+					if (!found && it.entity_type === 'folder' && !it.deleted && it.name === COPY_FOLDER) found = it;
+				});
+				if (!found) throw err;
+			}
+		}
+		if (found.protection_level && found.protection_level !== 'standard') {
+			throw new Error('Your "' + COPY_FOLDER + '" folder is ' + found.protection_level.charAt(0).toUpperCase()
+				+ found.protection_level.slice(1) + ', so the editor can\'t open files in it. '
+				+ 'Change its protection in Drive, or rename it.');
+		}
+		return found;
+	}
+
+	/** "Budget (2).xlsx", counting up past every name the folder holds. */
+	function freeCopyName(name, taken) {
+		var dot = name.lastIndexOf('.');
+		var stem = dot > 0 ? name.slice(0, dot) : name;
+		var ext = dot > 0 ? name.slice(dot) : '';
+		for (var n = 2; n < 1000; n++) {
+			var candidate = stem + ' (' + n + ')' + ext;
+			if (!taken[candidate]) return candidate;
+		}
+		return stem + ' (' + Date.now() + ')' + ext;
+	}
+
+	/** The opener's answer on a Drive listing entry: {url} or {explain}. */
+	function openWith(file, offer) {
+		var list = (file && file.open_with) || [];
+		for (var i = 0; i < list.length; i++) {
+			if (list[i].key === offer.key) return list[i];
+		}
+		return { explain: 'The copy was saved in "' + COPY_FOLDER + '" in your Drive, but it can\'t be opened in the editor.' };
+	}
+
+	function copyToEditor(a, m, offer, downloadUrl) {
+		var name = a.filename || 'attachment';
+		var level = attachmentLevel(a, m);
+
+		var overlay = el('div', 'mbx-modal-overlay');
+		var modal = el('div', 'mbx-modal mbx-copy-modal');
+		var title = el('h3', 'mbx-modal-title', offer.label);
+		var text = el('p', 'mbx-modal-help');
+		var bar = el('div', 'mbx-copy-progress');
+		var fill = el('span');
+		bar.appendChild(fill);
+		bar.hidden = true;
+		var actions = el('div', 'mbx-modal-actions');
+		modal.appendChild(title);
+		modal.appendChild(text);
+		modal.appendChild(bar);
+		modal.appendChild(actions);
+		overlay.appendChild(modal);
+
+		var tab = null;
+		var busy = false;
+		var gone = false;   // dismissed (or the vault locked): nothing more happens
+		function closeTab() {
+			if (tab) { try { tab.close(); } catch (e) { /* already gone */ } tab = null; }
+		}
+		function onKey(e) { if (e.key === 'Escape' && !busy) dismiss(); }
+		// Every way out closes a blank tab this dialog still holds.
+		function dismiss() {
+			gone = true;
+			closeTab();
+			if (offLock) { offLock(); offLock = null; }
+			document.removeEventListener('keydown', onKey);
+			closeModal(overlay);
+		}
+		// An end-to-end attachment's plaintext does not outlive the vault: a
+		// lock closes the dialog and its tab, and drops what was opened.
+		var offLock = (a.fortress && window.MailboxFortress && MailboxFortress.onLock)
+			? MailboxFortress.onLock(function () { dismiss(); }) : null;
+		function button(label, primary, fn) {
+			var b = el('button', 'mbx-action' + (primary ? ' mbx-primary' : ''), label);
+			b.type = 'button';
+			b.addEventListener('click', fn);
+			actions.appendChild(b);
+			return b;
+		}
+		function say(sentence) {
+			text.textContent = '';
+			if (sentence instanceof Node) text.appendChild(sentence); else text.textContent = sentence;
+		}
+		function stop(sentence) {
+			busy = false;
+			if (gone) return;
+			closeTab();
+			bar.hidden = true;
+			say(sentence);
+			actions.textContent = '';
+			button('Close', true, dismiss);
+		}
+		// The editor opens in a new tab. A browser blocks a tab opened once the
+		// upload is done (the press that asked is long over), so it is opened
+		// empty on the press and pointed at the editor when the copy is saved.
+		function openBlankTab() {
+			var w = null;
+			try { w = window.open('', '_blank'); } catch (e) { w = null; }
+			if (w) {
+				try { w.opener = null; } catch (e) { /* not ours to change */ }
+				// The new tab has the focus, so it says what is happening.
+				try {
+					w.document.title = 'Opening ' + name + '…';
+					var line = w.document.createElement('p');
+					line.style.cssText = 'font:16px system-ui,sans-serif;color:#52606d;margin:3rem auto;max-width:32rem;text-align:center';
+					line.textContent = 'Saving a copy of ' + name + ' to your Drive, then opening it in the editor…';
+					w.document.body.appendChild(line);
+				} catch (e) { /* fine */ }
+			}
+			return w;
+		}
+		function finish(answer) {
+			busy = false;
+			if (gone) return;
+			// The member closed the blank tab while the copy was saved.
+			if (tab && tab.closed) tab = null;
+			if (answer.url) {
+				if (tab) {
+					tab.location.href = answer.url;
+					tab = null;
+					dismiss();
+					return;
+				}
+				// The browser refused even the empty tab: a link the member presses.
+				bar.hidden = true;
+				var p = document.createDocumentFragment();
+				p.appendChild(document.createTextNode('The copy is saved in "' + COPY_FOLDER + '" in your Drive. '));
+				var link = el('a', null, 'Open in editor');
+				link.href = answer.url;
+				link.target = '_blank';
+				link.rel = 'noopener';
+				link.addEventListener('click', function () { setTimeout(dismiss, 0); });
+				p.appendChild(link);
+				say(p);
+				actions.textContent = '';
+				button('Close', false, dismiss);
+				return;
+			}
+			stop(answer.explain || 'The copy was saved, but it can\'t be opened in the editor.');
+		}
+
+		async function save(folder, blob, saveName) {
+			bar.hidden = false;
+			fill.style.width = '0%';
+			say('Saving a copy…');
+			actions.textContent = '';
+			var init = {
+				name: saveName,
+				size_bytes: blob.size,
+				mime_type: OFFICE_MIME[extensionOf(saveName)] || 'application/octet-stream',
+				folder_id: folder.id
+			};
+			var sha = blob.size <= 64 * 1024 * 1024 ? await JoineryDriveUpload.sha256Hex(blob) : null;
+			if (sha) init.sha256 = sha;
+			var done = await JoineryDriveUpload.send(blob, init, null, function (f) {
+				fill.style.width = Math.round(f * 100) + '%';
+			});
+			return done.file;
+		}
+
+		async function run() {
+			busy = true;
+			actions.textContent = '';
+			bar.hidden = true;
+			say('Saving a copy…');
+			try {
+				var blob = await attachmentCopyBlob(a, downloadUrl);
+				var folder = await copyFolder();
+				var file;
+				try {
+					file = await save(folder, blob, name);
+				} catch (err) {
+					if (!(err && err.data && err.data.reason === 'name_taken')) throw err;
+					busy = false;
+					if (gone) return;
+					bar.hidden = true;
+					askAboutTaken(folder, blob, err.data);
+					return;
+				}
+				finish(openWith(file, offer));
+			} catch (err) {
+				stop((err && err.message) || 'The copy could not be saved.');
+			}
+		}
+
+		// A file of that name is already in the folder: open it, or save another.
+		function askAboutTaken(folder, blob, holder) {
+			title.textContent = offer.label;
+			var p = document.createDocumentFragment();
+			p.appendChild(el('em', null, name));
+			p.appendChild(document.createTextNode(' is already in "' + COPY_FOLDER + '".'));
+			say(p);
+			actions.textContent = '';
+			if (holder && holder.holder_id) {
+				button('Open that one', true, function () {
+					if (!tab) tab = openBlankTab();
+					busy = true;
+					actions.textContent = '';
+					say('Opening…');
+					driveItems(folder.id).then(function (items) {
+						var it = items.filter(function (x) { return x.entity_type === 'file' && x.id === holder.holder_id; })[0];
+						if (!it) throw new Error('That copy is no longer in "' + COPY_FOLDER + '".');
+						finish(openWith(it, offer));
+					}).catch(function (err) { stop((err && err.message) || 'That copy could not be opened.'); });
+				});
+			}
+			button('Save another copy', !(holder && holder.holder_id), function () {
+				if (!tab) tab = openBlankTab();
+				busy = true;
+				actions.textContent = '';
+				say('Saving a copy…');
+				(async function () {
+					var taken = {};
+					(await driveItems(folder.id)).forEach(function (it) { if (!it.deleted) taken[it.name] = 1; });
+					for (var attempt = 0; attempt < 5; attempt++) {
+						var other = freeCopyName(name, taken);
+						try {
+							return await save(folder, blob, other);
+						} catch (err) {
+							// Taken a moment ago: count on.
+							if (!(err && err.data && err.data.reason === 'name_taken')) throw err;
+							taken[other] = 1;
+						}
+					}
+					throw new Error('A free name for the copy could not be found.');
+				})().then(function (file) { finish(openWith(file, offer)); })
+					.catch(function (err) { stop((err && err.message) || 'The copy could not be saved.'); });
+			});
+			button('Cancel', false, dismiss);
+		}
+
+		document.addEventListener('keydown', onKey);
+		overlay.addEventListener('click', function (e) { if (e.target === overlay && !busy) dismiss(); });
+
+		// The member's plan has no editing (or the like): say so, nothing else.
+		if (offer.explain) {
+			say(offer.explain);
+			button('Close', true, dismiss);
+			document.body.appendChild(overlay);
+			return;
+		}
+
+		// A sealed (Private) attachment on a locked thread opens only after the
+		// unlock, and the passkey prompt needs this page focused: unlock first,
+		// before any tab takes the focus, then a second press opens the tab.
+		function start() {
+			if (a.fortress || !state.threadLocked) {
+				tab = openBlankTab();
+				run();
+				return;
+			}
+			busy = true;
+			actions.textContent = '';
+			say('Your vault is locked. Unlocking…');
+			unlockVault().then(function (ok) {
+				busy = false;
+				if (gone) return;
+				if (!ok) { stop('Your vault is locked, so this attachment stays sealed.'); return; }
+				state.threadLocked = false;
+				var ready = document.createDocumentFragment();
+				ready.appendChild(document.createTextNode('Unlocked. Save the copy of '));
+				ready.appendChild(el('em', null, name));
+				ready.appendChild(document.createTextNode(' and open it?'));
+				say(ready);
+				button('Save a copy and open', true, start);
+				button('Cancel', false, dismiss);
+			}).catch(function () {
+				stop('Your vault is locked, so this attachment stays sealed.');
+			});
+		}
+
+		if (level === 'standard' && !state.threadLocked) {
+			document.body.appendChild(overlay);
+			start();
+			return;
+		}
+
+		title.textContent = 'Open a copy in the editor?';
+		var ask = document.createDocumentFragment();
+		ask.appendChild(document.createTextNode('This saves a copy of '));
+		ask.appendChild(el('em', null, name));
+		ask.appendChild(document.createTextNode(' in your Drive, in "' + COPY_FOLDER + '", so the editor can open it. '
+			+ 'The server can read that copy.'
+			+ (level === 'private' || level === 'fortress' ? ' The email itself stays encrypted.' : '')));
+		say(ask);
+		button('Save a copy and open', true, start);
+		button('Cancel', false, dismiss);
+		document.body.appendChild(overlay);
 	}
 
 	// Human-readable byte size.

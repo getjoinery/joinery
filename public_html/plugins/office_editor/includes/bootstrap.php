@@ -3,6 +3,7 @@
  * Office editor bootstrap: tell Drive what this plugin opens and creates.
  * Registrations only (docs/plugin_developer_guide.md § Bootstrap).
  *
+ * @version 0.2.0 - the opener declares `available` (OfficeEditor::openerAvailable)
  * @version 0.1.0
  */
 
@@ -11,6 +12,7 @@ DriveHelper::registerOpener('office_editor', array(
 	'extensions' => OfficeEditor::EXTENSIONS,
 	'url'        => array('OfficeEditor', 'openerUrl'),
 	'explain'    => array('OfficeEditor', 'openerExplain'),
+	'available'  => array('OfficeEditor', 'openerAvailable'),
 ));
 
 DriveHelper::registerCreator('office_document', array(

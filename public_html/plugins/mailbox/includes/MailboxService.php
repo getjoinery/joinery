@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.69 - previewMaxBytes() and PREVIEW_MAX_CHARS: the text preview's limits, one place for the server's
+ *                preview and the browser's (Fortress) one
  * @version 1.68 - end-to-end mail still waiting for its owner's browser to open it lists nowhere and counts as no unread
  *                (awaitingDeviceSql); the list carries `fortress_pending` so the reader opens it and shows the waiting line
  * @version 1.67 - listMailboxes() says why a level-10 viewer is not all-access (oversight, mail_access_hardening WP3)
@@ -2204,6 +2206,19 @@ class MailboxService {
 			$out[$col] = (string)$value;
 		}
 		return $out;
+	}
+
+	/** Characters the text preview returns, on the server and in the browser alike. */
+	const PREVIEW_MAX_CHARS = 200000;
+
+	/**
+	 * The largest attachment the text preview reads, in bytes (the
+	 * mailbox_preview_max_bytes setting, 15 MiB when unset): refused before a
+	 * byte is fetched on the server, and before a byte is read in the browser.
+	 */
+	public static function previewMaxBytes(): int {
+		$v = intval(Globalvars::get_instance()->get_setting('mailbox_preview_max_bytes'));
+		return $v > 0 ? $v : 15728640;
 	}
 
 	/**

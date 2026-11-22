@@ -24,6 +24,7 @@
  * reading it needs an open unlock window; a locked one returns {locked:true},
  * the same contract the body, source and draft reads use.
  *
+ * @version 1.3.1 - its byte and character limits are MailboxService's, shared with the browser's Fortress preview
  * @version 1.3.0 - an all-access viewer's preview from a message they hold no grant on is written down (MailboxReadAudit);
  *   the preview counts against the person's read budget (MailReadBudget)
  * @version 1.2.0 - a Fortress attachment is never previewed as text
@@ -103,7 +104,7 @@ function attachment_text_logic(array $input): LogicResult {
 		));
 	}
 
-	$max_bytes = _attachment_text_max_bytes();
+	$max_bytes = MailboxService::previewMaxBytes();
 	$too_large = function () use ($att, $filename, $declared, $id, $session) {
 		// The button was already drawn from the filename, so the honest sentence
 		// beats a silent refusal. Logged: a refusal must still count against the
@@ -147,7 +148,7 @@ function attachment_text_logic(array $input): LogicResult {
 		return $too_large();
 	}
 
-	$extract = DocumentText::extractBytes($bytes, $declared, 200000);
+	$extract = DocumentText::extractBytes($bytes, $declared, MailboxService::PREVIEW_MAX_CHARS);
 	unset($bytes);
 
 	RequestLogger::log('mailbox_preview', 'attachment ' . $id, $extract['status'] === DocumentText::OK,
@@ -175,12 +176,6 @@ function _attachment_text_answer(InboundMessageAttachment $att, string $filename
 	$data['size_bytes'] = intval($att->get('ima_size_bytes'));
 	if (!isset($data['truncated'])) $data['truncated'] = false;
 	return LogicResult::render($data);
-}
-
-/** Byte ceiling, enforced BEFORE the subprocess spawns. */
-function _attachment_text_max_bytes(): int {
-	$v = intval(Globalvars::get_instance()->get_setting('mailbox_preview_max_bytes'));
-	return $v > 0 ? $v : 15728640;
 }
 
 function attachment_text_logic_descriptor() {

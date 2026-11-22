@@ -30,6 +30,14 @@ site, so a file never leaves it.
   can never run: a container site, or a server the installer refused, which
   the Plugins page explains.
 
+- **From a mail attachment,** the mail reader offers Open in editor on an
+  attachment the editor opens: it saves a copy in the member's Drive, in a
+  top-level "Mail attachments" folder, and opens the copy. Edits go to the
+  copy; the email keeps its attachment. The offer is
+  `OfficeEditor::openerAvailable()`: not made where the editor is not
+  installed, greyed with "Editing documents isn't part of your plan." for a
+  member whose tier has it off.
+
 ## What a member sees
 
 Clicking a supported file in Drive opens `/profile/office_editor/edit?file={id}`
@@ -249,3 +257,5 @@ feature name.
   — and the capacity limit (an 11th document refused as busy, joining one
   already open allowed).
 - `tests/functional/drive/openers_test.php` (`db`): the Drive hook itself.
+- `tests/unit/drive_opener_offers_test.php` (`safe`): the opener offers a
+  feature outside Drive reads (`DriveHelper::opener_offers()`).

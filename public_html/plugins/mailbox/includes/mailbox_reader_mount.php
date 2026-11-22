@@ -36,6 +36,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.37.0 - attachmentOpeners (Drive's opener offers: "Open in editor" saves a copy to Drive), the shared
+ *                   Drive upload script; a Fortress reader loads the document reader with the preview's limits
  * @version 1.36.0 - open_mailbox: a link can name the mailbox to show
  * @version 1.35.0 - the lowering banner carries what was changed (data-changes), for the question asked before the move
  * @version 1.34.0 - the relay-pending banner is always present for a vault client (hidden at none), so the reader
@@ -254,6 +256,11 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// A mailbox a link asked for (?mailbox=N, a mailbox's Read link on the admin Accounts
 		// page); the script shows it only when the viewer's seed holds it.
 		'openMailbox'       => !empty($opts['open_mailbox']) ? intval($opts['open_mailbox']) : null,
+		// What a copy of an attachment saved to the member's Drive could open in
+		// (the document editor's "Open in editor"): the reader draws the button
+		// on an attachment whose extension one takes. The mailbox names no
+		// editor; any plugin that registers an opener with `available` is here.
+		'attachmentOpeners' => DriveHelper::opener_offers((int)SessionControl::get_instance()->get_user_id()),
 		'messageActions'    => array_map(function ($a) {
 			return array('key' => $a['key'], 'label' => $a['label'], 'icon' => $a['icon'], 'url' => $a['url']);
 		}, MailboxMessageActions::declared()),
@@ -264,6 +271,10 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// code it loads.
 		$config['searchWorkerUrl'] = $asset_ver('mailbox_search_worker.js');
 		$config['searchCoreUrl'] = $asset_ver('mailbox_search_core.js');
+		// The text preview of a Fortress attachment is read on the device
+		// (MailboxDocText), under the server preview's own limits.
+		$config['previewMaxBytes'] = MailboxService::previewMaxBytes();
+		$config['previewMaxChars'] = MailboxService::PREVIEW_MAX_CHARS;
 		// The mailboxes whose mail the relay seals for this browser: it asks the
 		// relay which key it seals each to and checks the answer against the
 		// relay it pinned (§ R10, MailboxFortress.checkRelayPins).
@@ -477,8 +488,12 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
      Not deferred: it must define window.JoineryPasskeys before the reader script
      below runs. Same include convention as views/login.php and profile/security.php. -->
 <script src="/assets/js/passkeys.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/passkeys.js')) ?: '1'; ?>"></script>
+<?php if (!empty($config['attachmentOpeners'])): ?>
+<script src="/assets/js/drive-upload.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-upload.js')) ?: '1'; ?>"></script>
+<?php endif; ?>
 <?php if (!empty($opts['fortress'])): ?>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_mime.js')); ?>"></script>
+<script src="<?php echo htmlspecialchars($asset_ver('mailbox_doc_text.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_filter_match.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_fortress.js')); ?>"></script>
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_search.js')); ?>"></script>

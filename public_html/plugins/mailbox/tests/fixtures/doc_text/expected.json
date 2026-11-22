@@ -1,0 +1,52 @@
+{
+    "budget.xlsx": {
+        "status": "ok",
+        "category": "xlsx",
+        "text": "[Budget & Plan]\nLine\tAmount\nRent, office \t1800\nTraveltora\t412.5\nInline & typed\t\t1\n[Notes]\nApproved by the board"
+    },
+    "data.csv": {
+        "status": "ok",
+        "category": "text",
+        "text": "name,amount\nRent,1800\n\"Travel, misc\",412.50"
+    },
+    "deck.pptx": {
+        "status": "ok",
+        "category": "pptx",
+        "text": "[Slide 1]\nRoadmap\nShip the reader\n\n[Speaker notes]\nMention the launch date.\n1\n[Slide 2]\nRisks\n\n[Slide 3]\nAppendix & sources"
+    },
+    "ledger.ods": {
+        "status": "ok",
+        "category": "odf",
+        "text": "Month\n\nSpend\n\nJanuary\n\n12"
+    },
+    "legacy.txt": {
+        "status": "ok",
+        "category": "text",
+        "text": "Café “quoted” – dash € euro\nrésumé"
+    },
+    "minutes.odt": {
+        "status": "ok",
+        "category": "odf",
+        "text": "Minutes\nPresent: Ada, Grace\nVote\n\nCarried\n\nNext meetingin March."
+    },
+    "notes.txt": {
+        "status": "ok",
+        "category": "text",
+        "text": "﻿First line\nSecond line\n\nAfter a gap ✓ done"
+    },
+    "readme.md": {
+        "status": "ok",
+        "category": "text",
+        "text": "# Title\n\nSome *markdown* text."
+    },
+    "report.docx": {
+        "status": "ok",
+        "category": "docx",
+        "text": "Quarterly Report\n\nSmith & Jones <legal> agreed on “terms” — café.\nItem\nCost\n\nWidgets\n1,250.00\n\nSee the note.\n\n  \n\nPage footer two\n\nPage footer ten\n\nFigures are unaudited.\n\nConfidential draft"
+    },
+    "talk.odp": {
+        "status": "ok",
+        "category": "odf",
+        "text": "Welcome\nAgenda"
+    }
+}

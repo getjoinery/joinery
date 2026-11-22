@@ -2,6 +2,7 @@
 /**
  * Drive — member file storage page.
  *
+ * @version 1.8 - loads the shared upload transport (assets/js/drive-upload.js)
  * @version 1.7 - the first listing and the settings are JSON blocks (no inline script)
  * @version 1.6 - New file dialog for the New menu's plugin creators
  * @changelog 1.5 - loads zip-writer.js for a Fortress folder's Download as zip
@@ -348,6 +349,7 @@ $new_file_fw   = $page->getFormWriter('drive_new_file', array('action' => '/driv
 <script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/zip-writer.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/zip-writer.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>
+<script defer src="/assets/js/drive-upload.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-upload.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/drive.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive.js')) ?: '1'; ?>"></script>
 
 <?php

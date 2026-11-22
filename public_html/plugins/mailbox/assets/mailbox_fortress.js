@@ -16,6 +16,8 @@
  *                     blob: URL of this page's origin);
  *   attachmentBlob(att) / download(att)  fetch a part's ciphertext and open
  *                     it under the row DEK with the MIME-part AD;
+ *   attachmentText(att)  the same part's words, read here by MailboxDocText
+ *                     (Word, Excel, PowerPoint, OpenDocument, plain text);
  *   saveDraft / openDraft / draftFiles / sourceOpen / sourceFiles  the
  *                     compose half (§ R6): a draft is sealed here under one
  *                     DEK for its life and posted as ciphertext; a reply or
@@ -42,6 +44,8 @@
  * sends: a message leaves as plaintext for its recipients (B10), so a reply
  * carries the quoted source and a forward its parts.
  *
+ * @version 1.22 - Word, Excel, PowerPoint, OpenDocument and plain-text attachments offer the text preview, read on this
+ *   device (attachmentText, MailboxDocText); onLock(fn) returns a function that takes fn off again
  * @version 1.21.1 - the relay-change popup closes at the Trust press, before the passkey prompt; a trust that
  *   does not finish saves no pin, so the next page load shows the popup again
  * @version 1.21 - showPending(n): every list read sets the waiting line (end-to-end mail waiting to be opened lists
@@ -312,9 +316,10 @@ window.MailboxFortress = (function () {
 			a.message_id = m.id;
 			a.ad_prefix = m.sealed.sealed_ad_prefix;
 			a.fortress = true;
-			// Pictures preview here, decrypted in this browser; text preview is
-			// the server's extractor, which cannot read this file.
-			a.preview_kind = imagePreviewKind(a.content_type, a.filename);
+			// Pictures and documents preview here, decrypted in this browser;
+			// the server's extractor cannot read this file.
+			a.preview_kind = imagePreviewKind(a.content_type, a.filename)
+				|| (window.MailboxDocText ? MailboxDocText.kindFor(a.content_type, a.filename) : null);
 			return a;
 		});
 		// Inline is what the opened body shows by cid:, the rule the server and
@@ -375,6 +380,29 @@ window.MailboxFortress = (function () {
 	async function attachmentBlob(att) {
 		var bytes = await attachmentBytes(att);
 		return new Blob([bytes], { type: att.content_type || 'application/octet-stream' });
+	}
+
+	/**
+	 * The part's words, read on this device (MailboxDocText), in the answer
+	 * shape of mailbox/attachment_text, so the reader's preview renders both
+	 * the same way. Nothing read here is sent anywhere.
+	 */
+	async function attachmentText(att) {
+		var c = cfg();
+		var maxBytes = Number(c.previewMaxBytes) || 0;
+		// The recorded size is the part's plaintext length: a file over the
+		// limit is refused before it is fetched or opened.
+		if (maxBytes > 0 && Number(att.size_bytes) > maxBytes) {
+			return { previewable: true, status: 'too_large', category: null, text: '', truncated: false,
+				filename: att.filename || 'attachment', size_bytes: Number(att.size_bytes) };
+		}
+		var bytes = await attachmentBytes(att);
+		var out = await MailboxDocText.read(bytes, att.content_type, att.filename,
+			{ maxBytes: maxBytes, maxChars: Number(c.previewMaxChars) || 0 });
+		out.previewable = true;
+		out.filename = att.filename || 'attachment';
+		out.size_bytes = bytes.length;
+		return out;
 	}
 
 	/** Hand the opened part to the browser as a download named from the manifest. */
@@ -1521,8 +1549,14 @@ window.MailboxFortress = (function () {
 		objectUrls = [];
 	}
 
-	/** fn() runs after a lock has dropped every key and object URL. */
-	function onLock(fn) { lockHandlers.push(fn); }
+	/** fn() runs after a lock has dropped every key and object URL; the answer takes it off again. */
+	function onLock(fn) {
+		lockHandlers.push(fn);
+		return function () {
+			var i = lockHandlers.indexOf(fn);
+			if (i !== -1) lockHandlers.splice(i, 1);
+		};
+	}
 
 	// Subscribe to the mail vault's lock once JoinerySealed exists. The vault
 	// modules load deferred in the page head, and this file loads in the body
@@ -1552,7 +1586,8 @@ window.MailboxFortress = (function () {
 		JoinerySealed.onLock(SCOPE, function () {
 			lockEpoch++;
 			wipe();
-			lockHandlers.forEach(function (fn) {
+			// A copy: a handler may take itself off while the list runs.
+			lockHandlers.slice().forEach(function (fn) {
 				try { fn(); } catch (e) { /* one handler must not stop the next */ }
 			});
 		});
@@ -2054,6 +2089,8 @@ window.MailboxFortress = (function () {
 		openList: openList,
 		openThread: openThread,
 		attachmentBlob: attachmentBlob,
+		attachmentBytes: attachmentBytes,
+		attachmentText: attachmentText,
 		download: download,
 		adoptObjectUrl: adoptObjectUrl,
 		inlineRewrite: inlineRewrite,

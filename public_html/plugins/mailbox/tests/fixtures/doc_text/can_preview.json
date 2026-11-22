@@ -1,0 +1,162 @@
+{
+    "bin": {
+        "category": null,
+        "preview": false
+    },
+    "cfg": {
+        "category": "text",
+        "preview": true
+    },
+    "conf": {
+        "category": "text",
+        "preview": true
+    },
+    "csv": {
+        "category": "text",
+        "preview": true
+    },
+    "doc": {
+        "category": null,
+        "preview": false
+    },
+    "docx": {
+        "category": "docx",
+        "preview": true
+    },
+    "eml": {
+        "category": "eml",
+        "preview": true
+    },
+    "epub": {
+        "category": "epub",
+        "preview": true
+    },
+    "htm": {
+        "category": "html",
+        "preview": true
+    },
+    "html": {
+        "category": "html",
+        "preview": true
+    },
+    "ics": {
+        "category": "ics",
+        "preview": true
+    },
+    "ini": {
+        "category": "text",
+        "preview": true
+    },
+    "js": {
+        "category": "text",
+        "preview": true
+    },
+    "json": {
+        "category": "text",
+        "preview": true
+    },
+    "log": {
+        "category": "text",
+        "preview": true
+    },
+    "markdown": {
+        "category": "text",
+        "preview": true
+    },
+    "md": {
+        "category": "text",
+        "preview": true
+    },
+    "odp": {
+        "category": "odf",
+        "preview": true
+    },
+    "ods": {
+        "category": "odf",
+        "preview": true
+    },
+    "odt": {
+        "category": "odf",
+        "preview": true
+    },
+    "pdf": {
+        "category": "pdf",
+        "preview": true
+    },
+    "png": {
+        "category": null,
+        "preview": false
+    },
+    "pptx": {
+        "category": "pptx",
+        "preview": true
+    },
+    "rtf": {
+        "category": "rtf",
+        "preview": true
+    },
+    "sh": {
+        "category": "text",
+        "preview": true
+    },
+    "sql": {
+        "category": "text",
+        "preview": true
+    },
+    "srt": {
+        "category": "text",
+        "preview": true
+    },
+    "svg": {
+        "category": "xml",
+        "preview": true
+    },
+    "text": {
+        "category": "text",
+        "preview": true
+    },
+    "toml": {
+        "category": "text",
+        "preview": true
+    },
+    "tsv": {
+        "category": "text",
+        "preview": true
+    },
+    "txt": {
+        "category": "text",
+        "preview": true
+    },
+    "vcf": {
+        "category": "text",
+        "preview": true
+    },
+    "vtt": {
+        "category": "text",
+        "preview": true
+    },
+    "xls": {
+        "category": null,
+        "preview": false
+    },
+    "xlsx": {
+        "category": "xlsx",
+        "preview": true
+    },
+    "xml": {
+        "category": "xml",
+        "preview": true
+    },
+    "yaml": {
+        "category": "text",
+        "preview": true
+    },
+    "yml": {
+        "category": "text",
+        "preview": true
+    },
+    "zip": {
+        "category": "archive",
+        "preview": true
+    }
+}
