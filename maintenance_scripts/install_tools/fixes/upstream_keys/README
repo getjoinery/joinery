@@ -1,16 +1,68 @@
 Upstream release signing keys, one file per source package: <source>.asc
 (for example openssl.asc, php8.5.asc), named as the source is in fixes/<source>/.
 
-build.sh reads a key here only for a recipe with upstream_release=: it checks
-the signature of upstream's release tarball against <source>.asc with gpgv,
-and stops when the file is missing. Nothing else trusts these keys.
+Two things trust these keys, and nothing else does:
+  - UpstreamFixFinder uses an upstream commit only when the release tag it is
+    reached from verifies against <source>.asc (git verify-tag);
+  - build.sh, for a recipe with upstream_release=, checks the signature of
+    upstream's release tarball against <source>.asc with gpgv.
+With no file here for a source, neither route is taken for it and the
+automatic runner says a person is needed, unless fixes/UPSTREAMS marks the
+source trust=unsigned (below).
 
 A person adds a project's key, once per project:
 
   1. Take the keys from the project's own published list of release keys.
-  2. Check each fingerprint against a second place the project publishes it.
+  2. Check each fingerprint against a second place the project publishes it,
+     and against the signature on a recent release tag or tarball.
   3. Save the keys, ASCII-armored, as <source>.asc here: several keys may sit
      in one file, as releases are signed by different release managers.
   4. Commit it.
 
 A key is never written here by the automatic recipe writer.
+
+What each file holds, and how it was checked (2026-11-22):
+
+php8.5.asc       Pierrick Charron 1198C0117593497A5EC5C199286AF1F9897469DC,
+                 Volker Dusch     49D9AF6BC72A80D6691719C8AA23F5BE9C7097D4,
+                 Daniel Scherzer  D95C03BC702BE9515344AE3374E44BC9067701A5.
+                 php.net/gpg-keys.php (PHP 8.5) and php.net's php-keyring.gpg;
+                 tags php-8.5.12 and php-8.5.13 verify.
+openssl.asc      OpenSSL <openssl@openssl.org> B146647E45A7B33947AB226B2A2C87D161692D40
+                 (signing subkey C46ED3F2CBEFDA1FDAADA44264ED7B1DCCE71CB2), and the
+                 old OpenSSL key BA5473A2B0587B07FB27CF2D216094DFD0CB81EF (expired).
+                 OpenSSL's doc/fingerprints.txt, keys.openpgp.org; tag and tarball
+                 openssl-3.5.9 verify.
+apache2.asc      Eric Covener 65B2D44FE74BD5E3DE3AC3F082781DE46D5954FA,
+                 Stefan Eissing 26F51EF9A82F4ACB43F1903ED377C9E7D1944C66,
+                 Jim Jagielski A93D62ECC3C8EA12DB220EC934EA76E6791485A8: the signers
+                 of httpd 2.4.58 to 2.4.71. downloads.apache.org/httpd/KEYS; tag
+                 2.4.71 and tarball 2.4.66 verify.
+curl.asc         Daniel Stenberg 27EDEAF22F3ABCEB50DB9A125CC908FDB71E12C2.
+                 daniel.haxx.se/mykey.asc; tag curl-8_23_0 and tarball 8.23.0 verify.
+openssh.asc      Damien Miller 7168B983815A5EEF59A4ADFD2A3F414E736060BA.
+                 cdn.openbsd.org/pub/OpenBSD/OpenSSH/RELEASE_KEY.asc; tarball
+                 10.3p1 verifies. OpenSSH signs its tags with SSH keys, not PGP:
+                 only the tarball route applies.
+postfix.asc      Wietse Venema 622C7C012254C186677469C50C0B590E80CA15A7.
+                 wietse.pgp on the postfix-release mirror and keyserver.ubuntu.com;
+                 tarball 3.10.14 (.gpg2) verifies. Its git mirror's tags are
+                 unsigned: only the tarball route applies.
+libxml2.asc      Daniel Garcia Moreno BB3FD16B22C34193BCFC66EA60B33F85ECD8D532: the
+                 signer of every libxml2 v2.15 release tag on gitlab.gnome.org, as
+                 keyserver.ubuntu.com lists it. libxml2 publishes no signed tarball:
+                 only the tag route applies.
+imagemagick.asc  ImageMagick code signing key D8272EF51DA223E4D05B466989AB63D48277377A.
+                 keyserver.ubuntu.com; tarballs 7.1.2-35 and 7.1.2-36 verify. Its
+                 tags are unsigned and fixes/UPSTREAMS names no release URL for it
+                 (its versions carry a dash build.sh refuses), so the key is not
+                 used yet: ImageMagick is trust=unsigned (below).
+
+Signing nothing, so taken without a key (trust=unsigned in fixes/UPSTREAMS, the
+owner's choice, 2026-11-22): their commits are used from their official git as
+it stands, a release tag or a branch head, with no signature checked.
+postgresql-18    git.postgresql.org: its tags are unsigned and it publishes no
+                 tarball signatures.
+glibc            sourceware.org: it makes no point releases, so its fixes are on
+                 release branches, which no one signs.
+imagemagick      github.com/ImageMagick: its tags are unsigned.

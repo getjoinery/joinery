@@ -180,6 +180,23 @@ if (trim((string)shell_exec('command -v gpg')) === '') {
 	check(UpstreamFixFinder::verify_tag('php8.5', $git_dir, 'php-8.5.5s', array('keys_dir' => $other)) !== '', 'nor one signed by a key other than the committed one');
 }
 
+section('A project the owner marked trust=unsigned');
+
+$unsigned = $scratch . '/UPSTREAMS.unsigned';
+file_put_contents($unsigned, "source=glibc git=https://sourceware.org/git/glibc.git tag=glibc-{major}.{minor} line=2 branch=release/{major}.{minor}/master trust=unsigned\n"
+	. "source=php8.5 git=https://github.com/example/php-src.git tag=php-{v} line=2 trust=unsigned\n");
+$never = function () { return 'the verifier must not be asked'; };
+$r = UpstreamFixFinder::find('glibc', 'CVE-2026-5555', array('base_upstream' => '2.43', 'git_dir' => $git_dir, 'upstreams_file' => $unsigned, 'tag_verifier' => $never));
+check(count($r['commits']) === 1 && $r['reason'] === '', 'its branch head is searched and used, with no signature', $r['reason']);
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-1111', array('base_upstream' => '8.5.4', 'fixed_in' => '8.5.5', 'git_dir' => $git_dir, 'upstreams_file' => $unsigned, 'tag_verifier' => $never));
+check(count($r['commits']) === 1, 'and its unsigned release tag is used too', $r['reason']);
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-1111', array('base_upstream' => '8.5.4', 'fixed_in' => '8.5.5', 'git_dir' => $git_dir, 'upstreams_file' => $upstreams, 'tag_verifier' => $never));
+check($r['commits'] === array() && $r['reason'] === 'the verifier must not be asked', 'a project not marked still needs its tag to verify', $r['reason']);
+$committed = UpstreamFixFinder::upstreams();
+check(($committed['postgresql-18']['trust'] ?? '') === 'unsigned' && ($committed['glibc']['trust'] ?? '') === 'unsigned' && ($committed['imagemagick']['trust'] ?? '') === 'unsigned'
+	&& ($committed['postfix']['trust'] ?? '') === 'signed' && ($committed['openssh']['trust'] ?? '') === 'signed' && ($committed['php8.5']['trust'] ?? '') === 'signed',
+	'as committed: unsigned only for PostgreSQL, glibc and ImageMagick (owner, 2026-11-22)');
+
 section('fixes/UPSTREAMS as committed');
 
 $all = UpstreamFixFinder::upstreams(PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/fixes/UPSTREAMS');

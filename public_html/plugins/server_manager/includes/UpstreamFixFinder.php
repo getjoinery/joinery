@@ -19,6 +19,9 @@
  * Runs as root under the automatic runner (WP9); nothing here writes outside
  * the clone directory.
  *
+ * @version 1.2 - owner 2026-11-22: a source UPSTREAMS marks trust=unsigned (a project that signs nothing:
+ *                PostgreSQL, glibc, ImageMagick) has its commits used from its official git without a
+ *                signed tag, a branch head included
  * @version 1.1 - owner R-Q1 (b): a commit is used only when the release tag it is reached from verifies
  *                against the project's key a person committed (fixes/upstream_keys/<source>.asc); an unsigned
  *                tag, a branch head, or no key sends the CVE on (upstream's signed release, else a person)
@@ -126,13 +129,17 @@ class UpstreamFixFinder {
 		// Owner R-Q1 (b): only what a release tag upstream signed reaches.
 		// Every commit searched below is in that tag's history, which its
 		// signature covers. A branch head has no signature to check.
-		if (strpos($end, 'refs/') === 0) {
-			return $fail("{$source} ends at a branch head ({$end}), which no one signs: its commits are not used automatically");
-		}
-		$verifier = $ctx['tag_verifier'] ?? array(self::class, 'verify_tag');
-		$why = (string)call_user_func($verifier, $source, $git_dir, $end, $ctx);
-		if ($why !== '') {
-			return $fail($why);
+		// A project the owner marked trust=unsigned (it signs nothing) is taken
+		// from its official git as it stands, a branch head included.
+		if ($up['trust'] !== 'unsigned') {
+			if (strpos($end, 'refs/') === 0) {
+				return $fail("{$source} ends at a branch head ({$end}), which no one signs: its commits are not used automatically");
+			}
+			$verifier = $ctx['tag_verifier'] ?? array(self::class, 'verify_tag');
+			$why = (string)call_user_func($verifier, $source, $git_dir, $end, $ctx);
+			if ($why !== '') {
+				return $fail($why);
+			}
 		}
 
 		$args = array('log', '--reverse', '--no-merges', '--format=%H%x1f%s', '-E', '--regexp-ignore-case', '--grep=' . self::id_pattern($cve));
@@ -203,6 +210,9 @@ class UpstreamFixFinder {
 				'ids'         => preg_split('/,/', (string)($f['ids'] ?? ''), -1, PREG_SPLIT_NO_EMPTY),
 				'release_url' => (string)($f['release_url'] ?? ''),
 				'sig_url'     => (string)($f['sig_url'] ?? ''),
+				// Owner's choice per project: 'unsigned' uses its commits without a
+				// signed tag; anything else requires one.
+				'trust'       => ($f['trust'] ?? '') === 'unsigned' ? 'unsigned' : 'signed',
 			);
 		}
 		return $out;

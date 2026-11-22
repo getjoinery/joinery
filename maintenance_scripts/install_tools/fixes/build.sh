@@ -4,6 +4,7 @@
 # plus upstream's security patches, as every binary package that source makes
 # (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.5 - a detached signature may also be named .gpg2 (Postfix's own name for one)
 # Version: 1.4 - made_by= (who wrote the recipe, into FIXINFO) and upstream_release= (a fix built on
 #                upstream's signed point release under Ubuntu's debian/; specs/package_fixes_automatic.md
 #                WP3, WP4)
@@ -82,7 +83,7 @@
 # applies. After Ubuntu's source is fetched and checked as always, build.sh
 # fetches upstream's tarball and its detached signature (https only; the
 # tarball's file name carries <version> and ends .tar.gz, .tar.xz or .tar.bz2;
-# the signature's ends .asc or .sig) and checks the signature with gpgv against
+# the signature's ends .asc, .sig or Postfix's .gpg2) and checks the signature with gpgv against
 # the project's key, upstream_keys/<source>.asc beside this script, committed
 # by a person once per project: with no key there, the build stops. Upstream's
 # files then take the place of Ubuntu's upstream files, Ubuntu's debian/ is
@@ -244,7 +245,7 @@ if recipe_has upstream_release; then
     [[ "$UTAR" =~ \.tar\.(gz|xz|bz2)$ ]] || die "upstream_release: ${UTAR} is not a .tar.gz, .tar.xz or .tar.bz2"
     UTAR_EXT="${BASH_REMATCH[1]}"
     [[ "$UTAR" == *"$UVER"* ]] || die "upstream_release: ${UTAR} does not carry the version ${UVER} in its name"
-    [[ "$USIG" =~ \.(asc|sig)$ ]] || die "upstream_release: ${USIG} is not a detached signature (.asc or .sig)"
+    [[ "$USIG" =~ \.(asc|sig|gpg2)$ ]] || die "upstream_release: ${USIG} is not a detached signature (.asc, .sig, or Postfix's .gpg2)"
     [[ "$USIG" != "$UTAR" ]] || die "upstream_release: the tarball and its signature are one file"
     BASE_NOEPOCH="${BASE_VERSION#*:}"
     [[ "$BASE_NOEPOCH" == *-* ]] || die "upstream_release: ${SOURCE} ${BASE_VERSION} is a native package, with no upstream part to replace"
