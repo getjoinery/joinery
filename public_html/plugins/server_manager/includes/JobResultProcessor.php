@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.145 - process_managed_domain_prepare keeps the site's reason (mailbox_inactive) beside its error
  * @version 1.144 - host_report_package_fixes keeps fetch_failed (host_report 1.44)
  * @version 1.143 - host_report_package_fixes keeps the channel serial a machine took (host_report 1.43, package_fixes_automatic WP7)
  * @version 1.142 - process_log_table_tail keeps an error read's kind (agent 1.127.0)
@@ -2415,6 +2416,7 @@ HTML;
 			'dkim_ready'  => !empty($payload['dkim_ready']),
 			'records'     => is_array($payload['records'] ?? null) ? $payload['records'] : [],
 			'error'       => (string)($payload['error'] ?? ''),
+			'reason'      => (string)($payload['reason'] ?? ''),
 		]));
 		$job->save();
 	}

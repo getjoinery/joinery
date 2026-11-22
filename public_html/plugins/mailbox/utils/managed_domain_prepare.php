@@ -25,6 +25,7 @@
  * Output is ONE JSON line on stdout:
  *   {"ok":true,"dkim_ready":bool,"records":[{"type","name","value","priority","note"}...]}
  *   {"ok":false,"error":"..."}
+ *   {"ok":false,"reason":"mailbox_inactive","error":"..."}  the plugin is here but off
  *
  * dkim_ready false is not a failure: MX and SPF are what make mail arrive, so
  * the caller publishes what it got and comes back for the signing key. It just
@@ -32,6 +33,8 @@
  *
  * Usage: php plugins/mailbox/utils/managed_domain_prepare.php <domain>
  *
+ * @version 1.4 - a site whose mailbox plugin is off says so (reason mailbox_inactive) instead of failing on
+ *   its missing tables, so the plane takes it as nothing to add rather than asking again for ever
  * @version 1.3 - a site container makes no local key (it has no rspamd; its provider signs), and a
  *   provider's DKIM record counts as ready whether it is a TXT or a CNAME
  * @version 1.2 - the signing key is looked for where rspamd signs from
@@ -61,6 +64,13 @@ function mdp_emit(array $payload, int $code = 0) {
 }
 
 try {
+	// ---- 0. The files ship with every release, but the plugin may be off
+	// here, and then its tables do not exist. Said in words the caller reads.
+	if (!PluginHelper::isPluginActive('mailbox')) {
+		mdp_emit(array('ok' => false, 'reason' => 'mailbox_inactive',
+			'error' => 'the mailbox plugin is not active on this site'), 1);
+	}
+
 	// ---- 1. The domain exists here and accepts mail for itself.
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/provisioning.php'));
 	$provisioned = mailbox_provision_domain($domain);

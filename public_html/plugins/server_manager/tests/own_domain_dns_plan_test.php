@@ -14,6 +14,8 @@
  * domain has none. The optional IPv6 line is listed while the name lacks it.
  * A name we registered gets nothing (we publish it ourselves), and neither
  * does a site not built yet.
+ *
+ * @version 1.1 - a site whose mailbox plugin is off (mailbox_inactive) is answered for
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -125,6 +127,21 @@ check(ProvisionBuyerDns::listed($provision) && ProvisionBuyerDns::site_records($
 	'a site with no mailbox plugin is listed with no records of its own', json_encode($ran));
 $ran = $leg->run(array('provision_id' => (int)$provision->key));
 check($ran['status'] === 'skipped', 'and is not asked again', json_encode($ran));
+// The plugin is here but switched off: the script says so, and that is the answer too.
+$provision->set('cvp_site_dns_records', null);
+$provision->set('cvp_site_dns_time', null);
+$provision->save();
+$leg->job = array('mjb_management_job_id' => 0, 'mjb_status' => 'failed', 'mjb_create_time' => gmdate('Y-m-d H:i:s'),
+	'mjb_completed_time' => gmdate('Y-m-d H:i:s'), 'mjb_error_message' => 'exited with an error: exit status 1',
+	'mjb_result' => json_encode(array('answered' => true, 'ok' => false, 'records' => array(),
+		'reason' => 'mailbox_inactive', 'error' => 'the mailbox plugin is not active on this site')));
+$ran = $leg->run(array('provision_id' => (int)$provision->key));
+$provision->load();
+check(ProvisionBuyerDns::listed($provision) && ProvisionBuyerDns::site_records($provision) === array(),
+	'a site whose mailbox plugin is off is listed with no records of its own', json_encode($ran));
+$ran = $leg->run(array('provision_id' => (int)$provision->key));
+check($ran['status'] === 'skipped', 'and is not asked again', json_encode($ran));
+$leg->job['mjb_result'] = json_encode(array('answered' => true, 'ok' => false, 'records' => array(), 'error' => 'boom'));
 $leg->job['mjb_error_message'] = 'Refused by the node: some other refusal';
 $provision->set('cvp_site_dns_records', null);
 $provision->set('cvp_site_dns_time', null);

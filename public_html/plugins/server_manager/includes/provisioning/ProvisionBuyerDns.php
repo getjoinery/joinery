@@ -22,10 +22,11 @@
  * again until it answers.
  *
  * A site without the mailbox plugin, which carries the script that answers,
- * can never answer. Its refusal is taken as the answer "nothing to add", so
+ * or with the plugin switched off, can never answer. Its refusal is taken as the answer "nothing to add", so
  * the buyer is shown the plane's records and the site is not asked again
  * every few minutes for ever.
  *
+ * @version 1.4 - a site whose mailbox plugin is off (mailbox_inactive) is answered for too, not re-asked every 5 minutes
  * @version 1.3 - a site with its own mail server keeps its SPF record and its own signing key beside our sending records (walkthrough finding 174)
  * @version 1.2 - an MX, the site's own or our relay's, is held back where the domain already receives email elsewhere
  *                (receives_elsewhere(), mx_left_alone(); walkthrough Q39)
@@ -249,15 +250,14 @@ class ProvisionBuyerDns {
 				return 1;
 			}
 		}
-		if ($job && (string)$job['mjb_status'] === 'failed'
-				&& NodeMonitorHealth::unverifiable_artifact((string)($job['mjb_error_message'] ?? '')) === self::ANSWERING_ARTIFACT) {
+		if ($job && self::has_no_answering_mailbox($job, $this->payload($job))) {
 			$provision->set('cvp_site_dns_records', json_encode(array()));
 			if (trim((string)$provision->get('cvp_site_dns_time')) === '') {
 				$provision->set('cvp_site_dns_time', gmdate('Y-m-d H:i:s'));
 			}
 			$provision->save();
 			$this->errors[] = $domain . ': its site cannot say what its domain needs (it has no mailbox plugin with a '
-				. 'signed release), so its buyer\'s DNS list shows only the records this plane knows';
+				. 'signed release, or it is switched off), so its buyer\'s DNS list shows only the records this plane knows';
 			return 1;
 		}
 		if ($job) {
@@ -273,6 +273,22 @@ class ProvisionBuyerDns {
 			return $this->stamp_if_overdue($provision, $overdue, $e->getMessage());
 		}
 		return 0;   // asked; the answer lands on a later pass
+	}
+
+	/**
+	 * Whether this job says the site has no mailbox that could answer: the
+	 * plugin ships no signed release (the agent refuses the script), or it is
+	 * here but off (the script says mailbox_inactive). Either way the site can
+	 * never answer until someone changes it, so asking again buys nothing.
+	 */
+	private static function has_no_answering_mailbox(array $job, ?array $payload): bool {
+		$status = (string)$job['mjb_status'];
+		if ($status === 'failed'
+				&& NodeMonitorHealth::unverifiable_artifact((string)($job['mjb_error_message'] ?? '')) === self::ANSWERING_ARTIFACT) {
+			return true;
+		}
+		return in_array($status, array('failed', 'completed'), true) && $payload !== null
+			&& empty($payload['ok']) && (string)($payload['reason'] ?? '') === 'mailbox_inactive';
 	}
 
 	/**
