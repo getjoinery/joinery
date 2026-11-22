@@ -14,6 +14,13 @@
  * Run by `node plugins/mailbox/tests/doc_text.mjs --write`; directly:
  *   php plugins/mailbox/tests/lib/doc_text_fixtures.php
  *
+ * The poi-*.doc files are real Word 97-2003 documents (and a Word 95 one,
+ * two password-protected ones and two fuzzer cases) from Apache POI's test
+ * data (test-data/document, Apache License 2.0); they are copied in, not
+ * built, because nothing here writes the format. Their expected text is the
+ * server's answer like every other file's.
+ *
+ * @version 1.1.0 - Word 97-2003 files from Apache POI's test data; can_preview.json covers .doc
  * @version 1.0.0
  */
 

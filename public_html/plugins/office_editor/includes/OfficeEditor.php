@@ -13,10 +13,13 @@
  *   - the site: the installer finished here (installed()),
  *   - the member: their tier has not switched `office_editing` off (a member
  *     with no tier, or a tier that never set it, may),
- *   - the file: one of EXTENSIONS, a Drive file at the Standard level. A Private
+ *   - the file: one of EXTENSIONS that the service's discovery lists, a Drive
+ *     file at the Standard level. A Private
  *     or Fortress file would put its plaintext in the editor's memory and temp
  *     files, outside the promise those levels make.
  *
+ * @version 0.6.0 - EXTENSIONS: every document, spreadsheet and presentation format Collabora edits (.doc, .xls, .ppt,
+ *   .pptx, .odp, .rtf, templates and macro-enabled files), discovery having the last word
  * @version 0.5.0 - openerAvailable(): the opener's `available`, so a feature outside Drive can offer to open a copy
  * @version 0.4.0 - creatorAvailable(): greyed with the reason instead of hidden; refusedHere()
  * @version 0.3.0 - memberMay(): on unless the member's tier switches office_editing off
@@ -25,8 +28,19 @@
  */
 class OfficeEditor {
 
-	/** What the editor opens. */
-	const EXTENSIONS = array('docx', 'xlsx', 'odt', 'ods');
+	/**
+	 * What the editor may open: the document, spreadsheet and presentation
+	 * formats Collabora edits, old binary Office formats and templates
+	 * included (a file saves back in its own format). The service's discovery
+	 * has the last word: a type it does not list is refused at open
+	 * (editorUrl() answers null). Plain text and CSV are left out on purpose:
+	 * clicking one in Drive downloads it rather than opening a word processor.
+	 */
+	const EXTENSIONS = array(
+		'docx', 'doc', 'docm', 'dotx', 'dot', 'dotm', 'odt', 'ott', 'rtf',
+		'xlsx', 'xls', 'xlsm', 'xlsb', 'xltx', 'xlt', 'xltm', 'ods', 'ots',
+		'pptx', 'ppt', 'pptm', 'potx', 'pot', 'potm', 'odp', 'otp',
+	);
 
 	/** The editor service, loopback only. */
 	const COOL_URL = 'http://127.0.0.1:9980';

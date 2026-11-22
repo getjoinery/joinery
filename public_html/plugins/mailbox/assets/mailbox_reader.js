@@ -1,5 +1,7 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
+ * @version 3.6 - Open in editor's copy is typed for every format the editor opens (.doc, .xls, .ppt, templates); a
+ *   filename's trailing space no longer hides the button
  * @version 3.5 - an end-to-end attachment's text preview is read on this device (MailboxFortress.attachmentText) and its
  *   modal closes when the vault locks; "Open in editor" on an attachment a Drive opener takes saves a copy to the
  *   member's "Mail attachments" folder and opens it (asked first on Private and Fortress mail)
@@ -2922,16 +2924,29 @@
 		odt: 'application/vnd.oasis.opendocument.text',
 		ods: 'application/vnd.oasis.opendocument.spreadsheet',
 		odp: 'application/vnd.oasis.opendocument.presentation',
-		doc: 'application/msword',
-		xls: 'application/vnd.ms-excel',
-		ppt: 'application/vnd.ms-powerpoint',
+		docm: 'application/vnd.ms-word.document.macroEnabled.12',
+		dotx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.template',
+		dotm: 'application/vnd.ms-word.template.macroEnabled.12',
+		xlsm: 'application/vnd.ms-excel.sheet.macroEnabled.12',
+		xlsb: 'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+		xltx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.template',
+		xltm: 'application/vnd.ms-excel.template.macroEnabled.12',
+		pptm: 'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
+		potx: 'application/vnd.openxmlformats-officedocument.presentationml.template',
+		potm: 'application/vnd.ms-powerpoint.template.macroEnabled.12',
+		ott: 'application/vnd.oasis.opendocument.text-template',
+		ots: 'application/vnd.oasis.opendocument.spreadsheet-template',
+		otp: 'application/vnd.oasis.opendocument.presentation-template',
+		doc: 'application/msword', dot: 'application/msword',
+		xls: 'application/vnd.ms-excel', xlt: 'application/vnd.ms-excel',
+		ppt: 'application/vnd.ms-powerpoint', pot: 'application/vnd.ms-powerpoint',
 		rtf: 'application/rtf',
 		txt: 'text/plain',
 		csv: 'text/csv'
 	};
 
 	function extensionOf(name) {
-		name = String(name || '').toLowerCase();
+		name = String(name || '').trim().toLowerCase();
 		var dot = name.lastIndexOf('.');
 		return dot > 0 ? name.slice(dot + 1) : '';
 	}
@@ -3036,7 +3051,8 @@
 	}
 
 	function copyToEditor(a, m, offer, downloadUrl) {
-		var name = a.filename || 'attachment';
+		// Trimmed: Drive names the copy's type by its extension.
+		var name = String(a.filename || '').trim() || 'attachment';
 		var level = attachmentLevel(a, m);
 
 		var overlay = el('div', 'mbx-modal-overlay');

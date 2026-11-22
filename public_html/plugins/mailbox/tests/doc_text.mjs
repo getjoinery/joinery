@@ -24,6 +24,7 @@
  *   node plugins/mailbox/tests/doc_text.mjs --write   rebuild the fixtures and
  *                                                      expectations from PHP
  *
+ * @version 1.2 - Word 97-2003 files (Apache POI's test data, poi-*.doc) held to DocumentText::docText()
  * @version 1.1 - a sender's long whitespace run, a long text and a large part each finish inside a time bound
  *   (reviewer2 B1, B2); an Office file declared application/zip offers the eye (B6); a UTF-16 part reads (B7)
  * @version 1.0
@@ -155,7 +156,7 @@ async function readAs(name, bytes, limits) {
 	const ole = new Uint8Array(512);
 	ole.set([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 	const oleAns = await readAs('locked.xlsx', ole);
-	check('an OLE file (a password-protected Office document) answers secured', oleAns.status === 'secured', JSON.stringify(oleAns));
+	check('a bare compound-file signature named .xlsx answers failed, as on the server (nothing in it says encrypted)', oleAns.status === 'failed', JSON.stringify(oleAns));
 
 	const dtd = await readAs('a.docx', makeZip([{ name: 'word/document.xml',
 		data: enc('<?xml version="1.0"?><!DOCTYPE r [<!ENTITY e "boom">]><w:document xmlns:w="x"><w:p><w:t>&e;</w:t></w:p></w:document>') }]));
@@ -247,7 +248,7 @@ async function timed(label, fn, ms) {
 
 {
 	const can = JSON.parse(readFileSync(join(fixtures, 'can_preview.json'), 'utf8'));
-	const reads = { docx: 1, xlsx: 1, pptx: 1, odf: 1, text: 1 };
+	const reads = { docx: 1, xlsx: 1, pptx: 1, odf: 1, text: 1, doc: 1 };
 	for (const ext of Object.keys(can)) {
 		const server = can[ext];
 		const kind = DocText.kindFor('application/octet-stream', 'file.' + ext);

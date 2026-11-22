@@ -1,11 +1,18 @@
 # Office Editor
 
-Members open Word and Excel files from Drive in the browser, edit them alone or
+Members open Word, Excel and PowerPoint files (and their OpenDocument and older
+Microsoft forms) from Drive in the browser, edit them alone or
 together, and save them back. The editor (Collabora Online's open-source
 edition, CODE, which runs the LibreOffice engine) runs on the same server as the
 site, so a file never leaves it.
 
-- **Opens:** `.docx`, `.xlsx`, `.odt`, `.ods`. New blank documents (`.docx`) and
+- **Opens:** the document, spreadsheet and presentation formats the editor edits:
+  `.docx`, `.doc`, `.odt`, `.rtf`, `.xlsx`, `.xls`, `.xlsb`, `.ods`, `.pptx`,
+  `.ppt`, `.odp`, their templates and macro-enabled forms
+  (`OfficeEditor::EXTENSIONS`). A file saves back in its own format. The
+  editor's own list of what it edits (its discovery) has the last word: a type
+  it does not list is refused when opened. Plain text and CSV are left out, so
+  clicking one in Drive downloads it. New blank documents (`.docx`) and
   spreadsheets (`.xlsx`) from Drive's New menu.
 - **Only Standard files.** A Private or Fortress file would put its plaintext in
   the editor's memory and temp files, outside what those levels promise. Their

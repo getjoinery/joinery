@@ -18,7 +18,7 @@
  * pptxText, odfText, toUtf8, finish), and plugins/mailbox/tests/doc_text.mjs
  * holds the two to the same output over the same files.
  *
- * Read here: Word, Excel and PowerPoint (OOXML), OpenDocument, and plain text.
+ * Read here: Word, Excel and PowerPoint (OOXML), Word 97-2003 (.doc), OpenDocument, and plain text.
  * Not read here: PDF, RTF, HTML, saved emails, calendar files, EPUB and zip
  * listings; those keep no preview on Fortress mail.
  *
@@ -32,6 +32,7 @@
  *
  * No dependence on the page: it is evaluated as-is under Node by the tests.
  *
+ * @version 1.2.0 - Word 97-2003 (.doc): the compound file and piece table read here, as DocumentText::docText()
  * @version 1.1.0 - review fixes (reviewer2): trimming walks indexes (a long run of spaces was quadratic
  *   under a trailing-whitespace regex, B1); the character cap counts only as far as it keeps (B2); a declared
  *   type it cannot read falls back to the extension, as the server's sniff would (B6); an XML part is decoded
@@ -62,7 +63,8 @@
 		'application/vnd.oasis.opendocument.text': 'odf',
 		'application/vnd.oasis.opendocument.spreadsheet': 'odf',
 		'application/vnd.oasis.opendocument.presentation': 'odf',
-		'application/epub+zip': 'epub'
+		'application/epub+zip': 'epub',
+		'application/msword': 'doc'
 	};
 
 	var EXTENSION_MIME = {
@@ -81,11 +83,12 @@
 		odt: 'application/vnd.oasis.opendocument.text',
 		ods: 'application/vnd.oasis.opendocument.spreadsheet',
 		odp: 'application/vnd.oasis.opendocument.presentation',
-		epub: 'application/epub+zip'
+		epub: 'application/epub+zip',
+		doc: 'application/msword'
 	};
 
 	/** The categories this file reads; every other one keeps no preview here. */
-	var READS = { docx: 1, xlsx: 1, pptx: 1, odf: 1, text: 1 };
+	var READS = { docx: 1, xlsx: 1, pptx: 1, odf: 1, text: 1, doc: 1 };
 	var ZIP_CATEGORIES = { docx: 1, xlsx: 1, pptx: 1, odf: 1 };
 
 	var LIMITS = {
@@ -721,6 +724,255 @@
 		return xmlText(content, ['text:p', 'text:h', 'table:table-row', 'table:table-cell']);
 	}
 
+	// ---- Word 97-2003 (.doc): DocumentText::cfbOpen() .. docClean() ----------------
+
+	var CP1252_HIGH = [0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+		0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F, 0x0090, 0x2018, 0x2019,
+		0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D,
+		0x017E, 0x0178];
+
+	function cu16(b, o) {
+		if (o < 0 || o + 2 > b.length) throw fail('compound file: read past the end');
+		return b[o] | (b[o + 1] << 8);
+	}
+	function cu32(b, o) {
+		if (o < 0 || o + 4 > b.length) throw fail('compound file: read past the end');
+		return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16)) + b[o + 3] * 0x1000000;
+	}
+
+	var utf16 = new TextDecoder('utf-16le');
+
+	function cfbOpen(b) {
+		var len = b.length;
+		if (len < 512 || !startsWith(b, OLE_SIG)) throw fail('not a compound file');
+		var shift = cu16(b, 0x1E);
+		if (shift !== 9 && shift !== 12) throw fail('compound file: bad sector size');
+		if (cu16(b, 0x20) !== 6) throw fail('compound file: bad mini sector size');
+		var ss = 1 << shift;
+		var nsec = Math.floor((Math.max(0, len - ss) + ss - 1) / ss);
+		var cfb = { b: b, ss: ss, nsec: nsec, fat: [], minifat: [], mini: null, cutoff: cu32(b, 0x38) };
+
+		var numFat = Math.min(cu32(b, 0x2C), nsec);
+		var fat = [];
+		for (var i = 0; i < 109 && fat.length < numFat; i++) fat.push(cu32(b, 0x4C + 4 * i));
+		var next = cu32(b, 0x44);
+		var seen = {};
+		var per = ss / 4 - 1;
+		while (fat.length < numFat && next < nsec && !seen[next]) {
+			seen[next] = true;
+			var base = (next + 1) * ss;
+			for (var k = 0; k < per && fat.length < numFat; k++) fat.push(cu32(b, base + 4 * k));
+			next = cu32(b, base + 4 * per);
+		}
+		cfb.fat = fat;
+
+		var dir = cfbRead(cfb, cu32(b, 0x30), Infinity, false);
+		cfb.minifat = cfbChain(cfb, cu32(b, 0x3C), false);
+		var count = Math.floor(dir.length / 128);
+		function entry(i) {
+			if (i < 0 || i >= count) return null;
+			var o = i * 128;
+			var nameLen = Math.min(64, cu16(dir, o + 0x40));
+			var name = nameLen >= 2 ? utf16.decode(dir.subarray(o, o + nameLen - 2)) : '';
+			return { name: name.toLowerCase(), type: dir[o + 0x42], left: cu32(dir, o + 0x44), right: cu32(dir, o + 0x48),
+				child: cu32(dir, o + 0x4C), start: cu32(dir, o + 0x74), size: cu32(dir, o + 0x78) };
+		}
+		var root = entry(0);
+		if (!root || root.type !== 5) throw fail('compound file: no root');
+		cfb.root = [root.start, root.size];
+
+		var streams = {};
+		var stack = [root.child];
+		var visited = {};
+		while (stack.length) {
+			var j = stack.pop();
+			if (j >= count || visited[j]) continue;
+			visited[j] = true;
+			var e = entry(j);
+			if (!e) continue;
+			if ((e.type === 2 || e.type === 1) && !Object.prototype.hasOwnProperty.call(streams, e.name)) {
+				streams[e.name] = [e.type, e.start, e.size];
+			}
+			stack.push(e.left);
+			stack.push(e.right);
+		}
+		cfb.streams = streams;
+		return cfb;
+	}
+
+	function cfbChain(cfb, start, mini) {
+		var out = [];
+		var seen = {};
+		var per = cfb.ss / 4;
+		var limit = mini ? cfb.minifat.length * per : cfb.nsec;
+		var s = start;
+		while (s >= 0 && s < limit && !seen[s]) {
+			seen[s] = true;
+			out.push(s);
+			var table = mini ? cfb.minifat : cfb.fat;
+			var fs = Math.floor(s / per);
+			if (fs >= table.length || table[fs] >= cfb.nsec) break;
+			s = cu32(cfb.b, (table[fs] + 1) * cfb.ss + 4 * (s % per));
+		}
+		return out;
+	}
+
+	function cfbRead(cfb, start, size, mini) {
+		var chain = cfbChain(cfb, start, mini);
+		var unit = mini ? 64 : cfb.ss;
+		var src = mini ? cfb.mini : cfb.b;
+		var parts = [];
+		var have = 0;
+		for (var i = 0; i < chain.length && have < size; i++) {
+			var o = mini ? chain[i] * 64 : (chain[i] + 1) * cfb.ss;
+			var part = src.subarray(Math.min(o, src.length), Math.min(o + unit, src.length));
+			parts.push(part);
+			have += unit;
+		}
+		var total = 0;
+		parts.forEach(function (p) { total += p.length; });
+		var out = new Uint8Array(total);
+		var at = 0;
+		parts.forEach(function (p) { out.set(p, at); at += p.length; });
+		return size === Infinity ? out : out.subarray(0, Math.min(size, out.length));
+	}
+
+	function cfbStream(cfb, name) {
+		var e = Object.prototype.hasOwnProperty.call(cfb.streams, name.toLowerCase()) ? cfb.streams[name.toLowerCase()] : null;
+		if (!e || e[0] !== 2) return null;
+		if (e[2] < cfb.cutoff) {
+			if (cfb.mini === null) cfb.mini = cfbRead(cfb, cfb.root[0], cfb.root[1], false);
+			return cfbRead(cfb, e[1], e[2], true);
+		}
+		return cfbRead(cfb, e[1], e[2], false);
+	}
+
+	function docText(bytes) {
+		var cfb = cfbOpen(bytes);
+		if (cfb.streams.encryptedpackage || cfb.streams.encryptioninfo) throw new Refusal('secured', 'encrypted document');
+		var wd = cfbStream(cfb, 'WordDocument');
+		if (wd === null) throw fail('doc: no WordDocument stream');
+		var ident = cu16(wd, 0);
+		if (ident === 0xA5DC) throw fail('doc: a Word 95 or older file');
+		if (ident !== 0xA5EC) throw fail('doc: not a Word document');
+		if (cu16(wd, 2) < 0x00C0) throw fail('doc: a Word 95 or older file');
+		var flags = cu16(wd, 0x0A);
+		if ((flags & 0x0100) || (flags & 0x8000)) throw new Refusal('secured', 'doc: encrypted');
+		var table = cfbStream(cfb, (flags & 0x0200) ? '1Table' : '0Table');
+		if (table === null) throw fail('doc: no table stream');
+
+		var csw = cu16(wd, 32);
+		var lw = 34 + 2 * csw + 2;
+		var cslw = cu16(wd, 34 + 2 * csw);
+		if (cslw < 11) throw fail('doc: short FIB');
+		var ccp = {};
+		for (var i = 3; i <= 10; i++) ccp[i] = cu32(wd, lw + 4 * i);
+		var fcl = lw + 4 * cslw;
+		if (cu16(wd, fcl) <= 33) throw fail('doc: short FIB');
+		var fcClx = cu32(wd, fcl + 2 + 33 * 8);
+		var lcbClx = cu32(wd, fcl + 2 + 33 * 8 + 4);
+		if (fcClx + lcbClx > table.length || lcbClx < 5) throw fail('doc: no piece table');
+		var clx = table.subarray(fcClx, fcClx + lcbClx);
+
+		var p = 0;
+		while (p < clx.length && clx[p] === 1) {
+			var cb = cu16(clx, p + 1);
+			if (cb >= 0x8000) throw fail('doc: bad piece table');
+			p += 3 + cb;
+		}
+		if (p >= clx.length || clx[p] !== 2) throw fail('doc: bad piece table');
+		var lcb = cu32(clx, p + 1);
+		var plc = clx.subarray(p + 5, p + 5 + lcb);
+		if (plc.length !== lcb || lcb < 16 || (lcb - 4) % 12 !== 0) throw fail('doc: bad piece table');
+		var n = (lcb - 4) / 12;
+		var cps = [];
+		for (var k = 0; k <= n; k++) {
+			cps[k] = cu32(plc, 4 * k);
+			if (k > 0 && cps[k] <= cps[k - 1]) throw fail('doc: bad piece table');
+		}
+		// No more characters than the text stream has bytes (DocumentText::docText()).
+		if (cps[0] !== 0 || cps[n] > Math.min(LIMITS.totalBytes, wd.length)) throw fail('doc: bad piece table');
+
+		// The whole document as UTF-16 code units, one per character position.
+		var u = new Uint16Array(cps[n]);
+		for (k = 0; k < n; k++) {
+			var fc = cu32(plc, 4 * (n + 1) + 8 * k + 2);
+			var count = cps[k + 1] - cps[k];
+			var at = cps[k];
+			var c, off;
+			if (fc & 0x40000000) {
+				off = Math.floor((fc & 0x3FFFFFFF) / 2);
+				for (c = 0; c < count && off + c < wd.length; c++) {
+					var by = wd[off + c];
+					u[at + c] = (by >= 0x80 && by <= 0x9F) ? CP1252_HIGH[by - 0x80] : by;
+				}
+			} else {
+				off = fc;
+				for (c = 0; c < count && off + 2 * c + 1 < wd.length; c++) {
+					u[at + c] = wd[off + 2 * c] | (wd[off + 2 * c + 1] << 8);
+				}
+			}
+			// A piece that runs past its stream keeps its length (zeros).
+		}
+
+		var ftn = ccp[3], hdd = ftn + ccp[4], atn = hdd + ccp[5] + ccp[6], edn = atn + ccp[7];
+		var stories = [[0, ccp[3]], [ftn, ccp[4]], [edn, ccp[8]], [hdd, ccp[5]]];
+		var out = [];
+		stories.forEach(function (st) {
+			if (st[1] <= 0) return;
+			var from = Math.min(st[0], u.length), to = Math.min(st[0] + st[1], u.length);
+			if (to <= from) return;
+			var slice = u.subarray(from, to);
+			out.push(docClean(utf16.decode(new Uint8Array(slice.buffer, slice.byteOffset, slice.byteLength))));
+		});
+		return out.join('\n');
+	}
+
+	/**
+	 * DocumentText::docClean(): fields show their results; breaks are lines;
+	 * cells tabs; rows lines. Runs of ordinary characters are copied whole.
+	 */
+	function docClean(s) {
+		var out = '';
+		var run = -1;          // start of the ordinary run being copied
+		var fields = [];
+		var inCode = 0;
+		var prev = '';
+		for (var i = 0; i < s.length; i++) {
+			var code = s.charCodeAt(i);
+			if (code >= 0x20 && inCode === 0) {
+				if (run < 0) run = i;
+				prev = '';
+				continue;
+			}
+			if (run >= 0) { out += s.slice(run, i); run = -1; }
+			var ch = s.charAt(i);
+			if (ch === '\x13') {
+				fields.push(false);
+				inCode++;
+			} else if (ch === '\x14') {
+				if (fields.length && !fields[fields.length - 1]) { fields[fields.length - 1] = true; inCode--; }
+			} else if (ch === '\x15') {
+				if (fields.length) { if (!fields.pop()) inCode--; }
+			} else if (inCode > 0) {
+				// inside a field's code
+			} else if (ch === '\r' || ch === '\x0B' || ch === '\x0C') {
+				out += '\n';
+			} else if (ch === '\x07') {
+				if (prev === '\x07' && out.charAt(out.length - 1) === '\t') out = out.slice(0, -1) + '\n';
+				else out += '\t';
+			} else if (ch === '\x1E') {
+				out += '-';
+			} else if (ch === '\t') {
+				out += '\t';
+			}
+			// any other control character (an anchor, a note reference, a separator): no text
+			prev = ch;
+		}
+		if (run >= 0) out += s.slice(run);
+		return out;
+	}
+
 	var READERS = { docx: docxText, xlsx: xlsxText, pptx: pptxText, odf: odfText };
 
 	function startsWith(bytes, sig) {
@@ -753,9 +1005,19 @@
 				category = await containerCategory(zip);
 				if (!READERS[category]) throw fail('not a document this reader opens: ' + category);
 				raw = await READERS[category](zip);
-			} else if (ZIP_CATEGORIES[category]) {
-				if (startsWith(bytes, OLE_SIG)) throw new Refusal('secured', 'password-protected document');
-				throw fail('not a readable zip container');
+			} else if (startsWith(bytes, OLE_SIG) && (category === 'doc' || ZIP_CATEGORIES[category])) {
+				// A compound file: a Word 97-2003 document, or (named as an
+				// Office Open XML file) the way Office stores a password-protected one.
+				var cfb = cfbOpen(bytes);
+				if (cfb.streams.encryptedpackage || cfb.streams.encryptioninfo) throw new Refusal('secured', 'encrypted document');
+				if (!cfb.streams.worddocument) {
+					if (ZIP_CATEGORIES[category]) throw new Refusal('secured', 'password-protected document');
+					throw fail('doc: no WordDocument stream');
+				}
+				category = 'doc';
+				raw = docText(bytes);
+			} else if (ZIP_CATEGORIES[category] || category === 'doc') {
+				throw fail(category === 'doc' ? 'not a compound file' : 'not a readable zip container');
 			} else {
 				raw = toUtf8(bytes);
 			}

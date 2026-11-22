@@ -9,6 +9,7 @@
  *   php walk_fixture.php create <purpose> [--messages=N] [--permission=P] [--fortress]
  *   php walk_fixture.php deliver <purpose> <N> <tag>
  *   php walk_fixture.php deliver-relay <purpose> <N> <tag> [--parts=P]
+ *   php walk_fixture.php deliver-docs <purpose> <tag>
  *   php walk_fixture.php approve-device <purpose> <link code>
  *   php walk_fixture.php add-rule <purpose> <subject word> [--forward=ADDRESS]
  *   php walk_fixture.php retire-key <purpose>
@@ -59,6 +60,9 @@
  * Refuses without the `debug` setting: it makes an admin account, so it never
  * runs on production.
  *
+ * @version 1.7 - the handoff names the site (base), so walk_vault.js signs in where the account was made; create marks the user past the setup wizard (markPastOnboarding: dismissed was not enough, every
+ *   step must be seen); deliver-docs (a .docx, an .xlsx, a Word 97 .doc and a PDF): one message carrying a Word file, a workbook and a PDF (the mail reader's
+ *   document preview and Open in editor walks), from plugins/mailbox/tests/fixtures/doc_text
  * @version 1.6 - add-rule --forward also confirms the destination, as its owner following the link would
  * @version 1.5 - approve-device hands over the X-Wing seed itself, as the browser does; deliver-relay
  *   stands in a relay at SEALS_POST_QUANTUM (post_quantum_sealing WP5/WP6)
@@ -142,6 +146,33 @@ function walk_extra_parts(string $word, int $extra): string {
 			chunk_split(base64_encode('%PDF-1.4 ' . $word . ' extra ' . $i)))) . "\r\n";
 	}
 	return $out;
+}
+
+/** One message with report.docx, budget.xlsx, a Word 97 .doc and a PDF attached, declared octet-stream as most senders do. */
+function walk_deliver_docs(string $address, string $tag): void {
+	$dir = PathHelper::getIncludePath('plugins/mailbox/tests/fixtures/doc_text');
+	$mid = '<walk-docs-' . bin2hex(random_bytes(6)) . '@elsewhere.example>';
+	$lines = array(
+		'From: "Walk Sender" <sender@elsewhere.example>', 'To: ' . $address, 'Subject: Documents ' . $tag,
+		'Message-ID: ' . $mid, 'Date: ' . gmdate('D, d M Y H:i:s') . ' +0000', 'MIME-Version: 1.0',
+		'Content-Type: multipart/mixed; boundary="OUT"', '',
+		'--OUT', 'Content-Type: text/plain; charset=UTF-8', '', 'The ' . $tag . ' report and budget are attached.',
+	);
+	$files = array('report.docx' => 'Report-' . $tag . '.docx', 'budget.xlsx' => 'Budget-' . $tag . '.xlsx',
+		'poi-simple-table.doc' => 'Letter-' . $tag . '.doc');
+	foreach ($files as $src => $name) {
+		$lines = array_merge($lines, array('--OUT', 'Content-Type: application/octet-stream; name="' . $name . '"',
+			'Content-Disposition: attachment; filename="' . $name . '"', 'Content-Transfer-Encoding: base64', '',
+			chunk_split(base64_encode((string)file_get_contents($dir . '/' . $src)))));
+	}
+	$lines = array_merge($lines, array('--OUT', 'Content-Type: application/pdf; name="Scan-' . $tag . '.pdf"',
+		'Content-Disposition: attachment; filename="Scan-' . $tag . '.pdf"', 'Content-Transfer-Encoding: base64', '',
+		chunk_split(base64_encode('%PDF-1.4 ' . $tag . ' scan')), '--OUT--', ''));
+	(new InboundEmailRouter())->processEmail(implode("\r\n", $lines), $address);
+	$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages WHERE iem_message_id_header = ?');
+	$q->execute(array($mid));
+	$id = intval($q->fetchColumn());
+	echo $id > 0 ? "delivered message $id (documents $tag)\n" : "NOT delivered: documents $tag\n";
 }
 
 function walk_deliver(string $address, int $n, string $tag): void {
@@ -448,8 +479,13 @@ function walk_write_handoff(User $user): void {
 		@mkdir(dirname(WALK_HANDOFF), 0700, true);
 	}
 	$old = umask(077);
+	// The site the account was made on: walk_vault.js signs in there, not at
+	// a fixed address.
+	$host = preg_replace('#^https?://#', '', (string)Globalvars::get_instance()->get_setting('webDir'));
+	$host = rtrim((string)$host, '/');
 	file_put_contents(WALK_HANDOFF, json_encode(array('user_id' => intval($user->key),
-		'email' => (string)$user->get('usr_email'), 'password' => $password)));
+		'email' => (string)$user->get('usr_email'), 'password' => $password,
+		'base' => $host !== '' ? 'https://' . $host : '')));
 	umask($old);
 	chmod(WALK_HANDOFF, 0600);
 }
@@ -489,7 +525,9 @@ switch ($command) {
 		$user->set('usr_permission', intval($opts['permission'] ?? 5));
 		$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		$user->set('usr_is_activated', true);
-		$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
+		// Past the setup wizard: dismissed AND every step seen, or each page
+		// view sends the walk to /setup.
+		SetupSteps::markPastOnboarding($user);
 		$user->save();
 		$user->load();
 		$uid = intval($user->key);
@@ -532,6 +570,13 @@ switch ($command) {
 			walk_fail('no fixture for ' . $args[1] . '; create it first');
 		}
 		walk_deliver($address, max(1, intval($args[2] ?? 1)), preg_replace('/[^a-z0-9]/', '', strtolower((string)($args[3] ?? 'more'))) ?: 'more');
+		break;
+
+	case 'deliver-docs':
+		if (!walk_domain($names['domain'])) {
+			walk_fail('no fixture for ' . $args[1] . '; create it first');
+		}
+		walk_deliver_docs($address, preg_replace('/[^a-z0-9]/', '', strtolower((string)($args[2] ?? 'docs'))) ?: 'docs');
 		break;
 
 	case 'deliver-relay':

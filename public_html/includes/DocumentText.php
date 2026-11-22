@@ -36,6 +36,8 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.6.0 - Word 97-2003 (.doc): a compound file read with byte arithmetic, the piece table's text with
+ *   fields shown as their results, tables as tabs and lines; an encrypted one is secured, Word 95 and older fail
  * @version 1.5.2 - jailFenced() caches through ApcuStore
  * @version 1.5.1 - inside the fence a staged container is emptied, not unlinked (the run
  *   has no unlink: reviewer2 D1); stage(), stagedIsOpen() and unstage() are public, the one
@@ -183,6 +185,7 @@ class DocumentText {
 		'application/vnd.oasis.opendocument.spreadsheet'  => 'odf',
 		'application/vnd.oasis.opendocument.presentation' => 'odf',
 		'application/epub+zip'     => 'epub',
+		'application/msword'       => 'doc',
 	);
 
 	/**
@@ -215,6 +218,7 @@ class DocumentText {
 		'ics'  => 'text/calendar',    'ical' => 'text/calendar',
 		'zip'  => 'application/zip',
 		'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		'doc'  => 'application/msword',
 		'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 		'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 		'odt'  => 'application/vnd.oasis.opendocument.text',
@@ -802,6 +806,7 @@ class DocumentText {
 			case 'xlsx':    return self::xlsxText(self::requireStaged($staged));
 			case 'pptx':    return self::pptxText(self::requireStaged($staged));
 			case 'odf':     return self::odfText(self::requireStaged($staged));
+			case 'doc':     return self::docText($bytes);
 			case 'epub':    return self::epubText(self::requireStaged($staged));
 			case 'archive': return self::archiveText(self::requireStaged($staged));
 			case 'text':
@@ -1403,6 +1408,297 @@ class DocumentText {
 			$out[] = 'This calendar file ends mid-event; the last entry is incomplete.';
 		}
 		return implode("\n", $out);
+	}
+
+	// ---- parsers: Word 97-2003 (.doc) ---------------------------------------
+	//
+	// A .doc is a compound file (a small FAT file system inside one file). Its
+	// text is in the WordDocument stream, placed by the piece table (the Clx)
+	// in the 0Table or 1Table stream; each piece is cp1252 bytes or UTF-16
+	// code units. Pure byte arithmetic, no extension. The browser's reader
+	// (plugins/mailbox/assets/mailbox_doc_text.js) follows this function for
+	// function, and plugins/mailbox/tests/doc_text.mjs holds the two to the
+	// same text.
+
+	/** windows-1252 bytes 0x80-0x9F as the WHATWG index maps them (a browser's table). */
+	const CP1252_HIGH = array(0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+		0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F, 0x0090, 0x2018, 0x2019,
+		0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D,
+		0x017E, 0x0178);
+
+	private static function cfbU16(string $b, int $o): int {
+		if ($o < 0 || $o + 2 > strlen($b)) throw new DocumentTextException('compound file: read past the end');
+		return unpack('v', $b, $o)[1];
+	}
+
+	private static function cfbU32(string $b, int $o): int {
+		if ($o < 0 || $o + 4 > strlen($b)) throw new DocumentTextException('compound file: read past the end');
+		return unpack('V', $b, $o)[1];
+	}
+
+	/**
+	 * The root storage's streams of a compound file, by lowercased name:
+	 * [name => [start, size]], plus the sector geometry. Nothing is read
+	 * beyond the file; every chain is bounded by the sector count and stops
+	 * on a revisit.
+	 */
+	private static function cfbOpen(string $b): array {
+		$len = strlen($b);
+		if ($len < 512 || substr($b, 0, 8) !== "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1") {
+			throw new DocumentTextException('not a compound file');
+		}
+		$shift = self::cfbU16($b, 0x1E);
+		if ($shift !== 9 && $shift !== 12) throw new DocumentTextException('compound file: bad sector size');
+		if (self::cfbU16($b, 0x20) !== 6) throw new DocumentTextException('compound file: bad mini sector size');
+		$ss = 1 << $shift;
+		$nsec = intdiv(max(0, $len - $ss) + $ss - 1, $ss);
+		$cfb = array('b' => $b, 'ss' => $ss, 'nsec' => $nsec, 'fat' => array(), 'minifat' => array(),
+			'mini' => null, 'cutoff' => self::cfbU32($b, 0x38));
+
+		// The FAT's own sectors: 109 in the header, the rest in the DIFAT chain.
+		$numFat = min(self::cfbU32($b, 0x2C), $nsec);
+		$fat = array();
+		for ($i = 0; $i < 109 && count($fat) < $numFat; $i++) {
+			$fat[] = self::cfbU32($b, 0x4C + 4 * $i);
+		}
+		$next = self::cfbU32($b, 0x44);
+		$seen = array();
+		$per = intdiv($ss, 4) - 1;
+		while (count($fat) < $numFat && $next < $nsec && !isset($seen[$next])) {
+			$seen[$next] = true;
+			$base = ($next + 1) * $ss;
+			for ($i = 0; $i < $per && count($fat) < $numFat; $i++) {
+				$fat[] = self::cfbU32($b, $base + 4 * $i);
+			}
+			$next = self::cfbU32($b, $base + 4 * $per);
+		}
+		$cfb['fat'] = $fat;
+
+		$dir = self::cfbRead($cfb, self::cfbU32($b, 0x30), PHP_INT_MAX, false);
+		$cfb['minifat'] = self::cfbChain($cfb, self::cfbU32($b, 0x3C), false);
+		$count = intdiv(strlen($dir), 128);
+		$entry = function ($i) use ($dir, $count) {
+			if ($i < 0 || $i >= $count) return null;
+			$o = $i * 128;
+			$nameLen = min(64, self::cfbU16($dir, $o + 0x40));
+			$name = $nameLen >= 2 ? (string)@mb_convert_encoding(substr($dir, $o, $nameLen - 2), 'UTF-8', 'UTF-16LE') : '';
+			return array('name' => strtolower($name), 'type' => ord($dir[$o + 0x42]),
+				'left' => self::cfbU32($dir, $o + 0x44), 'right' => self::cfbU32($dir, $o + 0x48),
+				'child' => self::cfbU32($dir, $o + 0x4C), 'start' => self::cfbU32($dir, $o + 0x74),
+				'size' => self::cfbU32($dir, $o + 0x78));
+		};
+		$root = $entry(0);
+		if ($root === null || $root['type'] !== 5) throw new DocumentTextException('compound file: no root');
+		$cfb['root'] = array($root['start'], $root['size']);
+
+		// The root's children: the tree under its child pointer, walked
+		// without recursion. An embedded object's streams sit deeper and are
+		// not among them.
+		$streams = array();
+		$stack = array($root['child']);
+		$visited = array();
+		while ($stack) {
+			$i = array_pop($stack);
+			if ($i >= $count || isset($visited[$i])) continue;
+			$visited[$i] = true;
+			$e = $entry($i);
+			if ($e === null) continue;
+			if (($e['type'] === 2 || $e['type'] === 1) && !isset($streams[$e['name']])) {
+				$streams[$e['name']] = array($e['type'], $e['start'], $e['size']);
+			}
+			$stack[] = $e['left'];
+			$stack[] = $e['right'];
+		}
+		$cfb['streams'] = $streams;
+		return $cfb;
+	}
+
+	/** A sector chain from the FAT (or the mini FAT), bounded and loop-free. */
+	private static function cfbChain(array $cfb, int $start, bool $mini): array {
+		$out = array();
+		$seen = array();
+		$per = intdiv($cfb['ss'], 4);
+		$limit = $mini ? count($cfb['minifat']) * $per : $cfb['nsec'];
+		$s = $start;
+		while ($s >= 0 && $s < $limit && !isset($seen[$s])) {
+			$seen[$s] = true;
+			$out[] = $s;
+			$table = $mini ? $cfb['minifat'] : $cfb['fat'];
+			$fs = intdiv($s, $per);
+			if (!isset($table[$fs]) || $table[$fs] >= $cfb['nsec']) break;
+			$s = self::cfbU32($cfb['b'], ($table[$fs] + 1) * $cfb['ss'] + 4 * ($s % $per));
+		}
+		return $out;
+	}
+
+	/** A stream's bytes, cut to $size. */
+	private static function cfbRead(array $cfb, int $start, int $size, bool $mini): string {
+		$parts = array();
+		$have = 0;
+		if ($mini) {
+			$ms = $cfb['mini'];
+			foreach (self::cfbChain($cfb, $start, true) as $s) {
+				if ($have >= $size) break;
+				$parts[] = substr($ms, $s * 64, 64);
+				$have += 64;
+			}
+		} else {
+			foreach (self::cfbChain($cfb, $start, false) as $s) {
+				if ($have >= $size) break;
+				$parts[] = substr($cfb['b'], ($s + 1) * $cfb['ss'], $cfb['ss']);
+				$have += $cfb['ss'];
+			}
+		}
+		$data = implode('', $parts);
+		return $size === PHP_INT_MAX ? $data : substr($data, 0, $size);
+	}
+
+	/** A root stream by name, or null. Small streams live in the mini stream. */
+	private static function cfbStream(array &$cfb, string $name): ?string {
+		$e = $cfb['streams'][strtolower($name)] ?? null;
+		if ($e === null || $e[0] !== 2) return null;
+		if ($e[2] < $cfb['cutoff']) {
+			if ($cfb['mini'] === null) {
+				$cfb['mini'] = self::cfbRead($cfb, $cfb['root'][0], $cfb['root'][1], false);
+			}
+			return self::cfbRead($cfb, $e[1], $e[2], true);
+		}
+		return self::cfbRead($cfb, $e[1], $e[2], false);
+	}
+
+	private static function docText(string $bytes): string {
+		$cfb = self::cfbOpen($bytes);
+		if (isset($cfb['streams']['encryptedpackage']) || isset($cfb['streams']['encryptioninfo'])) {
+			throw new DocumentTextException('encrypted document', self::SECURED);
+		}
+		$wd = self::cfbStream($cfb, 'WordDocument');
+		if ($wd === null) throw new DocumentTextException('doc: no WordDocument stream');
+		$ident = self::cfbU16($wd, 0);
+		if ($ident === 0xA5DC) throw new DocumentTextException('doc: a Word 95 or older file');
+		if ($ident !== 0xA5EC) throw new DocumentTextException('doc: not a Word document');
+		if (self::cfbU16($wd, 2) < 0x00C0) throw new DocumentTextException('doc: a Word 95 or older file');
+		$flags = self::cfbU16($wd, 0x0A);
+		if ($flags & 0x0100 || $flags & 0x8000) throw new DocumentTextException('doc: encrypted', self::SECURED);
+		$table = self::cfbStream($cfb, ($flags & 0x0200) ? '1Table' : '0Table');
+		if ($table === null) throw new DocumentTextException('doc: no table stream');
+
+		// FibRgLw97: the story lengths. FibRgFcLcb97: the Clx's place.
+		$csw = self::cfbU16($wd, 32);
+		$lw = 34 + 2 * $csw + 2;
+		$cslw = self::cfbU16($wd, 34 + 2 * $csw);
+		if ($cslw < 11) throw new DocumentTextException('doc: short FIB');
+		$ccp = array();
+		for ($i = 3; $i <= 10; $i++) $ccp[$i] = self::cfbU32($wd, $lw + 4 * $i);
+		$fcl = $lw + 4 * $cslw;
+		if (self::cfbU16($wd, $fcl) <= 33) throw new DocumentTextException('doc: short FIB');
+		$fcClx = self::cfbU32($wd, $fcl + 2 + 33 * 8);
+		$lcbClx = self::cfbU32($wd, $fcl + 2 + 33 * 8 + 4);
+		if ($fcClx + $lcbClx > strlen($table) || $lcbClx < 5) throw new DocumentTextException('doc: no piece table');
+		$clx = substr($table, $fcClx, $lcbClx);
+
+		$i = 0;
+		while ($i < strlen($clx) && ord($clx[$i]) === 1) {
+			$cb = self::cfbU16($clx, $i + 1);
+			if ($cb >= 0x8000) throw new DocumentTextException('doc: bad piece table');
+			$i += 3 + $cb;
+		}
+		if ($i >= strlen($clx) || ord($clx[$i]) !== 2) throw new DocumentTextException('doc: bad piece table');
+		$lcb = self::cfbU32($clx, $i + 1);
+		$plc = substr($clx, $i + 5, $lcb);
+		if (strlen($plc) !== $lcb || $lcb < 16 || ($lcb - 4) % 12 !== 0) throw new DocumentTextException('doc: bad piece table');
+		$n = intdiv($lcb - 4, 12);
+		$cps = array();
+		for ($k = 0; $k <= $n; $k++) {
+			$cps[$k] = self::cfbU32($plc, 4 * $k);
+			if ($k > 0 && $cps[$k] <= $cps[$k - 1]) throw new DocumentTextException('doc: bad piece table');
+		}
+		// No more characters than the text stream has bytes: a piece table
+		// that claims more is forged, and would cost memory, not text.
+		if ($cps[0] !== 0 || $cps[$n] > min(self::ZIP_MAX_TOTAL_BYTES, strlen($wd))) throw new DocumentTextException('doc: bad piece table');
+
+		// The whole document as UTF-16LE code units, one per character position.
+		$low = array();
+		for ($c = 0; $c < 256; $c++) {
+			$cp = ($c >= 0x80 && $c <= 0x9F) ? self::CP1252_HIGH[$c - 0x80] : $c;
+			$low[chr($c)] = pack('v', $cp);
+		}
+		$u = '';
+		for ($k = 0; $k < $n; $k++) {
+			$fc = self::cfbU32($plc, 4 * ($n + 1) + 8 * $k + 2);
+			$count = $cps[$k + 1] - $cps[$k];
+			if ($fc & 0x40000000) {
+				$piece = strtr(substr($wd, intdiv($fc & 0x3FFFFFFF, 2), $count), $low);
+			} else {
+				$piece = substr($wd, $fc, 2 * $count);
+			}
+			// A piece that runs past its stream keeps its length: the
+			// positions after it still mean what the story lengths say.
+			$u .= str_pad($piece, 2 * $count, "\0");
+		}
+
+		// Stories in character-position order: text, footnotes, headers,
+		// (macros), comments, endnotes. Shown: text, footnotes, endnotes, headers.
+		$start = array('text' => 0);
+		$start['ftn'] = $ccp[3];
+		$start['hdd'] = $start['ftn'] + $ccp[4];
+		$start['atn'] = $start['hdd'] + $ccp[5] + $ccp[6];
+		$start['edn'] = $start['atn'] + $ccp[7];
+		$stories = array(array(0, $ccp[3]), array($start['ftn'], $ccp[4]), array($start['edn'], $ccp[8]), array($start['hdd'], $ccp[5]));
+		$out = array();
+		$prev = mb_substitute_character();
+		mb_substitute_character(0xFFFD);
+		foreach ($stories as $st) {
+			if ($st[1] <= 0) continue;
+			$units = substr($u, 2 * $st[0], 2 * $st[1]);
+			if ($units === '') continue;
+			$out[] = self::docClean((string)mb_convert_encoding($units, 'UTF-8', 'UTF-16LE'));
+		}
+		mb_substitute_character($prev);
+		return implode("\n", $out);
+	}
+
+	/**
+	 * Word's marks to text: a field shows its result, not its code; a
+	 * paragraph, line or page break is a line; a cell is a tab and the mark
+	 * that ends a row a line; a non-breaking hyphen is a hyphen; every other
+	 * control character goes. Byte by byte: every mark is ASCII, and no byte
+	 * of a multibyte UTF-8 character is.
+	 */
+	private static function docClean(string $s): string {
+		$out = '';
+		$fields = array();   // per open field: true once its result begins
+		$inCode = 0;         // open fields still in their code
+		$prev = '';
+		$len = strlen($s);
+		for ($i = 0; $i < $len; $i++) {
+			$ch = $s[$i];
+			if ($ch === "\x13") {
+				$fields[] = false;
+				$inCode++;
+			} elseif ($ch === "\x14") {
+				if ($fields && !end($fields)) { $fields[count($fields) - 1] = true; $inCode--; }
+			} elseif ($ch === "\x15") {
+				if ($fields) { if (!array_pop($fields)) $inCode--; }
+			} elseif ($inCode > 0) {
+				// inside a field's code
+			} elseif ($ch === "\r" || $ch === "\x0B" || $ch === "\x0C") {
+				$out .= "\n";
+			} elseif ($ch === "\x07") {
+				if ($prev === "\x07" && substr($out, -1) === "\t") {
+					$out = substr($out, 0, -1) . "\n";
+				} else {
+					$out .= "\t";
+				}
+			} elseif ($ch === "\x1E") {
+				$out .= '-';
+			} elseif (ord($ch) < 0x20 && $ch !== "\t") {
+				// an anchor, a note reference, a separator: no text
+			} else {
+				$out .= $ch;
+			}
+			$prev = $ch;
+		}
+		return $out;
 	}
 
 	// ---- zip plumbing -------------------------------------------------------

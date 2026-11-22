@@ -16,8 +16,8 @@
         "preview": true
     },
     "doc": {
-        "category": null,
-        "preview": false
+        "category": "doc",
+        "preview": true
     },
     "docx": {
         "category": "docx",

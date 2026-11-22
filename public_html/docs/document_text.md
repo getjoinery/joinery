@@ -109,6 +109,7 @@ The parsers in the tree:
 | `xlsx` | Excel — rows tab-separated, sheets labelled, cell text resolved through `sharedStrings` |
 | `pptx` | PowerPoint — per-slide text plus speaker notes |
 | `odf` | OpenDocument text, spreadsheet, presentation |
+| `doc` | Word 97-2003 — body, footnotes, endnotes, headers; a field shows its result, a table reads as tabs and lines |
 | `epub` | EPUB — chapters through the HTML branch |
 | `rtf` | RTF, body text only |
 | `xml` | XML and SVG — text values, one per line |
@@ -116,9 +117,9 @@ The parsers in the tree:
 | `ics` | a calendar invite, as a readable event summary |
 | `archive` | ZIP — a **manifest** of entry names, sizes and dates. Nothing inside is decompressed |
 
-The office formats need no dependency at all: OOXML, OpenDocument and EPUB are ZIP plus XML, and `zip`, `dom` and `libxml` are already loaded.
+The office formats need no dependency at all: OOXML, OpenDocument and EPUB are ZIP plus XML, and `zip`, `dom` and `libxml` are already loaded. A Word 97-2003 `.doc` is read with byte arithmetic alone: its compound file (a small FAT file system) is walked with every sector chain bounded by the file's sector count and stopped on a revisit, and its piece table may claim no more characters than its text stream has bytes. An encrypted `.doc` is `secured`; Word 95 and older fail. The mailbox's browser reader (`mailbox_doc_text.js`) follows `docText()` function for function, held to it by `plugins/mailbox/tests/doc_text_gate.sh` over real Word files from Apache POI's test data.
 
-**Not read, deliberately:** legacy binary Office (`.doc`, `.xls`, `.ppt`), Outlook `.msg`, iWork, `.7z`/`.rar`, and encrypted databases like `.kdbx`. Each of the first four needs a dependency the platform does not have; the last is encrypted and correctly unreadable. Images are not read either — there is no OCR anywhere on the platform.
+**Not read, deliberately:** legacy binary Excel and PowerPoint (`.xls`, `.ppt`), Outlook `.msg`, iWork, `.7z`/`.rar`, and encrypted databases like `.kdbx`. Each of the first four needs a reader the platform does not have; the last is encrypted and correctly unreadable. Images are not read either — there is no OCR anywhere on the platform.
 
 ## The security properties
 

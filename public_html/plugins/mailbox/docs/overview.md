@@ -1583,7 +1583,7 @@ too — and ceilinged by `mailbox_preview_max_bytes` (15 MB) from the attachment
 size before any byte is fetched or decrypted. Parsing itself is
 [`DocumentText`](../../../docs/document_text.md), in a subprocess under the parser jail
 (the `joinery-jail` user: no network, no forking, no config, no key) — PDF, Word, Excel, PowerPoint,
-OpenDocument, EPUB, RTF, XML/SVG, forwarded `.eml`, calendar invites, the whole text
+Word 97-2003 (`.doc`), OpenDocument, EPUB, RTF, XML/SVG, forwarded `.eml`, calendar invites, the whole text
 family, and a name-and-size manifest for a `.zip`. Whether the button appears is decided
 from the declared type **and** the filename, because most real PDFs arrive declared
 `application/octet-stream`; that is a UI hint only, and the extractor re-sniffs the bytes
@@ -2021,7 +2021,7 @@ that tab (docs/sealed_vault.md § Sessions and the lock).
 **A Fortress attachment's text preview is read on the device.** The server holds only
 ciphertext, so `mailbox/attachment_text` refuses a Fortress attachment, and the eye
 button on one is the browser's: `MailboxDocText` (`mailbox_doc_text.js`, loaded with the
-Fortress scripts) reads Word, Excel and PowerPoint (OOXML), OpenDocument and the plain-text
+Fortress scripts) reads Word, Excel and PowerPoint (OOXML), Word 97-2003 (`.doc`), OpenDocument and the plain-text
 family out of the bytes `MailboxFortress.attachmentBytes()` opened, and
 `MailboxFortress.attachmentText()` hands the reader the same answer shape the endpoint
 gives. Each format's reader follows `DocumentText`'s line for line, under the same limits

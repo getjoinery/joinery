@@ -16,12 +16,15 @@
  * Delete the handoff file afterwards (walk_fixture.php also drops one older
  * than five minutes).
  *
+ * @version 1.3 - signs in at the handoff's site (base), not a fixed address; an account the site holds at its
+ *   second-factor page before any other opens is proved by the passkey step instead: adding a passkey
+ *   asks for the fixture's own password, which another account's session refuses, and the name is
+ *   read on the profile page once that page opens, before the vault is touched
  * @version 1.2 - login-as is a POST; stops unless signed in as the fixture user
  * @version 1.1 - signs in at /login with the fixture's own password
  * @version 1.0
  */
 async (page) => {
-	const base = 'https://dev.getjoinery.com';
 	const tab = await page.context().newPage();
 	let handoff;
 	try {
@@ -32,6 +35,7 @@ async (page) => {
 		return { ok: false, step: 'handoff', error: 'no readable handoff: run walk_fixture.php create first' };
 	}
 	await tab.close();
+	const base = handoff.base || 'https://dev.getjoinery.com';
 
 	// Sign in as the fixture user: its own password at /login, or (a browser
 	// already signed in by a remembered admin) the admin's login-as.
@@ -59,12 +63,22 @@ async (page) => {
 	}
 
 	// Everything below changes the signed-in account's security settings, so
-	// it runs only as the fixture user (named Claude / Walk <purpose>).
+	// it runs only as the fixture user (named Claude / Walk <purpose>). A site
+	// that requires a second factor holds the account at its security page
+	// until one exists, so the profile page may not open yet: then the passkey
+	// step is the proof (it asks for the fixture's password), and the name is
+	// read once the passkey exists, before the vault.
 	const purpose = (handoff.email.match(/^claude-walk-(.+)@example\.com$/) || [])[1];
-	await page.goto(base + '/profile/account_edit');
-	await page.waitForTimeout(1500);
-	const last = await page.locator('input[name="usr_last_name"]').inputValue().catch(() => null);
-	if (!purpose || last !== 'Walk ' + purpose) {
+	if (!purpose) return { ok: false, step: 'identity', error: 'the handoff is not a walk fixture', signin };
+	async function isFixture() {
+		await page.goto(base + '/profile/account_edit');
+		await page.waitForTimeout(1500);
+		if (!/\/profile\/account_edit/.test(page.url())) return null;   // held at the security page
+		const last = await page.locator('input[name="usr_last_name"]').inputValue().catch(() => null);
+		return last === 'Walk ' + purpose;
+	}
+	const before = await isFixture();
+	if (before === false) {
 		return { ok: false, step: 'identity', error: 'the browser is not signed in as the fixture user; stopped before touching any security setting', signin };
 	}
 
@@ -96,6 +110,12 @@ async (page) => {
 		await naming.last().getByRole('button', { name: 'Continue' }).click();
 		await page.waitForTimeout(6000);
 	}
+
+	if (before === null && (await isFixture()) !== true) {
+		return { ok: false, step: 'identity', error: 'after the passkey the profile is not the fixture user\'s; stopped before the vault', signin };
+	}
+	await page.goto(base + '/profile/security');
+	await page.waitForTimeout(2500);
 
 	// The vault. Its recovery codes are on screen until Done; nothing reads them.
 	await page.getByRole('button', { name: 'Set Up Your Vault' }).first().click();
