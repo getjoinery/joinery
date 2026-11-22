@@ -1,0 +1,10 @@
+{
+    "name": "joinery/vendorprobe",
+    "version": "1.0.0",
+    "require": { "psr/cache": "3.0.0" },
+    "config": {
+        "platform-check": false,
+        "autoloader-suffix": "JoineryPlugin_vendorprobe",
+        "optimize-autoloader": true
+    }
+}
