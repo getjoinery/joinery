@@ -88,7 +88,12 @@ chk "and writes nothing to /etc (says so)" "$(bash "$SCRIPT" 2>&1 | grep -c 'not
 
 echo "== a host built by the old recipe =="
 R="$T/host"
-mkdir -p "$R/etc/fail2ban/jail.d" "$R/etc/apache2/conf-available"
+mkdir -p "$R/etc/fail2ban/jail.d" "$R/etc/apache2/conf-available" "$R/etc/apache2/mods-enabled"
+# Apache on the event worker model, as every install leaves it.
+touch "$R/etc/apache2/mods-enabled/mpm_event.load"
+# mod_http2 as a2enmod leaves it: the module, and Ubuntu's own settings for it.
+touch "$R/etc/apache2/mods-enabled/http2.load"
+ln -s ../mods-available/http2.conf "$R/etc/apache2/mods-enabled/http2.conf"
 # A jail.conf that already declares [sshd] and the apache sections, as the real one does.
 printf '[DEFAULT]\nbantime = 10m\n\n[sshd]\nport = ssh\n\n[apache-auth]\nport = http,https\n' > "$R/etc/fail2ban/jail.conf"
 { cat "$R/etc/fail2ban/jail.conf"; legacy_block; } > "$R/etc/fail2ban/jail.local"
@@ -122,6 +127,17 @@ chk "no internal proxy on a bare-metal host (only the container has a bridge)" "
 chk "combined logs %a (the resolved client), not %h (the peer)" "$(grep -c '^LogFormat "%a %l %u %t' "$CONF")" "1"
 chk "vhost_combined too" "$(grep -c '^LogFormat "%v:%p %a %l %u %t' "$CONF")" "1"
 chk "and no format logs %h" "$(grep '^LogFormat' "$CONF" | grep -c '%h')" "0"
+
+echo "== HTTP/2 for the visitors who reach this Apache (specs/apache_http2.md) =="
+H2="$R/etc/apache2/conf-available/joinery-http2.conf"
+chk "writes conf-available/joinery-http2.conf" "$( [ -f "$H2" ] && echo yes )" "yes"
+chk "enables it" "$(readlink "$R/etc/apache2/conf-enabled/joinery-http2.conf")" "../conf-available/joinery-http2.conf"
+chk "its directives are exactly these, inside the module's guard" \
+    "$(grep -vE '^[[:space:]]*(#|$)' "$H2" | paste -sd '|')" "<IfModule http2_module>|Protocols h2 http/1.1|H2MaxSessionStreams 20|</IfModule>"
+chk "HTTP/2 without TLS is not offered" "$(grep -v '^#' "$H2" | grep -c 'h2c')" "0"
+chk "Ubuntu's http2.conf, which offers it, is out of mods-enabled and the module stays" \
+    "$( [ ! -L "$R/etc/apache2/mods-enabled/http2.conf" ] && [ -e "$R/etc/apache2/mods-enabled/http2.load" ] && echo ok )" "ok"
+chk "says what a real run would enable" "$(echo "$out" | grep -c 'would run: a2enmod http2; a2enconf joinery-http2')" "1"
 
 echo "== a second run changes no file =="
 before="$(tree_sum "$R")"
@@ -209,6 +225,22 @@ chk "a container with no route trusts only loopback, and says so" \
 chk "a bare-metal host gets no address-selection table" "$( [ ! -e "$R2/etc/gai.conf" ] && echo none )" "none"
 chk "the edge ranges are trusted here too (the host appends to the chain)" "$(sed -n 's/^RemoteIPTrustedProxy //p' "$R5/etc/apache2/conf-available/joinery-remoteip.conf")" "$want_ranges"
 chk "no fail2ban directory is created" "$( [ ! -e "$R5/etc/fail2ban" ] && echo none )" "none"
+
+echo "== HTTP/2 is the visitor-facing Apache's: not a container's, and not without the event worker model =="
+R5h="$T/container_event"
+mkdir -p "$R5h/etc/apache2/conf-available" "$R5h/etc/apache2/mods-enabled"
+touch "$R5h/.dockerenv" "$R5h/etc/apache2/mods-enabled/mpm_event.load"
+out5h="$(JOINERY_HOUSEKEEPING_ROOT="$R5h" bash "$SCRIPT" 2>&1)"
+chk "a container gets no joinery-http2.conf, written or enabled" \
+    "$( [ ! -e "$R5h/etc/apache2/conf-available/joinery-http2.conf" ] && [ ! -e "$R5h/etc/apache2/conf-enabled/joinery-http2.conf" ] && echo none )" "none"
+chk "and is not told a real run would enable the module" "$(echo "$out5h" | grep -c 'a2enmod http2')" "0"
+RPF="$T/prefork"
+mkdir -p "$RPF/etc/apache2/conf-available" "$RPF/etc/apache2/mods-enabled"
+touch "$RPF/etc/apache2/mods-enabled/mpm_prefork.load"
+out7="$(JOINERY_HOUSEKEEPING_ROOT="$RPF" bash "$SCRIPT" 2>&1)"
+chk "without the event worker model nothing is written" \
+    "$( [ ! -e "$RPF/etc/apache2/conf-available/joinery-http2.conf" ] && [ ! -e "$RPF/etc/apache2/conf-enabled/joinery-http2.conf" ] && echo none )" "none"
+chk "and the run says why, once" "$(echo "$out7" | grep -c 'does not run the event worker model - HTTP/2 left off')" "1"
 
 echo "== a missing range list is a failure, not a silent skip - and no Apache jail =="
 # The Docker host hand run: Apache is there, no site tree is, so the range

@@ -53,6 +53,8 @@ The contract:
 
 Behind Cloudflare the container resolves the original client the same way: Cloudflare's edge is a trusted hop in the chain.
 
+The two hops speak different protocols. A browser reaches host Apache over HTTP/2 (`conf-available/joinery-http2.conf`, written by `host_housekeeping.sh`; see [Installation](installation.md) § *HTTP/2 for visitors*); host Apache reaches the container over HTTP/1.1, and the container does not load `mod_http2`.
+
 #### Upgrade-flow split (important)
 
 This is the behavioural change most likely to trip up an operator who remembers the pre-shared-base model:

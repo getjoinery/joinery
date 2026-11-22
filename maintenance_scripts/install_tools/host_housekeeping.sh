@@ -4,6 +4,10 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.45 - The Apache visitors reach answers HTTP/2 over TLS (section 1a): conf-available/joinery-http2.conf,
+#                written and enabled with mod_http2 wherever Apache runs the event worker model, never in a site
+#                container (the host's proxy speaks HTTP/1.1 to it). Apache's verdict and its reload are one
+#                function each, shared with section 1 (specs/apache_http2.md)
 # Version: 1.44 - session.upload_progress.enabled = Off on every converge (_host_files.sh 1.7): the way in for
 #                CVE-2026-115560, and nothing on the platform reads upload progress
 # Version: 1.43 - the hourly security check is installed on a developer's box too (security_check.sh 1.4 trusts the
@@ -205,7 +209,11 @@
 #     client (%a) rather than the peer (%h). A jail bans what the log names,
 #     so the log must name the client - and must name it ONLY when every hop
 #     is a proxy we know. A forged header on a direct connection is never
-#     believed, so a ban can never be steered onto a third party.
+#     believed, so a ban can never be steered onto a third party;
+#   - /etc/apache2/conf-available/joinery-http2.conf, enabled with mod_http2,
+#     on a machine whose Apache visitors reach (not a site container) and
+#     which runs the event worker model: HTTP/2 over TLS only, twenty
+#     requests at once per connection.
 #
 # Three callers, one implementation: install.sh (host_housekeeping), the host
 # timer (_plugin_installers_start.sh, CORE_INSTALLERS) on every converge, and
@@ -327,6 +335,32 @@ install_file() {
     return 0
 }
 
+# Apache's verdict on the configuration as it now stands: 0 when it parses.
+# When it does not, Apache's own words are said and the caller puts back what
+# it changed: a configuration that does not parse stops every site on the
+# machine at the next reload.
+apache_accepts() {
+    local parse_out
+    parse_out="$(apache2ctl -t 2>&1)" && return 0
+    warn "Apache refuses the configuration; putting the previous one back"
+    warn "  $(printf '%s' "${parse_out}" | grep -viE 'AH00558|Syntax' | head -3 | tr '\n' ' ')"
+    return 1
+}
+
+# Make a running Apache read the configuration. At a container's start Apache
+# is not up yet and reads it when it comes up.
+apache_reload() {
+    if pidof apache2 >/dev/null 2>&1; then
+        if systemctl reload apache2 >/dev/null 2>&1 || apache2ctl graceful >/dev/null 2>&1; then
+            say "Apache reloaded"
+        else
+            warn "Apache could not be reloaded - the configuration applies at its next restart"
+        fi
+    else
+        say "Apache is not running here yet - the configuration is read when it starts"
+    fi
+}
+
 # --- 1. Apache: log the real client, and only when every hop is known --------
 #
 # Applicable wherever /etc/apache2 exists: a bare-metal node, the Docker host
@@ -431,23 +465,15 @@ if [[ -d "${APACHE_DIR}" && "${FAILED}" == 0 ]]; then
             fi
         fi
         if [[ "${APACHE_CHANGED}" == 1 ]] && command -v apache2ctl >/dev/null 2>&1; then
-            if ! parse_out="$(apache2ctl -t 2>&1)"; then
-                warn "Apache refuses the configuration; putting the previous one back"
-                warn "  $(printf '%s' "${parse_out}" | grep -viE 'AH00558|Syntax' | head -3 | tr '\n' ' ')"
+            if ! apache_accepts; then
                 if [[ -n "${PREVIOUS}" ]]; then
                     cat "${PREVIOUS}" > "${APACHE_CONF}"
                 else
                     rm -f "${APACHE_CONF}" "${APACHE_DIR}/conf-enabled/joinery-remoteip.conf"
                 fi
                 FAILED=1
-            elif pidof apache2 >/dev/null 2>&1; then
-                if systemctl reload apache2 >/dev/null 2>&1 || apache2ctl graceful >/dev/null 2>&1; then
-                    say "Apache reloaded"
-                else
-                    warn "Apache could not be reloaded - the configuration applies at its next restart"
-                fi
             else
-                say "Apache is not running here yet - the configuration is read when it starts"
+                apache_reload
             fi
         fi
         # Accepted = the module and the conf are both enabled and nothing above
@@ -471,6 +497,109 @@ if [[ -d "${APACHE_DIR}" && "${FAILED}" == 0 ]]; then
     [[ -n "${PREVIOUS}" ]] && rm -f "${PREVIOUS}"
 else
     [[ -d "${APACHE_DIR}" ]] || say "no Apache on this machine - remoteip step skipped"
+fi
+
+# --- 1a. Apache: HTTP/2 for the visitors who reach it -------------------------
+#
+# A browser fetches a page's ten to twenty files over one connection at once
+# instead of six that take turns (specs/apache_http2.md). Server-wide, so a
+# single site's vhost and a container host's proxy vhosts are both covered and
+# no vhost is rendered again.
+#
+#   - Over TLS only. Ubuntu's own mods-available/http2.conf also offers h2c,
+#     HTTP/2 without TLS, and a2enmod links it beside the module. That link is
+#     removed on every run, so the Protocols line here is the only one.
+#   - Twenty requests at once per connection: every page fits or nearly does,
+#     and a request past it waits in the browser. Each one holds a PHP worker.
+#   - Not in a site container: the host's proxy speaks HTTP/1.1 to it, so the
+#     module there would be more to patch and nothing gained.
+#   - Only under the event worker model: mod_http2 does nothing under prefork.
+#   - Inside <IfModule>, so the file is inert, never a parse error, wherever
+#     the module is not loaded.
+H2_CONF="${APACHE_DIR}/conf-available/joinery-http2.conf"
+H2_LINK="${APACHE_DIR}/conf-enabled/joinery-http2.conf"
+H2_MOD="${APACHE_DIR}/mods-enabled/http2.load"
+H2_STOCK="${APACHE_DIR}/mods-enabled/http2.conf"
+if [[ ! -d "${APACHE_DIR}" || "${IN_CONTAINER}" == 1 ]]; then
+    :
+elif [[ ! -e "${APACHE_DIR}/mods-enabled/mpm_event.load" ]]; then
+    say "Apache here does not run the event worker model - HTTP/2 left off"
+else
+    CANDIDATE="$(mktemp)"
+    cat > "${CANDIDATE}" <<'EOF'
+# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive.
+#
+# Visitors' browsers are answered over HTTP/2 when they ask for it over TLS,
+# and over HTTP/1.1 otherwise. One connection carries at most twenty requests
+# at once; the rest wait their turn in the browser.
+<IfModule http2_module>
+Protocols h2 http/1.1
+H2MaxSessionStreams 20
+</IfModule>
+EOF
+    H2_PREVIOUS=""
+    if [[ -f "${H2_CONF}" ]]; then
+        H2_PREVIOUS="$(mktemp)"
+        cp "${H2_CONF}" "${H2_PREVIOUS}"
+    fi
+    H2_CHANGED=0
+    H2_MOD_HERE=0
+    H2_STOCK_HERE=0
+    H2_FAILED=0
+    if install_file "${H2_CONF}" "${CANDIDATE}"; then
+        H2_CHANGED=1
+        say "wrote ${H2_CONF}"
+    fi
+    rm -f "${CANDIDATE}"
+
+    if [[ "${RUN_SYSTEM}" == 1 ]]; then
+        if command -v a2enmod >/dev/null 2>&1; then
+            if [[ ! -e "${H2_MOD}" ]]; then
+                a2enmod -q http2 >/dev/null 2>&1 && H2_CHANGED=1 && H2_MOD_HERE=1 && say "enabled mod_http2"
+            fi
+            if [[ ! -e "${H2_LINK}" ]]; then
+                a2enconf -q joinery-http2 >/dev/null 2>&1 && H2_CHANGED=1 && say "enabled joinery-http2.conf"
+            fi
+        fi
+        if [[ -L "${H2_STOCK}" ]] && rm -f "${H2_STOCK}"; then
+            H2_CHANGED=1
+            H2_STOCK_HERE=1
+            say "took Ubuntu's http2.conf out of mods-enabled - it offers HTTP/2 without TLS"
+        fi
+        if [[ "${H2_CHANGED}" == 1 ]] && command -v apache2ctl >/dev/null 2>&1; then
+            if ! apache_accepts; then
+                if [[ -n "${H2_PREVIOUS}" ]]; then
+                    cat "${H2_PREVIOUS}" > "${H2_CONF}"
+                else
+                    rm -f "${H2_CONF}" "${H2_LINK}"
+                fi
+                if [[ "${H2_MOD_HERE}" == 1 ]]; then
+                    a2dismod -q http2 >/dev/null 2>&1
+                elif [[ "${H2_STOCK_HERE}" == 1 ]]; then
+                    ln -s ../mods-available/http2.conf "${H2_STOCK}"
+                fi
+                H2_FAILED=1
+                FAILED=1
+            else
+                apache_reload
+            fi
+        fi
+        if [[ "${H2_FAILED}" == 0 && ! ( -e "${H2_MOD}" && -e "${H2_LINK}" ) ]]; then
+            warn "mod_http2 or joinery-http2.conf could not be enabled - visitors are answered over HTTP/1.1"
+            FAILED=1
+        fi
+    else
+        # Override mode stands in for a2enconf so a second run has nothing to do.
+        if [[ ! -e "${H2_LINK}" ]]; then
+            mkdir -p "${APACHE_DIR}/conf-enabled"
+            ln -s ../conf-available/joinery-http2.conf "${H2_LINK}"
+            say "would run: a2enmod http2; a2enconf joinery-http2"
+        fi
+        if [[ -L "${H2_STOCK}" ]] && rm -f "${H2_STOCK}"; then
+            say "took Ubuntu's http2.conf out of mods-enabled - it offers HTTP/2 without TLS"
+        fi
+    fi
+    [[ -n "${H2_PREVIOUS}" ]] && rm -f "${H2_PREVIOUS}"
 fi
 
 # --- 2. fail2ban -------------------------------------------------------------
