@@ -22,6 +22,7 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
+ * @version 1.11.0 - a device_link opened with a public key gets a code made from that key (DeviceLink::issue_code)
  * @version 1.10.0 - device_pubkey is a 1216-byte X-Wing key (specs/post_quantum_sealing.md R3)
  * @version 1.9.0
  * @changelog 1.9.0 - auth/login refuses a machine account with 403 (machine_accounts.md)
@@ -243,7 +244,7 @@ class ApiAuthEndpoint {
 			}
 		}
 
-		$code = DeviceLink::generate_code();
+		list($code, $code_nonce) = DeviceLink::issue_code($pubkey);
 		$poll_token = bin2hex(random_bytes(32));
 
 		$link = new DeviceLink(NULL);
@@ -253,6 +254,7 @@ class ApiAuthEndpoint {
 		$link->set('dlk_platform', $platform);
 		if ($pubkey !== '') {
 			$link->set('dlk_device_pubkey', $pubkey);
+			$link->set('dlk_code_nonce', $code_nonce);
 		}
 		$link->set('dlk_request_ip', substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45));
 		$link->set('dlk_status', DeviceLink::STATUS_PENDING);

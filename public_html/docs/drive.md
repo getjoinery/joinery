@@ -992,6 +992,19 @@ minted secret SecretBox-encrypted at rest and deliverable once.
 The daily retention sweep removes finished rows past
 `drive_device_link_grace_minutes` (default 60).
 
+**The code names the device's key.** A device that offers a public key gets a
+code made from it: the first 40 bits of SHA-256 over a fixed prefix, a random
+nonce kept on the row (`dlk_code_nonce`) and the key
+(`DeviceLink::code_for_key()`; the nonce gives a device that keeps its key a new
+code each time). The code reaches the person from the device; the key reaches
+the approval page from the row. Before sealing any vault the page works the
+code out again from the key and nonce `drive_device_link_info` hands it
+(`keyIsTheCodes()` in `assets/js/device-link.js`) and hands nothing over when it
+is not the code the person arrived with, so a public key changed on the row
+receives no vault. A device that offers no key gets a random code and can be
+handed none. Pinned by `tests/vault/device_link_code_gate.sh` and
+`tests/functional/drive/sync_contract_test.php`, which share one vector.
+
 Codes are 8 characters of a Crockford-style alphabet, and lookalike characters
 fold on entry (`O`→`0`, `I`/`L`→`1`) so a font cannot defeat someone reading a
 code off another screen. Wrong codes are counted per IP address rather than per

@@ -64,7 +64,7 @@ function device_key_enroll_logic(array $input): LogicResult {
 		return LogicResult::error('device_pubkey must be standard base64 of a ' . XWing::PUBLIC_KEY_BYTES . '-byte X-Wing public key.');
 	}
 
-	$code = DeviceLink::generate_code();
+	list($code, $code_nonce) = DeviceLink::issue_code($pubkey);
 	$poll_token = bin2hex(random_bytes(32));
 
 	$link = new DeviceLink(NULL);
@@ -73,6 +73,7 @@ function device_key_enroll_logic(array $input): LogicResult {
 	$link->set('dlk_device_name', substr($device_name, 0, 64));
 	$link->set('dlk_platform', $platform);
 	$link->set('dlk_device_pubkey', $pubkey);
+	$link->set('dlk_code_nonce', $code_nonce);
 	$link->set('dlk_request_ip', substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45));
 	$link->set('dlk_status', DeviceLink::STATUS_PENDING);
 	$link->set('dlk_usr_user_id', $user_id);

@@ -316,7 +316,9 @@ the public half. In the approving browser — the one place the vault can be unl
 drive session (`JoinerySealed.session('drive')`, through the core unlock
 ceremony) seals the vault **secret** key to that public key
 (`session.sealSecretKeyTo(devicePublicKey)`, the standard sealed-box primitive)
-and posts the result as `sealed_vault_key`. Any other browser-held vault the
+and posts the result as `sealed_vault_key`. It seals only to a key the link
+code was made from (`docs/drive.md` § Device linking), so a key changed on the
+ceremony row is handed nothing. Any other browser-held vault the
 user chose rides beside it in `sealed_vault_keys` (`{scope: blob}`), each with
 its own unlock (`docs/sealed_vault.md` § Handing a vault to a device). The
 server stores ciphertext it has no key for, holds it until the device polls

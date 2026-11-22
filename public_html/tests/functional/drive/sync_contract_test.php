@@ -275,6 +275,36 @@ check($info->data['device_name'] === 'Test Workstation', 'the ceremony reports t
 check($info->data['request_ip'] === '198.51.100.7', 'the ceremony reports where the request came from');
 check($info->data['supports_vault'] === true, 'a device with a public key can receive the vault key');
 
+// A device that offers a key gets a code made from that key, and the page is
+// handed what it needs to work the code out again (assets/js/device-link.js).
+$vector_key = base64_encode(str_repeat("\x07", XWing::PUBLIC_KEY_BYTES));
+check(DeviceLink::code_for_key($vector_key, base64_encode(str_repeat("\x09", 16))) === 'H8ME3V53',
+	'a key and nonce give the known code (the vector tests/vault/device_link_code.mjs holds too)');
+$keyed_pub = base64_encode(random_bytes(XWing::PUBLIC_KEY_BYTES));
+list($keyed_code, $keyed_nonce) = DeviceLink::issue_code($keyed_pub);
+list($again_code, $again_nonce) = DeviceLink::issue_code($keyed_pub);
+check(strlen($keyed_code) === 8 && $keyed_code === DeviceLink::normalize_code($keyed_code)
+	&& $keyed_code === DeviceLink::code_for_key($keyed_pub, (string)$keyed_nonce), 'an issued code is the one its key and nonce give');
+check($again_nonce !== $keyed_nonce && $again_code !== $keyed_code, 'the same key gets a new code each time');
+check(DeviceLink::code_for_key(base64_encode(random_bytes(XWing::PUBLIC_KEY_BYTES)), (string)$keyed_nonce) !== $keyed_code,
+	'another key under the same nonce does not give that code');
+$plain_issue = DeviceLink::issue_code('');
+check(strlen($plain_issue[0]) === 8 && $plain_issue[1] === null, 'a device with no key gets a random code and no nonce');
+$keyed = new DeviceLink(NULL);
+$keyed->set('dlk_code_hash', DeviceLink::hash_code($keyed_code));
+$keyed->set('dlk_poll_token_hash', DeviceLink::hash_token(bin2hex(random_bytes(32))));
+$keyed->set('dlk_device_name', 'Keyed Workstation');
+$keyed->set('dlk_platform', SyncDevice::PLATFORM_WINDOWS);
+$keyed->set('dlk_device_pubkey', $keyed_pub);
+$keyed->set('dlk_code_nonce', $keyed_nonce);
+$keyed->set('dlk_status', DeviceLink::STATUS_PENDING);
+$keyed->set('dlk_expires_time', gmdate('Y-m-d H:i:s', time() + DeviceLink::TTL_SECONDS));
+$keyed->save();
+$made_links[] = $keyed->key;
+$keyed_info = drive_device_link_info_logic(array('code' => $keyed_code));
+check(!$keyed_info->error && $keyed_info->data['code_nonce'] === $keyed_nonce && $keyed_info->data['device_pubkey'] === $keyed_pub,
+	'the approval page is handed the key and the nonce its code was made from', (string)$keyed_info->error);
+
 // The one-time secret survives exactly one collection.
 $link->seal_secret('super-secret-plaintext');
 $link->save();

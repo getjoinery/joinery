@@ -15,6 +15,8 @@
  * (vault_scope_{scope}); each chosen one is unlocked and sealed the same way,
  * one unlock per vault, and travels in sealed_vault_keys.
  *
+ * @version 1.6 - a vault is sealed only to a device key the typed code was made from (keyIsTheCodes); a key that
+ *   does not match hands nothing over
  * @version 1.5 - its settings are the page's #device-link-config JSON block
  * @version 1.4 - the server names the device kind (phones included); a signed-in app's
  *   handover says to return to the app
@@ -82,6 +84,55 @@
 		}
 	}
 
+	// ---- the device's key is the one the code names ----------------------------
+
+	var CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+	var CODE_KEY_PREFIX = 'joinery-device-link-code:v1:';
+
+	// A typed code in canonical form, as the server folds it (DeviceLink::normalize_code).
+	function normalizeCode(raw) {
+		return String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '')
+			.replace(/O/g, '0').replace(/[IL]/g, '1').replace(/U/g, 'V');
+	}
+
+	function b64bytes(b64) {
+		var bin = atob(String(b64)), out = new Uint8Array(bin.length);
+		for (var i = 0; i < bin.length; i++) { out[i] = bin.charCodeAt(i); }
+		return out;
+	}
+
+	// The code a public key and nonce give (DeviceLink::code_for_key): the first
+	// 40 bits of SHA-256(prefix || nonce || key), 5 bits a character.
+	async function codeForKey(pubkeyB64, nonceB64) {
+		var prefix = new TextEncoder().encode(CODE_KEY_PREFIX), nonce = b64bytes(nonceB64), key = b64bytes(pubkeyB64);
+		var msg = new Uint8Array(prefix.length + nonce.length + key.length);
+		msg.set(prefix, 0); msg.set(nonce, prefix.length); msg.set(key, prefix.length + nonce.length);
+		var digest = new Uint8Array(await crypto.subtle.digest('SHA-256', msg));
+		var out = '', acc = 0, bits = 0;
+		for (var i = 0; out.length < 8; i++) {
+			acc = ((acc << 8) | digest[i]) & 0xffff;
+			bits += 8;
+			while (bits >= 5 && out.length < 8) {
+				bits -= 5;
+				out += CODE_ALPHABET[(acc >> bits) & 31];
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Whether the key this site named for the device is the one the code was
+	 * made from. The code came to the person from the device itself; the key
+	 * comes from this site's records. A vault's secret is sealed only to a key
+	 * that passes, so a key changed in those records hands nothing over.
+	 */
+	async function keyIsTheCodes(code, info) {
+		if (!info || !info.device_pubkey || !info.code_nonce) { return false; }
+		try {
+			return (await codeForKey(info.device_pubkey, info.code_nonce)) === normalizeCode(code);
+		} catch (e) { return false; }
+	}
+
 	// ---- the vault handoff ---------------------------------------------------
 
 	/**
@@ -121,6 +172,14 @@
 				}
 				if (!resolved || !resolved.device_pubkey) {
 					alertBox('This device cannot receive your vaults.', 'danger');
+					return;
+				}
+				// Always asked again for the code being approved, then checked.
+				await resolveCode();
+				if (!resolved) { return; }   // resolveCode said why
+				if (!(await keyIsTheCodes(code, resolved))) {
+					alertBox('Nothing was handed over. The key this site holds for that device is not the one its code was made from, '
+						+ 'so your vaults were not sent to it. Start again on the device; if this repeats, tell your site admin.', 'danger');
 					return;
 				}
 			}
@@ -210,6 +269,9 @@
 		if (form.joineryValidator || document.readyState === 'complete') { attach(); }
 		else { document.addEventListener('DOMContentLoaded', attach); }
 	}
+
+	// For tests/vault/device_link_code.mjs: the check on its own.
+	window.JoineryDeviceLink = { codeForKey: codeForKey, keyIsTheCodes: keyIsTheCodes, normalizeCode: normalizeCode };
 
 	function init() {
 		var field = codeField();

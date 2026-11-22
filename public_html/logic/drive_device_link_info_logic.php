@@ -11,6 +11,7 @@
  * This is the one place a link code can be probed from, so a run of wrong codes
  * from one address shuts that address out for a while.
  *
+ * @version 1.2 - code_nonce: the browser checks the device's key against the code before sealing to it
  * @version 1.1 - bound ceremonies: only their own user sees or acts on them; open to anyone holding a content vault
  */
 
@@ -55,6 +56,9 @@ function drive_device_link_info_logic(array $input): LogicResult {
 		// to seal anything to it.
 		'supports_vault' => ($link->get('dlk_device_pubkey') !== null && $link->get('dlk_device_pubkey') !== ''),
 		'device_pubkey'  => $link->get('dlk_device_pubkey'),
+		// With the key, what the code was made from: the browser works the code
+		// out again and hands a vault only to a key whose code is the one typed.
+		'code_nonce'     => $link->get('dlk_code_nonce'),
 	));
 }
 

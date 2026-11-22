@@ -26,6 +26,8 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * nothing, only the same user can approve or deny it, and the poll hands over
  * the sealed keys alone.
  *
+ * @version 1.3.0 - a device that offers a public key gets a code made from that key (code_for_key, dlk_code_nonce),
+ *   so the approving browser can tell a key changed on the row
  * @version 1.2.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.2.0 - dlk_bound: a ceremony opened by a signed-in app, bound to its key
  * @version 1.1.0 - dlk_sealed_vault_keys: one sealed secret per client-custody scope
@@ -82,6 +84,9 @@ class DeviceLink extends SystemBase {
 		'dlk_code_hash'          => array('access_class' => 'restricted', 'type' => 'char(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'dlk_poll_token_hash'    => array('access_class' => 'restricted', 'type' => 'char(64)', 'is_nullable' => false, 'required' => true, 'unique' => true),
 		'dlk_device_pubkey'      => array('type' => 'text', 'is_nullable' => true),
+		// The random value the code was made from together with the device's
+		// public key (code_for_key()); null where the device offered no key.
+		'dlk_code_nonce'         => array('type' => 'varchar(32)', 'is_nullable' => true),
 		'dlk_device_name'        => array('type' => 'varchar(64)', 'is_nullable' => false, 'required' => true),
 		'dlk_platform'           => array('type' => 'varchar(16)', 'is_nullable' => false, 'required' => true),
 		'dlk_request_ip'         => array('type' => 'varchar(45)', 'is_nullable' => true),
@@ -115,6 +120,48 @@ class DeviceLink extends SystemBase {
 			$out .= self::CODE_ALPHABET[random_int(0, $n - 1)];
 		}
 		return $out;
+	}
+
+	/** Random bytes mixed into a key's code, so a device that keeps its key gets a new code each time. */
+	const CODE_NONCE_BYTES = 16;
+	const CODE_KEY_PREFIX = 'joinery-device-link-code:v1:';
+
+	/**
+	 * The code of a device that offered a public key: the first 40 bits of
+	 * SHA-256(prefix || nonce || public key), as 8 characters of the alphabet.
+	 * The approving browser works the same code out from the key and nonce it
+	 * is handed (assets/js/device-link.js) and seals a vault only to a key
+	 * whose code is the one the person arrived with. The code reaches the
+	 * person from the device, so a public key changed on this row afterwards
+	 * no longer matches it.
+	 */
+	public static function code_for_key(string $pubkey_b64, string $nonce_b64): string {
+		$digest = hash('sha256', self::CODE_KEY_PREFIX . base64_decode($nonce_b64, true) . base64_decode($pubkey_b64, true), true);
+		$out = '';
+		$bits = 0;
+		$acc = 0;
+		for ($i = 0; strlen($out) < 8; $i++) {
+			$acc = ($acc << 8) | ord($digest[$i]);
+			$bits += 8;
+			while ($bits >= 5 && strlen($out) < 8) {
+				$bits -= 5;
+				$out .= self::CODE_ALPHABET[($acc >> $bits) & 31];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * The code for a new ceremony and the nonce to store with it: made from
+	 * the device's public key where it offered one, random where it did not.
+	 * @return array{0:string,1:?string} [code, nonce or null]
+	 */
+	public static function issue_code(string $pubkey_b64 = ''): array {
+		if ($pubkey_b64 === '') {
+			return array(self::generate_code(), null);
+		}
+		$nonce = base64_encode(random_bytes(self::CODE_NONCE_BYTES));
+		return array(self::code_for_key($pubkey_b64, $nonce), $nonce);
 	}
 
 	/**
