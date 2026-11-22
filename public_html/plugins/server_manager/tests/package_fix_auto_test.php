@@ -269,6 +269,19 @@ $r = PackageFixAuto::run($opts(array('now' => $now + 8 * 3600, 'state' => $r['st
 check(isset($r['state']['soak']['sources']['php8.5']) && (int)$r['state']['soak']['started'] === $started,
 	'php keeps soaking from when it started', json_encode($r['state']['soak'] ?? null));
 
+section('A stop that needed a person is tried again once the release changes');
+
+$sent = array(); $issued = array(); $channel = array();
+$tries = 0;
+$fail_once = function () use (&$tries) { $tries++; return array('status' => 'failed', 'failed' => array('CVE-2026-115560' => 'no key committed')); };
+$r = PackageFixAuto::run($opts(array('now' => $now, 'state' => array(), 'write' => $fail_once, 'release' => '0.8.642')));
+$r = PackageFixAuto::run($opts(array('now' => $now + 600, 'state' => $r['state'], 'write' => $fail_once, 'release' => '0.8.642')));
+check($tries === 1, 'the same release: not tried again', (string)$tries);
+$r = PackageFixAuto::run($opts(array('now' => $now + 1200, 'state' => $r['state'], 'release' => '0.8.643')));
+check(($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'built', 'a new release: tried again, and built this time',
+	json_encode($r['state']['attempts'] ?? null));
+check(count(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; })) === 1, 'and the person was told once');
+
 section('reviewer2 B14: a person\'s recipe already carries it');
 
 $sent = array(); $issued = array(); $channel = array();

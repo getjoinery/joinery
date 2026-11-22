@@ -3,6 +3,8 @@
 # build_root.sh - the Ubuntu 26.04 build root the publishing machine builds
 # package fixes in (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.5 - the build folder is made 711 (passable, not listable): the runner's record and the nobody
+#                patch dry-run's work tree live under it (live check on dev, 2026-11-22)
 # Version: 1.4 - build copies upstream_keys/ into the root beside build.sh (the upstream_release check)
 # Version: 1.3 - source: Ubuntu's source for one exact version, fetched and unpacked in the root,
 #                with its .dsc's SHA-256; newest: the newest Ubuntu version of a source; both for
@@ -141,7 +143,9 @@ create() {
     fi
     [[ -f "$DEBOOTSTRAP_SCRIPT" ]] || die "debootstrap has no Ubuntu script at ${DEBOOTSTRAP_SCRIPT}"
     mkdir -p "$BASE"
-    chmod 700 "$BASE"
+    # Passable, not listable: the automatic runner's record (read by the web
+    # page) and its work tree (the patch dry-run runs as nobody) live under it.
+    chmod 711 "$BASE"
     [[ -e "$ROOT" ]] && die "${ROOT} exists but is not a finished build root; move it aside and run create again"
     say "bootstrapping Ubuntu 26.04 into ${ROOT} (a few minutes)"
     rm -rf "${ROOT:?}.partial"

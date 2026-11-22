@@ -34,6 +34,9 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.3 - an attempt that needed a person is tried again once this tree's release changes (a key committed
+ *                or a fix to the runner arrives with a release); the same failure again tells nobody twice
+ *                (live check on dev, 2026-11-22)
  * @version 1.2 - reviewer2's re-review: a build that fails puts the previous automatic recipe back (B21);
  *                apt refusing the source counts once per report (B22); the set is issued again when this
  *                tree's release is newer than the served one's (B23); the set every machine has starts from
@@ -190,14 +193,18 @@ class PackageFixAuto {
 			}
 			$said[] = 'told of ' . count($new) . ' new fix(es)';
 		}
+		// Tried once per CVE; one that needed a person is tried again once this
+		// tree's release changes: a committed key or a runner fix comes with one.
+		$release = (string)($opts['release'] ?? trim((string)@file_get_contents($site . '/public_html/VERSION')));
 		$by_source = array();
 		foreach ($c['build'] as $u) {
-			if (!isset($state['attempts'][$u['source'] . ' ' . $u['cve']])) {
+			$a = $state['attempts'][$u['source'] . ' ' . $u['cve']] ?? null;
+			if ($a === null || (($a['status'] ?? '') === 'needs_person' && (string)($a['release'] ?? '') !== $release)) {
 				$by_source[$u['source']][$u['cve']] = $u;
 			}
 		}
 		foreach ($by_source as $source => $cves) {
-			$state = self::attempt($state, $site, $source, $cves, $watch, $now, $opts, $said, $dispatch);
+			$state = self::attempt($state, $site, $source, $cves, $watch, $now, $opts + array('release' => $release), $said, $dispatch);
 		}
 
 		$channel = $opts['channel_state'] ?? PackageFixChannel::state();
@@ -224,7 +231,6 @@ class PackageFixAuto {
 		$wide_lines = $state['wide_lines'];
 		// A machine installed from a newer release refuses a channel issued
 		// before it: issue again once this tree's release moves (B23).
-		$release = (string)($opts['release'] ?? trim((string)@file_get_contents($site . '/public_html/VERSION')));
 		$served_release = (string)($served['release'] ?? '');
 		$stale = $served !== null && preg_match('/^\d+\.\d+\.\d+$/', $release) && preg_match('/^\d+\.\d+\.\d+$/', $served_release)
 			&& version_compare($served_release, $release, '<');
@@ -283,9 +289,10 @@ class PackageFixAuto {
 
 	/** Try one package: find and write the recipe, then build it. */
 	private static function attempt(array $state, string $site, string $source, array $cves, array $watch, int $now, array $opts, array &$said, callable $dispatch): array {
-		$mark = function (array $state, string $status, string $step, string $reason) use ($source, $cves, $now) {
+		$release = (string)($opts['release'] ?? '');
+		$mark = function (array $state, string $status, string $step, string $reason) use ($source, $cves, $now, $release) {
 			foreach (array_keys($cves) as $cve) {
-				$state['attempts'][$source . ' ' . $cve] = array('status' => $status, 'step' => $step, 'reason' => $reason, 'at' => $now);
+				$state['attempts'][$source . ' ' . $cve] = array('status' => $status, 'step' => $step, 'reason' => $reason, 'at' => $now, 'release' => $release);
 			}
 			return $state;
 		};
@@ -349,7 +356,7 @@ class PackageFixAuto {
 			// upstream's fixed release, the release carries every one.
 			foreach (($w['fallback'] ?? null) === 'upstream_release' ? array() : (array)($w['failed'] ?? array()) as $cve => $why) {
 				if (isset($cves[$cve])) {
-					$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now);
+					$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now, 'release' => $release);
 					$state = self::tellNeedsPerson($state, $source, array($cve), 'finding the fix', $why, $now, $dispatch);
 				}
 			}

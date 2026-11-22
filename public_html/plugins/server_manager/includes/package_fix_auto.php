@@ -15,6 +15,7 @@
  * email. A failed unit would open a failed-service incident on this box,
  * which the soak reads as a test machine failing.
  *
+ * @version 1.1 - the build folder is made passable (711) on every run (live check on dev, 2026-11-22)
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') {
@@ -29,6 +30,10 @@ if (!is_dir($lock_dir) && !@mkdir($lock_dir, 0755, true)) {
 	echo "package fix runner: STOPPED - cannot create {$lock_dir}\n";
 	exit(0);
 }
+// Passable, not listable: the record it keeps here is read by the Fleet Security
+// page, and the patch dry-run's work tree under it is reached as nobody. A box
+// whose build root was made before build_root.sh 1.5 has it at 700.
+@chmod($lock_dir, 0711);
 $lock = fopen($lock_dir . '/.auto.lock', 'c');
 if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
 	echo "package fix runner: another run is still going\n";
