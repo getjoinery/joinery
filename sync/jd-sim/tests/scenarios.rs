@@ -28672,14 +28672,49 @@ fn a_file_a_keyless_guest_saved_in_the_vault_and_carried_out_is_held_and_said() 
     assert!(!world.server.tree().contains_key("note.txt"), "nothing is sent in the clear: {:?}", world.server.tree());
     let held: Vec<_> = guest.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
     assert_eq!(held.len(), 1, "the file kept here is said: {held:?}");
+    assert!(held[0].detail.contains("once this device has the vault's key"), "in words true on a device with no key: {}", held[0].detail);
     assert!(guest.fs.exists("note.txt"), "and it stays on this disk");
     assert_converged(&world);
+    // Said once, not again every pass.
+    world.pass(guest);
+    let again: Vec<_> = guest.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
+    assert_eq!(again.iter().map(|i| i.issue_id).collect::<Vec<_>>(), vec![held[0].issue_id], "the same notice stands: {again:?}");
 
     // Back into the vault's folder, it waits for a key again, and the notice
     // that it is held outside goes.
     guest.fs.user_rename("note.txt", "Private/note.txt");
+    world.pass(guest);
+    let after_one: Vec<_> = guest.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
+    assert!(after_one.is_empty(), "the notice goes in the pass the file goes back: {after_one:?}");
     assert!(world.settle().is_some(), "it goes quiet again");
     let held: Vec<_> = guest.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
     assert!(held.is_empty(), "nothing is held outside any more: {held:?}");
     assert!(!world.server.tree().contains_key("note.txt"), "and nothing went up in the clear");
+}
+
+#[test]
+fn a_file_saved_in_the_vault_and_carried_out_before_it_was_sent_is_said_once() {
+    // On the device that holds the key: the notice for a file held outside
+    // the vault before it was ever sent stands while the file does, and is not
+    // dropped and raised again every pass.
+    let vault = SimVault::new(9_861);
+    let mut world = World::new(9_861, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let holder = world.device("holder");
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/note.txt", b"saved somewhere private");
+    world.pass(holder);
+    assert!(!world.server.tree().keys().any(|p| p.starts_with("Private/")), "not sent yet: {:?}", world.server.tree());
+    holder.fs.user_rename("Private/note.txt", "note.txt");
+    holder.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it goes quiet");
+    let held: Vec<_> = holder.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
+    assert_eq!(held.len(), 1, "the file kept here is said: {held:?}");
+    assert!(held[0].detail.contains("to sync it encrypted"), "{}", held[0].detail);
+    world.pass(holder);
+    let again: Vec<_> = holder.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
+    assert_eq!(again.iter().map(|i| i.issue_id).collect::<Vec<_>>(), vec![held[0].issue_id], "the same notice stands: {again:?}");
 }

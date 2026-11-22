@@ -1011,19 +1011,19 @@ found at the folder's path it is recorded as the folder's **stand-in**
 (`stand_in` on the entry, kept apart from the agreed placement), and from then
 on it follows the server — renamed here when the vault is renamed or moved
 there, with the held files resolving their paths through it — and becomes the
-folder's directory when the key arrives. The
-tie is deliberately not an agreement: a stand-in the user removes never held a
-byte of the vault, so its going deletes nothing anywhere and the tie simply
-lapses, where a materialized folder's directory going is the user deleting it.
-Something else standing where the server has the vault is moved aside under a
-conflict name first, unless it is a folder this device tracks, whose own record
-says where it goes. A vault trashed on the server while files are held under
-its stand-in is parked out of scope rather than forgotten: the directory is not
-adopted, the files stay held and unsent, and the user is told; restored from
-the trash, it goes back to waiting for a key. An empty placeholder of a trashed
-vault is trashed with it, as a materialized empty vault folder is. On a disk
-that folds case, a stand-in the user respells is the same directory: the walk
-matches it by the disk's comparison key and the record takes the new spelling.
+folder's directory when the key arrives. The tie is deliberately not an
+agreement: a stand-in the user removes never held a byte of the vault, so its
+going deletes nothing anywhere and the tie simply lapses, where a materialized
+folder's directory going is the user deleting it. Something else standing where
+the server has the vault is moved aside under a conflict name first, unless it
+is a folder this device tracks, whose own record says where it goes. A vault
+trashed on the server while files are held under its stand-in is parked out of
+scope rather than forgotten: the directory is not adopted, the files stay held
+and unsent, and the user is told; restored from the trash, it goes back to
+waiting for a key. An empty placeholder of a trashed vault is trashed with it,
+as a materialized empty vault folder is. On a disk that folds case, a stand-in
+the user respells is the same directory: the walk matches it by the disk's
+comparison key and the record takes the new spelling.
 
 **Renaming** an encrypted file is a metadata re-encrypt, not a rename. The
 current blob is fetched, decrypted, its name field changed, and the result

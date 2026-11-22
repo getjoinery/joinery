@@ -237,8 +237,15 @@ pub fn run_pass(
             continue;
         }
         let stands = match issue.entity {
+            // Or saved in a vault and carried out before it was ever sent,
+            // which is held with no agreement to read the hold from. Dropped
+            // here and raised again by the round, the notice was a new one
+            // every pass.
             Some(id) => match env.store.get_entry(id)? {
-                Some(e) => held_outside_its_vault(env, &e)?,
+                Some(e) => {
+                    held_outside_its_vault(env, &e)?
+                        || (relative_path(env, &e)?.is_some() && held_and_never_sent(env, &e)?)
+                }
                 None => false,
             },
             None => false,
@@ -1094,6 +1101,8 @@ pub fn run_pass(
 
     let sealed_names_at_risk = sealed_names_this_disk_cannot_vouch_for(env, &observed)?;
     let mut names_held: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    // Files held outside the vault before they were ever sent, said this pass.
+    let mut said_never_sent: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
     // A record the round passes by, and the line of the `continue` that does
     // it: what a trace says about a record that got no plan (`PassTrace`).
     macro_rules! declined {
@@ -1560,6 +1569,7 @@ pub fn run_pass(
             // anyone (killplat-vault-onekey: forty seeds in three hundred).
             if relative_path(env, &entry)?.is_some() && held_and_never_sent(env, &entry)? {
                 say_it_was_never_sent(env, &entry)?;
+                said_never_sent.insert(entry.id);
             }
             declined!(traced_id);
         }
@@ -1644,6 +1654,7 @@ pub fn run_pass(
             // until it goes back.
             if held_and_never_sent(env, &entry)? {
                 say_it_was_never_sent(env, &entry)?;
+                said_never_sent.insert(entry.id);
                 declined!(traced_id);
             }
             // Carrying a held record's disk identity: very likely that held
@@ -2281,6 +2292,23 @@ pub fn run_pass(
         }
     }
 
+    // A notice for a file held before it was ever sent stands while this pass
+    // says it again, and goes in the pass it stops: the file back in a vault,
+    // or gone. The sweep at the top of the pass keeps it, so it is not raised
+    // anew every pass; this is where it ends.
+    for issue in env.store.open_issues()? {
+        if issue.kind != HELD_OUTSIDE_THE_VAULT {
+            continue;
+        }
+        let Some(id) = issue.entity else { continue };
+        let never_sent = match env.store.get_entry(id)? {
+            Some(e) => e.id.is_provisional(),
+            None => true,
+        };
+        if never_sent && !said_never_sent.contains(&id) {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
     // ---- decide, journal, do -------------------------------------------------
     let synced_total = env.store.synced_count()?;
     // Where every folder sits now, on each side, for the planner to order
@@ -8886,12 +8914,23 @@ fn clear_of_a_held_name(
 /// server has deleted meanwhile, which says something else (below).
 /// A file written in a vault and taken out of it before it was ever sent.
 fn say_it_was_never_sent(env: &ExecEnv, entry: &Entry) -> Result<(), ExecError> {
-    let detail = format!(
-        "{} was saved in a vault and moved out before it was uploaded, so it is kept only \
-         on this device and not uploaded. Move it back into the vault to sync it encrypted, \
-         or delete it.",
-        entry.effective_local_name()
-    );
+    // Back in the vault it syncs encrypted where this device holds the key;
+    // where it does not, it waits there for one, and the sentence says so.
+    let detail = if env.vault.is_some() {
+        format!(
+            "{} was saved in a vault and moved out before it was uploaded, so it is kept only \
+             on this device and not uploaded. Move it back into the vault to sync it encrypted, \
+             or delete it.",
+            entry.effective_local_name()
+        )
+    } else {
+        format!(
+            "{} was saved in a vault and moved out before it was uploaded, so it is kept only \
+             on this device and not uploaded. Move it back into the vault's folder to keep it \
+             for the vault: it syncs encrypted once this device has the vault's key. Or delete it.",
+            entry.effective_local_name()
+        )
+    };
     for issue in env.store.open_issues()? {
         if issue.kind == HELD_OUTSIDE_THE_VAULT && issue.entity == Some(entry.id) && issue.detail != detail {
             env.store.dismiss_issue(issue.issue_id)?;
