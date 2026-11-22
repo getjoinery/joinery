@@ -292,7 +292,7 @@ An operator who never tags a product never meets the feature.
 
 ### Tagging a product
 
-The **Ownership** dropdown on the admin product edit page offers five
+The **Ownership** dropdown on the admin product edit page offers six
 meanings, and writes the single `pro_ownership_tag` column:
 
 | Choice | Stored tag |
@@ -302,6 +302,7 @@ meanings, and writes the single `pro_ownership_tag` column:
 | Own once, shared with other products… | the tag the operator names |
 | Bundle — owning this grants every own-once product | `*` |
 | Each purchase is one more | `each-product-{id}`, derived |
+| Each purchase is one more, and its owner owns every own-once product | `each-all-product-{id}`, derived |
 
 Products sharing a tag count as the same thing, which is how a second product
 joins an existing group: pick its tag from the list of tags already in use.
@@ -314,6 +315,14 @@ three guards below refuses a buyer who already holds one. The bundle tag does
 not cover it, and a manual grant of it may be repeated.
 `Ownership::is_each_tag()` answers whether a tag is one of these.
 
+**Each purchase is one more, and its owner owns every own-once product** is the
+same thing with the bundle's reach: a per-site licence that includes
+everything. Each purchase records its own row and none is refused, and a buyer
+holding one live row owns every own-once tag in the store, on their account.
+The cart will not hold it beside a product it covers for the same recipient;
+two of it together are two licences. `Ownership::covers_all()` answers whether
+a tag has that reach (`*` or `each-all-product-{id}`).
+
 Ownership applies to **one-time purchases only**, enforced from both
 directions: saving a tag on a product with a subscription version fails
 validation, and adding a subscription version to a tagged product fails the
@@ -324,8 +333,8 @@ it, as a backstop.
 ### The ownership rule
 
 User U owns tag T when a row exists in `own_ownerships` with
-`own_usr_user_id = U`, `own_tag` in (T, `*`), no revoke time and no delete
-time. `Ownership::user_owns($user_id, $tag)` is the single authority; every
+`own_usr_user_id = U`, `own_tag` T or a tag that covers all (`*`,
+`each-all-product-{id}`), no revoke time and no delete time. `Ownership::user_owns($user_id, $tag)` is the single authority; every
 guard calls it.
 
 The store writes the row itself when a tagged order item is paid, in

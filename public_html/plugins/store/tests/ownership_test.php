@@ -33,7 +33,7 @@
  *                         product it covers for the same recipient, and two
  *                         recipients make two lines. The profile labels a tag
  *                         with the product names carrying it.
- *   7. Admin            — the ownership dropdown's four meanings round-trip, the
+ *   7. Admin            — the ownership dropdown's meanings round-trip, the
  *                         subscription boundary holds from both directions
  *                         (tag onto a subscription product, subscription version
  *                         onto a tagged product), revoke re-opens purchase, a
@@ -529,7 +529,7 @@ $untagged_page = harness_call_logic('plugins/store/logic/product_logic.php', 'pr
 check(empty($untagged_page->data['already_owned']), 'an untagged product is never already-owned');
 
 // ---------------------------------------------------------------------------
-section('Admin: the four meanings');
+section('Admin: the meanings');
 // ---------------------------------------------------------------------------
 
 $_SESSION['usr_user_id'] = 1;
@@ -642,6 +642,118 @@ if ($two_gifts_ok) {
 		'the same tagged product for two recipients goes in as two lines');
 }
 own_reset_cart();
+
+$_SESSION['usr_user_id'] = 1;
+$_SESSION['permission'] = 10;
+
+// ---------------------------------------------------------------------------
+section('A licence whose owner owns everything');
+// ---------------------------------------------------------------------------
+
+list($lic_id, $lic_err) = own_create_product('Licence all ' . $run_id, 'own-lic-all-' . $run_id, array(
+	'ownership_mode' => Product::OWNERSHIP_EACH_ALL,
+));
+check((bool)$lic_id, 'covers-everything licence product saved', (string)$lic_err);
+$lic = new Product($lic_id, TRUE);
+$lic_tag = Ownership::tag_each_all_for_product($lic_id);
+check($lic->get('pro_ownership_tag') === $lic_tag, 'a brand-new one derives each-all-product-{id} after the insert',
+	(string)$lic->get('pro_ownership_tag'));
+check($lic->get_ownership_mode() === Product::OWNERSHIP_EACH_ALL, 'the stored tag maps back to the sixth meaning');
+check($lic->ownership_repeats() === true, 'every purchase of it is one more');
+check(Ownership::is_each_tag($lic_tag) && Ownership::covers_all($lic_tag), 'its tag is an each tag that covers all');
+check(Ownership::covers_all(Ownership::TAG_ALL) && !Ownership::covers_all(Ownership::tag_each_for_product($lic_id))
+	&& !Ownership::covers_all($tag), 'covers_all: the bundle tag yes, a plain each tag and a named tag no');
+check(!in_array($lic_tag, MultiOwnership::tags_in_use(), true), 'tags_in_use() leaves the derived tag out');
+$lic_version = own_create_version($lic_id, 'Standard', '30.00');
+
+$holder = make_user('own_holder_' . $run_id);
+check(Ownership::user_owns($holder->key, $tag) === false, 'before the licence: does not own the tagged product');
+
+// Changing a product from "each" to "each, and owns everything" moves its rows.
+$plain_each = Ownership::tag_each_for_product($lic_id);
+$lic_row = own_grant($holder->key, $plain_each);
+check(Ownership::user_owns($holder->key, $tag) === false, 'a plain each row covers nothing else');
+$moved = Ownership::retag_purchases_of_product($lic_id, $plain_each, $lic_tag);
+$lic_row->load();
+check($moved === 1 && $lic_row->get('own_tag') === $lic_tag, 'retag moves the rows to each-all-product-{id}',
+	$moved . ' / ' . $lic_row->get('own_tag'));
+check(Ownership::user_owns($holder->key, $tag) === true, 'a licence holder owns a tagged product');
+check(Ownership::user_owns($holder->key, 'anything-' . $run_id) === true, 'and any other tag');
+
+$lic_row->set('own_revoked_time', gmdate('Y-m-d H:i:s'));
+$lic_row->save();
+check(Ownership::user_owns($holder->key, $tag) === false, 'a revoked licence covers nothing');
+$lic_row->set('own_revoked_time', NULL);
+$lic_row->save();
+
+$_SESSION['usr_user_id'] = $holder->key;
+$_SESSION['permission'] = 0;
+
+own_reset_cart();
+$holder_error = '';
+try {
+	ShoppingCart::current()->add_item($tagged, own_form_data($tagged_version, $holder->get('usr_email')));
+}
+catch (ShoppingCartException $e) {
+	$holder_error = $e->getMessage();
+}
+check(stripos($holder_error, 'already own') !== false, 'the cart refuses a holder the product the licence covers',
+	$holder_error);
+
+// A second and third licence are never refused, and sit in one cart together.
+own_reset_cart();
+$again_error = '';
+try {
+	ShoppingCart::current()->add_item($lic, own_form_data($lic_version, $holder->get('usr_email')));
+	ShoppingCart::current()->add_item($lic, own_form_data($lic_version, $holder->get('usr_email')));
+}
+catch (ShoppingCartException $e) {
+	$again_error = $e->getMessage();
+}
+check($again_error === '' && count(ShoppingCart::current()->items) === 2,
+	'a holder adds two more licences to one cart', $again_error);
+
+// A covered product cannot join a cart holding the licence, for the same recipient.
+$_SESSION['usr_user_id'] = $fresh->key;
+own_reset_cart();
+ShoppingCart::current()->add_item($lic, own_form_data($lic_version, $fresh->get('usr_email')));
+$after_lic_error = '';
+try {
+	ShoppingCart::current()->add_item($tagged, own_form_data($tagged_version, $fresh->get('usr_email')));
+}
+catch (ShoppingCartException $e) {
+	$after_lic_error = $e->getMessage();
+}
+check(stripos($after_lic_error, 'bundle') !== false, 'a covered product cannot join a cart holding the licence',
+	$after_lic_error);
+
+// And the reverse order.
+own_reset_cart();
+ShoppingCart::current()->add_item($tagged, own_form_data($tagged_version, $fresh->get('usr_email')));
+$before_lic_error = '';
+try {
+	ShoppingCart::current()->add_item($lic, own_form_data($lic_version, $fresh->get('usr_email')));
+}
+catch (ShoppingCartException $e) {
+	$before_lic_error = $e->getMessage();
+}
+check(stripos($before_lic_error, 'bundle') !== false, 'the licence cannot join a cart holding a product it covers',
+	$before_lic_error);
+
+// For a different recipient it is a different ownership.
+$gift_lic_error = '';
+try {
+	ShoppingCart::current()->add_item($lic, own_form_data($lic_version, $giftee->get('usr_email')));
+}
+catch (ShoppingCartException $e) {
+	$gift_lic_error = $e->getMessage();
+}
+check($gift_lic_error === '' && count(ShoppingCart::current()->items) === 2,
+	'the licence for a different recipient goes in beside it', $gift_lic_error);
+own_reset_cart();
+
+$lic_row->set('own_revoked_time', gmdate('Y-m-d H:i:s'));
+$lic_row->save();
 
 $_SESSION['usr_user_id'] = 1;
 $_SESSION['permission'] = 10;

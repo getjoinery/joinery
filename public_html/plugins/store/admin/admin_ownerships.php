@@ -7,7 +7,7 @@
  * lists those ownerships, lets you revoke one (which re-opens purchase, the
  * companion to a refund) and lets you grant one by hand for comps and support.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -93,9 +93,7 @@ foreach ($ownerships as $ownership) {
 		: 'Unknown user';
 
 	$tag = $ownership->get('own_tag');
-	$tag_label = ($tag === Ownership::TAG_ALL)
-		? '<code>*</code> (all-access)'
-		: '<code>' . htmlspecialchars($tag) . '</code>';
+	$tag_label = '<code>' . htmlspecialchars($tag) . '</code>' . (Ownership::covers_all($tag) ? ' (all-access)' : '');
 	$rowvalues[] = '<a href="/plugins/store/admin/admin_ownership_edit?own_ownership_id='
 		. $ownership->key . '">' . $tag_label . '</a>';
 

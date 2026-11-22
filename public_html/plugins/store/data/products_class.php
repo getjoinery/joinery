@@ -28,6 +28,7 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.11 - OWNERSHIP_EACH_ALL: one more per purchase, and its owner owns every own-once product
  * @version 1.10 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.9 - the name_like filter's value is quoted and product_id_is_not is a whole number, never joined into the condition
  * @version 1.8 - OWNERSHIP_EACH: every purchase records one more ownership and none refuses a repeat (ownership_repeats())
@@ -78,7 +79,7 @@ class Product extends SystemBase {
 
 	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
-	// The four meanings own-once can have on the admin product edit page. The
+	// The meanings own-once can have on the admin product edit page. The
 	// stored value is always pro_ownership_tag; these name what a given tag
 	// means so the operator never faces a blank string field.
 	const OWNERSHIP_NONE   = 1;   // no tag — buy it as often as you like
@@ -86,6 +87,7 @@ class Product extends SystemBase {
 	const OWNERSHIP_SHARED = 3;   // operator-named tag shared with other products
 	const OWNERSHIP_BUNDLE = 4;   // the all-access tag
 	const OWNERSHIP_EACH   = 5;   // tag derived as each-product-{id}: one more per purchase, never refused
+	const OWNERSHIP_EACH_ALL = 6; // tag derived as each-all-product-{id}: as EACH, and its owner owns every own-once product
 
 	protected static $foreign_key_actions = [
 		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
@@ -162,7 +164,7 @@ public function get_requirement_info($output='text') {
 	
 	//GET ALL OF THE ADDITIONAL PRODUCT REQUIREMENTS FOR THIS PRODUCT
 	/**
-	 * Which of the five ownership meanings this product's stored tag carries.
+	 * Which of the six ownership meanings this product's stored tag carries.
 	 * The inverse of what the admin product edit page writes.
 	 */
 	public function get_ownership_mode() {
@@ -178,6 +180,9 @@ public function get_requirement_info($output='text') {
 		}
 		if ($this->key && $tag === Ownership::tag_each_for_product($this->key)) {
 			return self::OWNERSHIP_EACH;
+		}
+		if ($this->key && $tag === Ownership::tag_each_all_for_product($this->key)) {
+			return self::OWNERSHIP_EACH_ALL;
 		}
 		return self::OWNERSHIP_SHARED;
 	}

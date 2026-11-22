@@ -381,15 +381,26 @@ class ShoppingCart {
 		//the payment-time recorder credits, so an owner can still buy a gift.
 		//Unknown identity passes; the charge-time guard is the authority.
 		$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
-		//A product every purchase of which is one more is never refused here.
-		if ($ownership_tag !== '' && !$product_version->is_subscription() && !Ownership::is_each_tag($ownership_tag)) {
+		//A product every purchase of which is one more is never refused for
+		//being owned. One whose owner owns everything is still not sold
+		//beside a product it covers.
+		$ownership_repeats = Ownership::is_each_tag($ownership_tag);
+		$ownership_covers_all = Ownership::covers_all($ownership_tag);
+		if ($ownership_tag !== '' && !$product_version->is_subscription() && (!$ownership_repeats || $ownership_covers_all)) {
 			$added_for = strtolower(trim((string)($form_data['email'] ?? '')));
 
 			foreach($this->items as $existing_item) {
 				$item_product = $existing_item[1];
 				$item_data = $existing_item[2];
 				$item_tag = trim((string)$item_product->get('pro_ownership_tag'));
-				if ($item_tag === '' || Ownership::is_each_tag($item_tag)) {
+				$item_repeats = Ownership::is_each_tag($item_tag);
+				$item_covers_all = Ownership::covers_all($item_tag);
+				if ($item_tag === '' || ($item_repeats && !$item_covers_all)) {
+					continue;
+				}
+				//Two of a product every purchase of which is one more are
+				//two licences, whatever else they cover.
+				if ($ownership_repeats && $item_repeats) {
 					continue;
 				}
 				//A line for a different recipient is a different ownership —
@@ -404,7 +415,7 @@ class ShoppingCart {
 				}
 				//A bundle covers every tag: buying one beside a product it
 				//covers would sell the same ownership twice in one order.
-				if ($item_tag === Ownership::TAG_ALL || $ownership_tag === Ownership::TAG_ALL) {
+				if ($item_covers_all || $ownership_covers_all) {
 					throw new ShoppingCartException(
 						'"' . htmlspecialchars($product->get('pro_name')) . '" and "' . htmlspecialchars($item_product->get('pro_name'))
 						. '" cannot be bought together — one is a bundle that already covers the other. '
@@ -421,7 +432,7 @@ class ShoppingCart {
 				$ownership_user_id = $session->get_user_id() ?: NULL;
 			}
 
-			if ($ownership_user_id && Ownership::user_owns($ownership_user_id, $ownership_tag)) {
+			if (!$ownership_repeats && $ownership_user_id && Ownership::user_owns($ownership_user_id, $ownership_tag)) {
 				if ($ownership_user_id == $session->get_user_id()) {
 					throw new ShoppingCartException(
 						'You already own "' . htmlspecialchars($product->get('pro_name')) . '". '

@@ -17,9 +17,14 @@ class OwnershipException extends SystemBaseException {}
  * may hold as many rows as they bought, nothing refuses a repeat, and the
  * bundle tag does not cover it.
  *
+ * A tag derived as each-all-product-{id} is both: every purchase is one more,
+ * and whoever holds a live row owns every own-once tag, as the bundle tag's
+ * holder does (a per-site licence that includes everything).
+ *
  * own_license_key is fulfillment's business, not ownership's: an operator
  * whose product mails out a key string stamps it here. Core never reads it.
  *
+ * Version: 1.3.0 - each-all-product-{id} tags: one more per purchase, and the holder owns every own-once tag (tag_each_all_for_product, covers_all)
  * Version: 1.2.0 - retag_purchases_of_product(): a product's buyers keep owning it when its tag changes
  * Version: 1.1.0 - each-product-{id} tags: every purchase is one more (tag_each_for_product, is_each_tag)
  */
@@ -58,8 +63,8 @@ class Ownership extends SystemBase {
 	/**
 	 * Does this user own this tag?
 	 *
-	 * True when they hold a live, un-revoked row for the tag itself or for the
-	 * all-access tag. This is the single authority — every guard calls it.
+	 * True when they hold a live, un-revoked row for the tag itself or for a
+	 * tag that covers every tag (covers_all()). This is the single authority — every guard calls it.
 	 */
 	public static function user_owns($user_id, $tag) {
 		$user_id = (int)$user_id;
@@ -92,6 +97,26 @@ class Ownership extends SystemBase {
 	}
 
 	/**
+	 * The tag a product with "Each purchase is one more, and its owner owns
+	 * every own-once product" gets. Derived, never typed.
+	 */
+	public static function tag_each_all_for_product($product_id) {
+		return 'each-all-product-' . (int)$product_id;
+	}
+
+	/** Does a live row under this tag own every own-once tag? */
+	public static function covers_all($tag) {
+		$tag = trim((string)$tag);
+		return $tag === self::TAG_ALL || strpos($tag, 'each-all-product-') === 0;
+	}
+
+	/** Is this one of the tags derived from this product's id? */
+	private static function is_derived_tag_of($product_id, $tag) {
+		return in_array($tag, array(self::tag_for_product($product_id), self::tag_each_for_product($product_id),
+			self::tag_each_all_for_product($product_id)), true);
+	}
+
+	/**
 	 * Move the ownerships bought with this product from its old tag to its new
 	 * one, when an operator changes what owning it means (own once to each
 	 * purchase is one more, say). When the old tag was the product's own
@@ -107,7 +132,7 @@ class Ownership extends SystemBase {
 			return 0;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
-		if ($old_tag === self::tag_for_product($product_id) || $old_tag === self::tag_each_for_product($product_id)) {
+		if (self::is_derived_tag_of($product_id, $old_tag)) {
 			$q = $db->prepare('UPDATE own_ownerships SET own_tag = ? WHERE own_tag = ?');
 			$q->execute(array($new_tag, $old_tag));
 			return $q->rowCount();
@@ -120,7 +145,8 @@ class Ownership extends SystemBase {
 
 	/** Is this a tag every purchase of which is one more (never own-once)? */
 	public static function is_each_tag($tag) {
-		return strpos(trim((string)$tag), 'each-product-') === 0;
+		$tag = trim((string)$tag);
+		return strpos($tag, 'each-product-') === 0 || strpos($tag, 'each-all-product-') === 0;
 	}
 
 	/**
@@ -196,9 +222,11 @@ class MultiOwnership extends SystemMultiBase {
 			$filters['own_tag'] = [$this->options['tag'], PDO::PARAM_STR];
 		}
 
-		// The ownership question: a row for this tag, or an all-access row.
+		// The ownership question: a row for this tag, or a row that covers
+		// every tag (Ownership::covers_all()).
 		if (isset($this->options['covers_tag'])) {
-			$filters['own_tag'] = SqlCondition::bind('IN (?, ?)', (string)$this->options['covers_tag'], Ownership::TAG_ALL);
+			$filters['(own_tag'] = SqlCondition::bind("IN (?, ?) OR own_tag LIKE 'each-all-product-%')",
+				(string)$this->options['covers_tag'], Ownership::TAG_ALL);
 		}
 
 		if (isset($this->options['revoked'])) {
@@ -224,6 +252,7 @@ class MultiOwnership extends SystemMultiBase {
 			AND pro_ownership_tag <> " . $dblink->quote(Ownership::TAG_ALL) . "
 			AND pro_ownership_tag NOT LIKE 'product-%'
 			AND pro_ownership_tag NOT LIKE 'each-product-%'
+			AND pro_ownership_tag NOT LIKE 'each-all-product-%'
 			AND pro_delete_time IS NULL ORDER BY pro_ownership_tag";
 		$tags = array();
 		foreach ($dblink->query($sql, PDO::FETCH_ASSOC) as $row) {

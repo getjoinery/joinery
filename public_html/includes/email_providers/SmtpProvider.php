@@ -12,6 +12,7 @@
  * forwarding relay. The EmailMessage→PHPMailer mapping lives once in
  * SmtpMailer::applyMessage().
  *
+ * @version 1.7 - getSpfMechanism(): a host at SMTP2GO answers as the SMTP2GO provider does (walkthrough finding 175)
  * @version 1.6 - send() notes its signing to MailSendOutcome: signed (selector, d=), or handed on to
  *   the SMTP host it submits to, or unsigned with the signer's reason
  * @version 1.5 - SendReceiptSource: the server's reply to DATA (queue id and line) is the
@@ -58,6 +59,11 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay, SendReceipt
         $host = strtolower(trim((string)Globalvars::get_instance()->get_setting('smtp_host')));
         if ($host === '' || $host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
             return '';
+        }
+        // SMTP2GO takes submissions on SMTP as it does on its API, and sends
+        // them the same way: what it prescribes is the answer.
+        if ($host === 'smtp2go.com' || substr($host, -12) === '.smtp2go.com' || substr($host, -12) === '.smtp2go.net') {
+            return Smtp2GoProvider::getSpfMechanism($domain);
         }
         return 'a:' . $host;
     }

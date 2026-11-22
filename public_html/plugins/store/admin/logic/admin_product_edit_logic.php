@@ -154,8 +154,13 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$derive_ownership_tag = false;
 		$ownership_tag_before = $product->key ? trim((string)$product->get('pro_ownership_tag')) : '';
 
-		if($ownership_mode == Product::OWNERSHIP_ONCE || $ownership_mode == Product::OWNERSHIP_EACH){
-			$derive = $ownership_mode == Product::OWNERSHIP_EACH ? 'tag_each_for_product' : 'tag_for_product';
+		$derived_tag_of = array(
+			Product::OWNERSHIP_ONCE     => 'tag_for_product',
+			Product::OWNERSHIP_EACH     => 'tag_each_for_product',
+			Product::OWNERSHIP_EACH_ALL => 'tag_each_all_for_product',
+		);
+		if(isset($derived_tag_of[$ownership_mode])){
+			$derive = $derived_tag_of[$ownership_mode];
 			if($product->key){
 				$product->set('pro_ownership_tag', Ownership::$derive($product->key));
 			}
@@ -172,7 +177,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 					. 'or choose a different Ownership option.');
 			}
 			if(Ownership::is_each_tag($ownership_tag_input)){
-				return LogicResult::error('Tags starting each-product- are derived. Choose "Each purchase is one more" instead.');
+				return LogicResult::error('Tags starting each-product- or each-all-product- are derived. Choose an "Each purchase is one more" option instead.');
 			}
 			$product->set('pro_ownership_tag', $ownership_tag_input);
 		}
@@ -231,8 +236,8 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product->load();
 
 		if($derive_ownership_tag && $product->key){
-			$product->set('pro_ownership_tag', $ownership_mode == Product::OWNERSHIP_EACH
-				? Ownership::tag_each_for_product($product->key) : Ownership::tag_for_product($product->key));
+			$derive = $derived_tag_of[$ownership_mode];
+			$product->set('pro_ownership_tag', Ownership::$derive($product->key));
 			$product->save();
 		}
 
@@ -319,7 +324,7 @@ function admin_product_edit_logic(array $input): LogicResult {
 		return substr($fn, -15) === '_product_script';
 	}));
 
-	// Ownership control state: which of the four meanings the stored tag
+	// Ownership control state: which of the meanings the stored tag
 	// carries, plus the shared tags already in use for the suggestion list.
 	$ownership_mode = $product->get_ownership_mode();
 	$ownership_tags_in_use = MultiOwnership::tags_in_use();

@@ -190,6 +190,19 @@ try {
 	check(call_private($self, 'spfCoversMechanism', 'v=spf1 include:otherprovider.example -all', 'include:mailgun.org') === false,
 		'uncovered mechanism is not matched');
 
+	// An SMTP host names itself in SPF, except SMTP2GO's, which sends from
+	// its own return-path domain whichever way mail is handed to it.
+	$smtp_snapshot = harness_settings_snapshot();
+	$smtp_set = function ($host) use ($smtp_snapshot) {
+		harness_settings_restore(array_merge($smtp_snapshot, array('smtp_host' => $host)));
+		return SmtpProvider::getSpfMechanism('example.test');
+	};
+	check($smtp_set('smtp.custom.example') === 'a:smtp.custom.example', 'an SMTP host is the authorized sender');
+	check($smtp_set('mail.smtp2go.com') === '' && $smtp_set('mail-eu.smtp2go.com') === '',
+		'a host at SMTP2GO asks nothing of the domain\'s SPF');
+	check($smtp_set('notsmtp2go.com') === 'a:notsmtp2go.com', 'a host that only ends like SMTP2GO is not SMTP2GO');
+	harness_settings_restore($smtp_snapshot);
+
 	// -----------------------------------------------------------------------
 	section('ownership proofs from fleet state');
 

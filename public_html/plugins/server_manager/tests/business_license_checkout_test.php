@@ -417,4 +417,23 @@ $expect = array((int)$bought->key, (int)$spare->key);
 sort($expect);
 check($freed === $expect, 'both licences are free again', json_encode($freed));
 
+// ---------------------------------------------------------------------------
+section('A Founder licence that also covers every own-once product');
+
+$all_tag = Ownership::tag_each_all_for_product($founder->key);
+$held_before = count(BusinessLicense::held_by((int)$buyer->key));
+$founder_tag_was = trim((string)$founder->get('pro_ownership_tag'));
+$founder->set('pro_ownership_tag', $all_tag);
+$founder->save();
+Ownership::retag_purchases_of_product($founder->key, $founder_tag_was, $all_tag);
+BusinessLicense::forget();
+check(isset(BusinessLicense::offers()['founder']), 'the setup still offers it');
+check(BusinessLicense::kind_of_tag($all_tag) === 'founder', 'its ownerships read as Founder licences');
+check($held_before > 0 && count(BusinessLicense::held_by((int)$buyer->key)) === $held_before,
+	'the buyer holds the same licences after the change', (string)$held_before);
+check(Ownership::user_owns((int)$buyer->key, Ownership::tag_for_product($once->key)) === true,
+	'and now owns an own-once product');
+check(Ownership::user_owns((int)$other->key, Ownership::tag_for_product($once->key)) === false,
+	'someone with no Founder licence does not');
+
 harness_finish();

@@ -195,6 +195,7 @@ $formwriter->dropinput('ownership_mode', 'Ownership', [
 		Product::OWNERSHIP_SHARED => 'Own once, shared with other products…',
 		Product::OWNERSHIP_BUNDLE => 'Bundle — owning this grants every own-once product',
 		Product::OWNERSHIP_EACH   => 'Each purchase is one more — recorded per purchase, never refused (a per-site licence)',
+		Product::OWNERSHIP_EACH_ALL => 'Each purchase is one more, and its owner owns every own-once product (a per-site licence that includes everything)',
 	],
 	'helptext' => 'An owner sees "You already own this" instead of a buy button, and checkout will not '
 		. 'charge them again. Products sharing a tag count as the same purchase. Applies to one-time '
@@ -205,6 +206,7 @@ $formwriter->dropinput('ownership_mode', 'Ownership', [
 		Product::OWNERSHIP_SHARED => ['show' => ['pro_ownership_tag'], 'hide' => []],
 		Product::OWNERSHIP_BUNDLE => ['show' => [], 'hide' => ['pro_ownership_tag']],
 		Product::OWNERSHIP_EACH   => ['show' => [], 'hide' => ['pro_ownership_tag']],
+		Product::OWNERSHIP_EACH_ALL => ['show' => [], 'hide' => ['pro_ownership_tag']],
 	],
 ]);
 

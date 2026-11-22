@@ -2,7 +2,7 @@
 /**
  * One ownership: who owns what, where it came from, and the actions on it.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 function admin_ownership_edit_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -34,7 +34,7 @@ function admin_ownership_edit_logic(array $input): LogicResult {
 
 	// Which products this ownership covers, so the operator can see what the
 	// buyer is exempt from without reading tags off the product list.
-	$covered_criteria = ($ownership->get('own_tag') === Ownership::TAG_ALL)
+	$covered_criteria = Ownership::covers_all($ownership->get('own_tag'))
 		? array('has_ownership_tag' => TRUE)
 		: array('ownership_tag' => $ownership->get('own_tag'));
 	$covered_products = new MultiProduct($covered_criteria, array('pro_name' => 'ASC'));

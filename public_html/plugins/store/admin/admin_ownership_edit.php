@@ -45,7 +45,7 @@ else {
 echo '</p>';
 
 echo '<p><strong>Tag:</strong> <code>' . htmlspecialchars($tag) . '</code>';
-if ($tag === Ownership::TAG_ALL) {
+if (Ownership::covers_all($tag)) {
 	echo ' &mdash; all-access: this covers every own-once product in the store.';
 }
 echo '</p>';
