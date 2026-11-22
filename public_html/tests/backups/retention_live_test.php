@@ -25,6 +25,7 @@
  *
  * Run: php tests/backups/retention_live_test.php
  *
+ * @version 1.1 - a target that locks what it writes is passed over: retention rightly keeps locked chains (B26)
  * @version 1.0
  */
 
@@ -39,6 +40,12 @@ $H = 3600;
 $targets = array();
 foreach (new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_backup_target_id' => 'ASC')) as $t) {
 	$p = (string)$t->get('bkt_provider');
+	// A target that locks what it writes keeps these chains for its lock
+	// days, so retention rightly deletes none of them; object_lock_live
+	// covers that case. Only an unlocked target can prove the deletion.
+	if ((int)$t->get('bkt_lock_days') > 0) {
+		continue;
+	}
 	if (in_array($p, array('b2', 'linode'), true) && !isset($targets[$p])) {
 		$targets[$p] = $t;
 	}
@@ -47,7 +54,7 @@ foreach (new MultiBackupTarget(array('deleted' => false, 'enabled' => true), arr
 foreach (array('b2' => 'Backblaze B2', 'linode' => 'Linode') as $provider => $label) {
 	section('Retention against a real ' . $label . ' bucket');
 	if (!isset($targets[$provider])) {
-		harness_skip($label . ' retention', 'no enabled ' . $label . ' backup target on this site');
+		harness_skip($label . ' retention', 'no enabled, unlocked ' . $label . ' backup target on this site');
 		continue;
 	}
 	$target = $targets[$provider];

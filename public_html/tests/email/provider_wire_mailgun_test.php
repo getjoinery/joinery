@@ -22,6 +22,7 @@
  *
  * Run: php tests/run.php --filter=provider_wire_mailgun
  *
+ * @version 1.2 - a picked domain the key may not send through falls back to the configured one (B25)
  * @version 1.1 - recipient-variables survive a name that is not UTF-8 (B13); file parts carry our own
  *   quoted Content-Disposition (B18); the pre-send domain lookup is not retried (B21); a batch leaves
  *   out the pinned Message-Id (B15); transport failures; send() chunks at 500; 201; the EU base
@@ -390,6 +391,33 @@ mg_mock(array(mg_json(array('id' => '<a@b>', 'message' => 'ok'))));
 check((string)mg_req()->getUri() === 'https://api.eu.mailgun.net/v3/mg.example.test/messages',
 	'mailgun_eu_api_link replaces the base');
 harness_set_setting_mem('mailgun_eu_api_link', 'https://api.mailgun.net');
+
+section('A picked account domain the key may not send through (B25)');
+
+$ss = new ReflectionProperty('MailgunProvider', 'sending_domain_state');
+$ss->setValue(null, array());
+$us = new ReflectionProperty('MailgunProvider', 'unsendable_domains');
+$us->setValue(null, array());
+$m = (new EmailMessage())->from('sender@other.example.test')->to('one@example.com')->subject('s')->text('t');
+mg_mock(array(
+	mg_json(array('domain' => array('name' => 'other.example.test', 'state' => 'active'))),   // pre-send lookup
+	mg_json(array('message' => 'Forbidden'), 401),                                           // send through other
+	mg_json(array('id' => '<x@y>', 'message' => 'Queued')),                                  // send through configured
+));
+check((new MailgunProvider())->send($m) === true, 'a 401 through the picked domain is sent again through the configured one');
+check(strpos((string)mg_req(1)->getUri(), '/v3/other.example.test/messages') !== false
+	&& strpos((string)mg_req(2)->getUri(), '/v3/mg.example.test/messages') !== false, 'tried the picked domain, then mg.example.test');
+// mg_mock() clears the domain-state cache, so the lookup is asked again; the
+// domain the key may not send through is still remembered.
+mg_mock(array(mg_json(array('domain' => array('name' => 'other.example.test', 'state' => 'active'))),
+	mg_json(array('id' => '<x@z>', 'message' => 'Queued'))));
+check((new MailgunProvider())->send($m) === true && count($GLOBALS['mg_history']) === 2
+	&& strpos((string)mg_req(1)->getUri(), '/v3/mg.example.test/messages') !== false,
+	'the next send goes straight through the configured domain', (string)(mg_req(1) ? mg_req(1)->getUri() : ''));
+mg_mock(array(mg_json(array('message' => 'Forbidden'), 401)));
+$m2 = (new EmailMessage())->from('sender@mg.example.test')->to('one@example.com')->subject('s')->text('t');
+check((new MailgunProvider())->send($m2) === false && count($GLOBALS['mg_history']) === 1,
+	'a 401 through the configured domain itself is a failed send, not retried');
 
 harness_finish();
 

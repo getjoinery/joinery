@@ -8,6 +8,10 @@
  * signature covers (specs/plugin_own_vendor.md); vendorOverlaps() checks that
  * two copies of one library agree.
  *
+ * @version 1.15 - a vendor/ that is a mount point (every site container's) is updated in place: the new
+ *                autoloader files are renamed in one by one, opcache is given time, and only then do the
+ *                removed packages go; a mount point cannot be renamed, so neither swap could ever work there
+ *                (found live on wd5, 11-22)
  * @version 1.14 - constraints with a space after the operator (">= 8.1") and hyphen ranges ("8.1 - 8.5") are read
  *                right; an ext-* requirement a package in the tree provides is met; an extension is matched as
  *                composer names it (ext-zend-opcache); an unreadable sandbox state skips the plugin (reviewer2 C4-C7)
@@ -858,12 +862,18 @@ class ComposerValidator {
     /** @var string|null tests: the composer.lock the keep set is read from */
     private $pruneLock = null;
 
+    /** @var bool|null tests: whether vendor/ is a mount point (null: ask /proc/self/mountinfo) */
+    private $pruneMountPoint = null;
+
+    /** @var int|null tests: seconds to wait for opcache in the in-place update (null: opcache's own) */
+    private $pruneSettle = null;
+
 
 
     /**
      * Test seams for the prune, CLI only: 'mv' => fn(string $cmd): int,
      * 'composer' => fn(string $copy): bool, 'stop_after' => step number,
-     * 'lock' => composer.lock path.
+     * 'lock' => composer.lock path, 'mount_point' => bool, 'settle' => seconds.
      */
     public function usePruneSeamsForTest(array $seams): void {
         if (php_sapi_name() !== 'cli') {
@@ -873,6 +883,8 @@ class ComposerValidator {
         $this->pruneComposer = $seams['composer'] ?? null;
         $this->pruneStopAfter = isset($seams['stop_after']) ? (int)$seams['stop_after'] : null;
         $this->pruneLock = $seams['lock'] ?? null;
+        $this->pruneMountPoint = array_key_exists('mount_point', $seams) ? (bool)$seams['mount_point'] : null;
+        $this->pruneSettle = isset($seams['settle']) ? (int)$seams['settle'] : null;
     }
 
     /**
@@ -973,7 +985,7 @@ class ComposerValidator {
         if ($this->pruneStopAfter === 5) { return false; }
 
         // Step 6: swap.
-        if (!$this->swapIn($vendor, $new, $old)) {
+        if (!$this->swapIn($vendor, $new, $old, $unneeded)) {
             return false;
         }
         @unlink($vendor . '/.prune-new');
@@ -990,7 +1002,12 @@ class ComposerValidator {
      * out and the two renames run. mv's version is never asked: Ubuntu
      * 26.04's default mv is uutils, which has differed from GNU before.
      */
-    private function swapIn(string $vendor, string $new, string $old): bool {
+    private function swapIn(string $vendor, string $new, string $old, array $unneeded): bool {
+        // A site container mounts vendor/ from its own volume, and a mount
+        // point cannot be renamed (EBUSY): neither swap can work there.
+        if ($this->isMountPoint($vendor)) {
+            return $this->updateInPlace($vendor, $new, $unneeded);
+        }
         $nested = $vendor . '/' . basename($new);
         // -T: GNU mv reads an existing directory target as "move into it"
         // and tries to exchange with vendor/vendor.prune-new, which fails.
@@ -1033,6 +1050,113 @@ class ComposerValidator {
             $this->pruneLog[] = 'The swap did not complete (mv exit ' . $rc . '); vendor/ is as it was';
         }
         return false;
+    }
+
+    /** Is $path a mount point? Read from /proc/self/mountinfo, which a bind mount on the same device shows too. */
+    private function isMountPoint(string $path): bool {
+        if ($this->pruneMountPoint !== null) {
+            return $this->pruneMountPoint;
+        }
+        $real = realpath($path);
+        $info = @file_get_contents('/proc/self/mountinfo');
+        if ($real === false || !is_string($info)) {
+            return false;
+        }
+        foreach (explode("\n", $info) as $line) {
+            $f = explode(' ', $line);
+            if (isset($f[4]) && preg_replace_callback('/\\\\([0-7]{3})/', function ($m) { return chr(octdec($m[1])); }, $f[4]) === $real) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Update a vendor/ that cannot be renamed (a mount point) in place, in an
+     * order that never leaves it naming a file that is gone:
+     *   1. the copy's composer/ files and autoload.php replace the live ones,
+     *      each by a rename inside vendor/ (atomic per file); while that runs,
+     *      every file the old or the new maps name is still on disk, since
+     *      only removals differ;
+     *   2. wait for opcache to see the new maps (revalidate_freq);
+     *   3. only then remove the packages nothing names any more, and any
+     *      vendor/bin link left pointing at one.
+     * Refused when the copy's autoloader class is not the live one's, since
+     * a half-replaced autoloader would then mix two classes. A failure in 1
+     * leaves a vendor/ that loads (both maps' files are present); one in 3
+     * leaves unneeded folders nothing names, which the next upgrade removes.
+     */
+    private function updateInPlace(string $vendor, string $new, array $unneeded): bool {
+        $suffix = function ($dir) {
+            $src = (string)@file_get_contents($dir . '/composer/autoload_real.php');
+            return preg_match('/class (ComposerAutoloaderInit[A-Za-z0-9_]+)/', $src, $m) ? $m[1] : '';
+        };
+        $live_init = $suffix($vendor);
+        if ($live_init === '' || $live_init !== $suffix($new)) {
+            $this->pruneLog[] = 'vendor/ is a mount point and the copy\'s autoloader is not the live one\'s; vendor/ is as it was';
+            return false;
+        }
+
+        // 1. The autoloader files, each renamed into place inside vendor/.
+        $files = array('autoload.php');
+        foreach ((array)scandir($new . '/composer') as $f) {
+            if ($f !== '.' && $f !== '..' && is_file($new . '/composer/' . $f)) {
+                $files[] = 'composer/' . $f;
+            }
+        }
+        foreach ($files as $rel) {
+            $src = $new . '/' . $rel;
+            $dst = $vendor . '/' . $rel;
+            $tmp = $dst . '.prune-tmp';
+            if (!@copy($src, $tmp)) {
+                @unlink($tmp);
+                $this->pruneLog[] = 'vendor/ is a mount point; could not write ' . $rel . '; vendor/ still loads, the next upgrade tries again';
+                return false;
+            }
+            @chmod($tmp, fileperms($src) & 0777);
+            @chown($tmp, fileowner($src));
+            @chgrp($tmp, filegroup($src));
+            if (!@rename($tmp, $dst)) {
+                @unlink($tmp);
+                $this->pruneLog[] = 'vendor/ is a mount point; could not replace ' . $rel . '; vendor/ still loads, the next upgrade tries again';
+                return false;
+            }
+        }
+        foreach ((array)scandir($vendor . '/composer') as $f) {
+            if ($f !== '.' && $f !== '..' && is_file($vendor . '/composer/' . $f) && !file_exists($new . '/composer/' . $f)) {
+                @unlink($vendor . '/composer/' . $f);
+            }
+        }
+
+        // 2. Let opcache see the new maps before what the old ones named goes.
+        $settle = $this->pruneSettle ?? (class_exists('DeploymentHelper') ? DeploymentHelper::opcacheSettleSeconds() : 3);
+        if ($settle > 0) {
+            sleep($settle);
+        }
+
+        // 3. The packages nothing names now, then their empty vendor folders
+        // and dead vendor/bin links.
+        foreach ($unneeded as $name) {
+            if (!preg_match('#^[a-z0-9]([_.\-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$#', $name)) {
+                continue;
+            }
+            $dir = $vendor . '/' . $name;
+            if (is_dir($dir) && !is_link($dir)) {
+                $this->runShell('rm -rf -- ' . escapeshellarg($dir));
+            }
+            $parent = dirname($dir);
+            if (is_dir($parent) && count((array)@scandir($parent)) === 2) {
+                @rmdir($parent);
+            }
+        }
+        foreach ((array)@scandir($vendor . '/bin') as $f) {
+            $link = $vendor . '/bin/' . $f;
+            if ($f !== '.' && $f !== '..' && is_link($link) && !file_exists($link)) {
+                @unlink($link);
+            }
+        }
+        $this->pruneLog[] = 'Updated vendor/ in place (it is a mount point)';
+        return true;
     }
 
     /** Does vendor/ carry this run's marker (not a stale one from an earlier run)? */

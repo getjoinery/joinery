@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php --filter=composer_prune
  *
+ * @version 1.4 - a mount-point vendor/ is updated in place; a copy with another autoloader class is refused
  * @version 1.3 - the keep set is the lock alone: the plugin cases go with the plugin composer tier
  *   (specs/plugin_own_vendor.md WP4)
  * @version 1.2 - the plugin list is read once per prune (reviewer2 B24)
@@ -72,6 +73,8 @@ function cp_write_vendor(string $vendor, array $names): void {
 		$requires .= "require __DIR__ . '/" . $n . "/f.php';\n";
 	}
 	file_put_contents($vendor . '/composer/installed.json', json_encode($installed));
+	// The autoloader class composer names after the tree, as the in-place update compares it.
+	file_put_contents($vendor . '/composer/autoload_real.php', "<?php\nclass ComposerAutoloaderInitFixture {}\n");
 	file_put_contents($vendor . '/autoload.php', $requires);
 }
 
@@ -255,6 +258,31 @@ check($vh->pruneUnneededPackages() === false && is_dir($site . '/vendor') && cp_
 	&& !file_exists($site . '/vendor.prune-old'),
 	'the fallback leaves vendor/ missing: the prune renames vendor.prune-old back itself',
 	implode(' | ', $vh->getPruneLog()));
+
+section('A vendor/ that is a mount point is updated in place');
+
+// A site container mounts vendor/ from a volume: no rename of it can work, so
+// a mv that is never even asked proves the in-place path was taken.
+$site = cp_make_site($everything);
+$asked = 0;
+$vi = cp_validator($site, array('mount_point' => true, 'settle' => 0,
+	'mv' => function (string $cmd) use (&$asked): int { $asked++; return 1; }));
+check($vi->pruneUnneededPackages() === true && cp_pruned_right($site),
+	'a mount-point vendor/ is pruned in place, leaving exactly the keep set, loading', implode(' | ', $vi->getPruneLog()));
+check($asked === 0, 'no rename of vendor/ is tried');
+check(in_array('Updated vendor/ in place (it is a mount point)', $vi->getPruneLog(), true), 'the log says so');
+check(!is_dir($site . '/vendor/gone') && !is_dir($site . '/vendor/plug'), 'emptied vendor folders go too');
+check(!glob($site . '/vendor/composer/*.prune-tmp'), 'no temporary file is left behind');
+
+$site = cp_make_site($everything);
+$before = cp_fingerprint($site . '/vendor');
+$vx = cp_validator($site, array('mount_point' => true, 'settle' => 0, 'composer' => function (string $copy) {
+	cp_fake_composer($copy);
+	file_put_contents($copy . '/composer/autoload_real.php', "<?php\nclass ComposerAutoloaderInitOther {}\n");
+	return true;
+}));
+check($vx->pruneUnneededPackages() === false && cp_fingerprint($site . '/vendor') === $before,
+	'a copy whose autoloader is another class is never mixed in: vendor/ is as it was', implode(' | ', $vx->getPruneLog()));
 
 section('validate() warns, never errors');
 

@@ -20,6 +20,8 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
+ * @version 1.14 - a send the key may not make through a picked account domain (401/403) goes again through the
+ *   configured mailgun_domain, and that domain is not picked again this request (B25, found live on dev 11-22)
  * @version 1.13 - recipient-variables that cannot be encoded fail the chunk rather than going out empty
  *   (B13); every file part carries its own Content-Disposition, so a cid or name is sent whole and
  *   quoted, never basename()'d (B18); the pre-send domain lookup is asked once, no retries (B21); a
@@ -58,6 +60,14 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
 
     /** @var array<string,string> Per-request cache: sending domain => account state ('' = not in account / lookup failed). */
     private static $sending_domain_state = [];
+
+    /**
+     * Account domains this key may read but not send through, learned from a
+     * 401/403 on a send: later sends this request go through the configured
+     * domain (B25). A key scoped to one sending domain still reads the
+     * account's other domains, so their "active" state says nothing about it.
+     */
+    private static $unsendable_domains = [];
     /** @var array<string,string> Per-request cache of domain => why the state lookup failed ('' = it did not). */
     private static $sending_domain_error = [];
 
@@ -329,7 +339,7 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         $fields[] = ['name' => 'to', 'contents' => implode(',', $to)];
         $fields[] = ['name' => 'recipient-variables', 'contents' => $encoded];
         try {
-            $resp = self::call('POST', '/v3/' . rawurlencode($domain) . '/messages', ['multipart' => $fields]);
+            $resp = self::postThroughDomain($domain, '/messages', $fields);
         } catch (ProviderHttpException $e) {
             error_log('[MailgunProvider] Send failed: ' . $e->getMessage());
             return null;
@@ -745,6 +755,29 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
      * every destination maps to the same success/failure, matching the
      * per-destination shape forwardEmail() expects.
      */
+    /**
+     * POST $endpoint through $domain. When the key may not send through a
+     * picked account domain (401/403), the send goes again through the
+     * configured mailgun_domain, which the key is for, and the domain is not
+     * picked again this request (B25): the alternative is mail that never
+     * leaves, which is worse than a signature that does not align.
+     */
+    private static function postThroughDomain(string $domain, string $endpoint, array $fields): ProviderHttpResponse {
+        $configured = (string)Globalvars::get_instance()->get_setting('mailgun_domain');
+        if (isset(self::$unsendable_domains[strtolower($domain)])) {
+            $domain = $configured;
+        }
+        $resp = self::call('POST', '/v3/' . rawurlencode($domain) . $endpoint, ['multipart' => $fields]);
+        if (($resp->status === 401 || $resp->status === 403) && $configured !== ''
+                && strcasecmp($domain, $configured) !== 0) {
+            self::$unsendable_domains[strtolower($domain)] = true;
+            error_log('[MailgunProvider] the API key may not send through ' . $domain
+                . '; sending through ' . $configured . ' instead');
+            $resp = self::call('POST', '/v3/' . rawurlencode($configured) . $endpoint, ['multipart' => $fields]);
+        }
+        return $resp;
+    }
+
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
         // Submit through the envelope sender's own sending domain when the
         // account has it active — the API path domain is Mailgun's signing
@@ -760,7 +793,7 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
 
         $ok = false;
         try {
-            $resp = self::call('POST', '/v3/' . rawurlencode($domain) . '/messages.mime', ['multipart' => $fields]);
+            $resp = self::postThroughDomain($domain, '/messages.mime', $fields);
             $ok = self::succeeded($resp);
             if (!$ok) {
                 error_log('[MailgunProvider] relayRawMessage failed: ' . self::describeError($resp, true));
