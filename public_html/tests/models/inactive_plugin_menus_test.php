@@ -11,7 +11,7 @@
  * entry left behind is a link to a 404. A deactivation that lost its record of
  * the slugs it owned left them in place, so the sync removes the slugs the
  * manifest declares as well as the recorded ones, and never a slug core or an
- * active plugin declares.
+ * active plugin declares. A plugin on disk with no row counts as not active.
  *
  * Runs in one transaction it rolls back: the bookings plugin is switched off
  * only inside it, so no other suite sees the change.
@@ -71,6 +71,19 @@ try {
 
 	section('a second sync has nothing to do');
 	check($prune->invoke($manager, new MultiPlugin(array('plg_active' => 1))) === array(), 'no entries removed the second time');
+} finally {
+	if ($db->inTransaction()) { $db->rollBack(); }
+}
+
+section('a plugin on disk with no row loses its entries too');
+// The shape core's move of a menu into a plugin leaves on a site that never
+// registered the plugin: the entries are there, the plugin has no row.
+$db->beginTransaction();
+try {
+	$db->exec("UPDATE plg_plugins SET plg_name = 'bookings_unregistered_probe' WHERE plg_name = 'bookings'");
+	$messages = $prune->invoke($manager, new MultiPlugin(array('plg_active' => 1)));
+	check($slugs_present($bookings) === array(), 'all four bookings entries are gone', implode(' | ', $messages));
+	check($slugs_present(array('joinery-ai-chat')) === array('joinery-ai-chat'), 'the active plugin\'s entry stays');
 } finally {
 	if ($db->inTransaction()) { $db->rollBack(); }
 }

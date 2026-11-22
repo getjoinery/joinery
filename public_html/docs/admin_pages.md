@@ -245,12 +245,15 @@ the header honest:
 A renderer that throws is logged and skipped, so a page never fails to load
 because a notice could not decide. Tests: `tests/unit/admin_notices_test.php`.
 
-### The Help button
+### The Help menu
 
-Every admin page header carries a **Help** button for permission 5 and up
-(`PublicPageBase::render_support_help_slot()`, placed by the admin theme's
-`top_right_menu()`); each setup wizard step carries one too, with the step as
-its route (`setup:{key}`). It opens the Help panel (`assets/js/support_panel.js`),
+Every admin page header carries a **Help** menu for permission 5 and up
+(`PublicPageBase::render_help_menu()`, placed by the admin theme's
+`top_right_menu()`). It holds **Ask for help**, when a support desk is
+reachable, and **Report a problem**, which opens `/admin/admin_report_problem`
+from the current page. Each setup wizard step carries an Ask for help button
+(`PublicPageBase::render_support_help_slot()`), with the step as its route
+(`setup:{key}`). Ask for help opens the Help panel (`assets/js/support_panel.js`),
 which asks the support desk of the node named by `support_url`, or of the
 upgrade source (where problem reports go) when `support_url` is blank.
 The browser only calls this site's own actions —

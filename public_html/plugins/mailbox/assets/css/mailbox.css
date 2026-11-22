@@ -9,6 +9,7 @@ summary.fix-toggle:hover { color: #0d6efd; text-decoration: underline; }
 
 /* --- Accounts page --- */
 .iea-acct { max-width: 1000px; }
+.iea-read-mail { margin: 0 0 12px; text-align: right; font-weight: 600; }
 .iea-domain {
 	border: 1px solid #d9dde2; border-radius: 8px; margin-bottom: 14px; background: #fff; overflow: hidden;
 }

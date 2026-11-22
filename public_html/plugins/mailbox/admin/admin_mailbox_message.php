@@ -12,6 +12,7 @@
  * logic layer before the body reaches this view (the sandboxed iframe sends
  * no cookies, so the URLs must authorize themselves).
  *
+ * @version 1.8 - highlights the Accounts tab; the Mailbox crumb is the member reader
  * @version 1.7 - a Fortress message says it opens only on its owner's devices
  * @version 1.6
  */
@@ -33,14 +34,14 @@ $page->admin_header(
 		'menu-id' => 'incoming',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
-			'Mailbox' => '/plugins/mailbox/admin/admin_mailbox_reader',
+			'Mailbox' => '/profile/mailbox/mailbox',
 			'Message #' . intval($message->key) => '',
 		),
 		'session' => $session,
 	)
 );
 
-echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
+echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 $received_local = $message->get_local('iem_received_time', 'M j, Y g:i:s A T');
 

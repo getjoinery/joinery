@@ -1,39 +1,22 @@
 <?php
 /**
- * Logic for the Inbound Email Mailbox Reader (the Gmail-style Mailbox tab).
+ * Logic for the old admin address of the mailbox reader: sends the visitor to
+ * the member reader, carrying a mailbox (?mailbox=N) or a message (?open=N)
+ * the link named.
  *
- * Permission-gated (staff-only in v1). Issues a persistent per-session CSRF
- * token for the reader's state-changing AJAX (mailbox_action) and seeds the
- * initial switcher data so the rail renders without a flash. All list/thread
- * reads and mutations go through the AJAX endpoints, scoped by MailboxViewer.
- *
- * @version 1.2 - the relay-or-direct choice card is gone (Enable/Disable relay decide it), so no gate to handle
- * @version 1.1
+ * @version 2.0 - redirect to /profile/mailbox/mailbox
  */
 
 function admin_mailbox_reader_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
 
-	$session = SessionControl::get_instance();
-	$settings = Globalvars::get_instance();
-
-	// Persistent CSRF token for the reader's action endpoint (validated, not
-	// consumed, because the reader fires many actions per session).
-	if (empty($_SESSION['mailbox_reader_csrf'])) {
-		$_SESSION['mailbox_reader_csrf'] = bin2hex(random_bytes(32));
+	$query = array();
+	foreach (array('mailbox', 'open') as $key) {
+		$id = intval($input[$key] ?? 0);
+		if ($id > 0) {
+			$query[$key] = $id;
+		}
 	}
-	$csrf_token = $_SESSION['mailbox_reader_csrf'];
-
-	$viewer = MailboxViewer::fromSession($session);
-	$service = new MailboxService($viewer);
-	$initial_mailboxes = $service->listMailboxes();
-
-	return LogicResult::render(array(
-		'session'           => $session,
-		'settings'          => $settings,
-		'csrf_token'        => $csrf_token,
-		'initial_mailboxes' => $initial_mailboxes,
-	));
+	return LogicResult::redirect('/profile/mailbox/mailbox' . ($query ? '?' . http_build_query($query) : ''));
 }
 ?>

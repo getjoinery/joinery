@@ -9,6 +9,7 @@
  * the HTML body are rewritten to short-lived signed URLs by the shared
  * MailboxService::resolveInlineImages(), scoped to this message only.
  *
+ * @version 1.8 - links back to the member reader (/profile/mailbox/mailbox); a redirect that carries a notice lands on Accounts
  * @version 1.7 - an all-access viewer's open of a message they hold no grant on is written down (MailboxReadAudit);
  *   the open counts against the person's read budget (MailReadBudget); a level-10 viewer yet to confirm
  *   oversight is sent to confirm (WP3)
@@ -31,12 +32,12 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 
 	$id = intval($input['iem_inbound_email_message_id'] ?? 0);
 	if ($id <= 0) {
-		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+		return LogicResult::redirect('/profile/mailbox/mailbox');
 	}
 
 	$message = new InboundEmailMessage($id, TRUE);
 	if (!$message->key || $message->get('iem_delete_time')) {
-		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+		return LogicResult::redirect('/profile/mailbox/mailbox');
 	}
 
 	// The same rule as the reader: a grant on the message's mailbox, or all-access for
@@ -53,7 +54,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 			$session->save_message(new DisplayMessage('Reading a mailbox you are not a member of needs a second factor on your account. Add one under Security.',
 				'Second factor needed', '~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		}
-		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
 	}
 
 	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'delete') {
@@ -65,7 +66,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 			DisplayMessage::MESSAGE_ANNOUNCEMENT,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
-		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
 	}
 
 	// This page shows the message whole: an all-access viewer opening one they
@@ -75,7 +76,7 @@ function admin_mailbox_message_logic(array $input): LogicResult {
 	if ($budget['paused']) {
 		$session->save_message(new DisplayMessage(MailReadBudget::refusal($budget)->error, 'Paused',
 			'~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_reader');
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
 	}
 
 	// Load referenced domain / alias (best-effort)

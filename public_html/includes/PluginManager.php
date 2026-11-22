@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.24 - the menu prune counts a plugin on disk with no row as not active, so entries core declared before the plugin took them over do not outlive it
  * @version 1.23 - every install has an install id and a ledger of what it made (PluginInstallIdentity, spec
  *                plugin_install_identity): install finishes the earlier install's ledger before it makes its
  *                own id, each step records what it made, uninstall removes everything in the ledger, and the
@@ -2544,8 +2545,10 @@ class PluginManager extends AbstractExtensionManager {
      * load, so an entry left behind is a link to a 404. A deactivation removes
      * the slugs the plugin's last sync recorded; a node whose record was lost
      * (before keepStoredMetadata) kept the entries, so this also removes the
-     * slugs the plugin's manifest declares. A slug core or an active plugin
-     * declares is never touched.
+     * slugs the plugin's manifest declares. Not active includes a plugin on disk
+     * with no row at all: a site that never registered it still holds the
+     * entries core declared before the plugin took them over. A slug core or an
+     * active plugin declares is never touched.
      *
      * @param iterable $active_plugins the active Plugin rows
      * @return string[] one line per plugin whose entries were removed
@@ -2570,6 +2573,16 @@ class PluginManager extends AbstractExtensionManager {
         $dblink = DbConnector::get_instance()->get_db_link();
         // Not active is anything but 1: a row registered and never switched on holds NULL.
         $inactive = $dblink->query("SELECT plg_name FROM plg_plugins WHERE plg_active IS DISTINCT FROM 1")->fetchAll(PDO::FETCH_COLUMN);
+        // A plugin on disk with no row is not active either.
+        $active_names = array();
+        foreach ($active_plugins as $plugin) {
+            $active_names[$plugin->get('plg_name')] = true;
+        }
+        foreach (array_keys(PluginHelper::getAvailablePlugins()) as $name) {
+            if (!isset($active_names[$name]) && !in_array($name, $inactive, true)) {
+                $inactive[] = $name;
+            }
+        }
         foreach ($inactive as $name) {
             $recorded = $this->getMenuSlugsFromMetadata($name);
             $slugs = array_values(array_filter(

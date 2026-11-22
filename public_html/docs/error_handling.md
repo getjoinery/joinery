@@ -108,7 +108,10 @@ long enough to reach the link. `drive.js`, `vault-manager.js`, `messenger.js`,
 ## Problem reports
 
 `/report_problem` (`views/report_problem.php`, `logic/report_problem_logic.php`) is where
-the links lead. A guest is sent to sign in and brought back.
+the links lead. A guest is sent to sign in and brought back. An administrator (permission
+5 and up) is sent to `/admin/admin_report_problem`, the same page in the admin chrome,
+carrying `ref`, `from` and `msg`; both pages draw their body from
+`includes/report_problem_form.php`.
 
 The page shows, top to bottom:
 
@@ -230,6 +233,6 @@ carries only the row's withheld reference.
 | `problem_reports_auto_send` | off | Report unexpected errors automatically, with no one reviewing the report first. Needs sending on. |
 | `problem_reports_retention_days` | 90 | Days to keep reports and their images; the daily retention sweep deletes older ones. 0 keeps them. |
 
-Both are under **Settings › Problem reports**. **Report a problem** is an item in the admin
-menu, for administrators; the member menu has none. Members reach `/report_problem` from the
+Both are under **Settings › Problem reports**. **Report a problem** is in the admin header's
+**Help** menu, for administrators; the member menu has none. Members reach `/report_problem` from the
 report links on error pages, error messages and the 404 page.

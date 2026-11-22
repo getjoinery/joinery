@@ -1,10 +1,12 @@
 <?php
 /**
- * Member Mailbox — the Mailbox Reader mounted at /profile/mailbox/mailbox,
- * scoped to the mailboxes the signed-in member holds grants for. Same reader UI
- * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
- * theme chrome, the member attachment endpoint, and no detail-page deep links.
+ * Member Mailbox — the Mailbox Reader mounted at /profile/mailbox/mailbox
+ * (includes/mailbox_reader_mount.php), the one place mail is read, scoped to
+ * the mailboxes the signed-in member holds grants for (superadmins: every
+ * mailbox). This page supplies the theme chrome, the member attachment
+ * endpoint, and no detail-page deep links.
  *
+ * @version 1.19.0 - ?mailbox=N opens on that mailbox
  * @version 1.18.0 - no AI button or panel when there is no model to run against
  * @version 1.17.0 - the gear links Download a mailbox
  * @version 1.16.0 - the gear lists Contacts
@@ -106,6 +108,7 @@ if (!$has_mailboxes) {
 		'setup_url_base'      => $is_operator ? '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=' : null,
 		'fortress'            => $fortress_visible,
 		'open_message'        => $open_message ?? null,
+		'open_mailbox'        => $open_mailbox ?? null,
 	));
 
 	if ($ai_panel_active) {

@@ -88,8 +88,11 @@ abstract class PublicPageBase {
 		echo '<' . $tag . $class_attr . ' data-vault-lock-slot></' . $tag . '>';
 	}
 
-	/** @var bool the Help panel's script and sheet are on this page already */
+	/** @var bool the Help panel's script is on this page already */
 	private $support_assets_emitted = false;
+
+	/** @var bool the Help panel's sheet is on this page already */
+	private $support_css_emitted = false;
 
 	/**
 	 * The Help button (support_chatbot.md, Where it appears): opens the
@@ -110,12 +113,7 @@ abstract class PublicPageBase {
 		}
 		$unread = SiteSupportThread::unreadCount();
 		$check = SiteSupportThread::usedThisWeek() ? '1' : '0';
-		if (!$this->support_assets_emitted) {
-			$this->support_assets_emitted = true;
-			echo ChatTranscript::assets()
-				. '<link rel="stylesheet" href="/assets/css/support_panel.css?v=' . $this->asset_mtime('assets/css/support_panel.css') . '">'
-				. '<script defer src="/assets/js/support_panel.js?v=' . $this->asset_mtime('assets/js/support_panel.js') . '"></script>';
-		}
+		$this->emit_support_assets(true);
 		$class_attr = $class !== '' ? ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '"' : '';
 		echo '<' . $tag . $class_attr . '>'
 			. '<button type="button" class="jy-support-help" data-support-help data-support-check="' . $check . '"'
@@ -123,6 +121,51 @@ abstract class PublicPageBase {
 			. htmlspecialchars($label, ENT_QUOTES, 'UTF-8')
 			. '<span class="jy-support-badge"' . ($unread > 0 ? '' : ' hidden') . '>' . ($unread > 0 ? (int)$unread : '') . '</span>'
 			. '</button></' . $tag . '>';
+	}
+
+	/**
+	 * The Help panel's sheet, and with $panel its script and the transcript it
+	 * draws with; each once per page.
+	 */
+	private function emit_support_assets(bool $panel): void {
+		if (!$this->support_css_emitted) {
+			$this->support_css_emitted = true;
+			echo '<link rel="stylesheet" href="/assets/css/support_panel.css?v=' . $this->asset_mtime('assets/css/support_panel.css') . '">';
+		}
+		if ($panel && !$this->support_assets_emitted) {
+			$this->support_assets_emitted = true;
+			echo ChatTranscript::assets()
+				. '<script defer src="/assets/js/support_panel.js?v=' . $this->asset_mtime('assets/js/support_panel.js') . '"></script>';
+		}
+	}
+
+	/**
+	 * The admin header's Help menu: Ask for help (the support desk's panel,
+	 * when support_url names one) and Report a problem (/admin/admin_report_problem,
+	 * from this page). Administrators only (permission 5 and up), the people the
+	 * header serves; members reach Report a problem from an error page. The
+	 * unread mark sits on Help and on Ask for help.
+	 */
+	public function render_help_menu(string $tag = 'li', string $class = 'nav-item dropdown'): void {
+		$session = SessionControl::get_instance();
+		if (!$session->is_logged_in() || !Access::permits(Access::staffLevel(), $session)) {
+			return;
+		}
+		$route = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+		$support = class_exists('SiteSupportThread') && SupportChatClient::enabled();
+		$unread = $support ? SiteSupportThread::unreadCount() : 0;
+		$this->emit_support_assets($support);
+		$badge = '<span class="jy-support-badge"' . ($unread > 0 ? '' : ' hidden') . '>' . ($unread > 0 ? (int)$unread : '') . '</span>';
+		echo '<' . $tag . ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '">'
+			. '<button type="button" class="jy-support-help" data-toggle="dropdown" aria-haspopup="true">Help' . $badge . '</button>'
+			. '<div class="dropdown-menu jy-help-menu">';
+		if ($support) {
+			echo '<button type="button" class="dropdown-item" data-support-help'
+				. ' data-support-check="' . (SiteSupportThread::usedThisWeek() ? '1' : '0') . '"'
+				. ' data-route="' . htmlspecialchars($route, ENT_QUOTES, 'UTF-8') . '">Ask for help' . $badge . '</button>';
+		}
+		echo '<a class="dropdown-item" href="/admin/admin_report_problem?from=' . htmlspecialchars(urlencode($route), ENT_QUOTES, 'UTF-8') . '">Report a problem</a>'
+			. '</div></' . $tag . '>';
 	}
 
 	/**

@@ -8,6 +8,10 @@
 .jy-support-badge { min-width: 1.15rem; padding: 0 0.3rem; border-radius: 999px; background: #1d63d1; color: #fff;
     font-size: 0.72rem; font-weight: 700; line-height: 1.15rem; text-align: center; }
 .jy-support-badge[hidden] { display: none; }
+/* The admin header's Help menu (PublicPageBase::render_help_menu). */
+.jy-help-menu { min-width: 12rem; right: 0; left: auto; }
+.jy-help-menu .dropdown-item { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
 
 .jy-support-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 420px; max-width: 100vw; z-index: 1050;
     display: flex; flex-direction: column; background: #fff; border-left: 1px solid #e4e7ec;

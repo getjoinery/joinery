@@ -1,69 +1,17 @@
 <?php
 /** @joinery-admin class=personal */
 /**
- * Inbound Email - Mailbox Reader (Gmail-style).
+ * Inbound Email - the old admin address of the mailbox reader.
  *
- * Two-pane Gmail layout: a left sidebar (mailbox switcher — the addresses this
- * viewer has been granted, each independently badged; "All mail" for
- * superadmins — plus filters + search) and a single main pane that shows EITHER
- * the conversation list OR an opened conversation full-width (with a back
- * arrow), never both side-by-side. HTML bodies render in a sandboxed iframe.
+ * Mail is read in one place, the member reader at /profile/mailbox/mailbox,
+ * for staff and members alike (superadmins get every mailbox there). The admin
+ * section is configuration only; this address stays so bookmarks and old links
+ * land in the reader.
  *
- * All data and mutations go through the scoped AJAX endpoints
- * (/ajax/mailbox_*). Vanilla JS only. The single-message detail page is kept
- * for raw MIME / .eml download / deep links.
- *
- * The reader UI itself is the shared mount (includes/mailbox_reader_mount.php),
- * also used by the member page at /profile/mailbox/mailbox — this page
- * supplies the admin chrome and the admin endpoint URLs.
- *
- * @version 1.6 - Fortress mailboxes open here too (the `fortress` mount option)
- * @version 1.5
+ * @version 2.0 - sends the visitor to the member reader
  */
 
-require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_reader_mount.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_reader_logic.php'));
 
-$page_vars = process_logic(admin_mailbox_reader_logic(array_merge($_GET, $_POST, $params ?? [])));
-extract($page_vars);
-
-$page = new AdminPage();
-// End-to-end mail opens in this browser, as on the member page: without the
-// Fortress module a Fortress mailbox here would only ever list sealed rows.
-$fortress_visible = !empty($initial_mailboxes) && mailbox_reader_fortress_visible($initial_mailboxes);
-if ($fortress_visible) {
-	$page->needs_vault_client();
-}
-$page->admin_header(
-	array(
-		'menu-id' => 'incoming',
-		'breadcrumbs' => array(
-			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
-			'Mailbox' => '',
-		),
-		'session' => $session,
-	)
-);
-
-echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
-
-// How mail reaches this server is a deployment fact, not a question every page
-// has to have answered first: an undecided deployment receives directly and
-// works. The choice lives in the Server tab's Relay section
-// (specs/mailbox_relay_surface_simplification.md).
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-
-mailbox_render_mailbox_reader($page, array(
-	'csrf_token'          => $csrf_token,
-	'initial_mailboxes'   => $initial_mailboxes,
-	'attachment_url_base' => '/plugins/mailbox/admin/admin_mailbox_attachment',
-	// An empty inbox is where "is this even wired up?" gets asked, so the answer
-	// is one click away from the mailbox rather than two tabs over.
-	'setup_url_base'      => '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=',
-	'fortress'            => $fortress_visible,
-));
-
-$page->admin_footer();
+process_logic(admin_mailbox_reader_logic(array_merge($_GET, $_POST, $params ?? [])));
 ?>

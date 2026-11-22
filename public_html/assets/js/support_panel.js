@@ -21,7 +21,7 @@
  * used in the last week, the button refreshes it once in a while from
  * support_threads.
  *
- * Vanilla JS, no framework. @version 1.1.0
+ * Vanilla JS, no framework. @version 1.2.0 - the unread mark is drawn on every .jy-support-badge (the Help menu's too); @version 1.1.0
  */
 (function () {
 	'use strict';
@@ -43,10 +43,9 @@
 	var running = null;    // {threadId, messageId}
 	var buttons = [];
 
+	// Every unread mark on the page: the buttons' own and the Help menu's.
 	function setBadge(n) {
-		buttons.forEach(function (b) {
-			var badge = b.querySelector('.jy-support-badge');
-			if (!badge) return;
+		document.querySelectorAll('.jy-support-badge').forEach(function (badge) {
 			badge.textContent = n > 0 ? String(n) : '';
 			badge.hidden = !(n > 0);
 		});

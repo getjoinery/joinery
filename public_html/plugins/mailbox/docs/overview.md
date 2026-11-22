@@ -1356,8 +1356,12 @@ Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
 
 ## Local Mailbox
 
-The **Mailboxes** tab (`Emails > Mailbox > Mailboxes`) is the default landing
-tab — a Gmail-style reader over locally-stored inbound messages. The
+Locally-stored inbound messages are read in the **Mailbox Reader** at
+`/profile/mailbox/mailbox` (see [Mailbox Reader](#mailbox-reader)), a
+Gmail-style reader. The admin section (`Emails > Email setup`) is
+configuration only: its **Accounts** tab is the landing tab, with a **Read
+mail** link at the top and a **Read** button on each mailbox that keeps its
+mail, which opens the reader on that mailbox (`?mailbox=N`). The
 conversation list updates in place after mutations
 (`specs/implemented/mailbox_reader_list_persistence.md`): an action that takes rows out of
 the current view (delete, restore, spam, archive-from-Inbox) removes exactly
@@ -3524,10 +3528,9 @@ wherever they are:
   nothing otherwise. It never pings or probes.
 - **The reader's setup banner** (*This mailbox needs attention*) is the Setup
   tab's verdict for the open mailbox, and the relay's *Receiving* card is part
-  of it for a domain with Seal at the relay. Both reader mounts show it to an operator: the
-  admin reader always, and the profile reader
-  (`/profile/mailbox/mailbox`) for a viewer at permission 5 or above, since
-  that is where operators read mail too. Members never see it.
+  of it for a domain with Seal at the relay. The reader
+  (`/profile/mailbox/mailbox`) shows it to a viewer at permission 5 or above,
+  since that is where operators read mail. Members never see it.
 
 Tests: `relay_pickup_alarm_test.php`.
 
@@ -3883,15 +3886,19 @@ shows either the conversation list or an opened conversation full-width. It is
 a vanilla-JS client (`assets/mailbox_reader.js` + `.css`, cache-busted by file
 mtime) talking to the scoped AJAX/API actions listed under **API Surface**.
 
-The reader has **two mounts** of one shared UI
-(`includes/mailbox_reader_mount.php`):
+The reader lives at `/profile/mailbox/mailbox`
+(`views/profile/mailbox.php` + `logic/profile_mailbox_logic.php`, mounting
+`includes/mailbox_reader_mount.php`) in the theme's chrome. It is the one
+place mail is read, by staff and members alike:
 
-- **Admin** — the **Mailboxes** tab (`admin_mailbox_reader.php`), staff
-  chrome, with attachment downloads at the admin endpoint.
-- **Member** — `/profile/mailbox/mailbox`
-  (`views/profile/mailbox.php` + `logic/profile_mailbox_logic.php`), theme
-  chrome, for any signed-in member; what they see is their granted mailboxes.
-  A member with no grants gets a short "no mailboxes are assigned to your
+- What a viewer sees is their granted mailboxes; a superadmin who has
+  confirmed oversight sees every mailbox plus **All mail** and **Unmatched**.
+- `?mailbox=N` opens on that mailbox instead of the last one viewed, when the
+  viewer's rail holds it (the admin Accounts tab's **Read** buttons use it);
+  `?open=N` opens a conversation.
+- `/plugins/mailbox/admin/admin_mailbox_reader` redirects here, carrying
+  `mailbox` and `open`, so admin links land in the reader.
+- The page is for any signed-in member. A member with no grants gets a short "no mailboxes are assigned to your
   account" state. Attachment chips point at the member endpoint. The
   plugin's `profileMenu` declares the "Email" entry that puts the page in the
   member menu on every theme and in the apps' navigation. A **gear** at the
@@ -3900,11 +3907,10 @@ The reader has **two mounts** of one shared UI
   (`/profile/mailbox/settings`) and **Import old mail**
   (`/profile/mailbox/import`).
 
-The mounts differ only in chrome and endpoint URLs (handed to the JS via
-`window.MAILBOX_READER`); the endpoints themselves scope every read and write
-via `MailboxViewer`.
+The page hands the reader its endpoint URLs (via `window.MAILBOX_READER`);
+the endpoints themselves scope every read and write via `MailboxViewer`.
 
-The **member mount only** also mounts the joinery_ai area AI panel
+The page also mounts the joinery_ai area AI panel
 (`JoineryAiPanel.mount`) into the right column's top slot, where the signed-in
 user sees what the AI is doing for that mailbox, approves what it is waiting
 on, and switches their AI recipes on or off for the mailbox open in the rail.
@@ -3912,12 +3918,10 @@ Below 1100px the reader has no right column: the panel moves itself into a
 slide-over, and an **AI** button appears beside the gear to open it. At widths
 that have the column there is no button — the panel is already on the page. The reader exposes the host surface the panel
 reads — `window.MailboxReader.currentAddress()` plus a
-`joineryareacontextchange` event on every rail switch. The admin mount
-deliberately does not carry the button: its all-access view spans mailboxes
-the viewer holds no grant on, and admins manage recipes on the dashboard. Nor
-does a member mount with no model to run against — none this site can reach
+`joineryareacontextchange` event on every rail switch. There is no panel
+or button on a page with no model to run against — none this site can reach
 (`AiEndpointRegistry::anyAvailable()`) and no model the member registered for
-Fortress mail: there is no panel or button until one is set up. See
+Fortress mail; they appear once one is set up. See
 `plugins/joinery_ai/docs/overview.md` § The area AI panel.
 
 ### Phone layout
@@ -4259,9 +4263,8 @@ Every message card carries a kebab (⋮) in its top-right corner, on both mounts
 | **Show logs** | the message timeline — every recorded event about the message, oldest first (`mailbox/message_timeline`); see [The message timeline](#the-message-timeline) |
 
 Every one of them scopes the read to the caller's own grants exactly as the
-reader does (a NULL-alias catch-all message stays superadmin-only), so the member
-mount and the admin mount give the same answer and the admin mount needs no staff
-route of its own. The two exports live at `/profile/mailbox/original`
+reader does (a NULL-alias catch-all message stays superadmin-only), so a member's view
+and a superadmin's all-access view give the same answer through one route. The two exports live at `/profile/mailbox/original`
 (`logic/profile_original_logic.php` gates, `includes/message_export.php`
 renders); `format=print` picks the sheet, and the `.eml` download is the default.
 
@@ -5915,7 +5918,7 @@ poller summary). To connect a real Gmail account:
    name).
 4. **Verify.** Click **Test**, then **Fetch now**. The first fetch seeds the cursor to
    "now" and ingests nothing — send a **new** email to the Gmail afterward, **Fetch now**
-   again, and confirm it appears under the mailbox in the **Mailboxes** reader; open it
+   again, and confirm it appears under the mailbox in the reader (**Read** on its Accounts row); open it
    and download an attachment. For hands-off fetching, activate the **Fetch inbound IMAP
    mail** scheduled task.
 

@@ -24,6 +24,7 @@
  * (includes/attachment_retrieval.php); only the authorization posture here
  * is admin-specific.
  *
+ * @version 1.7 - the way back is the member reader
  * @version 1.6 - the file-backed branch asks the mailbox's rule too (canReadMessage), so a level-6 staff member or an
  *   unconfirmed level-10 cannot take an attachment the reader would refuse them (reviewer2 B3); a step-up pause redirects
  * @version 1.5 - an all-access viewer's download from a message they hold no grant on is written down (MailboxReadAudit);
@@ -41,7 +42,7 @@ function admin_mailbox_attachment_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
 
-	$reader_url = '/plugins/mailbox/admin/admin_mailbox_reader';
+	$reader_url = '/profile/mailbox/mailbox';
 
 	$id = intval($input['ima_inbound_message_attachment_id'] ?? 0);
 	if ($id <= 0) {

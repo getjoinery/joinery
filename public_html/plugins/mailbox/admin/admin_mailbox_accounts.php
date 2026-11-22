@@ -12,8 +12,11 @@
  *
  * The page is an overview + entry point: + Domain / + Mailbox / + IMAP feed and
  * every Edit jump to the existing per-object editors with context pre-filled.
+ * It is the plugin's landing tab; mail is read in the member reader, which the
+ * page links at its top and on each mailbox that keeps its mail (Read).
  * DNS/host diagnostics live on the Setup tab.
  *
+ * @version 1.13 - Read mail link, and Read on each mailbox that keeps its mail (opens the member reader)
  * @version 1.12 - a feed's skipped messages (Retry) and paused folders (Resume)
  * @version 1.11 - the level badges carry the domain's add-ons in force
  * @version 1.10 - the To/Cc catch-up card is retired with the backfill
@@ -118,6 +121,8 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 ?>
 
 <div class="iea-acct">
+<?php // This section sets mail up; reading it is the member reader. One plain way there. ?>
+<p class="iea-read-mail"><a href="/profile/mailbox/mailbox">Read mail &rarr;</a></p>
 <?php if (empty($tree)): ?>
 	<div class="alert alert-info">No domains yet. Add one to start receiving mail &mdash; a domain you host (MX),
 		or an IMAP source like <code>gmail.com</code> to pull mail from an existing mailbox.</div>
@@ -275,6 +280,11 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 				</div>
 
 				<div class="iea-mb-actions">
+					<?php // A mailbox that keeps its mail opens in the reader; a forward-only one has nothing to read.
+					if (($alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD) !== InboundEmailAlias::MODE_FORWARD): ?>
+						<a class="btn btn-sm btn-outline-primary"
+						   href="/profile/mailbox/mailbox?mailbox=<?php echo intval($alias->key); ?>">Read</a>
+					<?php endif; ?>
 					<?php if ($is_imap_src): ?>
 						<?php // IMAP-source mailbox: one Edit manages the mailbox AND its feed
 						      // (and creates the feed if this mailbox doesn't have one yet).

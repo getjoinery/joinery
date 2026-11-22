@@ -4,10 +4,10 @@
  *
  * Requires a signed-in session — any member, no staff permission. What the
  * member sees is decided entirely by MailboxViewer: the mailboxes they hold
- * grants for (superadmins are all-access). Issues the same persistent
- * per-session reader CSRF token the admin mount uses, so the shared AJAX
- * endpoints accept either mount.
+ * grants for (superadmins are all-access). Issues the persistent per-session
+ * reader CSRF token the reader's AJAX endpoints check.
  *
+ * @version 1.6.0 - ?mailbox=N names the mailbox to show (open_mailbox)
  * @version 1.5.0 - a level-10 account yet to confirm oversight gets the reader, not the empty state (mail_access_hardening WP3)
  * @version 1.4.0 - ?open=N hands the reader a message to open (open_message)
  * @version 1.3.0 - no device_ai_site_model: Email settings is where the site's model is offered
@@ -28,7 +28,7 @@ function profile_mailbox_logic(array $input): LogicResult {
 
 	// Persistent CSRF token for the reader's state-changing endpoints
 	// (validated, not consumed, because the reader fires many actions per
-	// session). Same session key as the admin mount — one reader, one token.
+	// session).
 	if (empty($_SESSION['mailbox_reader_csrf'])) {
 		$_SESSION['mailbox_reader_csrf'] = bin2hex(random_bytes(32));
 	}
@@ -74,6 +74,9 @@ function profile_mailbox_logic(array $input): LogicResult {
 		'settings'          => $settings,
 		'csrf_token'        => $csrf_token,
 		'open_message'      => $open_message,
+		// ?mailbox=N shows that mailbox first (the admin Accounts page's Read link). The
+		// reader shows it only if the viewer's seed holds it, so nothing is revealed.
+		'open_mailbox'      => intval($input['mailbox'] ?? 0) ?: null,
 		'initial_mailboxes' => $initial_mailboxes,
 		'has_mailboxes'     => $has_mailboxes,
 		// Where the member's own AI model answers, if they registered one

@@ -3,7 +3,7 @@
  * @version 3.4 - a list read hands its fortress_pending count to MailboxFortress.showPending: the waiting line
  *   shows it, and mail that arrived while the page was open is opened now
  * @version 3.3 - its page settings come from a JSON block the page writes (no inline script); a read before the block exists is not kept
- * No framework. @version 3.2 — an AI run (done.ai_pipeline) redraws the list like a parse does; @version 3.1 — a drain's redraw leaves a list opened past its first page alone; @version 3.0 — one trip to the step-up ceremony per read budget pause (reviewer2 B2); @version 2.99 — a level-10 account reads every mailbox only after confirming a second factor: the rail offers "Every mailbox (confirm it is you)" or the way to add a factor (mail_access_hardening WP3); @version 2.98 — a read budget pause (requires_stepup) sends the page to confirm it is this person and back; a wait is said where the content would be; @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 3.3 — a link can name the mailbox to show (CFG.openMailbox, ?mailbox=N); @version 3.2 — an AI run (done.ai_pipeline) redraws the list like a parse does; @version 3.1 — a drain's redraw leaves a list opened past its first page alone; @version 3.0 — one trip to the step-up ceremony per read budget pause (reviewer2 B2); @version 2.99 — a level-10 account reads every mailbox only after confirming a second factor: the rail offers "Every mailbox (confirm it is you)" or the way to add a factor (mail_access_hardening WP3); @version 2.98 — a read budget pause (requires_stepup) sends the page to confirm it is this person and back; a wait is said where the content would be; @version 2.97 — an all-access viewer with no mailboxes is linked to where one is added; @version 2.96 — Download .eml on every message the server can read (a lean record is rebuilt); @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -5509,8 +5509,9 @@
 		renderMailboxes(seed);
 
 		if (seed.mailboxes && seed.mailboxes.length) {
-			// Reopen the last-viewed mailbox if it's still available; else the first.
-			var want = recallMailbox();
+			// A mailbox the link named (?mailbox=N), else the last-viewed one if it's
+			// still available; else the first.
+			var want = CFG.openMailbox != null ? String(CFG.openMailbox) : recallMailbox();
 			var pick = null;
 			if (want != null) {
 				pick = seed.mailboxes.filter(function (m) {

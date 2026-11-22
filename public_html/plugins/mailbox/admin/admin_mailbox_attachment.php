@@ -7,6 +7,7 @@
  * below only runs when retrieval failed — it renders an honest "not available"
  * message rather than an error.
  *
+ * @version 1.1 - highlights the Accounts tab; the Mailbox crumb is the member reader
  * @version 1.0
  */
 
@@ -23,13 +24,13 @@ $page->admin_header(array(
 	'menu-id' => 'incoming',
 	'breadcrumbs' => array(
 		'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
-		'Mailbox' => '/plugins/mailbox/admin/admin_mailbox_reader',
+		'Mailbox' => '/profile/mailbox/mailbox',
 		'Attachment' => '',
 	),
 	'session' => $session,
 ));
 
-echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
+echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 
 echo '<div class="alert alert-warning">' . htmlspecialchars($error ?? 'Attachment unavailable.') . '</div>';
 if (!empty($reader_url)) {

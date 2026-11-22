@@ -2091,3 +2091,33 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE uew_user_encryption_wrappings SET uew_wrapped_secret_key = 'scrubbed' WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NOT NULL AND uew_wrapped_secret_key <> 'scrubbed' AND uew_uev_user_encryption_vault_id IN (SELECT uev_user_encryption_vault_id FROM uev_user_encryption_vaults WHERE uev_custody = 'client')";
 	$migrations[] = $migration;
+
+	// The Admin Utilities entry leaves the menu; the page stays at
+	// /admin/admin_utilities. The core menu seed never removes a row, so this
+	// takes the entry out once. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '244';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM amu_admin_menus WHERE amu_slug = 'core-admin-utilities'";
+	$migrations[] = $migration;
+
+	// SEO Pages leaves the 9-dots menu for the Pages section of the sidebar
+	// (slug seo-pages, which the core menu seed adds after migrations run). The
+	// seed never removes a row, so this takes the old entry out once. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '245';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM amu_admin_menus WHERE amu_slug = 'core-admin-seo-pages'";
+	$migrations[] = $migration;
+
+	// Report a problem leaves the sidebar for the admin header's Help menu
+	// (PublicPageBase::render_help_menu). The seed never removes a row, so this
+	// takes the entry out once. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '246';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM amu_admin_menus WHERE amu_slug = 'report-problem' AND amu_location = 'admin_sidebar'";
+	$migrations[] = $migration;

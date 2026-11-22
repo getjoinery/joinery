@@ -1,11 +1,10 @@
 <?php
 /**
- * Mailbox Reader mount — the one reader UI, shared by its two entry points:
- * the admin page (admin_mailbox_reader) and the member page
- * (/profile/mailbox/mailbox). Emits the reader config, the two-pane
- * skeleton, the compose form, and the reader script. The mounts differ only
- * in chrome (admin vs theme page) and in the URLs they hand the reader —
- * the endpoints themselves scope every read and write via MailboxViewer.
+ * Mailbox Reader mount — the reader UI, mounted by the member page
+ * (/profile/mailbox/mailbox), where staff and members alike read mail. Emits
+ * the reader config, the two-pane skeleton, the compose form, and the reader
+ * script. The page hands it the URLs the reader uses; the endpoints scope
+ * every read and write via MailboxViewer.
  *
  * Compose attachment UX matches the AI chat composer (paperclip button, pending
  * chips with remove, drag-and-drop onto the open panel) — see
@@ -37,6 +36,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.36.0 - open_mailbox: a link can name the mailbox to show
  * @version 1.35.0 - the lowering banner carries what was changed (data-changes), for the question asked before the move
  * @version 1.34.0 - the relay-pending banner is always present for a vault client (hidden at none), so the reader
  *                   can show it when end-to-end mail arrives while the page is open
@@ -96,6 +96,11 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  *                                            before its header, and the reader
  *                                            opens browser-sealed rows through
  *                                            window.MailboxFortress.
+ *   - open_message        (array|null)       a conversation to open on load
+ *                                            (alias_id, thread_key, subject)
+ *   - open_mailbox        (int|null)         a mailbox to show on load in place of
+ *                                            the last one viewed; ignored unless it
+ *                                            is in initial_mailboxes
  */
 /**
  * Does the viewer see a Fortress mailbox (its own level, or an unmatched box on
@@ -143,8 +148,8 @@ function mailbox_reader_emit_fortress_banner(callable $asset_ver, bool $vault_cl
 	}
 	$plural = function (int $n) { return $n . ' message' . ($n === 1 ? '' : 's'); };
 	if ($lower > 0 && !$vault_client) {
-		// This page does not carry the vault client (the admin mount); the
-		// member's mailbox page does, and says so there.
+		// A page without the vault client cannot finish a lowering here; the
+		// member's mailbox page carries it when a visible mailbox needs it.
 		$lower = 0;
 		if ($raise === 0) {
 			return;
@@ -215,9 +220,9 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'messageSourceUrl'  => '/api/v1/action/mailbox/message_source',
 		'messageTimelineUrl' => '/api/v1/action/mailbox/message_timeline',
 		'attachmentTextUrl' => '/api/v1/action/mailbox/attachment_text',
-		// .eml download + print sheet. One grant-scoped endpoint for both mounts:
-		// a superadmin reaches every mailbox through it exactly as they do in the
-		// reader, so the admin mount needs no separate staff route.
+		// .eml download + print sheet. One grant-scoped endpoint: a superadmin
+		// reaches every mailbox through it exactly as they do in the reader, so
+		// there is no separate staff route.
 		'exportUrlBase'     => '/profile/mailbox/original',
 		'contactsUrl'       => '/api/v1/action/mailbox/contacts',
 		// The contacts pane's pencils: the Contacts page, where they are managed.
@@ -246,6 +251,9 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// A conversation another feature's link asked the reader to open (?open=N): the
 		// mailbox and thread, already checked against the viewer's grants.
 		'openMessage'       => $opts['open_message'] ?? null,
+		// A mailbox a link asked for (?mailbox=N, a mailbox's Read link on the admin Accounts
+		// page); the script shows it only when the viewer's seed holds it.
+		'openMailbox'       => !empty($opts['open_mailbox']) ? intval($opts['open_mailbox']) : null,
 		'messageActions'    => array_map(function ($a) {
 			return array('key' => $a['key'], 'label' => $a['label'], 'icon' => $a['icon'], 'url' => $a['url']);
 		}, MailboxMessageActions::declared()),

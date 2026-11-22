@@ -289,6 +289,13 @@
             "parent": "pages"
         },
         {
+            "slug": "seo-pages",
+            "title": "SEO Pages",
+            "url": "admin_seo_pages",
+            "order": 3,
+            "parent": "pages"
+        },
+        {
             "slug": "system-components",
             "title": "Component Types",
             "url": "admin_component_types",
@@ -359,13 +366,6 @@
             "url": "admin_cloud_storage",
             "order": 11,
             "parent": "system"
-        },
-        {
-            "slug": "report-problem",
-            "title": "Report a problem",
-            "url": "/report_problem",
-            "order": 90,
-            "icon": "question-circle"
         }
     ],
     "profileMenu": [
@@ -447,20 +447,6 @@
             "url": "/admin/admin_settings",
             "order": 120,
             "icon": "wrench"
-        },
-        {
-            "slug": "core-admin-seo-pages",
-            "title": "SEO Pages",
-            "url": "/admin/admin_seo_pages",
-            "order": 125,
-            "icon": "search"
-        },
-        {
-            "slug": "core-admin-utilities",
-            "title": "Admin Utilities",
-            "url": "/admin/admin_utilities",
-            "order": 130,
-            "icon": "tools"
         },
         {
             "slug": "core-signout",

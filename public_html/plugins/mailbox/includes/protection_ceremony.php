@@ -30,6 +30,7 @@
  * caller-scoped, since unsealing needs each holder's own unlock window —
  * and mailbox_lowering_receipt_render() is the downgrade's receipt card.
  *
+ * @version 2.14 - "Open mailbox" opens the member reader
  * @version 2.13 - the lowering receipt carries what was changed (data-changes), for the question asked before the move
  * @version 2.12 - the checklist takes 'shown' (drawn visible, for a page with one target)
  * @version 2.11 - a fix button's confirm is data-jy-confirm (no inline handler)
@@ -901,7 +902,7 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 		$button_url = '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . intval($domain->key);
 	} else {
 		$button_label = 'Open mailbox';
-		$button_url = '/plugins/mailbox/admin/admin_mailbox_reader';
+		$button_url = '/profile/mailbox/mailbox';
 	}
 
 	// The progress row is driven by the shared batch loop
@@ -1050,7 +1051,7 @@ function mailbox_lowering_receipt_render(InboundEmailDomain $domain, array $stat
 	$html .= mailbox_contacts_receipt_row(intval($domain->key), $alias_scope_id, 'opened');
 	$html .= '</ul>';
 	$html .= '<div style="margin-top:.75rem;"><a id="lowering-action" class="btn btn-primary'
-		. (($own > 0 && $window_open) ? ' d-none' : '') . '" href="/plugins/mailbox/admin/admin_mailbox_reader">'
+		. (($own > 0 && $window_open) ? ' d-none' : '') . '" href="/profile/mailbox/mailbox">'
 		. 'Open mailbox</a></div>';
 	if ($own > 0 && $window_open) {
 		// No-JS fallback: bounded server-side unseal batches, one page load

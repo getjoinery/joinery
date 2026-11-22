@@ -10,9 +10,9 @@ extract($page_vars);
 
 $page = new AdminPage();
 $page->admin_header(array(
-	'menu-id'     => 'settings-seo-pages',
+	'menu-id'     => 'seo-pages',
 	'breadcrumbs' => array(
-		'Settings'  => '',
+		'Pages'     => '/admin/admin_pages',
 		'SEO Pages' => '',
 	),
 	'session' => $session,

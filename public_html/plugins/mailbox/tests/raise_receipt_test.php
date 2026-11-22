@@ -137,7 +137,7 @@ try {
 	$html = mailbox_protection_receipt_render($dom, rr_facts_one_holder(9001, 'Sam Holder'), $state);
 	check(strpos($html, '3 earlier messages sealed') !== false, 'the sealed count is the completed fact');
 	check(strpos($html, 'd-none') === false, 'the action button is visible on completion');
-	check(strpos($html, 'Open mailbox') !== false && strpos($html, 'admin_mailbox_reader') !== false,
+	check(strpos($html, 'Open mailbox') !== false && strpos($html, '/profile/mailbox/mailbox') !== false,
 		'the button opens the mailbox reader');
 	check(strpos($html, '<noscript>') === false, 'no batch form remains with an empty backlog');
 	check(strpos($html, 'Reading takes an unlock by Sam Holder') !== false,
