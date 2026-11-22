@@ -158,12 +158,22 @@ $provision->set('cvp_site_dns_records', json_encode(array(
 $provision->set('cvp_site_dns_time', gmdate('Y-m-d H:i:s'));
 check(ProvisionBuyerDns::listed($provision), 'the list is shown once the site has answered');
 $site_names = array();
+$provision->set('cvp_no_mail_server', true);
 foreach (ProvisionBuyerDns::site_records_for_buyer($provision, profile_sites_plane_mail_records($provision)) as $r) {
 	$site_names[] = $r['type'] . ' ' . $r['name'];
 }
 check($site_names === array('SRV _joinery._tcp.' . $domain, 'TXT _joinery-key.' . $domain),
 	'the site\'s address, signing key, SPF and DMARC give way to ours where we set up sending; a name we list is ours',
 	json_encode($site_names));
+$provision->set('cvp_no_mail_server', false);
+$site_names = array();
+foreach (ProvisionBuyerDns::site_records_for_buyer($provision, profile_sites_plane_mail_records($provision)) as $r) {
+	$site_names[] = $r['type'] . ' ' . $r['name'];
+}
+check($site_names === array('TXT ' . $domain, 'TXT mail._domainkey.' . $domain, 'SRV _joinery._tcp.' . $domain, 'TXT _joinery-key.' . $domain),
+	'a site with its own mail server keeps its SPF record and its own signing key beside our sending records; its DMARC still gives way',
+	json_encode($site_names));
+$provision->set('cvp_no_mail_server', true);
 $listed = array();
 foreach (profile_sites_mail_records($provision) as $r) {
 	$listed[] = $r['type'] . ' ' . $r['name'];

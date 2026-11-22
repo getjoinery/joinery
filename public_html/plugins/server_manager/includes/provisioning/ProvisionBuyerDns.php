@@ -26,6 +26,7 @@
  * the buyer is shown the plane's records and the site is not asked again
  * every few minutes for ever.
  *
+ * @version 1.3 - a site with its own mail server keeps its SPF record and its own signing key beside our sending records (walkthrough finding 174)
  * @version 1.2 - an MX, the site's own or our relay's, is held back where the domain already receives email elsewhere
  *                (receives_elsewhere(), mx_left_alone(); walkthrough Q39)
  * @version 1.1 - a site without the mailbox plugin is answered for, not re-asked for ever (Joinerydemo, 2026-11-18)
@@ -105,11 +106,15 @@ class ProvisionBuyerDns {
 	 * array(type, name, value, priority, note). The plane lists the addresses
 	 * itself, so the site's are dropped. Where the plane set up sending, the
 	 * provider signs and the forgery policy is the plane's optional box, so the
-	 * site's own signing key, SPF and DMARC are dropped, and a name and type
-	 * the plane already lists is the plane's.
+	 * site's DMARC is dropped, and a name and type the plane already lists is
+	 * the plane's. Its own signing key and SPF are dropped too, unless the site
+	 * runs its own mail server: mail that server forwards or bounces leaves
+	 * from the site's address, signed with the site's key, and the site's own
+	 * setup check asks for both records.
 	 */
 	public static function site_records_for_buyer($provision, array $plane): array {
 		$has_sending = count(ProvisionHostedMail::records_of($provision)) > 0;
+		$own_mail_server = !$provision->is_container() && !(bool)$provision->get('cvp_no_mail_server');
 		$taken = array();
 		foreach ($plane as $record) {
 			$taken[strtoupper((string)($record['type'] ?? '')) . ' ' . strtolower(rtrim((string)($record['name'] ?? ''), '.'))] = true;
@@ -123,8 +128,8 @@ class ProvisionBuyerDns {
 					|| isset($taken[$type . ' ' . $name])) {
 				continue;
 			}
-			if ($has_sending && (strpos($name, '._domainkey.') !== false || strpos($name, '_dmarc.') === 0
-					|| ($type === 'TXT' && stripos($value, 'v=spf1') === 0))) {
+			$is_key_or_spf = strpos($name, '._domainkey.') !== false || ($type === 'TXT' && stripos($value, 'v=spf1') === 0);
+			if ($has_sending && (strpos($name, '_dmarc.') === 0 || ($is_key_or_spf && !$own_mail_server))) {
 				continue;
 			}
 			// A domain that already receives its email somewhere else keeps

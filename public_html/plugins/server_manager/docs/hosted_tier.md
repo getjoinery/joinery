@@ -123,8 +123,10 @@ needs (the `managed_domain_prepare` primitive), keeps the answer in
 page says the records are being gathered and lists none. A site that has not
 answered fifteen minutes after its install (`SmHosting::DNS_WAIT_SECONDS`) has
 its list shown with what is known, the gap is reported on every pass, and the
-site is asked until it answers. Where the plane set up sending, the site's own
-signing key, SPF and DMARC give way to the provider's. Where the domain's DNS
+site is asked until it answers. Where the plane set up sending, the site's DMARC
+gives way to the plane's optional one, and so do its own signing key and SPF
+unless the site runs its own mail server: mail that server forwards leaves from
+the site's address, so both records are listed beside the provider's. Where the domain's DNS
 host has a driver the page offers to add every record at once
 (the DNS publish box, docs/dns_management.md). There
 the admin password their account was born with is shown **once** — reading it
