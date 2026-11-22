@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php safe --filter=csp_header
  *
+ * @version 1.15 - header names compared without case: over HTTP/2 the site sends them lower-cased
  * @version 1.14 - declares the tree it sweeps (covers:), so a new or changed PHP or JS file reruns it instead of reusing an older pass
  * @version 1.13 - the site's own form addresses (csp_form_hosts): exact https origins only, and the live check expects them
  * @version 1.12 - a report-only header carries no frame-ancestors
@@ -386,10 +387,11 @@ check($r['status'] > 0 && $r['status'] < 500, 'homepage answers (' . $r['status'
 $seen = array();
 foreach ((array)$r['headers'] as $line) {
 	if (preg_match('/^(Content-Security-Policy(?:-Report-Only)?):\s*(.*)$/i', $line, $m)) {
-		$seen[] = array($m[1], $fold($m[2]));
+		// A header name has no case, and HTTP/2 sends every one in lower case.
+		$seen[] = array(strtolower($m[1]), $fold($m[2]));
 	}
 }
-$want = array_map(function ($h) use ($fold) { return array($h[0], $fold($h[1])); }, $expected_all);
+$want = array_map(function ($h) use ($fold) { return array(strtolower($h[0]), $fold($h[1])); }, $expected_all);
 if ($want === array()) {
 	check(empty($seen), 'enable_csp is off here and the site sends no CSP header', json_encode($seen));
 } else {
