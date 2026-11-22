@@ -31,6 +31,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.76 - a subdomain with no DMARC record of its own plans one from its parent domain's, and keeps a strict shape the parent asks for
  * @version 1.75 - a read-only check says it did not ask the provider for DKIM records, not that its API failed
  * @version 1.74 - the Finish send protection link is InboundEmailDomain::send_protection_setup_url()
  * @version 1.73 - two SPF records at a name fail its SPF row (apex, forwarding subdomain, machine identity):
@@ -1047,7 +1048,79 @@ class InboundEmailSetupCheck {
 		// Not knowing the live record is no reason to overwrite it: '' leaves
 		// _dmarc out of this plan (planAdd skips it), and the check row already
 		// says the lookup failed.
-		return $ok ? self::foldDmarc($domain, $strict, self::firstDmarc((array)$txt)) : '';
+		if (!$ok) {
+			return '';
+		}
+		return $this->dmarcFolded($domain, $strict, self::firstDmarc((array)$txt))[0];
+	}
+
+	/**
+	 * foldDmarc() for $domain from its seed (dmarcSeed()), given its own live
+	 * record $own ('' for none). A subdomain whose parent domain publishes the
+	 * strict shape keeps that shape in the ordinary fold: it is the policy the
+	 * subdomain is under with no record at all, so relaxing it would publish
+	 * less than the parent asks.
+	 *
+	 * @return array [string $value, bool $ok]; $ok is false, and $value '',
+	 *               when the parent's record could not be read
+	 */
+	private function dmarcFolded(string $domain, bool $strict, string $own): array {
+		list($seed, $ok) = $this->dmarcSeed($domain, $own);
+		if (!$ok) {
+			return array('', false);
+		}
+		$keep_strict = false;
+		if (!$strict && self::isStrictDmarc($seed)) {
+			if ($own === '') {
+				$keep_strict = true;   // the seed is the parent's record
+			} else {
+				list($parent, $parent_ok) = $this->dmarcSeed($domain, '');
+				if (!$parent_ok) {
+					return array('', false);
+				}
+				$keep_strict = self::isStrictDmarc($parent);
+			}
+		}
+		return array(self::foldDmarc($domain, $strict, $seed, $keep_strict), true);
+	}
+
+	/** Whether DMARC record $record has the strict shape: p=reject with aspf=s and adkim=s. */
+	public static function isStrictDmarc(string $record): bool {
+		$tags = array();
+		foreach (explode(';', $record) as $pair) {
+			if (strpos($pair, '=') === false) { continue; }
+			list($k, $v) = explode('=', $pair, 2);
+			$k = strtolower(trim($k));
+			if (!isset($tags[$k])) { $tags[$k] = strtolower(trim($v)); }
+		}
+		return ($tags['p'] ?? '') === 'reject' && ($tags['aspf'] ?? '') === 's' && ($tags['adkim'] ?? '') === 's';
+	}
+
+	/**
+	 * The record a DMARC fold for $domain starts from: its own ($own), or, for a
+	 * subdomain with none, its parent domain's as it applies to the subdomain
+	 * (DnsAuthChecker::dmarcForSubdomain()), so the record published here keeps
+	 * the policy and report addresses the subdomain is already under.
+	 *
+	 * @return array [string $seed, bool $ok]; $ok is false when the parent's
+	 *               record could not be read
+	 */
+	private function dmarcSeed(string $domain, string $own): array {
+		if ($own !== '') {
+			return array($own, true);
+		}
+		$domain = strtolower(trim($domain));
+		$parent = DnsAuthChecker::organisationalDomain($domain);
+		if ($parent === $domain) {
+			return array('', true);
+		}
+		list($txt, $ok) = $this->dns(function () use ($parent) {
+			return DnsResolver::getTxt('_dmarc.' . $parent);
+		});
+		if (!$ok) {
+			return array('', false);
+		}
+		return array(DnsAuthChecker::dmarcForSubdomain(self::firstDmarc((array)$txt)), true);
 	}
 
 	/**
@@ -1095,7 +1168,9 @@ class InboundEmailSetupCheck {
 	 * when there is no p or one receivers would not recognize. The one exception is the strict shape send
 	 * protection wrote (p=reject with aspf=s and adkim=s): switching protection
 	 * off puts p=none and relaxed alignment back, or legitimate mail would go on
-	 * failing alignment with nothing protected in exchange.
+	 * failing alignment with nothing protected in exchange. $keep_strict turns
+	 * the exception off, for a subdomain whose parent domain asks for that
+	 * shape (dmarcFolded()).
 	 *
 	 * The report address postmaster@ comes first in rua, because report ingest
 	 * reads it; every other report address and tag (ruf, fo, ri, ...) is kept as
@@ -1103,7 +1178,7 @@ class InboundEmailSetupCheck {
 	 * (DnsRecord::isSatisfiedBy), so folding a record this built gives the same
 	 * record back.
 	 */
-	public static function foldDmarc(string $domain, bool $strict, string $live): string {
+	public static function foldDmarc(string $domain, bool $strict, string $live, bool $keep_strict = false): string {
 		$domain = strtolower(trim($domain));
 		$kept = array();
 		foreach (explode(';', $live) as $pair) {
@@ -1123,7 +1198,7 @@ class InboundEmailSetupCheck {
 			foreach (array('pct' => '100', 't' => 'n', 'sp' => 'reject', 'np' => 'reject') as $k => $safe) {
 				if (isset($kept[$k]) && !$is($k, $safe)) { $drop[$k] = true; }
 			}
-		} elseif ($is('p', 'reject') && $is('aspf', 's') && $is('adkim', 's')) {
+		} elseif (!$keep_strict && $is('p', 'reject') && $is('aspf', 's') && $is('adkim', 's')) {
 			$set = array('p' => 'none');
 			$drop = array('aspf' => true, 'adkim' => true);
 		} else {
@@ -2246,13 +2321,22 @@ class InboundEmailSetupCheck {
 			} else {
 				$hasDmarc = false;
 				foreach ($dmarcTxt as $t) { if (stripos($t, 'v=DMARC1') === 0) { $hasDmarc = true; break; } }
-				$out[] = $hasDmarc
-					? $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::PASS,
-						'A DMARC record is published.')
-					: $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::WARN,
-						$domain . ' has no DMARC record.',
-						'DMARC is optional but recommended once SPF and DKIM pass.',
-						$this->dnsFix('TXT', '_dmarc.' . $domain, self::foldDmarc($domain, false, '')));
+				if ($hasDmarc) {
+					$out[] = $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::PASS,
+						'A DMARC record is published.');
+				} else {
+					list($dmarcSeed, ) = $this->dmarcSeed($domain, '');
+					list($dmarcFix, ) = $this->dmarcFolded($domain, false, '');
+					$out[] = $dmarcSeed !== ''
+						? $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::WARN,
+							$domain . ' has no DMARC record of its own; it follows the one on ' . DnsAuthChecker::organisationalDomain($domain) . '.',
+							'A record of its own, carrying the same policy, brings this domain\'s delivery reports here.',
+							$this->dnsFix('TXT', '_dmarc.' . $domain, $dmarcFix))
+						: $this->r('domain.dmarc', $domain, 'domain', 'DMARC record', self::RECOMMENDED, self::WARN,
+							$domain . ' has no DMARC record.',
+							'DMARC is optional but recommended once SPF and DKIM pass.',
+							$this->dnsFix('TXT', '_dmarc.' . $domain, self::foldDmarc($domain, false, '')));
+				}
 
 				// Aggregate reports arriving (specs/deliverability_report_ingest.md
 				// § Surfaces). A DMARC record whose rua address is wrong looks
@@ -3895,10 +3979,9 @@ class InboundEmailSetupCheck {
 		});
 		$dmarc_rejects = false;
 		if ($dmarcOk) {
-			foreach ($dmarcTxt as $t) {
-				if (stripos($t, 'v=DMARC1') !== 0) { continue; }
-				if (preg_match('/\bp\s*=\s*reject\b/i', $t)) { $dmarc_rejects = true; }
-			}
+			// A subdomain with no record of its own is under its parent's.
+			list($governing, ) = $this->dmarcSeed($domain, self::firstDmarc((array)$dmarcTxt));
+			$dmarc_rejects = (bool)preg_match('/(?:^|;)\s*p\s*=\s*reject\b/i', $governing);
 		}
 		return $spf_rejects && $dmarc_rejects;
 	}
@@ -4400,7 +4483,8 @@ class InboundEmailSetupCheck {
 				'DNS lookup for _dmarc.' . $domain . ' failed — try again.');
 		}
 		$record = self::firstDmarc((array)$dmarcTxt);
-		$strict = self::foldDmarc($domain, true, $record);
+		list($seed, ) = $this->dmarcSeed((string)$domain, $record);
+		$strict = self::foldDmarc($domain, true, $seed);
 		$all = array_values(array_filter((array)$dmarcTxt, function ($t) { return stripos(ltrim((string)$t), 'v=DMARC1') === 0; }));
 		if (count($all) > 1) {
 			return $this->r('domain.dmarc', $domain, 'domain', 'Strict DMARC (p=reject; aspf=s; adkim=s)', self::REQUIRED, self::FAIL,

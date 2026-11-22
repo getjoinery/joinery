@@ -147,6 +147,15 @@ written. A record the plan built folds back to itself, so the diff settles. When
 the live record cannot be read, `_dmarc` is left out of the plan rather than
 overwritten blind.
 
+A subdomain with no record of its own is under its parent domain's, so the fold
+starts from that one as it applies to the subdomain
+(`DnsAuthChecker::dmarcForSubdomain()`: `sp`, where set, becomes `p`; `sp` and
+`np` are left out). The subdomain's own record then carries the policy and
+report addresses it was already under, plus `postmaster@`. Where the parent
+publishes the strict shape, the subdomain's ordinary record keeps it rather than
+going back to `p=none`. Every DMARC reader
+follows the same rule through `DnsAuthChecker::governingDmarc()`.
+
 ## Adding the box to a page
 
 Two calls: one in the action path, one in the render path.

@@ -8,6 +8,7 @@
  * Lookups go through DnsResolver — the single raw-DNS chokepoint — so this
  * class is fully unit-testable via DnsResolver::setBackend().
  *
+ * @version 1.5 - governingDmarc() and dmarcForSubdomain(): a subdomain with no DMARC record is under its parent domain's
  * @version 1.4 - on hosted mail (a key name the management node told the site) a missing SPF record is
  *   advice, not a failure: the provider's return address carries its own (hosting_paid_launch B4)
  * @version 1.3 - assess() tries smtp_dkim_key_name first, the key name hosted mail signs with (hosting_launch B7)
@@ -269,6 +270,35 @@ class DnsAuthChecker {
 			}
 		}
 		return array('record' => '', 'at' => '', 'inherited' => false);
+	}
+
+	/**
+	 * A parent domain's DMARC record written as a subdomain's own, carrying the
+	 * policy the subdomain is under: sp, where the parent set one, becomes p, and
+	 * sp and np (which only a parent's record uses) are left out. Every other
+	 * tag is kept as written. '' gives ''.
+	 */
+	public static function dmarcForSubdomain(string $record): string {
+		$tags = array();
+		foreach (explode(';', $record) as $pair) {
+			$pair = trim($pair);
+			if ($pair === '' || strpos($pair, '=') === false) { continue; }
+			list($k, $v) = explode('=', $pair, 2);
+			$k = strtolower(trim($k));
+			$v = trim($v);
+			if ($k === '' || $v === '' || isset($tags[$k])) { continue; }
+			$tags[$k] = $v;
+		}
+		if (empty($tags)) {
+			return '';
+		}
+		if (isset($tags['sp'])) {
+			$tags['p'] = $tags['sp'];
+		}
+		unset($tags['sp'], $tags['np']);
+		$out = array();
+		foreach ($tags as $k => $v) { $out[] = $k . '=' . $v; }
+		return implode('; ', $out);
 	}
 
 	/**

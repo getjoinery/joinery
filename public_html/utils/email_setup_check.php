@@ -1074,6 +1074,7 @@ class EmailAuthChecker {
             'valid' => false,
             'policy' => '',
             'subdomain_policy' => '',
+            'inherited_from' => '',
             'percentage' => 100,
             'alignment' => [],
             'reporting' => [],
@@ -1083,6 +1084,23 @@ class EmailAuthChecker {
         
         $dmarcDomain = '_dmarc.' . $this->domain;
         $txtRecords = @dns_get_record($dmarcDomain, DNS_TXT);
+
+        // A subdomain with no record of its own is under its parent domain's.
+        $parent = DnsAuthChecker::organisationalDomain((string)$this->domain);
+        $ownHasDmarc = false;
+        foreach ((array)$txtRecords as $record) {
+            if (isset($record['txt']) && strpos($record['txt'], 'v=DMARC1') === 0) { $ownHasDmarc = true; }
+        }
+        if (!$ownHasDmarc && $parent !== strtolower(rtrim((string)$this->domain, '.'))) {
+            $parentRecords = @dns_get_record('_dmarc.' . $parent, DNS_TXT);
+            foreach ((array)$parentRecords as $record) {
+                if (isset($record['txt']) && strpos($record['txt'], 'v=DMARC1') === 0) {
+                    $txtRecords = $parentRecords;
+                    $dmarc['inherited_from'] = $parent;
+                    break;
+                }
+            }
+        }
         
         if (!$txtRecords) {
             $dmarc['issues'][] = 'No DMARC record found';
@@ -1150,6 +1168,14 @@ class EmailAuthChecker {
             }
         }
         
+        if ($dmarc['inherited_from'] !== '') {
+            // Under a parent's record, sp is the policy that applies here.
+            if ($dmarc['subdomain_policy'] !== '') {
+                $dmarc['policy'] = $dmarc['subdomain_policy'];
+            }
+            $dmarc['recommendations'][] = 'This record is published on ' . $dmarc['inherited_from'] . ' and applies to ' . $this->domain . ' because it has none of its own';
+        }
+
         // Validate policy
         if (!in_array($dmarc['policy'], ['none', 'quarantine', 'reject'])) {
             $dmarc['issues'][] = 'Invalid DMARC policy - must be none, quarantine, or reject';

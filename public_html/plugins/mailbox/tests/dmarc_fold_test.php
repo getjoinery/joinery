@@ -13,7 +13,7 @@
  * changes only the policy its stage is about. Plan matching is exact text, so
  * a record it built must fold back to itself, or the diff would never settle.
  *
- * @version 1.1 - strict drops a weaker sp or np and t; ordinary keeps the owner's policy except the strict shape
+ * @version 1.2 - a subdomain with no record of its own starts from its parent domain's, and keeps a strict shape its parent asks for
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -85,6 +85,49 @@ check($plan_value->invoke($checker, 'example.test', true) === '',
 DnsResolver::setBackend(new class { public function getRecords($n, $t) { return array(array('txt' => 'v=DMARC1; p=none; ruf=mailto:f@dmarc.example')); } });
 check($plan_value->invoke($checker, 'example.test', true) === 'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@example.test; ruf=mailto:f@dmarc.example',
 	'and the live record is folded when it can');
+
+section('A subdomain with no record of its own starts from its parent domain\'s');
+check(DnsAuthChecker::dmarcForSubdomain('v=DMARC1; p=reject; sp=quarantine; np=reject; rua=mailto:r@example.test; fo=1')
+	=== 'v=DMARC1; p=quarantine; rua=mailto:r@example.test; fo=1', 'sp becomes the policy; sp and np are left out; the rest is kept');
+check(DnsAuthChecker::dmarcForSubdomain('v=DMARC1; p=reject') === 'v=DMARC1; p=reject' && DnsAuthChecker::dmarcForSubdomain('') === '',
+	'with no sp the parent policy carries over; no record gives none');
+$parent_only = function (array $map) {
+	return new class($map) {
+		private $map;
+		public function __construct(array $map) { $this->map = $map; }
+		public function getRecords($n, $t) {
+			if (!array_key_exists($n, $this->map)) { return array(); }
+			if ($this->map[$n] === false) { throw new DnsLookupException('down'); }
+			return array(array('txt' => $this->map[$n]));
+		}
+	};
+};
+DnsResolver::setBackend($parent_only(array('_dmarc.example.test' => 'v=DMARC1; p=quarantine; rua=mailto:owner@example.test')));
+$sub_plan = $plan_value->invoke($checker, 'mail.example.test', false);
+check($sub_plan === 'v=DMARC1; p=quarantine; rua=mailto:postmaster@mail.example.test,mailto:owner@example.test',
+	'the ordinary plan keeps the parent policy and report address, with postmaster first');
+DnsResolver::setBackend($parent_only(array('_dmarc.mail.example.test' => $sub_plan, '_dmarc.example.test' => 'v=DMARC1; p=reject')));
+check($plan_value->invoke($checker, 'mail.example.test', false) === $sub_plan, 'once published, its own record is what folds, so the diff settles');
+DnsResolver::setBackend($parent_only(array('_dmarc.example.test' => 'v=DMARC1; p=reject; rua=mailto:owner@example.test')));
+check($plan_value->invoke($checker, 'mail.example.test', true) === 'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@mail.example.test,mailto:owner@example.test',
+	'the strict plan keeps the parent report address too');
+DnsResolver::setBackend($parent_only(array('_dmarc.example.test' => false)));
+check($plan_value->invoke($checker, 'mail.example.test', false) === '', 'a parent record that cannot be read leaves the record out of the plan');
+$parent_strict = 'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:owner@example.test';
+$sub_strict = 'v=DMARC1; p=reject; rua=mailto:postmaster@mail.example.test,mailto:owner@example.test; aspf=s; adkim=s';
+DnsResolver::setBackend($parent_only(array('_dmarc.example.test' => $parent_strict)));
+check($plan_value->invoke($checker, 'mail.example.test', false) === $sub_strict,
+	'a parent that asks for the strict shape: the ordinary plan keeps it, where relaxing would publish less than the parent asks');
+DnsResolver::setBackend($parent_only(array('_dmarc.mail.example.test' => $sub_strict, '_dmarc.example.test' => $parent_strict)));
+check($plan_value->invoke($checker, 'mail.example.test', false) === $sub_strict, 'and it still does once the subdomain has published it');
+DnsResolver::setBackend($parent_only(array('_dmarc.mail.example.test' => $sub_strict, '_dmarc.example.test' => 'v=DMARC1; p=none')));
+check($plan_value->invoke($checker, 'mail.example.test', false) === 'v=DMARC1; p=none; rua=mailto:postmaster@mail.example.test,mailto:owner@example.test',
+	'under a parent that does not, the strict shape goes back to p=none as it does on a main domain');
+DnsResolver::setBackend($parent_only(array('_dmarc.mail.example.test' => $sub_strict, '_dmarc.example.test' => false)));
+check($plan_value->invoke($checker, 'mail.example.test', false) === '', 'and with the parent unreadable the record is left out of the plan');
+DnsResolver::setBackend($parent_only(array()));
+check($plan_value->invoke($checker, 'mail.example.test', false) === 'v=DMARC1; p=none; rua=mailto:postmaster@mail.example.test',
+	'with no record on either name the plan writes its own');
 DnsResolver::clearBackend();
 
 harness_finish();
