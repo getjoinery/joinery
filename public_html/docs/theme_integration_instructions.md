@@ -499,7 +499,6 @@ Your theme's `BeginPage`/`EndPage` should use your CSS framework's container cla
 | Framework | BeginPage output | EndPage output |
 |-----------|-----------------|----------------|
 | Bootstrap | `<section class="pt-100 pb-70"><div class="container">` | `</div></section>` |
-| UIKit | `<div class="uk-section"><div class="uk-container">` | `</div></div>` |
 
 **Fallback:** `PublicPageBase` provides a basic default container (`max-width: 1140px; margin: 0 auto; padding: 2rem 1rem`) so pages are never completely unstyled, but themes should always override with framework-appropriate markup.
 

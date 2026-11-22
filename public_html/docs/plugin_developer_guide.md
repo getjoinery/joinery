@@ -1929,7 +1929,7 @@ Themes can range from simple presentation layers to complex integrations with mu
 │       └── dashboard.php
 ├── assets/
 └── includes/
-    ├── PublicPage.php          # Bootstrap/UIKit/WordPress-specific implementation
+    ├── PublicPage.php          # Framework-specific implementation
     └── ThemeHelper.php         # Theme-specific utilities
 ```
 
@@ -2070,8 +2070,6 @@ The `?v=` query changes whenever the file does, so a cache in front of the site 
 $theme_config = ThemeHelper::config('cssFramework', 'bootstrap');
 if ($theme_config === 'bootstrap') {
     echo '<div class="container">';
-} elseif ($theme_config === 'uikit') {
-    echo '<div class="uk-container">';
 }
 ?>
 ```
@@ -2656,15 +2654,6 @@ protected function getTableClasses() {
     ];
 }
 
-// UIKit theme  
-protected function getTableClasses() {
-    return [
-        'wrapper' => 'uk-overflow-auto',
-        'table' => 'uk-table uk-table-striped', 
-        'header' => 'uk-table-header'
-    ];
-}
-
 // WordPress theme
 protected function getTableClasses() {
     return [
@@ -2705,12 +2694,6 @@ protected function getTableClasses() {
 - PublicPage with WordPress-specific table classes
 - FormWriter using default base
 - Theme.json accurately reflects implementation
-
-**Zouk Room Theme (UIKit)**
-- CSS Framework: `uikit` 
-- PublicPage with UIKit table classes
-- Theme.json specifies UIKit framework
-- Custom styling for UIKit components
 
 **Other Themes (Various Frameworks)**
 - Falcon (Bootstrap), Default (minimal)

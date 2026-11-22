@@ -309,10 +309,6 @@ class HttpRoutingTestRunner {
             "/theme/falcon/includes/js/theme.js" => "Falcon theme JS",
             "/theme/falcon/includes/vendors/bootstrap/bootstrap.min.js" => "Falcon Bootstrap JS",
             
-            // Zoukroom theme - has actual files
-            "/theme/zoukroom/includes/css/main.css" => "Zoukroom CSS",
-            "/theme/zoukroom/includes/js/uikit.js" => "Zoukroom UIKit JS",
-            
             // Default theme - has actual files
             "/theme/sassa/assets/img/logo.svg" => "Sassa theme image",
 			
