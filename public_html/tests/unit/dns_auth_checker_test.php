@@ -58,6 +58,9 @@ DnsResolver::setBackend(new FakeDnsBackend([
     'hosted.example.com|' . DNS_TXT                   => [],
     's77._domainkey.hosted.example.com|' . DNS_CNAME  => [['target' => 'k.dkimhost.example.net']],
     '_dmarc.hosted.example.com|' . DNS_TXT            => [['txt' => 'v=DMARC1; p=none']],
+    '_dmarc.parent.test|' . DNS_TXT                   => [['txt' => 'v=DMARC1; p=reject; sp=none']],
+    '_dmarc.own.parent.test|' . DNS_TXT               => [['txt' => 'v=DMARC1; p=quarantine']],
+    '_dmarc.strict.test|' . DNS_TXT                   => [['txt' => 'v=DMARC1; p=reject']],
 ]));
 
 // ── checkSPF ─────────────────────────────────────────────────────────────
@@ -82,6 +85,13 @@ ok('checkDMARC pass on p=reject',   DnsAuthChecker::checkDMARC('reject.example.c
 $dmarc_mon = DnsAuthChecker::checkDMARC('monitor.example.com');
 ok('checkDMARC warn on p=none',     $dmarc_mon['status'] === 'warn' && $dmarc_mon['policy'] === 'none');
 ok('checkDMARC fail when absent',   DnsAuthChecker::checkDMARC('dmarcmissing.example.com')['status'] === 'fail');
+$inh = DnsAuthChecker::checkDMARC('shop.strict.test');
+ok('checkDMARC: a subdomain follows its parent record', $inh['status'] === 'pass' && $inh['policy'] === 'reject' && $inh['inherited'] === true && $inh['at'] === 'strict.test');
+$inh_sp = DnsAuthChecker::checkDMARC('shop.parent.test');
+ok('checkDMARC: the parent sp is the subdomain policy', $inh_sp['policy'] === 'none' && $inh_sp['status'] === 'warn');
+$own = DnsAuthChecker::checkDMARC('own.parent.test');
+ok('checkDMARC: a record of its own wins over the parent', $own['policy'] === 'quarantine' && $own['inherited'] === false);
+ok('checkDMARC: the parent itself ignores its sp', DnsAuthChecker::checkDMARC('parent.test')['policy'] === 'reject');
 
 // ── quickCheck rolls all three up ────────────────────────────────────────
 $quick = DnsAuthChecker::quickCheck('pass.example.com', ['mail']);

@@ -604,19 +604,18 @@ class ProvisionHostedMail {
 		);
 	}
 
-	/** Whether $domain publishes a DMARC record. A failed lookup reads as none. */
+	/**
+	 * Whether a DMARC record governs $domain: its own, or its parent domain's,
+	 * which a subdomain follows. A failed lookup reads as none.
+	 */
 	public static function has_dmarc(string $domain): bool {
 		try {
-			foreach (DnsResolver::getTxt('_dmarc.' . strtolower(trim($domain))) as $txt) {
-				if (stripos(trim((string)$txt), 'v=DMARC1') === 0) {
-					return true;
-				}
-			}
+			return DnsAuthChecker::governingDmarc($domain)['record'] !== '';
 		} catch (DnsLookupException $e) {
 			// Unknown: listed again for the buyer, which is harmless; for a zone
 			// we hold the additive publish leaves any DMARC record in place.
+			return false;
 		}
-		return false;
 	}
 
 	/** The DNS records the provider described, as stored. */

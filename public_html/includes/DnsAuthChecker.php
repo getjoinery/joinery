@@ -194,39 +194,33 @@ class DnsAuthChecker {
 			'record' => '',
 			'policy' => '',
 			'adkim'  => 'r',
+			'inherited' => false,
+			'at'     => '',
 		];
 
-		$dmarcDomain = '_dmarc.' . $domain;
 		try {
-			$txtRecords = DnsResolver::getTxt($dmarcDomain);
+			$found = self::governingDmarc((string)$domain);
 		} catch (DnsLookupException $e) {
-			$txtRecords = []; // fail-open: a resolver failure reads as "no record"
+			$found = array('record' => '', 'at' => '', 'inherited' => false); // fail-open: a resolver failure reads as "no record"
 		}
-
-		if (empty($txtRecords)) {
+		$dmarcRecord = $found['record'];
+		if ($dmarcRecord === '') {
 			$result['detail'] = 'No DMARC record found';
 			return $result;
 		}
-
-		$dmarcRecord = null;
-		foreach ($txtRecords as $txt) {
-			if (strpos($txt, 'v=DMARC1') === 0) {
-				$dmarcRecord = $txt;
-				break;
-			}
-		}
-
-		if (!$dmarcRecord) {
-			$result['detail'] = 'No valid DMARC record found';
-			return $result;
-		}
+		$result['inherited'] = $found['inherited'];
+		$result['at'] = $found['at'];
 
 		$result['record'] = $dmarcRecord;
 
 		// Extract policy
 		$policy = 'none';
-		if (preg_match('/p=([^;]+)/', $dmarcRecord, $matches)) {
-			$policy = trim($matches[1]);
+		if (preg_match('/(?:^|;)\s*p\s*=\s*([^;]+)/i', $dmarcRecord, $matches)) {
+			$policy = strtolower(trim($matches[1]));
+		}
+		// A subdomain under its parent's record follows sp where the parent set one.
+		if ($found['inherited'] && preg_match('/(?:^|;)\s*sp\s*=\s*([^;]+)/i', $dmarcRecord, $matches)) {
+			$policy = strtolower(trim($matches[1]));
 		}
 		$result['policy'] = $policy;
 		// How closely the signing domain must match the From domain: s(trict),
@@ -249,7 +243,32 @@ class DnsAuthChecker {
 			$result['detail'] = 'DMARC policy: ' . $policy . ' (unknown)';
 		}
 
+		if ($found['inherited']) {
+			$result['detail'] .= ' (from ' . $found['at'] . ')';
+		}
+
 		return $result;
+	}
+
+	/**
+	 * The DMARC record that governs mail From $domain: its own, or, when it
+	 * publishes none, its organisational domain's, which every name under it
+	 * follows.
+	 *
+	 * @return array{record:string, at:string, inherited:bool} record '' when neither publishes one
+	 * @throws DnsLookupException when a lookup fails before a record is found
+	 */
+	public static function governingDmarc(string $domain): array {
+		$domain = strtolower(rtrim(trim($domain), '.'));
+		foreach (array_unique(array($domain, self::organisationalDomain($domain))) as $name) {
+			foreach (DnsResolver::getTxt('_dmarc.' . $name) as $txt) {
+				$txt = trim((string)$txt);
+				if (stripos($txt, 'v=DMARC1') === 0) {
+					return array('record' => $txt, 'at' => $name, 'inherited' => $name !== $domain);
+				}
+			}
+		}
+		return array('record' => '', 'at' => '', 'inherited' => false);
 	}
 
 	/**

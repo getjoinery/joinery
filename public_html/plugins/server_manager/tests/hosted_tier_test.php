@@ -389,12 +389,14 @@ DnsResolver::setBackend(new FakeDnsBackend(array(
 	'_dmarc.has.example.com|' . DNS_TXT  => array(array('txt' => 'v=DMARC1; p=reject')),
 	'_dmarc.none.example.com|' . DNS_TXT => array(),
 	'_dmarc.down.example.com|' . DNS_TXT => false,
+	'_dmarc.parent.test|' . DNS_TXT      => array(array('txt' => 'v=DMARC1; p=quarantine')),
 )));
 $dm = ProvisionHostedMail::dmarc_record('None.Example.com ');
 check($dm['type'] === 'TXT' && $dm['name'] === '_dmarc.none.example.com' && $dm['value'] === 'v=DMARC1; p=none'
 	&& strpos($dm['note'], 'only if your domain has no DMARC record') !== false, 'the DMARC record offered is monitoring only, with its condition');
 check(ProvisionHostedMail::has_dmarc('has.example.com') && !ProvisionHostedMail::has_dmarc('none.example.com')
 	&& !ProvisionHostedMail::has_dmarc('down.example.com'), 'a domain with its own DMARC record is left alone; none, or an unanswered lookup, is offered one');
+check(ProvisionHostedMail::has_dmarc('shop.parent.test'), 'a subdomain under a parent DMARC record is left alone: a record of its own would replace the parent policy there');
 // The zone we hold gets the DMARC record in a plan of its own, which can never fail the mail leg.
 require_once(PathHelper::getIncludePath('tests/dns/fixtures/FakeDnsDriver.php'));
 $fake = new FakeDnsDriver(array('api_token' => 'unused'));
