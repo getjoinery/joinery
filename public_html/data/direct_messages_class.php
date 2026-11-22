@@ -16,6 +16,8 @@
  * open and a pass that stops part way resumes where it stopped. The rows are
  * the history the group, event and user pages list.
  *
+ * @version 1.1 - the dmg_eml_email_id deletion rule names eml_emails outright: on a site without the email_lists
+ *   plugin the prefix resolved to nothing and the rule was never registered, with a warning every update (B31)
  * @version 1.0
  */
 class DirectMessage extends SystemBase {
@@ -26,7 +28,10 @@ class DirectMessage extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		'dmg_usr_user_id_sender' => array('action' => 'null'),
-		'dmg_eml_email_id' => array('action' => 'null'),
+		// eml_emails is the email_lists plugin's table (Email moved there):
+		// named outright, since the prefix has no owner on a site without the
+		// plugin, where the rule is then skipped until the table exists (B31).
+		'dmg_eml_email_id' => array('action' => 'null', 'source_table' => 'eml_emails'),
 	);
 
 	const QUEUED = 1;   // recipients waiting

@@ -14,10 +14,6 @@ class Upgrade extends SystemBase {	public static $prefix = 'upg';
 	public static $write_permission = 10;
 	public static $pkey_column = 'upg_upgrade_id';
 
-	protected static $foreign_key_actions = [
-		'upg_upg_upgrade_id_requires' => ['action' => 'prevent', 'message' => 'Cannot delete upgrade - required by other upgrades']
-	];
-
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 

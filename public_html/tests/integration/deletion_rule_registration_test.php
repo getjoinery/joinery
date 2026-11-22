@@ -32,6 +32,8 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
+ * @version 1.10 - every core rule resolves on a site with no plugins: by a core prefix, or by naming its table (B31);
+ *   every declared rule, core or plugin, names a column its model has
  * @version 1.9 - and is never registered: a source table this database does not have
  *   (another plugin's, not installed here) registers nothing and warns nothing, while
  *   the model's other rules register
@@ -304,5 +306,68 @@ try {
 } finally {
     cleanup_fixture_rows($db);
 }
+
+// ---------------------------------------------------------------------------
+// Every core rule resolves on a site with no plugins (B31)
+// ---------------------------------------------------------------------------
+// Core registers its rules before any plugin's classes exist, and a site may
+// not have a plugin at all. A core rule that names a plugin's table by prefix
+// alone (dmg_eml_email_id after Email moved to email_lists) resolves to
+// nothing there and is never registered: it must name its table outright,
+// and is then skipped until the table exists.
+$core_classes = LibraryFunctions::discover_model_classes(array(
+	'require_tablename' => true, 'require_field_specifications' => true, 'include_plugins' => false));
+$core_prefixes = array();
+foreach ($core_classes as $cc) {
+	$rc = new ReflectionClass($cc);
+	if ($rc->hasProperty('prefix') && $rc->getStaticPropertyValue('prefix')) {
+		$core_prefixes[$rc->getStaticPropertyValue('prefix')] = true;
+	}
+}
+$unresolved = array();
+$dead = array();
+foreach ($core_classes as $cc) {
+	$rc = new ReflectionClass($cc);
+	$own = $rc->hasProperty('prefix') ? (string)$rc->getStaticPropertyValue('prefix') : '';
+	try { $actions = $rc->getStaticPropertyValue('foreign_key_actions', array()); } catch (ReflectionException $e) { $actions = array(); }
+	$columns = (array)$rc->getStaticPropertyValue('field_specifications', array());
+	foreach ((array)$actions as $col => $rule) {
+		// A rule for a column the model does not have guards nothing: the
+		// registrar walks the columns, so it is never even looked at.
+		if (!isset($columns[$col])) {
+			$dead[] = $cc . '::' . $col;
+			continue;
+		}
+		if (isset($rule['source_table']) || isset($rule['source_class'])) {
+			continue;
+		}
+		$rest = ($own !== '' && strpos($col, $own . '_') === 0) ? substr($col, strlen($own) + 1) : '';
+		$seg = $rest !== '' ? (string)strstr($rest, '_', true) : '';
+		if ($seg === '' || !isset($core_prefixes[$seg])) {
+			$unresolved[] = $cc . '::' . $col;
+		}
+	}
+}
+check(count($core_classes) > 50, 'the core models were read', count($core_classes) . ' classes');
+check($unresolved === array(), 'every core deletion rule resolves among core models or names its table outright',
+	implode(', ', $unresolved));
+check($dead === array(), 'every core deletion rule names a column its model has', implode(', ', $dead));
+
+// The same for every plugin model on disk: a rule for a column the model
+// does not have guards nothing.
+$plugin_dead = array();
+foreach (LibraryFunctions::discover_model_classes(array('require_tablename' => true,
+		'require_field_specifications' => true, 'include_plugins' => true)) as $pc) {
+	if (in_array($pc, $core_classes, true)) { continue; }
+	$rc = new ReflectionClass($pc);
+	try { $actions = $rc->getStaticPropertyValue('foreign_key_actions', array()); } catch (ReflectionException $e) { $actions = array(); }
+	$columns = (array)$rc->getStaticPropertyValue('field_specifications', array());
+	foreach (array_keys((array)$actions) as $col) {
+		if (!isset($columns[$col])) { $plugin_dead[] = $pc . '::' . $col; }
+	}
+}
+check($plugin_dead === array(), 'every plugin deletion rule names a column its model has', implode(', ', $plugin_dead));
+check((DirectMessage::class) && (new ReflectionClass('DirectMessage'))->getStaticPropertyValue('foreign_key_actions')['dmg_eml_email_id']['source_table'] === 'eml_emails',
+	'DirectMessage names eml_emails for dmg_eml_email_id');
 
 harness_finish();
