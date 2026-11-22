@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.46 - joinery-http2.conf sets H2WindowSize 1048576. Under Apache's 64 KB default an upload over HTTP/2
+#                moved one window per round trip: 20 MB took 5.2 s over a 9 ms link against 0.6 s over HTTP/1.1
 # Version: 1.45 - The Apache visitors reach answers HTTP/2 over TLS (section 1a): conf-available/joinery-http2.conf,
 #                written and enabled with mod_http2 wherever Apache runs the event worker model, never in a site
 #                container (the host's proxy speaks HTTP/1.1 to it). Apache's verdict and its reload are one
@@ -213,7 +215,7 @@
 #   - /etc/apache2/conf-available/joinery-http2.conf, enabled with mod_http2,
 #     on a machine whose Apache visitors reach (not a site container) and
 #     which runs the event worker model: HTTP/2 over TLS only, twenty
-#     requests at once per connection.
+#     requests at once per connection, a 1 MB upload window.
 #
 # Three callers, one implementation: install.sh (host_housekeeping), the host
 # timer (_plugin_installers_start.sh, CORE_INSTALLERS) on every converge, and
@@ -511,6 +513,12 @@ fi
 #     removed on every run, so the Protocols line here is the only one.
 #   - Twenty requests at once per connection: every page fits or nearly does,
 #     and a request past it waits in the browser. Each one holds a PHP worker.
+#   - An upload window of 1 MB a request. A browser may send only that much
+#     before Apache says it has room for more, so an upload moves one window
+#     per round trip: Apache's 64 KB default held a 9 ms link to 4 MB a second,
+#     and would hold a 100 ms one to 650 KB. 1 MB allows 10 MB a second at
+#     100 ms. It is also the most one request can make Apache hold unread, so
+#     it is not set higher than uploads need.
 #   - Not in a site container: the host's proxy speaks HTTP/1.1 to it, so the
 #     module there would be more to patch and nothing gained.
 #   - Only under the event worker model: mod_http2 does nothing under prefork.
@@ -531,10 +539,13 @@ else
 #
 # Visitors' browsers are answered over HTTP/2 when they ask for it over TLS,
 # and over HTTP/1.1 otherwise. One connection carries at most twenty requests
-# at once; the rest wait their turn in the browser.
+# at once; the rest wait their turn in the browser. An upload may run 1 MB
+# ahead of what Apache has read (64 KB, Apache's default, slows every upload
+# to one small window per round trip).
 <IfModule http2_module>
 Protocols h2 http/1.1
 H2MaxSessionStreams 20
+H2WindowSize 1048576
 </IfModule>
 EOF
     H2_PREVIOUS=""

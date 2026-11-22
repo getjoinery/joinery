@@ -133,7 +133,7 @@ H2="$R/etc/apache2/conf-available/joinery-http2.conf"
 chk "writes conf-available/joinery-http2.conf" "$( [ -f "$H2" ] && echo yes )" "yes"
 chk "enables it" "$(readlink "$R/etc/apache2/conf-enabled/joinery-http2.conf")" "../conf-available/joinery-http2.conf"
 chk "its directives are exactly these, inside the module's guard" \
-    "$(grep -vE '^[[:space:]]*(#|$)' "$H2" | paste -sd '|')" "<IfModule http2_module>|Protocols h2 http/1.1|H2MaxSessionStreams 20|</IfModule>"
+    "$(grep -vE '^[[:space:]]*(#|$)' "$H2" | paste -sd '|')" "<IfModule http2_module>|Protocols h2 http/1.1|H2MaxSessionStreams 20|H2WindowSize 1048576|</IfModule>"
 chk "HTTP/2 without TLS is not offered" "$(grep -v '^#' "$H2" | grep -c 'h2c')" "0"
 chk "Ubuntu's http2.conf, which offers it, is out of mods-enabled and the module stays" \
     "$( [ ! -L "$R/etc/apache2/mods-enabled/http2.conf" ] && [ -e "$R/etc/apache2/mods-enabled/http2.load" ] && echo ok )" "ok"
