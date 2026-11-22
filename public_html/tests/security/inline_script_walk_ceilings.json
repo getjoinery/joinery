@@ -102,6 +102,7 @@
         "/plugins/mailbox/admin/admin_mailbox_imap_delete",
         "/plugins/mailbox/admin/admin_mailbox_imap_edit",
         "/plugins/mailbox/admin/admin_mailbox_message",
+        "/plugins/mailbox/admin/admin_mailbox_reader",
         "/plugins/store/admin/admin_coupon_code",
         "/plugins/store/admin/admin_order",
         "/plugins/store/admin/admin_order_delete",
