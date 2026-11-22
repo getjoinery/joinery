@@ -1166,7 +1166,7 @@ SES and Route 53 sign their requests with `AwsSigV4` (`includes/AwsSigV4.php`), 
 
 An attachment that cannot be read at send time (a file that is gone or unreadable) fails the send on every provider, with the reason logged; the failed send is queued for retry like any other.
 
-**A pinned Message-ID** (`messageId()`, which the mailbox sets on every compose and reply so its stored copy matches the sent message) reaches the recipient on Mailgun, SMTP2GO, SES, Postmark (sent with `X-PM-KeepID: true`, without which Postmark replaces it), Resend, SendGrid and every SMTP transport. **Brevo and Mailjet cannot carry one:** Brevo's API refuses standard headers and Mailjet forbids `Message-Id`. Each assigns its own, so a message sent through either arrives with a Message-ID the stored copy does not have, and a reply to it is not matched to that copy by Message-ID.
+**A pinned Message-ID** (`messageId()`, which the mailbox sets on every compose and reply so its stored copy matches the sent message) reaches the recipient on Mailgun, SMTP2GO, SES, Postmark (sent with `X-PM-KeepID: true`, without which Postmark replaces it), SendGrid and every SMTP transport. **Brevo, Mailjet and Resend cannot carry one:** Brevo's API refuses standard headers, Mailjet forbids `Message-Id`, and Resend replaces it with Amazon SES's own. Each assigns its own, so a message sent through any of them arrives with a Message-ID the stored copy does not have, and a reply to it is not matched to that copy by Message-ID.
 
 ### Adding a New Provider
 

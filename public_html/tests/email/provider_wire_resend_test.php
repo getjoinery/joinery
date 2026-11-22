@@ -13,6 +13,7 @@
  *
  * Run: php tests/run.php --filter=provider_wire_resend
  *
+ * @version 1.3 - the pinned Message-ID is not sent (Resend replaces it)
  * @version 1.2 - the live API's answer to a wrong key reads as rejected (B29)
  * @version 1.1 - no pinned Message-ID in batch entries (B15); the per-recipient path retries a 429 (B16);
  *   headers is an object (B20); quoted display names; a success must carry an id; transport failure,
@@ -80,7 +81,7 @@ check(($b['cc'] ?? null) === array('cc@example.com') && ($b['bcc'] ?? null) === 
 check(($b['subject'] ?? '') === 'Hello' && ($b['html'] ?? '') !== '' && ($b['text'] ?? '') === 'Hi', 'subject, html, text');
 check(($b['reply_to'] ?? '') === 'reply@example.com', 'reply_to');
 check(($b['headers']['X-Thing'] ?? '') === 'v1', 'headers are a name => value map');
-check(($b['headers']['Message-ID'] ?? '') === '<pinned-1@example.com>', 'the pinned Message-ID is sent (B1)');
+check(!isset($b['headers']['Message-ID']), 'the pinned Message-ID is not sent: Resend replaces it (B1, live check 11-22)');
 $att = $b['attachments'][0] ?? array();
 check(($att['filename'] ?? '') === 'logo.png' && ($att['content'] ?? '') === base64_encode('PNGBYTES') && !isset($att['cid']),
 	'an inline part goes as a regular attachment (no Content-ID field)');

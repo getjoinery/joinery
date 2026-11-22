@@ -9,13 +9,14 @@
  * WHAT THE DOCS SAY (read 2026-11-22):
  *  - Errors carry a `name` (https://resend.com/docs/api-reference/errors).
  *    restricted_api_key is a key limited to sending; invalid_api_key and
- *    missing_api_key are a key Resend will not take. The documented statuses
- *    for these disagree between pages (401, 403, 400), so validation decides
- *    by `name` alone, never by status or message text.
- *  - The send API takes a custom `headers` object
- *    (https://resend.com/docs/dashboard/emails/custom-headers). Nothing in the
- *    docs says Message-ID is refused or replaced, so the pinned Message-ID is
- *    sent as a header. The live check confirms Resend keeps it.
+ *    missing_api_key are a key Resend will not take. The live API answers a
+ *    key it does not know with 400 validation_error "API key is invalid"
+ *    instead, which reads as rejected too.
+ *  - Resend REPLACES a custom Message-ID: it sends through Amazon SES, and a
+ *    message sent with one arrives with SES's own (<...@email.amazonses.com>),
+ *    ours nowhere in its headers (live check 2026-11-22). So the pinned
+ *    Message-ID is not sent, as for Brevo and Mailjet; the mailbox cannot
+ *    match its stored copy of a message sent through Resend by Message-ID.
  *  - /emails/batch does not take attachments
  *    (https://resend.com/docs/api-reference/emails/send-batch-emails), so a
  *    batch whose message has attachments is sent one /emails call per
@@ -23,6 +24,7 @@
  *  - No Content-ID field: an inline part is sent as a regular attachment and
  *    a marker is logged.
  *
+ * @version 2.3 - the pinned Message-ID is no longer sent: Resend replaces it with Amazon SES's own (live check 11-22)
  * @version 2.2 - a key Resend does not know reads as API Key Rejected: the live API answers 400 validation_error
  *   'API key is invalid', not the documented invalid_api_key (B29, seen live 11-22)
  * @version 2.1 - batch entries never carry the pinned Message-ID (review B15); the per-recipient path for
@@ -232,8 +234,7 @@ class ResendProvider implements EmailServiceProvider, SingleKeyProvider {
 
     public function sendBatch(EmailMessage $message, array $recipients): array {
         try {
-            // A pinned Message-ID names one message; every entry is its own.
-            $base = $this->buildPayload($message, false);
+            $base = $this->buildPayload($message);
         } catch (RuntimeException $e) {
             error_log('[ResendProvider] Batch send failed: ' . $e->getMessage());
             return ['success' => false, 'failed_recipients' => array_values($recipients)];
@@ -303,7 +304,7 @@ class ResendProvider implements EmailServiceProvider, SingleKeyProvider {
      *
      * @throws RuntimeException when an attachment yields no bytes
      */
-    private function buildPayload(EmailMessage $message, bool $pin_message_id = true): array {
+    private function buildPayload(EmailMessage $message): array {
         $from = self::formatAddress((string)$message->getFrom(), (string)$message->getFromName());
 
         $payload = [
@@ -322,9 +323,6 @@ class ResendProvider implements EmailServiceProvider, SingleKeyProvider {
         }
 
         $headers = [];
-        if ($pin_message_id && $message->getMessageId()) {
-            $headers['Message-ID'] = (string)$message->getMessageId();
-        }
         foreach ($message->getHeaders() as $name => $value) {
             $headers[(string)$name] = (string)$value;
         }
