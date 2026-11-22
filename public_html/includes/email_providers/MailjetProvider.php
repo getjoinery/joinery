@@ -12,6 +12,8 @@
  * so a send that set it could be refused. The mailbox cannot match its
  * stored copy of a message sent here to the delivered one by Message-ID.
  *
+ * @version 2.2 - the key check shows the account holder, company and country from the fields /myprofile really
+ *   carries (Firstname, Lastname, CompanyName, AddressCountry); it read Email and Country, which it never has (B30)
  * @version 2.1 - a batch whose message has attachments goes one message per call, with retries, so 50
  *   copies of a file never share one request (review B12); Headers is always a JSON object (B20); a
  *   send counts only when the answer parses with Messages[0].Status success
@@ -115,15 +117,20 @@ class MailjetProvider implements EmailServiceProvider {
         $data = ($response->json() ?? [])['Data'] ?? [];
         $profile = is_array($data) && !empty($data[0]) ? $data[0] : [];
 
+        // The fields /myprofile really carries (live 2026-11-22, B30): no
+        // Email or Country, which live on /user and as AddressCountry. The
+        // account holder's name stands in for the email, rather than a
+        // second request to /user.
         $details = [];
-        if (!empty($profile['Email'])) {
-            $details['Account Email'] = $profile['Email'];
+        $name = trim((string)($profile['Firstname'] ?? '') . ' ' . (string)($profile['Lastname'] ?? ''));
+        if ($name !== '') {
+            $details['Account Holder'] = $name;
         }
         if (!empty($profile['CompanyName'])) {
             $details['Company Name'] = $profile['CompanyName'];
         }
-        if (!empty($profile['Country'])) {
-            $details['Country'] = $profile['Country'];
+        if (!empty($profile['AddressCountry'])) {
+            $details['Country'] = $profile['AddressCountry'];
         }
         if (!empty($configured_domain)) {
             $details['Verified Domain'] = $configured_domain;

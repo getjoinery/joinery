@@ -13,6 +13,7 @@
  *
  * Run: php tests/run.php --filter=provider_wire_mailjet
  *
+ * @version 1.2 - the profile fixture has the fields Mailjet's /myprofile really sends (B30)
  * @version 1.1 - batch with attachments goes per recipient (B12); Headers is an object (B20); a non-JSON
  *   200 fails; transport failure, no 5xx retry, batch unreadable attachment, the empty-field check sees
  *   a real request (T1-T3)
@@ -75,13 +76,13 @@ $basic = 'Basic ' . base64_encode('MJKEY:MJSECRET');
 
 section('Validation');
 
-pw_mock(array(pw_json(array('Count' => 1, 'Data' => array(array('Email' => 'acct@example.com', 'CompanyName' => 'Co', 'Country' => 'FR')), 'Total' => 1))));
+pw_mock(array(pw_json(array('Count' => 1, 'Data' => array(array('Firstname' => 'Ada', 'Lastname' => 'Lovelace', 'CompanyName' => 'Co', 'AddressCountry' => 'FR', 'AddressCity' => '')), 'Total' => 1))));
 $v = MailjetProvider::validateApiConnection();
 $r = pw_req();
 check($r && $r->getMethod() === 'GET' && (string)$r->getUri() === 'https://api.mailjet.com/v3/REST/myprofile', 'GET /v3/REST/myprofile');
 check($r && $r->getHeaderLine('Authorization') === $basic, 'key and secret travel as HTTP basic auth');
-check($v['success'] && $v['label'] === 'API Credentials Valid' && $v['details']['Account Email'] === 'acct@example.com'
-	&& $v['details']['Company Name'] === 'Co' && $v['details']['Country'] === 'FR', 'the profile is read from Data[0]');
+check($v['success'] && $v['label'] === 'API Credentials Valid' && $v['details']['Account Holder'] === 'Ada Lovelace'
+	&& $v['details']['Company Name'] === 'Co' && $v['details']['Country'] === 'FR', 'the profile is read from Data[0], with the fields Mailjet really sends (B30)');
 
 pw_mock(array(new Response(401, array(), '')));
 $v = MailjetProvider::validateApiConnection();
