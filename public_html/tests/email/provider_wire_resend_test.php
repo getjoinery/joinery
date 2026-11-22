@@ -13,6 +13,7 @@
  *
  * Run: php tests/run.php --filter=provider_wire_resend
  *
+ * @version 1.2 - the live API's answer to a wrong key reads as rejected (B29)
  * @version 1.1 - no pinned Message-ID in batch entries (B15); the per-recipient path retries a 429 (B16);
  *   headers is an object (B20); quoted display names; a success must carry an id; transport failure,
  *   no 5xx retry, the empty-field check sees a real request (T1-T3)
@@ -196,5 +197,17 @@ check(ResendProvider::getSpfMechanism('mail.example') === 'include:amazonses.com
 	'the answer is cached for the request');
 rw_mock(array(rw_json(array('name' => 'invalid_api_key'), 403)));
 check(ResendProvider::getSpfMechanism('nothere.example') === '', 'a refused list gives no mechanism');
+
+section('A key Resend does not know, as the live API answers it (B29)');
+
+harness_set_setting_mem('resend_api_key', 're_wrongwrong_xxxxxxxxxxxxxxxxxxxxxxxx');
+rw_mock(array(new \GuzzleHttp\Psr7\Response(400, array('Content-Type' => 'application/json'),
+	json_encode(array('statusCode' => 400, 'message' => 'API key is invalid', 'name' => 'validation_error')))));
+$r = ResendProvider::validateApiConnection();
+check($r['success'] === false && $r['label'] === 'API Key Rejected', '400 validation_error "API key is invalid" reads as API Key Rejected', json_encode($r));
+rw_mock(array(new \GuzzleHttp\Psr7\Response(422, array('Content-Type' => 'application/json'),
+	json_encode(array('statusCode' => 422, 'message' => 'The from field is invalid', 'name' => 'validation_error')))));
+$r = ResendProvider::validateApiConnection();
+check($r['label'] !== 'API Key Rejected', 'a validation_error about something else is not called a rejected key', json_encode($r));
 
 harness_finish();

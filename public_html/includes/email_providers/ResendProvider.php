@@ -23,6 +23,8 @@
  *  - No Content-ID field: an inline part is sent as a regular attachment and
  *    a marker is logged.
  *
+ * @version 2.2 - a key Resend does not know reads as API Key Rejected: the live API answers 400 validation_error
+ *   'API key is invalid', not the documented invalid_api_key (B29, seen live 11-22)
  * @version 2.1 - batch entries never carry the pinned Message-ID (review B15); the per-recipient path for
  *   a batch with attachments retries a 429 (B16); headers is always a JSON object (B20); a display name
  *   is quoted per RFC 5322; a send counts only when the answer parses with an id (a batch: data[])
@@ -187,7 +189,13 @@ class ResendProvider implements EmailServiceProvider, SingleKeyProvider {
                 'error' => null,
             ];
         }
-        if ($name === 'invalid_api_key' || $name === 'missing_api_key') {
+        // Resend's live API answers a key it does not know with 400,
+        // validation_error and "API key is invalid", not the invalid_api_key
+        // its error reference lists (seen 2026-11-22, B29): both read as
+        // rejected. Any other validation_error is not about the key.
+        $message = (string)($resp->json()['message'] ?? '');
+        if ($name === 'invalid_api_key' || $name === 'missing_api_key'
+                || ($name === 'validation_error' && preg_match('/\bapi key\b.*\b(invalid|missing|required)\b/i', $message))) {
             return [
                 'success' => false,
                 'label' => 'API Key Rejected',
