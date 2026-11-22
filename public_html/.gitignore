@@ -23,3 +23,8 @@ Globalvars_site.php
 /CLAUDE.md
 /GEMINI.md
 /AGENTS.md
+
+# A plugin ships its libraries in its own vendor/, which its signature covers
+# (specs/plugin_own_vendor.md): nothing in it is ignored. This must stay the
+# last line: the last matching pattern decides.
+!plugins/*/vendor/**

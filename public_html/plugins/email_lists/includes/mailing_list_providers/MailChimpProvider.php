@@ -2,17 +2,25 @@
 /**
  * MailChimpProvider — MailChimp mailing list provider
  *
- * Implements MailingListProvider via AbstractMailingListProvider, using the
- * jhut89/mailchimp3php SDK.
+ * Implements MailingListProvider via AbstractMailingListProvider, talking to
+ * the Marketing API 3.0 directly through ProviderHttp.
+ *
+ * Every call checks the HTTP status. An unsubscribe answered 404 is a success
+ * (the address was never on the list); any other failure throws, so a sync
+ * never reads a refused or failed call as "the list is empty", and a 429 or
+ * 5xx reaches translateException() as a retryable failure.
  *
  * Provider-specific custom merge fields (e.g., MMERGE3) are configured via the
  * mailchimp_default_merge_fields setting (JSON) and applied on every subscribe()
  * call. See spec section "C3" for the rationale.
+ *
+ * @version 1.2 - the data-center check ends at \z, so a key ending in a newline is refused (review B17)
+ * @version 1.1 - talks to the API directly (ProviderHttp), no SDK; every status is checked:
+ *   unsubscribe() is true on 2xx and 404 and throws otherwise, getLists() and getSubscribers()
+ *   throw on a failure instead of answering empty, and subscribe() failures carry the real
+ *   status so a 429 or 5xx is retryable (specs/email_provider_sdk_removal.md WP7, B5)
+ * @version 1.0
  */
-
-require_once(PathHelper::getComposerAutoloadPath());
-
-use MailchimpAPI\Mailchimp;
 
 class MailChimpProvider extends AbstractMailingListProvider {
 
@@ -60,32 +68,8 @@ class MailChimpProvider extends AbstractMailingListProvider {
         }
 
         try {
-            $mailchimp = new Mailchimp($api_key);
-            $lists_response = $mailchimp->lists()->get(['count' => 10]);
-            $lists_data = $lists_response->deserialize();
-
-            if (!isset($lists_data->lists)) {
-                return [
-                    'success' => false,
-                    'label' => 'Invalid API Response',
-                    'details' => [],
-                    'error' => 'API key may be invalid or expired',
-                ];
-            }
-
-            $details = [];
-            foreach ($lists_data->lists as $list) {
-                $details[$list->name] = ($list->stats->member_count ?? 0) . ' members';
-            }
-
-            $count = isset($lists_data->total_items) ? $lists_data->total_items : count($lists_data->lists);
-            return [
-                'success' => true,
-                'label' => 'Connected — ' . $count . ' list' . ($count == 1 ? '' : 's') . ' found',
-                'details' => $details,
-                'error' => null,
-            ];
-        } catch (\Exception $e) {
+            $resp = self::call($api_key, 'GET', '/lists', ['count' => 10]);
+        } catch (MailingListProviderException $e) {
             return [
                 'success' => false,
                 'label' => 'API Connection Failed',
@@ -93,6 +77,44 @@ class MailChimpProvider extends AbstractMailingListProvider {
                 'error' => $e->getMessage(),
             ];
         }
+        if ($resp->status === 401 || $resp->status === 403) {
+            return [
+                'success' => false,
+                'label' => 'API Key Rejected',
+                'details' => [],
+                'error' => 'MailChimp rejected the API key.',
+            ];
+        }
+        if (!$resp->ok()) {
+            return [
+                'success' => false,
+                'label' => 'API Connection Failed',
+                'details' => [],
+                'error' => self::describeFailure($resp),
+            ];
+        }
+        $lists_data = $resp->json();
+        if (!is_array($lists_data) || !isset($lists_data['lists']) || !is_array($lists_data['lists'])) {
+            return [
+                'success' => false,
+                'label' => 'Invalid API Response',
+                'details' => [],
+                'error' => 'API key may be invalid or expired',
+            ];
+        }
+
+        $details = [];
+        foreach ($lists_data['lists'] as $list) {
+            $details[(string)($list['name'] ?? '')] = ($list['stats']['member_count'] ?? 0) . ' members';
+        }
+
+        $count = isset($lists_data['total_items']) ? (int)$lists_data['total_items'] : count($lists_data['lists']);
+        return [
+            'success' => true,
+            'label' => 'Connected — ' . $count . ' list' . ($count == 1 ? '' : 's') . ' found',
+            'details' => $details,
+            'error' => null,
+        ];
     }
 
     public function subscribe(string $remote_list_id, string $email,
@@ -123,26 +145,17 @@ class MailChimpProvider extends AbstractMailingListProvider {
             'merge_fields' => $merge_fields,
         ];
 
-        try {
-            $mailchimp = new Mailchimp($api_key);
-            // PUT is idempotent — creates or updates by subscriber hash
-            $subscriber_hash = md5($email);
-            $return = $mailchimp
-                ->lists($remote_list_id)
-                ->members($subscriber_hash)
-                ->put($post_params);
-
-            $status = $return->deserialize();
-            if (!isset($status->id)) {
-                throw new MailingListProviderException(
-                    'MailChimp subscribe returned unexpected response', false);
-            }
-            return $status->id;
-        } catch (MailingListProviderException $e) {
-            throw $e;
-        } catch (\Exception $e) {
-            throw self::translateException($e, 'subscribe');
+        // PUT is idempotent — creates or updates by subscriber hash
+        $resp = self::call($api_key, 'PUT', self::memberPath($remote_list_id, $email), [], $post_params);
+        if (!$resp->ok()) {
+            throw self::statusException($resp, 'subscribe');
         }
+        $status = $resp->json();
+        if (!is_array($status) || empty($status['id'])) {
+            throw new MailingListProviderException(
+                'MailChimp subscribe returned unexpected response', false);
+        }
+        return (string)$status['id'];
     }
 
     public function unsubscribe(string $remote_list_id, string $email): bool {
@@ -158,17 +171,13 @@ class MailChimpProvider extends AbstractMailingListProvider {
                 'MailChimp API key is not configured', false);
         }
 
-        try {
-            $mailchimp = new Mailchimp($api_key);
-            $subscriber_hash = md5($email);
-            $mailchimp
-                ->lists($remote_list_id)
-                ->members($subscriber_hash)
-                ->patch(['status' => 'unsubscribed']);
+        $resp = self::call($api_key, 'PATCH', self::memberPath($remote_list_id, $email), [],
+            ['status' => 'unsubscribed']);
+        // 404: the address was never on the list, which is already unsubscribed.
+        if ($resp->ok() || $resp->status === 404) {
             return true;
-        } catch (\Exception $e) {
-            throw self::translateException($e, 'unsubscribe');
         }
+        throw self::statusException($resp, 'unsubscribe');
     }
 
     public function getSubscribers(string $remote_list_id, ?string $cursor = null,
@@ -188,37 +197,32 @@ class MailChimpProvider extends AbstractMailingListProvider {
             $offset = (int)$cursor;
         }
 
-        try {
-            $mailchimp = new Mailchimp($api_key);
-            $return = $mailchimp
-                ->lists($remote_list_id)
-                ->members()
-                ->get([
-                    'count' => $limit,
-                    'offset' => $offset,
-                ]);
-            $results = $return->deserialize();
-
-            $subscribers = [];
-            $members = isset($results->members) ? $results->members : [];
-            foreach ($members as $m) {
-                $subscribers[] = [
-                    'email' => $m->email_address,
-                    'status' => self::mapStatus($m->status ?? ''),
-                    'last_changed' => $m->last_changed ?? null,
-                ];
-            }
-
-            // If we got fewer than requested, iteration is done
-            $next_cursor = (count($members) < $limit) ? null : (string)($offset + $limit);
-
-            return [
-                'subscribers' => $subscribers,
-                'next_cursor' => $next_cursor,
-            ];
-        } catch (\Exception $e) {
-            throw self::translateException($e, 'getSubscribers');
+        $resp = self::call($api_key, 'GET', '/lists/' . rawurlencode($remote_list_id) . '/members', [
+            'count' => $limit,
+            'offset' => $offset,
+        ]);
+        if (!$resp->ok()) {
+            throw self::statusException($resp, 'getSubscribers');
         }
+        $results = $resp->json() ?? [];
+
+        $subscribers = [];
+        $members = (isset($results['members']) && is_array($results['members'])) ? $results['members'] : [];
+        foreach ($members as $m) {
+            $subscribers[] = [
+                'email' => (string)($m['email_address'] ?? ''),
+                'status' => self::mapStatus((string)($m['status'] ?? '')),
+                'last_changed' => $m['last_changed'] ?? null,
+            ];
+        }
+
+        // If we got fewer than requested, iteration is done
+        $next_cursor = (count($members) < $limit) ? null : (string)($offset + $limit);
+
+        return [
+            'subscribers' => $subscribers,
+            'next_cursor' => $next_cursor,
+        ];
     }
 
     public function getLists(): array {
@@ -229,24 +233,22 @@ class MailChimpProvider extends AbstractMailingListProvider {
                 'MailChimp API key is not configured', false);
         }
 
-        try {
-            $mailchimp = new Mailchimp($api_key);
-            $response = $mailchimp->lists()->get(['count' => 1000]);
-            $data = $response->deserialize();
-
-            $lists = [];
-            $raw_lists = isset($data->lists) ? $data->lists : [];
-            foreach ($raw_lists as $l) {
-                $lists[] = [
-                    'id' => $l->id,
-                    'name' => $l->name,
-                    'member_count' => $l->stats->member_count ?? 0,
-                ];
-            }
-            return $lists;
-        } catch (\Exception $e) {
-            throw self::translateException($e, 'getLists');
+        $resp = self::call($api_key, 'GET', '/lists', ['count' => 1000]);
+        if (!$resp->ok()) {
+            throw self::statusException($resp, 'getLists');
         }
+        $data = $resp->json() ?? [];
+
+        $lists = [];
+        $raw_lists = (isset($data['lists']) && is_array($data['lists'])) ? $data['lists'] : [];
+        foreach ($raw_lists as $l) {
+            $lists[] = [
+                'id' => (string)($l['id'] ?? ''),
+                'name' => (string)($l['name'] ?? ''),
+                'member_count' => $l['stats']['member_count'] ?? 0,
+            ];
+        }
+        return $lists;
     }
 
     /**
@@ -291,32 +293,88 @@ class MailChimpProvider extends AbstractMailingListProvider {
     }
 
     /**
-     * Translate an SDK / network exception into a MailingListProviderException
-     * with isRetryable() set appropriately.
+     * The API base for a key. The data center is the key's second
+     * dash-separated piece (abc123-us6 is us6), as Mailchimp issues them.
+     *
+     * @throws MailingListProviderException for a key with no data center
+     */
+    public static function apiBase(string $api_key): string {
+        $parts = explode('-', trim($api_key));
+        $dc = $parts[1] ?? '';
+        if (!preg_match('/^[a-z]+\d+\z/', $dc)) {   // \z: $ would let a trailing newline through
+            throw new MailingListProviderException(
+                'The MailChimp API key has no data center at its end (it looks like abc123-us6).', false);
+        }
+        return 'https://' . $dc . '.api.mailchimp.com/3.0';
+    }
+
+    /**
+     * One API call. A transport failure (no answer at all) throws through
+     * translateException(); any HTTP status comes back for the caller to read.
+     */
+    private static function call(string $api_key, string $method, string $path, array $query = [],
+                                 ?array $json = null): ProviderHttpResponse {
+        $options = [
+            'headers' => ['Authorization' => 'apikey ' . trim($api_key)],
+        ];
+        if (!empty($query)) {
+            $options['query'] = $query;
+        }
+        if ($json !== null) {
+            $options['json'] = $json;
+        }
+        $url = self::apiBase($api_key) . $path;
+        try {
+            return ProviderHttp::request($method, $url, $options);
+        } catch (ProviderHttpException $e) {
+            // The exception's code is a curl error number, not a status.
+            throw self::translateException(new \RuntimeException($e->getMessage(), 0, $e), $method . ' ' . $path);
+        }
+    }
+
+    private static function memberPath(string $remote_list_id, string $email): string {
+        return '/lists/' . rawurlencode($remote_list_id) . '/members/' . md5(strtolower(trim($email)));
+    }
+
+    /** "MailChimp answered 400: …", with Mailchimp's own detail when it gave one. */
+    private static function describeFailure(ProviderHttpResponse $resp): string {
+        $body = $resp->json() ?? [];
+        $words = trim((string)($body['detail'] ?? ($body['title'] ?? '')));
+        return 'MailChimp answered ' . $resp->status . ($words !== '' ? ': ' . $words : '');
+    }
+
+    /** A failed status as the exception translateException() reads, the status as its code. */
+    private static function statusException(ProviderHttpResponse $resp, string $op): MailingListProviderException {
+        return self::translateException(new \RuntimeException(self::describeFailure($resp), $resp->status), $op);
+    }
+
+    /**
+     * Translate a failed call into a MailingListProviderException with
+     * isRetryable() set: a 429 or 5xx status, or a transport failure that
+     * names a timeout or a connection, is worth retrying.
      */
     private static function translateException(\Exception $e, string $op): MailingListProviderException {
         $message = $e->getMessage();
-        $code = $e->getCode();
+        $code = (int)$e->getCode();
 
-        // HTTP status codes are sometimes embedded in the exception code or message.
         $is_retryable = false;
 
         if ($code === 429 || $code >= 500) {
             $is_retryable = true;
-        } else if (preg_match('/\b(429|5\d\d)\b/', $message)) {
-            $is_retryable = true;
-        } else if (stripos($message, 'rate limit') !== false
+        } else if ($code === 0 && (stripos($message, 'rate limit') !== false
                 || stripos($message, 'timeout') !== false
                 || stripos($message, 'timed out') !== false
-                || stripos($message, 'could not resolve') !== false
-                || stripos($message, 'connection') !== false) {
+                || stripos($message, 'resolve') !== false
+                || stripos($message, 'connect') !== false
+                || stripos($message, 'SSL') !== false)) {
             $is_retryable = true;
         }
 
         return new MailingListProviderException(
             "MailChimp $op failed: $message",
             $is_retryable,
-            $e
+            $e,
+            $code
         );
     }
 }

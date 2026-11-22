@@ -34,6 +34,9 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.42 - after the last rollback point, an upgrade run as root removes installed composer packages
+	 *               the shipped code no longer needs (utils/composer_prune.php), then reloads web PHP again;
+	 *               the reload is one function, upgrade_reload_web_php() (specs/email_provider_sdk_removal.md WP8)
 	 * @version 1.41 - a site other sites upgrade from serves its release's package fix archives before the swap
 	 *                (PackageFixPublisher::serveReceived): its new support bundle sent container hosts for them first (B21)
 	 * @version 1.40 - a declared package name may not end in a dash (NAME- is a remove), and only a name
@@ -526,6 +529,35 @@
 		// Highest version wins when a host carries more than one.
 		usort($found, 'version_compare');
 		return (string) end($found);
+	}
+
+	// Reload web PHP, so the next request loads what is on disk now: Apache
+	// graceful, then the PHP-FPM service. Graceful reload only, never a
+	// stop/start from inside the box. Derives the FPM service from the PHP
+	// running this script, the same PHP the web tier loads: a hardcoded name
+	// matches nothing on a host running any other version, and because the
+	// failure is silent the upgrade would report success while opcache kept
+	// serving the old code. $prefix is the upgrade's root prefix where the
+	// caller is not root.
+	function upgrade_reload_web_php($prefix, $verbose, $not_picked_up) {
+		exec($prefix . 'apache2ctl graceful 2>/dev/null');
+		$fpm_service = upgrade_find_fpm_service();
+		if ($fpm_service === '') {
+			// No FPM on this host (mod_php, or PHP served some other way).
+			// apache2ctl graceful above already reloaded it.
+			if ($verbose) upgrade_echo('No PHP-FPM service present; Apache reloaded<br>');
+			return;
+		}
+		$fpm_out = array();
+		$fpm_return = 0;
+		exec($prefix . 'service ' . escapeshellarg($fpm_service) . ' reload 2>&1', $fpm_out, $fpm_return);
+		if ($fpm_return !== 0) {
+			out_alert('warning', 'Could not reload ' . htmlspecialchars($fpm_service),
+				$not_picked_up . ' Reload it by hand: service ' . htmlspecialchars($fpm_service) . ' reload<br>'
+				. htmlspecialchars(implode(' ', array_slice($fpm_out, -3))));
+		} else if ($verbose) {
+			upgrade_echo('Reloaded web PHP (' . htmlspecialchars($fpm_service) . ')<br>');
+		}
 	}
 
 	// Abort the upgrade with a styled error message; clears staging unless told not to.
@@ -2199,32 +2231,7 @@
 			}
 			if ($installed_any) {
 				// Web PHP won't see a new extension until its process reloads.
-				// Graceful reload only — never a stop/start from inside the box.
-				exec('apache2ctl graceful 2>/dev/null');
-
-				// Derive the FPM service from the PHP running this script - it is
-				// the same PHP the web tier loads. A hardcoded name matches nothing
-				// on a host running any other version, and because the failure is
-				// silent the upgrade would report success while opcache kept
-				// serving pre-upgrade code.
-				$fpm_service = upgrade_find_fpm_service();
-				if ($fpm_service === '') {
-					// No FPM on this host (mod_php, or PHP served some other way).
-					// apache2ctl graceful above already reloaded it.
-					if ($verbose) upgrade_echo('No PHP-FPM service present; Apache reloaded<br>');
-				} else {
-					$fpm_out = array();
-					$fpm_return = 0;
-					exec('service ' . escapeshellarg($fpm_service) . ' reload 2>&1', $fpm_out, $fpm_return);
-					if ($fpm_return !== 0) {
-						out_alert('warning', 'Could not reload ' . htmlspecialchars($fpm_service),
-							'The extension is installed but the running PHP has not picked it up. '
-							. 'Reload it by hand: service ' . htmlspecialchars($fpm_service) . ' reload<br>'
-							. htmlspecialchars(implode(' ', array_slice($fpm_out, -3))));
-					} else if ($verbose) {
-						upgrade_echo('Reloaded web PHP after extension install (' . htmlspecialchars($fpm_service) . ')<br>');
-					}
-				}
+				upgrade_reload_web_php('', $verbose, 'The extension is installed but the running PHP has not picked it up.');
 			} else if ($verbose) {
 				upgrade_echo('All declared extensions already present<br>');
 			}
@@ -2627,6 +2634,46 @@
 			} else {
 				out_alert('warning', 'Could not remove ' . htmlspecialchars($stale_rel),
 					'This release no longer ships it. ' . htmlspecialchars(implode(' ', array_slice($rm_out, -2))));
+			}
+		}
+
+		// ============================================
+		// COMPOSER PRUNE
+		// ============================================
+		// Installed packages this release no longer needs leave vendor/ here,
+		// after the last rollback point, never at the composer step: a
+		// rollback restores the old tree but not vendor/, so old code would
+		// load a package that was just removed. The prune copies vendor/,
+		// installs into the copy and swaps it in, so a prune that fails is a
+		// warning and the site keeps loading. It writes vendor/, which only
+		// root can, and is level-triggered: every later upgrade finds nothing
+		// to remove and returns at once.
+		$prune_script = $full_site_dir . '/public_html/utils/composer_prune.php';
+		if (file_exists($prune_script)) {
+			$can_root = $is_root;
+			if (!$can_root) {
+				$sudo_rc = 0; $sudo_out = array();
+				exec('sudo -n true 2>&1', $sudo_out, $sudo_rc);
+				$can_root = ($sudo_rc === 0);
+			}
+			if (!$can_root) {
+				upgrade_echo('ℹ Unneeded composer packages are not removed by an upgrade without root; the next upgrade run as root removes them.<br>');
+			} else {
+				$prune_out = array(); $prune_rc = 0;
+				exec($root_prefix . 'php ' . escapeshellarg($prune_script) . ' 2>&1', $prune_out, $prune_rc);
+				// Exit 0 nothing to do, 10 pruned or vendor/ put back, anything else a warning.
+				if ($prune_rc === 10) {
+					out_step('Unneeded Composer Packages');
+					echo nl2br(htmlspecialchars(implode("\n", $prune_out))) . "<br>\n";
+					// The reload and opcache_reset() above ran before the swap;
+					// a worker could still hold an autoload_files.php naming
+					// files that are gone.
+					upgrade_reload_web_php($root_prefix, $verbose, 'Packages were removed but the running PHP may still name them.');
+				} else if ($prune_rc !== 0) {
+					out_alert('warning', 'Unneeded composer packages were not removed',
+						'vendor/ is as it was and the site loads as before; the next upgrade tries again. '
+						. htmlspecialchars(implode(' ', array_slice($prune_out, -4))));
+				}
 			}
 		}
 

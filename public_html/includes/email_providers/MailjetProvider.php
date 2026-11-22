@@ -2,17 +2,30 @@
 /**
  * MailjetProvider - Mailjet email service provider
  *
- * Implements EmailServiceProvider using the Mailjet APIv3 PHP SDK (^1.5).
- * Uses Send API v3.1 with `Messages` array — up to 50 messages per call,
- * each a separate envelope with per-message status in the response.
+ * Talks to Mailjet directly through ProviderHttp: GET /v3/REST/myprofile
+ * validates the key pair, POST /v3.1/send sends, with a `Messages` array of
+ * up to 50 messages per call, each a separate envelope with its own status
+ * in the answer. The credential is HTTP basic auth, key and secret.
+ *
+ * MESSAGE-ID: not sent. Mailjet lists Message-Id among its forbidden headers
+ * (https://dev.mailjet.com/docs/email-api/send-api-v31/add-email-headers),
+ * so a send that set it could be refused. The mailbox cannot match its
+ * stored copy of a message sent here to the delivered one by Message-ID.
+ *
+ * @version 2.1 - a batch whose message has attachments goes one message per call, with retries, so 50
+ *   copies of a file never share one request (review B12); Headers is always a JSON object (B20); a
+ *   send counts only when the answer parses with Messages[0].Status success
+ * @version 2.0 - on ProviderHttp, no SDK (specs/email_provider_sdk_removal.md WP2); an attachment that
+ *   yields no bytes fails the send (B6)
  */
 
-require_once(PathHelper::getComposerAutoloadPath());
-
-use Mailjet\Client as MailjetClient;
-use Mailjet\Resources as MailjetResources;
-
 class MailjetProvider implements EmailServiceProvider {
+
+    const PROFILE_URL = 'https://api.mailjet.com/v3/REST/myprofile';
+    const SEND_URL = 'https://api.mailjet.com/v3.1/send';
+
+    /** Mailjet's Messages limit per call. */
+    const BATCH_SIZE = 50;
 
     public static function getKey(): string {
         return 'mailjet';
@@ -63,59 +76,8 @@ class MailjetProvider implements EmailServiceProvider {
         }
 
         try {
-            $mj = new MailjetClient($key, $secret, true);
-            $response = $mj->get(MailjetResources::$Myprofile);
-
-            if (!$response->success()) {
-                $status = $response->getStatus();
-                if ($status === 401) {
-                    return [
-                        'success' => false,
-                        'label' => 'Credentials Rejected',
-                        'details' => [],
-                        'error' => 'Invalid API key + secret combination. Both halves are required and must match the same credential pair.',
-                    ];
-                }
-                if ($status === 403) {
-                    return [
-                        'success' => false,
-                        'label' => 'Access Denied',
-                        'details' => [],
-                        'error' => 'Credentials valid but lack required scope.',
-                    ];
-                }
-                return [
-                    'success' => false,
-                    'label' => 'API Connection Failed',
-                    'details' => [],
-                    'error' => 'HTTP ' . $status . ': ' . $response->getReasonPhrase(),
-                ];
-            }
-
-            $data = $response->getData();
-            $profile = is_array($data) && !empty($data[0]) ? $data[0] : [];
-
-            $details = [];
-            if (!empty($profile['Email'])) {
-                $details['Account Email'] = $profile['Email'];
-            }
-            if (!empty($profile['CompanyName'])) {
-                $details['Company Name'] = $profile['CompanyName'];
-            }
-            if (!empty($profile['Country'])) {
-                $details['Country'] = $profile['Country'];
-            }
-            if (!empty($configured_domain)) {
-                $details['Verified Domain'] = $configured_domain;
-            }
-
-            return [
-                'success' => true,
-                'label' => 'API Credentials Valid',
-                'details' => $details,
-                'error' => null,
-            ];
-        } catch (\Exception $e) {
+            $response = ProviderHttp::request('GET', self::PROFILE_URL, ['auth' => [(string)$key, (string)$secret]]);
+        } catch (ProviderHttpException $e) {
             return [
                 'success' => false,
                 'label' => 'API Connection Failed',
@@ -123,17 +85,60 @@ class MailjetProvider implements EmailServiceProvider {
                 'error' => $e->getMessage(),
             ];
         }
+
+        $status = $response->status;
+        if ($status === 401) {
+            return [
+                'success' => false,
+                'label' => 'Credentials Rejected',
+                'details' => [],
+                'error' => 'Invalid API key + secret combination. Both halves are required and must match the same credential pair.',
+            ];
+        }
+        if ($status === 403) {
+            return [
+                'success' => false,
+                'label' => 'Access Denied',
+                'details' => [],
+                'error' => 'Credentials valid but lack required scope.',
+            ];
+        }
+        if (!$response->ok()) {
+            return [
+                'success' => false,
+                'label' => 'API Connection Failed',
+                'details' => [],
+                'error' => 'HTTP ' . $status . ': ' . self::errorText($response),
+            ];
+        }
+
+        $data = ($response->json() ?? [])['Data'] ?? [];
+        $profile = is_array($data) && !empty($data[0]) ? $data[0] : [];
+
+        $details = [];
+        if (!empty($profile['Email'])) {
+            $details['Account Email'] = $profile['Email'];
+        }
+        if (!empty($profile['CompanyName'])) {
+            $details['Company Name'] = $profile['CompanyName'];
+        }
+        if (!empty($profile['Country'])) {
+            $details['Country'] = $profile['Country'];
+        }
+        if (!empty($configured_domain)) {
+            $details['Verified Domain'] = $configured_domain;
+        }
+
+        return [
+            'success' => true,
+            'label' => 'API Credentials Valid',
+            'details' => $details,
+            'error' => null,
+        ];
     }
 
     public function send(EmailMessage $message): bool {
-        $settings = Globalvars::get_instance();
-
         try {
-            $mj = $this->buildClient(
-                $settings->get_setting('mailjet_api_key'),
-                $settings->get_setting('mailjet_api_secret')
-            );
-
             $msg = $this->buildBaseMessage($message);
             $msg['To'] = $this->mapRecipients($message->getRecipients());
             if ($cc = $this->mapRecipients($message->getCc())) {
@@ -142,72 +147,81 @@ class MailjetProvider implements EmailServiceProvider {
             if ($bcc = $this->mapRecipients($message->getBcc())) {
                 $msg['Bcc'] = $bcc;
             }
-
-            $body = ['Messages' => [$msg]];
-            if ($settings->get_setting('mailjet_sandbox_mode') == '1') {
-                $body['SandboxMode'] = true;
-            }
-
-            $response = $mj->post(MailjetResources::$Email, ['body' => $body]);
-            if (!$response->success()) {
-                error_log('[MailjetProvider] Send failed: HTTP ' . $response->getStatus() . ' ' . json_encode($response->getData()));
-                return false;
-            }
-            return true;
-        } catch (\Exception $e) {
+            $response = self::post([$msg]);
+        } catch (RuntimeException $e) {
             error_log('[MailjetProvider] Send failed: ' . $e->getMessage());
             return false;
         }
+        if (!self::accepted($response, 0)) {
+            error_log('[MailjetProvider] Send failed: HTTP ' . $response->status . ' ' . self::errorText($response));
+            return false;
+        }
+        return true;
+    }
+
+    /** Message $i of a 2xx answer that parses reads Status success. */
+    private static function accepted(ProviderHttpResponse $response, int $i): bool {
+        $messages = $response->ok() ? (($response->json() ?? [])['Messages'] ?? null) : null;
+        return is_array($messages) && (($messages[$i]['Status'] ?? null) === 'success');
     }
 
     public function sendBatch(EmailMessage $message, array $recipients): array {
-        $settings = Globalvars::get_instance();
-        $sandbox = $settings->get_setting('mailjet_sandbox_mode') == '1';
-        $failed = [];
-
+        $recipients = array_values($recipients);
         try {
-            $mj = $this->buildClient(
-                $settings->get_setting('mailjet_api_key'),
-                $settings->get_setting('mailjet_api_secret')
-            );
+            $base = $this->buildBaseMessage($message);
+        } catch (RuntimeException $e) {
+            error_log('[MailjetProvider] Batch send failed: ' . $e->getMessage());
+            return ['success' => false, 'failed_recipients' => $recipients];
+        }
 
-            $chunks = array_chunk($recipients, 50);
-            foreach ($chunks as $chunk) {
-                $messages = [];
-                foreach ($chunk as $email) {
-                    $msg = $this->buildBaseMessage($message);
-                    $msg['To'] = [['Email' => $email]];
-                    $messages[] = $msg;
-                }
-                $body = ['Messages' => $messages];
-                if ($sandbox) {
-                    $body['SandboxMode'] = true;
-                }
-
+        $failed = [];
+        if (!empty($base['Attachments']) || !empty($base['InlinedAttachments'])) {
+            // A batch call would carry a full copy of every file per message:
+            // one message per call instead.
+            foreach ($recipients as $email) {
+                $msg = $base;
+                $msg['To'] = [['Email' => $email]];
                 try {
-                    $response = $mj->post(MailjetResources::$Email, ['body' => $body]);
-                    if (!$response->success()) {
-                        error_log('[MailjetProvider] Batch chunk HTTP ' . $response->getStatus() . ': ' . json_encode($response->getData()));
-                        $failed = array_merge($failed, $chunk);
-                        continue;
-                    }
-                    // v3.1 returns ['Messages' => [{Status: 'success'|'error', ...}]]
-                    $data = $response->getData();
-                    $msg_results = $data['Messages'] ?? [];
-                    foreach ($chunk as $idx => $email) {
-                        $status = $msg_results[$idx]['Status'] ?? null;
-                        if ($status !== 'success') {
-                            $failed[] = $email;
-                        }
-                    }
-                } catch (\Exception $e) {
-                    error_log('[MailjetProvider] Batch chunk failed: ' . $e->getMessage());
-                    $failed = array_merge($failed, $chunk);
+                    $response = self::post([$msg], 2);
+                } catch (ProviderHttpException $e) {
+                    error_log('[MailjetProvider] Send to ' . $email . ' failed: ' . $e->getMessage());
+                    $failed[] = $email;
+                    continue;
+                }
+                if (!self::accepted($response, 0)) {
+                    error_log('[MailjetProvider] Send to ' . $email . ' failed: HTTP ' . $response->status . ' ' . self::errorText($response));
+                    $failed[] = $email;
                 }
             }
-        } catch (\Exception $e) {
-            error_log('[MailjetProvider] Batch setup failed: ' . $e->getMessage());
-            $failed = $recipients;
+            return ['success' => empty($failed), 'failed_recipients' => $failed];
+        }
+
+        foreach (array_chunk($recipients, self::BATCH_SIZE) as $chunk) {
+            $messages = [];
+            foreach ($chunk as $email) {
+                $msg = $base;
+                $msg['To'] = [['Email' => $email]];
+                $messages[] = $msg;
+            }
+
+            try {
+                $response = self::post($messages);
+            } catch (ProviderHttpException $e) {
+                error_log('[MailjetProvider] Batch chunk failed: ' . $e->getMessage());
+                $failed = array_merge($failed, $chunk);
+                continue;
+            }
+            if (!$response->ok()) {
+                error_log('[MailjetProvider] Batch chunk HTTP ' . $response->status . ': ' . $response->body);
+                $failed = array_merge($failed, $chunk);
+                continue;
+            }
+            // v3.1 answers {Messages: [{Status: 'success'|'error', ...}]}, positionally.
+            foreach ($chunk as $idx => $email) {
+                if (!self::accepted($response, $idx)) {
+                    $failed[] = $email;
+                }
+            }
         }
 
         return [
@@ -240,36 +254,27 @@ class MailjetProvider implements EmailServiceProvider {
         }
         $headers = $message->getHeaders();
         if (!empty($headers)) {
-            $msg['Headers'] = $headers;
+            // An object always: a map whose only name is "0" would encode as a list.
+            $msg['Headers'] = (object)$headers;
         }
 
         $attachments = [];
         $inlined = [];
         foreach ($message->getAttachments() as $a) {
-            if (!empty($a['path']) && is_readable($a['path'])) {
-                $attachments[] = [
-                    'ContentType' => mime_content_type($a['path']) ?: 'application/octet-stream',
-                    'Filename' => $a['name'] ?: basename($a['path']),
-                    'Base64Content' => base64_encode(file_get_contents($a['path'])),
-                ];
-            } elseif (isset($a['data'])) {
-                if (!empty($a['cid'])) {
-                    // Inline (embedded) image: Mailjet v3.1 carries inline parts in a
-                    // separate InlinedAttachments array keyed by ContentID (bare token),
-                    // which the body references as cid:<id>.
-                    $inlined[] = [
-                        'ContentType' => $a['type'] ?: 'application/octet-stream',
-                        'Filename' => $a['name'] ?: 'attachment',
-                        'ContentID' => $a['cid'],
-                        'Base64Content' => base64_encode($a['data']),
-                    ];
-                } else {
-                    $attachments[] = [
-                        'ContentType' => $a['type'] ?: 'application/octet-stream',
-                        'Filename' => $a['name'] ?: 'attachment',
-                        'Base64Content' => base64_encode($a['data']),
-                    ];
-                }
+            $content = EmailMessage::attachmentContent($a);
+            $row = [
+                'ContentType' => $content['type'],
+                'Filename' => $content['name'],
+                'Base64Content' => base64_encode($content['bytes']),
+            ];
+            if (!empty($a['cid'])) {
+                // Inline (embedded) image: Mailjet v3.1 carries inline parts in a
+                // separate InlinedAttachments array keyed by ContentID (bare token),
+                // which the body references as cid:<id>.
+                $row['ContentID'] = $a['cid'];
+                $inlined[] = $row;
+            } else {
+                $attachments[] = $row;
             }
         }
         if (!empty($attachments)) {
@@ -296,7 +301,28 @@ class MailjetProvider implements EmailServiceProvider {
         return $out;
     }
 
-    private function buildClient(string $key, string $secret): MailjetClient {
-        return new MailjetClient($key, $secret, true, ['version' => 'v3.1']);
+    /** One v3.1 send of $messages, SandboxMode following mailjet_sandbox_mode. */
+    private static function post(array $messages, int $retries = 0): ProviderHttpResponse {
+        $settings = Globalvars::get_instance();
+        $body = ['Messages' => $messages];
+        if ($settings->get_setting('mailjet_sandbox_mode') == '1') {
+            $body['SandboxMode'] = true;
+        }
+        return ProviderHttp::request('POST', self::SEND_URL, [
+            'auth' => [(string)$settings->get_setting('mailjet_api_key'), (string)$settings->get_setting('mailjet_api_secret')],
+            'json' => $body,
+            'retries' => $retries,
+        ]);
+    }
+
+    /** Mailjet's own words for a failed call, or the status. */
+    private static function errorText(ProviderHttpResponse $resp): string {
+        $body = $resp->json();
+        foreach (['ErrorMessage', 'message'] as $k) {
+            if (is_array($body) && !empty($body[$k]) && is_string($body[$k])) {
+                return $body[$k];
+            }
+        }
+        return 'HTTP ' . $resp->status;
     }
 }

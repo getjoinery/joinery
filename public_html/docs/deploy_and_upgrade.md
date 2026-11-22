@@ -796,9 +796,16 @@ A download serves the archive `publish_upgrade.php` wrote to `static_files/theme
 10. Run composer_install_if_needed.php (composer under umask 022), then fix permissions again, so what composer installed is owned and moded like the tree
 11. Run database migrations (update_database.php)
 12. Run the deploy test tier against the new code
+13. Remove installed composer packages the release no longer needs (`utils/composer_prune.php`, as root): copy vendor/, install the lock into the copy, swap it in with `mv --exchange`, then reload web PHP
 
-If ANY step fails → Automatic rollback of the whole previous release (public_html, maintenance_scripts, the manifest pair)
+If ANY of steps 1-12 fails → Automatic rollback of the whole previous release (public_html, maintenance_scripts, the manifest pair)
 ```
+
+**Removing composer packages a release no longer needs.** Step 13 runs only after the last rollback point. A rollback restores the old code but not `vendor/`, so removing a package any earlier would leave old code loading a package that is gone. `ComposerValidator::pruneUnneededPackages()` compares the installed packages with the shipped `composer.lock` (the site's `vendor/` is core's alone; a plugin ships its libraries in its own `vendor/`).
+- **Copy, install, swap.** It copies `vendor/` to `vendor.prune-new`, runs `composer install` into the copy, checks the copy loads, gives it `vendor/`'s owner and modes, and swaps it in with `mv --exchange -T`, so `vendor/` never stops loading.
+- **Checking the swap.** A per-run marker in the copy proves the swap; where `mv` cannot exchange, it does two renames.
+- **Failure.** A prune that stops leaves `vendor/` as it was and is a warning, never a rollback. If a crash between the two renames leaves only `vendor.prune-old`, the host converger's next tick renames it back.
+- **When it runs.** It needs root and is level-triggered: every later upgrade finds nothing to remove and returns at once. `ComposerValidator::validate()` warns "Packages not needed by this code" until an upgrade run as root removes them.
 
 ### Directory Structure
 
@@ -1072,7 +1079,6 @@ writes into root's queue for the site, `/var/lib/joinery/sites/{site}/root_reque
 | `install_plugin` `{name}` | fetch a plugin by name from the upgrade source into a working directory of root's own, verify it, and install it |
 | `install_theme` `{name}` | the same for a theme |
 | `install_package` `{type, staged_dir, replace?, unsigned_ack?}` | verify a staged upload and install it; an unverified one only with the owner's acknowledgement, under the unsigned restrictions; with `replace`, the installed copy of the same name is set aside first (kept beside the new one) |
-| `reconcile_composer` | install a plugin's declared composer packages |
 | `write_agent_files` | write `CLAUDE.md` and its siblings from the database |
 | `save_doc` | write one file under `docs/`, in the directory the key names |
 | `set_receives_upgrades` `{type, name, value}` | write the fork mark (`receives_upgrades`) into a theme's or plugin's live manifest: false keeps the operator's copy across deploys, true lets the next deploy replace it |

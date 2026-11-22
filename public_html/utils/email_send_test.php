@@ -65,8 +65,8 @@ function est_pick_loopback_domain($db) {
 
 /**
  * Pull the most recent provider "Send failed: <reason>" lines from the error
- * log so a failed send can show what the provider actually said (e.g. a Mailgun
- * "Your credentials are incorrect."), instead of a generic message. Read-only,
+ * log so a failed send can show what the provider actually said (e.g. Mailgun's
+ * "Mailgun rejected the API key."), instead of a generic message. Read-only,
  * guarded; returns up to 3 recent reasons or null.
  */
 function est_recent_send_error() {

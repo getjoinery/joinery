@@ -1,6 +1,7 @@
 <?php
 /** @joinery-admin class=config */
 /**
+ * @version 1.3 - the connection check runs when validateConfiguration() passes, for every provider (SES hasCredentials() is gone)
  * @version 1.2 - no New Setting link (there is no such page; settings are declared in settings.json)
  * @version 1.1 - the provider sections' show/hide is assets/js/admin-settings-email.js (no inline script)
  */
@@ -218,12 +219,7 @@
 				echo '<h5>' . htmlspecialchars($provider_label) . ' Connection Status</h5>';
 				echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 
-				// "Credentials present" defaults to a passing config check, but a
-				// provider may override via hasCredentials() when valid config does
-				// not imply entered credentials (e.g. SES IAM-role fallback).
-				$provider_has_credentials = method_exists($provider_class, 'hasCredentials')
-					? $provider_class::hasCredentials()
-					: $provider_class::validateConfiguration()['valid'];
+				$provider_has_credentials = $provider_class::validateConfiguration()['valid'];
 
 				if ($run_validation && !$provider_has_credentials) {
 					echo '<div style="text-align: center; padding: 40px;">';

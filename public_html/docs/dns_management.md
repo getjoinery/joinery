@@ -655,7 +655,7 @@ untested driver surfaces as a wrong diff to decline, never a silent bad write.
 | DigitalOcean DNS | OAuth2 · `DigitalOceanOAuthProvider` |
 | DNSimple | OAuth2 · `DnsimpleOAuthProvider` |
 | Cloudflare | API token (Zone · DNS · Edit) |
-| AWS Route 53 | IAM key pair, signed by the AWS SDK |
+| AWS Route 53 | IAM key pair; each request is signed with AWS Signature Version 4 by `AwsSigV4` |
 | Namecheap | API key + username + IP allowlist |
 | GoDaddy | sso-key pair |
 | Gandi LiveDNS | Personal access token |

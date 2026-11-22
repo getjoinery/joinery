@@ -109,15 +109,9 @@ ok('Resend still sends both parts as attachments', count($resend_atts) === 2);
 // Brevo — call its base-email builder to trigger the same degrade + log marker.
 $brevo = new BrevoProvider();
 $ref_b = new ReflectionMethod('BrevoProvider', 'buildBaseEmail');
-try {
-    $ref_b->invoke($brevo, $message, Globalvars::get_instance());
-    $brevo_ran = true;
-} catch (\Throwable $e) {
-    // Building the SDK object may need settings we don't assert on; the error_log
-    // marker fires during attachment assembly regardless.
-    $brevo_ran = true;
-}
-ok('Brevo builder ran', $brevo_ran);
+$brevo_payload = $ref_b->invoke($brevo, $message, Globalvars::get_instance());
+ok('Brevo builder ran', is_array($brevo_payload));
+ok('Brevo sends both parts as attachments', count($brevo_payload['attachment'] ?? []) === 2);
 
 // Flush and inspect the captured log for both distinct markers.
 ini_set('error_log', $orig_log);

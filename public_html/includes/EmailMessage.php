@@ -5,6 +5,9 @@ require_once('EmailTemplateRenderer.php');
 /**
  * EmailMessage - one outgoing message, composed fluently and sent by EmailSender.
  *
+ * @version 1.2 - attachmentContent(): one attachment's bytes and name, read at send time; an entry that
+ *   cannot be read throws (an empty one is sent as zero bytes), so every API provider fails the send instead of dropping the file
+ *   (specs/email_provider_sdk_removal.md B6)
  * @version 1.1 - toTransfer() / fromTransfer(): the message as plain data, so a sandboxed plugin's fence can hand
  *   it to the site (specs/sandboxed_plugin_email.md); an attachment travels as its bytes, never as a path.
  *   header() refuses a name that is not a header token, a value with CR, LF or NUL, and the headers the
@@ -397,6 +400,35 @@ class EmailMessage {
     public function getHeaders() { return $this->headers; }
     public function getMetadata() { return $this->metadata; }
     public function getMessageId() { return $this->messageId; }
+
+    /**
+     * One attachment's bytes and name, read now, for a provider building its
+     * request. An entry that cannot be read (a path that cannot be read, or
+     * neither a path nor data) throws: the send fails with that reason rather
+     * than going out without the file. An empty file, or data that is an empty
+     * string, is an attachment of zero bytes and is sent as one.
+     *
+     * @return array{bytes: string, name: string, type: string}
+     * @throws RuntimeException
+     */
+    public static function attachmentContent(array $attachment): array {
+        $type = (string)($attachment['type'] ?? '');
+        if (!empty($attachment['path'])) {
+            $bytes = is_readable($attachment['path']) ? @file_get_contents($attachment['path']) : false;
+            if (!is_string($bytes)) {
+                throw new RuntimeException('Attachment file could not be read: ' . basename((string)$attachment['path']));
+            }
+            $name = (string)($attachment['name'] ?? '') ?: basename((string)$attachment['path']);
+            return array('bytes' => $bytes, 'name' => $name,
+                'type' => $type !== '' ? $type : self::typeFromName($name));
+        }
+        if (isset($attachment['data'])) {
+            return array('bytes' => (string)$attachment['data'],
+                'name' => (string)($attachment['name'] ?? '') ?: 'attachment',
+                'type' => $type !== '' ? $type : 'application/octet-stream');
+        }
+        throw new RuntimeException('Attachment has neither a file nor data.');
+    }
 
     /**
      * The message as plain data (JSON-safe), for another process to send.

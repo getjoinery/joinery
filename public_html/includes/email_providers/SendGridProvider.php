@@ -1,9 +1,31 @@
 <?php
 /**
- * SendGridProvider - SendGrid email service provider
+ * SendGridProvider - SendGrid email service provider, over its v3 HTTP API.
  *
- * Implements EmailServiceProvider using the SendGrid PHP SDK (v8.x) over the v3 HTTP API.
- * Supports batch sending via the personalizations[] array (up to 1000 per request).
+ * Talks to https://api.sendgrid.com (or https://api.eu.sendgrid.com when
+ * sendgrid_region is eu) directly through ProviderHttp, with the key as
+ * Authorization: Bearer. A send is accepted with 202. Batch sends put one
+ * personalization per recipient, up to 1000 per request; a chunk succeeds or
+ * fails as a whole.
+ *
+ * The body follows what the SendGrid SDK sent: text/plain content before
+ * text/html (SendGrid refuses the other order), an empty name left out rather
+ * than sent as "", click tracking always stated, sandbox mode only when on.
+ *
+ * MESSAGE-ID (read 2026-11-22): SendGrid's reserved-header list
+ * (https://www.twilio.com/docs/sendgrid/api-reference/mail-send/errors) does
+ * not name Message-ID, so the pinned Message-ID is sent as a header. Anymail
+ * notes SendGrid's smtp-id event field does not always echo it
+ * (https://anymail.readthedocs.io/en/stable/esps/sendgrid/); the live check
+ * confirms the delivered message carries it.
+ *
+ * @version 2.1 - a key that may send but not read the account (a "Mail Send" restricted key answers 403 at
+ *   /v3/user/account) validates as API Key Valid (Restricted), read from GET /v3/scopes, so
+ *   install_mail_provider.php accepts it; batch personalizations never carry the pinned Message-ID
+ *   (review B15); headers is always a JSON object (B20). A send stays any 2xx: SendGrid answers 202
+ *   with an empty body
+ * @version 2.0 - on ProviderHttp, no SDK; the pinned Message-ID is sent; an attachment that yields no bytes
+ *   fails the send (specs/email_provider_sdk_removal.md WP2, B1, B2, B6)
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -63,57 +85,8 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider, Si
         }
 
         try {
-            $sg = new \SendGrid($api_key);
-            if ($region === 'eu') {
-                $sg->setDataResidency('eu');
-            }
-
-            $response = $sg->client->user()->account()->get();
-            $status = $response->statusCode();
-
-            if ($status >= 200 && $status < 300) {
-                $body = json_decode($response->body(), true) ?: [];
-                $details = [
-                    'Region' => $region === 'eu' ? 'EU' : 'Global',
-                ];
-                if (!empty($body['type'])) {
-                    $details['Account Type'] = $body['type'];
-                }
-                if (isset($body['reputation'])) {
-                    $details['Reputation'] = $body['reputation'];
-                }
-                if (!empty($configured_domain)) {
-                    $details['Verified Domain'] = $configured_domain;
-                }
-
-                return [
-                    'success' => true,
-                    'label' => 'API Key Valid',
-                    'details' => $details,
-                    'error' => null,
-                ];
-            }
-
-            if ($status === 401) {
-                $error = 'Authentication failed (401). Check API key.';
-                if ($region !== 'eu') {
-                    $error .= ' If your account is EU-region, set Region to EU.';
-                }
-                return [
-                    'success' => false,
-                    'label' => 'API Key Rejected',
-                    'details' => ['Region' => $region === 'eu' ? 'EU' : 'Global'],
-                    'error' => $error,
-                ];
-            }
-
-            return [
-                'success' => false,
-                'label' => 'API Connection Failed',
-                'details' => ['Region' => $region === 'eu' ? 'EU' : 'Global'],
-                'error' => 'HTTP ' . $status . ': ' . $response->body(),
-            ];
-        } catch (\Exception $e) {
+            $resp = self::call('GET', '/v3/user/account', (string)$api_key);
+        } catch (ProviderHttpException $e) {
             return [
                 'success' => false,
                 'label' => 'API Connection Failed',
@@ -121,76 +94,124 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider, Si
                 'error' => $e->getMessage(),
             ];
         }
+        $region_label = $region === 'eu' ? 'EU' : 'Global';
+
+        if ($resp->ok()) {
+            $body = $resp->json() ?: [];
+            $details = ['Region' => $region_label];
+            if (!empty($body['type'])) {
+                $details['Account Type'] = $body['type'];
+            }
+            if (isset($body['reputation'])) {
+                $details['Reputation'] = $body['reputation'];
+            }
+            if (!empty($configured_domain)) {
+                $details['Verified Domain'] = $configured_domain;
+            }
+            return [
+                'success' => true,
+                'label' => 'API Key Valid',
+                'details' => $details,
+                'error' => null,
+            ];
+        }
+
+        if ($resp->status === 401) {
+            $error = 'Authentication failed (401). Check API key.';
+            if ($region !== 'eu') {
+                $error .= ' If your account is EU-region, set Region to EU.';
+            }
+            return [
+                'success' => false,
+                'label' => 'API Key Rejected',
+                'details' => ['Region' => $region_label],
+                'error' => $error,
+            ];
+        }
+        if ($resp->status === 403) {
+            // The key is real but may not read the account: a restricted key.
+            // Every key may read its own scopes; one holding mail.send can send.
+            $scopes = null;
+            try {
+                $sresp = self::call('GET', '/v3/scopes', (string)$api_key);
+                $scopes = $sresp->ok() ? (($sresp->json() ?? [])['scopes'] ?? null) : null;
+            } catch (ProviderHttpException $e) {
+                $scopes = null;
+            }
+            if (is_array($scopes) && in_array('mail.send', $scopes, true)) {
+                $details = ['Region' => $region_label, 'Scopes' => count($scopes)];
+                if (!empty($configured_domain)) {
+                    $details['Verified Domain'] = $configured_domain;
+                }
+                return [
+                    'success' => true,
+                    'label' => 'API Key Valid (Restricted)',
+                    'details' => $details,
+                    'error' => null,
+                ];
+            }
+            return [
+                'success' => false,
+                'label' => 'API Key Rejected',
+                'details' => ['Region' => $region_label],
+                'error' => 'This API key may not send mail (403). Give it the Mail Send permission in SendGrid.',
+            ];
+        }
+
+        return [
+            'success' => false,
+            'label' => 'API Connection Failed',
+            'details' => ['Region' => $region_label],
+            'error' => self::describeError($resp),
+        ];
     }
 
     public function send(EmailMessage $message): bool {
-        $settings = Globalvars::get_instance();
-        $api_key = $settings->get_setting('sendgrid_api_key');
-
         try {
             $mail = $this->buildBaseMail($message);
-
-            foreach ($message->getRecipients() as $recipient) {
-                $personalization = new \SendGrid\Mail\Personalization();
-                $personalization->addTo(new \SendGrid\Mail\To($recipient['email'], $recipient['name'] ?? null));
-                $mail->addPersonalization($personalization);
-            }
-
-            // CC and BCC apply per personalization in SendGrid; add to the first.
-            $personalizations = $mail->getPersonalizations();
-            if (!empty($personalizations)) {
-                $first = $personalizations[0];
-                foreach ($message->getCc() as $cc) {
-                    $first->addCc(new \SendGrid\Mail\Cc($cc['email'], $cc['name'] ?? null));
-                }
-                foreach ($message->getBcc() as $bcc) {
-                    $first->addBcc(new \SendGrid\Mail\Bcc($bcc['email'], $bcc['name'] ?? null));
-                }
-            }
-
-            $sg = $this->buildClient($api_key, $settings);
-            $response = $sg->send($mail);
-            $status = $response->statusCode();
-
-            if ($status >= 200 && $status < 300) {
-                return true;
-            }
-
-            error_log("[SendGridProvider] Send failed: HTTP " . $status . " " . $response->body());
-            return false;
-        } catch (\Exception $e) {
-            error_log("[SendGridProvider] Send failed: " . $e->getMessage());
+        } catch (RuntimeException $e) {
+            error_log('[SendGridProvider] Send failed: ' . $e->getMessage());
             return false;
         }
+
+        $personalizations = [];
+        foreach ($message->getRecipients() as $recipient) {
+            $personalizations[] = ['to' => [self::address($recipient['email'], $recipient['name'] ?? null)]];
+        }
+        // CC and BCC apply per personalization in SendGrid; add to the first.
+        if (!empty($personalizations)) {
+            $cc = [];
+            foreach ($message->getCc() as $r) {
+                $cc[] = self::address($r['email'], $r['name'] ?? null);
+            }
+            $bcc = [];
+            foreach ($message->getBcc() as $r) {
+                $bcc[] = self::address($r['email'], $r['name'] ?? null);
+            }
+            if ($cc) { $personalizations[0]['cc'] = $cc; }
+            if ($bcc) { $personalizations[0]['bcc'] = $bcc; }
+        }
+        $mail = ['personalizations' => $personalizations] + $mail;
+
+        return $this->post($mail, 'Send failed');
     }
 
     public function sendBatch(EmailMessage $message, array $recipients): array {
-        $settings = Globalvars::get_instance();
-        $api_key = $settings->get_setting('sendgrid_api_key');
+        try {
+            // A pinned Message-ID names one message; every personalization is its own.
+            $base = $this->buildBaseMail($message, false);
+        } catch (RuntimeException $e) {
+            error_log('[SendGridProvider] Batch send failed: ' . $e->getMessage());
+            return ['success' => false, 'failed_recipients' => array_values($recipients)];
+        }
 
-        $chunks = array_chunk($recipients, 1000);
         $failed = [];
-
-        foreach ($chunks as $chunk) {
-            try {
-                $mail = $this->buildBaseMail($message);
-
-                foreach ($chunk as $email) {
-                    $personalization = new \SendGrid\Mail\Personalization();
-                    $personalization->addTo(new \SendGrid\Mail\To($email, $email));
-                    $mail->addPersonalization($personalization);
-                }
-
-                $sg = $this->buildClient($api_key, $settings);
-                $response = $sg->send($mail);
-                $status = $response->statusCode();
-
-                if ($status < 200 || $status >= 300) {
-                    error_log("[SendGridProvider] Batch chunk failed: HTTP " . $status . " " . $response->body());
-                    $failed = array_merge($failed, $chunk);
-                }
-            } catch (\Exception $e) {
-                error_log("[SendGridProvider] Batch chunk failed: " . $e->getMessage());
+        foreach (array_chunk(array_values($recipients), 1000) as $chunk) {
+            $personalizations = [];
+            foreach ($chunk as $email) {
+                $personalizations[] = ['to' => [self::address($email, $email)]];
+            }
+            if (!$this->post(['personalizations' => $personalizations] + $base, 'Batch chunk failed')) {
                 $failed = array_merge($failed, $chunk);
             }
         }
@@ -201,76 +222,129 @@ class SendGridProvider implements EmailServiceProvider, InboundEmailProvider, Si
         ];
     }
 
+    /** POST /v3/mail/send; true on a 2xx (SendGrid answers 202). */
+    private function post(array $mail, string $what): bool {
+        $key = (string)Globalvars::get_instance()->get_setting('sendgrid_api_key');
+        try {
+            $resp = self::call('POST', '/v3/mail/send', $key, $mail);
+        } catch (ProviderHttpException $e) {
+            error_log('[SendGridProvider] ' . $what . ': ' . $e->getMessage());
+            return false;
+        }
+        if (!$resp->ok()) {
+            error_log('[SendGridProvider] ' . $what . ': ' . self::describeError($resp));
+            return false;
+        }
+        return true;
+    }
+
     /**
-     * Build a Mail object populated with everything except recipient personalizations.
-     * Callers add personalizations and (optionally) CC/BCC afterwards.
+     * The mail body with everything except the personalizations, which
+     * send() and sendBatch() fill in differently.
+     *
+     * @throws RuntimeException when an attachment yields no bytes
      */
-    private function buildBaseMail(EmailMessage $message): \SendGrid\Mail\Mail {
+    private function buildBaseMail(EmailMessage $message, bool $pin_message_id = true): array {
         $settings = Globalvars::get_instance();
-        $mail = new \SendGrid\Mail\Mail();
 
-        $from = new \SendGrid\Mail\From($message->getFrom(), $message->getFromName() ?: null);
-        $mail->setFrom($from);
-        $mail->setSubject($message->getSubject());
-
-        if ($message->getHtmlBody()) {
-            $mail->addContent('text/html', $message->getHtmlBody());
-        }
-        if ($message->getTextBody()) {
-            $mail->addContent('text/plain', $message->getTextBody());
-        }
-
+        $mail = [
+            'from' => self::address((string)$message->getFrom(), $message->getFromName() ?: null),
+            'subject' => (string)$message->getSubject(),
+        ];
         if ($replyTo = $message->getReplyTo()) {
-            $mail->setReplyTo(new \SendGrid\Mail\ReplyTo($replyTo));
+            $mail['reply_to'] = ['email' => (string)$replyTo];
         }
 
+        // text/plain must come before text/html: SendGrid refuses the other order.
+        $content = [];
+        if ($message->getTextBody()) {
+            $content[] = ['type' => 'text/plain', 'value' => (string)$message->getTextBody()];
+        }
+        if ($message->getHtmlBody()) {
+            $content[] = ['type' => 'text/html', 'value' => (string)$message->getHtmlBody()];
+        }
+        if ($content) {
+            $mail['content'] = $content;
+        }
+
+        $headers = [];
+        if ($pin_message_id && $message->getMessageId()) {
+            $headers['Message-ID'] = (string)$message->getMessageId();
+        }
         foreach ($message->getHeaders() as $name => $value) {
-            $mail->addGlobalHeader($name, $value);
+            $headers[(string)$name] = (string)$value;
+        }
+        if ($headers) {
+            // An object always: a map whose only name is "0" would encode as a list.
+            $mail['headers'] = (object)$headers;
         }
 
+        $attachments = [];
         foreach ($message->getAttachments() as $attachment) {
-            if (!empty($attachment['path']) && is_readable($attachment['path'])) {
-                $content = base64_encode(file_get_contents($attachment['path']));
-                $sg_attachment = new \SendGrid\Mail\Attachment();
-                $sg_attachment->setContent($content);
-                $sg_attachment->setFilename($attachment['name'] ?: basename($attachment['path']));
-                $sg_attachment->setDisposition('attachment');
-                $mail->addAttachment($sg_attachment);
-            } elseif (isset($attachment['data'])) {
-                $sg_attachment = new \SendGrid\Mail\Attachment();
-                $sg_attachment->setContent(base64_encode($attachment['data']));
-                $sg_attachment->setFilename($attachment['name'] ?: 'attachment');
-                if (!empty($attachment['cid'])) {
-                    // Inline (embedded) image: disposition inline + Content-ID so the
-                    // body's cid: reference resolves in the recipient's client.
-                    $sg_attachment->setDisposition('inline');
-                    $sg_attachment->setContentID($attachment['cid']);
-                } else {
-                    $sg_attachment->setDisposition('attachment');
-                }
-                if (!empty($attachment['type'])) {
-                    $sg_attachment->setType($attachment['type']);
-                }
-                $mail->addAttachment($sg_attachment);
+            $c = EmailMessage::attachmentContent($attachment);
+            $entry = [
+                'content' => base64_encode($c['bytes']),
+                'filename' => $c['name'],
+                'type' => $c['type'],
+                'disposition' => 'attachment',
+            ];
+            if (!empty($attachment['cid'])) {
+                // Inline (embedded) image: disposition inline + Content-ID so the
+                // body's cid: reference resolves in the recipient's client.
+                $entry['disposition'] = 'inline';
+                $entry['content_id'] = (string)$attachment['cid'];
             }
+            $attachments[] = $entry;
+        }
+        if ($attachments) {
+            $mail['attachments'] = $attachments;
         }
 
         if ($settings->get_setting('sendgrid_sandbox_mode') == '1') {
-            $mail->enableSandBoxMode();
+            $mail['mail_settings'] = ['sandbox_mode' => ['enable' => true]];
         }
 
         // Click tracking — explicit on or off based on setting (default off in settings.json)
-        $mail->setClickTracking($settings->get_setting('sendgrid_click_tracking') == '1');
+        $mail['tracking_settings'] = ['click_tracking' => [
+            'enable' => $settings->get_setting('sendgrid_click_tracking') == '1',
+        ]];
 
         return $mail;
     }
 
-    private function buildClient(string $api_key, Globalvars $settings): \SendGrid {
-        $sg = new \SendGrid($api_key);
-        if ($settings->get_setting('sendgrid_region') === 'eu') {
-            $sg->setDataResidency('eu');
+    /** {email, name}, the name left out when empty. */
+    private static function address(string $email, ?string $name): array {
+        $out = ['email' => $email];
+        if ($name !== null && trim($name) !== '') {
+            $out['name'] = $name;
         }
-        return $sg;
+        return $out;
+    }
+
+    private static function apiBase(): string {
+        return Globalvars::get_instance()->get_setting('sendgrid_region') === 'eu'
+            ? 'https://api.eu.sendgrid.com'
+            : 'https://api.sendgrid.com';
+    }
+
+    /** One API call. Throws ProviderHttpException only when no answer came back. */
+    private static function call(string $method, string $path, string $key, ?array $json = null): ProviderHttpResponse {
+        $options = ['headers' => ['Authorization' => 'Bearer ' . trim($key)]];
+        if ($json !== null) {
+            $options['json'] = $json;
+        }
+        return ProviderHttp::request($method, self::apiBase() . $path, $options);
+    }
+
+    /** SendGrid's own words for a failed answer (errors[].message), prefixed with the status. */
+    private static function describeError(ProviderHttpResponse $resp): string {
+        $words = [];
+        foreach ((array)($resp->json()['errors'] ?? []) as $err) {
+            if (is_array($err) && !empty($err['message'])) {
+                $words[] = (string)$err['message'];
+            }
+        }
+        return 'SendGrid answered ' . $resp->status . ($words ? ': ' . implode('; ', $words) : '');
     }
 
     // ── InboundEmailProvider ────────────────────────────────────────────

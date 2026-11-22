@@ -318,8 +318,7 @@ Routes outside the namespace are dropped with a logged warning.
     "requires": {
         "php": ">=8.0",
         "joinery": ">=1.0",
-        "extensions": ["pdo", "json", "curl"],
-        "composer": { "vendor/package": "^2.0" }
+        "extensions": ["pdo", "json", "curl"]
     },
     "depends": {
         "core-plugin": ">=1.0"
@@ -392,7 +391,29 @@ A plugin that needs something installed on the host declares it; the platform in
 
 **1. PHP extensions — `requires.extensions`.** Declare the extension name (e.g. `"extensions": ["imagick"]`). The install tooling reads every bundled plugin's declarations via `utils/list_dependencies.php` and apt-installs the union at the root moments: Docker image build, `install.sh` site build, and `upgrade.php` on nodes. Activation checks `extension_loaded()` and refuses with the specific missing extension when the host somehow lacks it — the same gate applies to themes via `theme.json` `requires.extensions`. Core's own extension requirements live as `ext-*` entries in root `composer.json`, not in any plugin manifest.
 
-**2. Composer libraries — `requires.composer`.** Declare `{"vendor/package": "constraint"}`. This is the one tier that installs **at activation**: `PluginManager` runs a reconcile (owned by `ComposerValidator::reconcilePluginPackages()`) that `composer require`s anything missing into the single root `composer.json` — there is one manifest, one vendor dir, one autoloader. Composer resolves each constraint; an unsatisfiable one refuses activation with composer's output. Because the root manifest holds one constraint per package, two plugins declaring the **same package with different constraints** is detected before composer runs and refuses activation naming both plugins (identical constraints are fine — declare what you need even if another plugin already ships it). The reconcile also runs at `update_database` time, covering deploys that add a dependency to an already-active plugin. Reconciled packages are recorded in `composer.json` `extra.joinery-plugin-packages`; `utils/list_dependencies.php --orphans` lists recorded packages no plugin declares anymore (deactivation never removes packages). Activation-time reconcile needs network access to the composer registry.
+**2. Composer libraries — the plugin's own `vendor/`.** A plugin that needs PHP libraries ships them in its own folder: `plugins/<name>/composer.json`, `composer.lock` and `vendor/`, built with `composer install --no-dev` in the plugin folder and committed with the plugin. The plugin's signature covers every file in its `vendor/`, so switching the plugin on installs nothing and needs neither root nor the network. The site's own `composer.json` and `vendor/` belong to core; `requires.composer` in `plugin.json` is refused. The plugin's `composer.json` must set:
+
+```json
+{
+    "name": "joinery-plugin/<name>",
+    "version": "<the plugin's version>",
+    "require": { "vendor/package": "^1.2" },
+    "config": {
+        "platform-check": false,
+        "autoloader-suffix": "JoineryPlugin_<name>",
+        "optimize-autoloader": true
+    }
+}
+```
+
+`<name>` is the plugin's folder name exactly. Activation and publish refuse a plugin whose `vendor/` breaks any of these rules:
+- the three keys are missing;
+- a `vendor/composer/platform_check.php` exists;
+- the autoloader class is not `ComposerAutoloaderInitJoineryPlugin_<name>`;
+- `vendor/` does not match the plugin's `composer.lock`;
+- a package it holds is also in core's `vendor/` or another active plugin's at a different build. The same build is fine; pin core's version to share a package.
+
+Activation also refuses when a package needs a PHP version or extension the site lacks. The site loads an active plugin's library classes on first use (`ClassAutoloader`), after core's own: where two copies of a class exist, core's wins. A sandboxed plugin's `vendor/` is never loaded by the site. A library used only through functions (no class to trigger the load) is loaded with `ClassAutoloader::requirePluginVendor('<name>')`. Never require `vendor/autoload.php` yourself: composer would put the plugin's loader first in line, ahead of core's.
 
 **2b. System packages — `requires.packages`.** A plain apt package the plugin needs beside PHP (a command-line tool, a library a tool links): `"packages": ["libjpeg-turbo-progs"]`. It travels with the extensions: the same resolver emits it, and the same root moments install it — Docker image build, every container start, `install.sh site`, and `upgrade.php` on existing nodes. Core's own system packages are listed in root `composer.json` under `extra.joinery-system-packages`. Nothing checks for the package at activation; the code that runs it must handle its absence (as `ImageDecoder` does, decoding in full without `djpeg`). Anything that needs more than `apt-get install` — a daemon, files under `/etc` — is the next tier. In a site container, root holds six capabilities only ([Installation](installation.md#what-docker-mode-is)), and two dropped ones fail quietly: a package whose install sets a file capability (`setcap`, as `iputils-ping` does) is left without it, and a setgid bit on a file whose group root is not in is cleared. Such a package installs with no error and then misbehaves; prefer one that needs neither.
 
@@ -1812,7 +1833,7 @@ Declare it only on a check that is cheap enough to run hourly and whose failure 
 
 The report also carries one check of core's own, under the plugin name `core`: `outbound_mail` (`PluginProvisioning::outboundMailCheck()`). It passes when the mail service (`email_service`) or its fallback (`email_fallback_service`) is set and that provider's `validateConfiguration()` finds its settings complete: the sender uses the fallback when no service is set and tries it when the service fails, so either one working is mail leaving. A site that cannot send mail fails its node's health like a failing plugin check, since nothing it sends would leave it.
 
-Core's second check is `composer` (`PluginProvisioning::composerCheck()`): the `composerAutoLoad` setting is one `PathHelper` accepts (`../vendor/` or `vendor/`), and the vendor tree the site loads is whole by `ComposerValidator` (autoload.php present, every required package at composer.lock's version, every active plugin's declared packages installed). A refused setting over a whole tree is `unmet`, with the refused value in the reason: the site runs on `../vendor/`, and the setting should say so. A tree that does not validate is `error`, in the validator's words. The validator reads files and runs no command, so the check is cheap enough for the hourly report.
+Core's second check is `composer` (`PluginProvisioning::composerCheck()`): the `composerAutoLoad` setting is one `PathHelper` accepts (`../vendor/` or `vendor/`), and the vendor tree the site loads is whole by `ComposerValidator` (autoload.php present, every required package at composer.lock's version; an active plugin's library that clashes with core's or another plugin's is a warning). A refused setting over a whole tree is `unmet`, with the refused value in the reason: the site runs on `../vendor/`, and the setting should say so. A tree that does not validate is `error`, in the validator's words. The validator reads files and runs no command, so the check is cheap enough for the hourly report.
 
 ## Parsing Outside Bytes
 

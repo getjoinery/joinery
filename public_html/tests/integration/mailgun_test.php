@@ -7,7 +7,7 @@
  * timeout: 600
  */
 /**
- * Live Mailgun send test: a direct SDK send and a template send through
+ * Live Mailgun send test: a direct MailgunProvider send and a template send through
  * EmailSender, both to the configured webmaster address. Sends real mail, so it
  * is live/prod-verify — the dashboard's live confirm and the env gate are the
  * access control (the old $_REQUEST password gate is gone).
@@ -17,32 +17,27 @@ require_once(__DIR__ . '/../lib/harness.php');
 require_once(PathHelper::getIncludePath('includes/EmailTemplateRenderer.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('includes/email_providers/MailgunProvider.php'));
 require_once(PathHelper::getIncludePath('data/email_templates_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getComposerAutoloadPath());
-
-use Mailgun\Mailgun;
 
 harness_boot();
 
 $settings = Globalvars::get_instance();
 
-section('Direct Mailgun SDK send');
+section('Direct Mailgun provider send');
 try {
-	if ($settings->get_setting('mailgun_eu_api_link')) {
-		$mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-	} else {
-		$mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
-	}
-	$domain = $settings->get_setting('mailgun_domain');
-	$result = $mg->messages()->send($domain, [
-		'from'    => $settings->get_setting('defaultemail'),
-		'to'      => $settings->get_setting('webmaster_email'),
-		'subject' => 'Test email with direct mailgun',
-		'text'    => 'Direct mailgun sending is working.'
-	]);
-	check(is_object($result) && method_exists($result, 'getId') ? $result->getId() !== '' : $result !== null,
-		'direct Mailgun send accepted the message');
+	$direct = (new EmailMessage())
+		->from($settings->get_setting('defaultemail'))
+		->to($settings->get_setting('webmaster_email'))
+		->subject('Test email with direct mailgun')
+		->text('Direct mailgun sending is working.');
+	$provider = new MailgunProvider();
+	$sent = $provider->send($direct);
+	$receipt = $provider->lastSendReceipt();
+	check($sent === true && !empty($receipt['id']), 'direct Mailgun send accepted the message',
+		$sent ? (string)($receipt['id'] ?? '') : 'refused; see the error log');
 } catch (Throwable $e) {
 	check(false, 'direct Mailgun send accepted the message', $e->getMessage());
 }

@@ -27,6 +27,8 @@
  * envelope sender and no chosen envelope recipients, so it cannot express what
  * inbound forwarding needs. Forwarding keeps using the SMTP relay.
  *
+ * @version 1.8 - requests go through ProviderHttp; an attachment that yields no bytes fails the send
+ *   (specs/email_provider_sdk_removal.md WP1, B6)
  * @version 1.7 - RefusesUnregisteredSenderDomains: it refuses a From domain the account does not hold
  * @version 1.6 - dkimSigningDomain(): the domain a send from a given From domain is signed as
  * @version 1.5 - records are read from dkim_expected / rpath_expected / cname_expected, what the provider
@@ -46,8 +48,6 @@
 
 require_once(PathHelper::getComposerAutoloadPath());
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
 
 class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, SendingDomainRegistrar, RefusesUnregisteredSenderDomains, SingleKeyProvider {
 
@@ -187,7 +187,12 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
     // ── Sending ─────────────────────────────────────────────────────────
 
     public function send(EmailMessage $message): bool {
-        $payload = $this->buildPayload($message);
+        try {
+            $payload = $this->buildPayload($message);
+        } catch (RuntimeException $e) {
+            error_log('[Smtp2GoProvider] Send failed: ' . $e->getMessage());
+            return false;
+        }
         $payload['to'] = self::formatAddresses($message->getRecipients());
         $cc = self::formatAddresses($message->getCc());
         if (!empty($cc)) { $payload['cc'] = $cc; }
@@ -216,7 +221,12 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
      * else, and a narrow key should cost speed, not delivery.
      */
     public function sendBatch(EmailMessage $message, array $recipients): array {
-        $base = $this->buildPayload($message);
+        try {
+            $base = $this->buildPayload($message);
+        } catch (RuntimeException $e) {
+            error_log('[Smtp2GoProvider] Batch send failed: ' . $e->getMessage());
+            return array('success' => false, 'failed_recipients' => array_values($recipients));
+        }
         $failed = array();
 
         foreach (array_chunk(array_values($recipients), 500) as $chunk) {
@@ -321,15 +331,11 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         $inlines = array();
         foreach ($message->getAttachments() as $attachment) {
             $type = (string)($attachment['type'] ?? 'application/octet-stream');
-            if (!empty($attachment['path']) && is_readable($attachment['path'])) {
-                $blob = file_get_contents($attachment['path']);
-                $name = $attachment['name'] ?: basename($attachment['path']);
-            } elseif (isset($attachment['data'])) {
-                $blob = $attachment['data'];
-                $name = $attachment['name'] ?: 'attachment';
-            } else {
-                continue;
-            }
+            // A file that yields no bytes throws: the send fails rather than
+            // going out without it.
+            $content = EmailMessage::attachmentContent($attachment);
+            $blob = $content['bytes'];
+            $name = $content['name'];
             if (!empty($attachment['cid'])) {
                 // SMTP2GO references an inline part by its filename, so the
                 // on-wire filename IS the cid the body points at (cid:<cid>).
@@ -665,25 +671,19 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         if ($key === '') {
             throw new RuntimeException('No SMTP2GO API key is configured.');
         }
-        $http = new Client(array(
-            'base_uri'        => self::API_BASE,
-            'timeout'         => 30,
-            'connect_timeout' => 10,
-        ));
         try {
-            $response = $http->request('POST', $path, array(
-                'headers' => array(
-                    'X-Smtp2go-Api-Key' => $key,
-                    'Accept'            => 'application/json',
-                ),
-                'json' => $body,
+            $resp = ProviderHttp::request('POST', self::API_BASE . $path, array(
+                'headers' => array('X-Smtp2go-Api-Key' => $key),
+                'json'    => $body,
             ));
-        } catch (RequestException $e) {
-            $status = $e->getResponse() ? $e->getResponse()->getStatusCode() : 0;
-            throw new RuntimeException('SMTP2GO ' . $path . ' failed (' . $status . '): '
-                . self::extractError($e), $status);
+        } catch (ProviderHttpException $e) {
+            throw new RuntimeException('SMTP2GO ' . $path . ' failed (0): ' . $e->getMessage(), 0);
         }
-        $decoded = json_decode((string)$response->getBody(), true);
+        $decoded = $resp->json();
+        if (!$resp->ok()) {
+            throw new RuntimeException('SMTP2GO ' . $path . ' failed (' . $resp->status . '): '
+                . self::extractError($decoded, 'HTTP ' . $resp->status), $resp->status);
+        }
         $data = (is_array($decoded) && isset($decoded['data']) && is_array($decoded['data']))
             ? $decoded['data'] : (is_array($decoded) ? $decoded : array());
         if (!empty($data['error'])) {
@@ -692,12 +692,8 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
         return $data;
     }
 
-    /** SMTP2GO's own words for a failed request, or the transport's. */
-    private static function extractError(RequestException $e): string {
-        if (!$e->getResponse()) {
-            return $e->getMessage();
-        }
-        $decoded = json_decode((string)$e->getResponse()->getBody(), true);
+    /** SMTP2GO's own words for a failed request, or $fallback. */
+    private static function extractError(?array $decoded, string $fallback): string {
         foreach (array(array('data', 'error'), array('error')) as $path) {
             $node = $decoded;
             foreach ($path as $key) {
@@ -708,7 +704,7 @@ class Smtp2GoProvider implements EmailServiceProvider, DkimRecordSource, Sending
                 return $node;
             }
         }
-        return $e->getMessage();
+        return $fallback;
     }
 
     /** A value as a plain list, so a scalar or an object never fans out wrongly. */

@@ -24,6 +24,7 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.13 - reconcile_composer is gone (specs/plugin_own_vendor.md)
  * @version 1.12 - remove_plugin and run_plugin_remover pass the request's install id to PluginRemoval::refusal()
  * @version 1.11 - run_plugin_remover: the runner asks the checks remove_plugin asks (--check) before it runs an
  *                 uninstalled plugin's host_remover, and removes the files through the same function afterwards
@@ -243,30 +244,6 @@ switch ($kind) {
 		}
 		passthru($cmd, $code);
 		exit((int)$code);
-
-	case 'reconcile_composer':
-		$plugin = (string)($args['plugin'] ?? '');
-		$manager = new PluginManager();
-		if ($plugin !== '' && !$manager->validateName($plugin)) {
-			fwrite(STDERR, "root_request: invalid plugin name\n");
-			exit(2);
-		}
-		$validator = new ComposerValidator();
-		$ok = $validator->reconcilePluginPackages($plugin !== '' ? array($plugin) : null);
-
-		// composer writes vendor/, which is code the pool executes: give it
-		// back to the tree's owner before anything runs out of it. Done whether
-		// or not the reconcile succeeded — a partial install still left files.
-		root_request_own(PathHelper::getSiteRoot() . '/vendor');
-
-		if (!$ok) {
-			foreach ($validator->getErrors() as $line) {
-				fwrite(STDERR, $line . "\n");
-			}
-			exit(1);
-		}
-		echo "composer packages reconciled" . ($plugin !== '' ? " for $plugin" : '') . "\n";
-		exit(0);
 
 	case 'write_agent_files':
 		// Every DB-managed file, each to each of its declared targets. The

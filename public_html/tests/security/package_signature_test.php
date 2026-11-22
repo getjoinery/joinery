@@ -21,6 +21,8 @@
  *
  * Run: php tests/run.php --only=tests/security/package_signature_test.php
  *
+ * @version 1.6 - a plugin's own vendor/ is signed whole, a vendor .gitignore and .git left out, and git ignores
+ *   none of it (specs/plugin_own_vendor.md WP1)
  * @version 1.3 - the fork mark written false then true leaves a package unedited; an unreadable file is not
  *                an edit (reviewer2 F1, F4)
  * @version 1.2 - editedSinceInstall(): a changed, added or removed file is an edit and is named; unsigned
@@ -396,6 +398,60 @@ list($site, $plugin) = $signed_plugin('edit_cached', $files);
 check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'the first answer is read from the files');
 file_put_contents($plugin . '/includes/Fixture.php', "<?php // later\n");
 check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'and the same request gets the same answer');
+
+section('A plugin\'s own vendor/ is signed whole (specs/plugin_own_vendor.md WP1)');
+
+// Libraries are full of folders the site's mutable-folder rule names: psr/cache,
+// a logs/ helper, uploads/, node_modules/. Under a plugin's vendor/ every file
+// is signed but a .git folder's and a .gitignore.
+$vendor_files = $files + array(
+	'vendor/psr/cache/src/x.php'  => "<?php // psr cache\n",
+	'vendor/a/logs/y.php'         => "<?php // a logs helper\n",
+	'vendor/a/schema.sql'         => "CREATE TABLE t (id int);\n",
+	'vendor/x/node_modules/z.js'  => "// z\n",
+	'vendor/x/uploads/u.php'      => "<?php // u\n",
+	'vendor/a/.gitignore'         => "",
+);
+$library_files = array('vendor/psr/cache/src/x.php', 'vendor/a/logs/y.php', 'vendor/a/schema.sql',
+	'vendor/x/node_modules/z.js', 'vendor/x/uploads/u.php');
+list($site, $plugin) = $signed_plugin('own_vendor', $vendor_files);
+$listing = PackageSignature::parse((string)file_get_contents($plugin . '/' . PackageSignature::MANIFEST_NAME)) ?? array();
+$missing = array();
+foreach ($library_files as $rel) {
+	if (!isset($listing['public_html/plugins/fixture/' . $rel])) { $missing[] = $rel; }
+}
+check($missing === array(), 'every library file in the plugin\'s vendor/ is in its manifest, cache/, logs/, node_modules/ and uploads/ included',
+	implode(', ', $missing));
+check(!isset($listing['public_html/plugins/fixture/vendor/a/.gitignore']), 'a .gitignore inside vendor/ stays unlisted');
+check(PackageSignature::excluded('public_html/plugins/fixture/vendor/a/.git/HEAD'), 'a .git folder inside vendor/ is left out');
+check(PackageSignature::excluded('public_html/plugins/fixture/cache/x.php'), 'outside vendor/, the plugin\'s cache/ is still left out');
+check(PackageSignature::excluded('vendor/psr/cache/src/x.php'), 'the site\'s own vendor/ is still not signed');
+$v = PackageSignature::verify($plugin, $keys_file);
+check($v->signed(), 'the plugin with its own vendor/ verifies', $v->line());
+foreach ($library_files as $rel) {
+	list($site, $plugin) = $signed_plugin('own_vendor_edit_' . md5($rel), $vendor_files);
+	file_put_contents($plugin . '/' . $rel, "changed\n");
+	$v = PackageSignature::verify($plugin, $keys_file);
+	check($v->verdict === PackageSignature::TAMPERED && $v->file === $rel, 'editing ' . $rel . ' is `tampered`', $v->line());
+}
+
+// Git must not drop a library file from the commit: the negation at the end of
+// both ignore files re-includes everything under a plugin's vendor/.
+$repo = dirname(PathHelper::getBasePath());
+if (is_dir($repo . '/.git')) {
+	$paths = array();
+	foreach (array_merge($library_files, array('vendor/a/debug.log', 'vendor/a/old.bak', 'vendor/a/dump.sql.gz')) as $rel) {
+		$paths[] = 'public_html/plugins/fixture/' . $rel;
+	}
+	$out = array(); $rc = 0;
+	exec('git -C ' . escapeshellarg($repo) . ' check-ignore --no-index ' . implode(' ', array_map('escapeshellarg', $paths)) . ' 2>&1', $out, $rc);
+	check($rc === 1 && $out === array(), 'git ignores no file under a plugin\'s vendor/', implode(' ', $out));
+	$out = array(); $rc = 0;
+	exec('git -C ' . escapeshellarg($repo) . ' check-ignore --no-index public_html/plugins/fixture/x.log 2>&1', $out, $rc);
+	check($rc === 0, 'a .log outside vendor/ is still ignored');
+} else {
+	harness_skip('git ignores no file under a plugin\'s vendor/', 'not a checkout');
+}
 
 section('The parser refuses a listing that reaches outside itself');
 

@@ -252,7 +252,7 @@
 				$packages = $all_packages;
 
 				// Show key packages we use FIRST
-				$key_packages = ['mailgun/mailgun-php', 'stripe/stripe-php', 'phpmailer/phpmailer'];
+				$key_packages = ['stripe/stripe-php', 'phpmailer/phpmailer', 'guzzlehttp/guzzle'];
 				$found_key_packages = array_filter($packages, function($pkg) use ($key_packages) {
 					return in_array($pkg['name'], $key_packages);
 				});

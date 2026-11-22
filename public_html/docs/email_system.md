@@ -1151,12 +1151,22 @@ The email system uses a provider abstraction so that new email services can be a
 | `mailgun` | Mailgun | Native (recipient-variables, 500/chunk) | Yes (domain show) | EU region supported via `mailgun_eu_api_link` |
 | `smtp` | SMTP | Per-recipient loop via PHPMailer | Yes (connect + auth) | Generic SMTP, works with any provider that supports it |
 | `sendgrid` | SendGrid | Native (personalizations, 1000/chunk) | Yes (`/v3/user/account`) | Global or EU region via `sendgrid_region`; supports sandbox mode and per-message click-tracking toggle |
-| `ses` | Amazon SES | Per-recipient `SendEmail` loop (no native non-templated batch) | Yes (`GetAccount`) | AWS region selectable; static keys or IAM role auto-discovery; optional Configuration Set for engagement tracking |
-| `postmark` | Postmark | Native (`sendEmailBatch`, 500/chunk, per-recipient failure status) | Yes (`getServer`) | Server token (not Account token); message stream selection (transactional vs broadcast); per-message open and link tracking |
+| `ses` | Amazon SES | Per-recipient SESv2 send loop (no native non-templated batch) | Yes (`GET /v2/email/account`) | Access key and secret both required; `ses_region` is an AWS region name (China `cn-*` and isolated `*-iso*` regions are refused, GovCloud works); optional Configuration Set for engagement tracking |
+| `postmark` | Postmark | Native (`/email/batch`, 500/chunk, per-recipient failure status) | Yes (`GET /server`) | Server token (not Account token); message stream selection (transactional vs broadcast); per-message open and link tracking |
 | `brevo` | Brevo | Native (`messageVersions`, 1000/chunk) | Yes (`/v3/account`) | Single global endpoint; supports sandbox mode via `X-Sib-Sandbox` header |
-| `resend` | Resend | Native (`batch->send`, 100/chunk) | Yes (`apiKeys->list`) | Simplest config — single bearer token. Restricted/sending-only keys validate as "API Key Valid (Restricted)" |
+| `resend` | Resend | Native (`/emails/batch`, 100/chunk); a message with attachments goes one `/emails` call per recipient, since the batch endpoint takes none | Yes (`GET /api-keys`) | Simplest config — single bearer token. Restricted/sending-only keys validate as "API Key Valid (Restricted)", decided by Resend's error name |
 | `mailjet` | Mailjet | Native v3.1 Send API (50 messages/chunk, per-message status) | Yes (`/v3/REST/myprofile`) | Two-part credential (key + secret); supports sandbox mode |
 | `connected_account` | Connected Email Account | Per-recipient loop | — | Sends all site mail through a connected IMAP account's SMTP (Gmail/M365 XOAUTH2, Yahoo/iCloud/Fastmail app password). Forces `From` to that address. See [Two send modes](#two-send-modes--smtpconfig) |
+
+### How providers reach their services
+
+Every HTTP-API provider sends its requests through `ProviderHttp` (`includes/ProviderHttp.php`), a thin layer over Guzzle. It sets a 30 s timeout (10 s to connect), never follows a redirect, keeps request headers, credentials and query strings out of every log and exception message, and returns an HTTP error status to the provider rather than throwing. It retries only where the service cannot have taken the message (a 429, or a failure to resolve, connect or complete TLS), and a provider opts in to retrying a 5xx. A failure with no response at all throws `ProviderHttpException`. Tests answer requests with `ProviderHttp::useTestHandler()` (CLI only), and `tests/email/provider_wire_*_test.php` check what each provider sends.
+
+SES and Route 53 sign their requests with `AwsSigV4` (`includes/AwsSigV4.php`), the platform's one AWS Signature Version 4 signer, which `S3Signer` also uses.
+
+An attachment that cannot be read at send time (a file that is gone or unreadable) fails the send on every provider, with the reason logged; the failed send is queued for retry like any other.
+
+**A pinned Message-ID** (`messageId()`, which the mailbox sets on every compose and reply so its stored copy matches the sent message) reaches the recipient on Mailgun, SMTP2GO, SES, Postmark (sent with `X-PM-KeepID: true`, without which Postmark replaces it), Resend, SendGrid and every SMTP transport. **Brevo and Mailjet cannot carry one:** Brevo's API refuses standard headers and Mailjet forbids `Message-Id`. Each assigns its own, so a message sent through either arrives with a Message-ID the stored copy does not have, and a reply to it is not matched to that copy by Message-ID.
 
 ### Adding a New Provider
 
@@ -1253,7 +1263,7 @@ need both:
 
 | Provider | Raw-MIME path | Envelope sender | API submission (`ApiSubmissionRelay`) |
 |---|---|---|---|
-| `mailgun` | `messages.mime` (SDK `sendMime`) | Mailgun owns bounces; best-effort sender | ✅ |
+| `mailgun` | `messages.mime` | Mailgun sets the return-path and owns bounces; the envelope sender only picks the account domain | ✅ |
 | `ses` | SESv2 `sendEmail` with `Content.Raw.Data` | SES owns bounces; verified MAIL FROM domain | ✅ |
 | `smtp` | Native raw SMTP | Full `MAIL FROM` control | ❌ (SMTP submission) |
 
@@ -1304,8 +1314,9 @@ check then reports an unregistered domain as mail that does not leave; `unreacha
 render an unknown verdict, never a fabricated one.
 
 Implementers: **Mailgun** (sending DNS records from the domains API — the
-`_domainkey` TXT rows) and **SES** (Easy DKIM CNAME tokens from
-`GetEmailIdentity`; a BYODKIM identity has no tokens and reports `ok` with no
+`_domainkey` TXT rows; a domain registered from the platform gets a 2048-bit
+DKIM key with DKIM authority on the domain itself, and https tracking links)
+and **SES** (Easy DKIM CNAME tokens from the SESv2 identity read; a BYODKIM identity has no tokens and reports `ok` with no
 records). Local-submission providers (`postfix`, `smtp`) never implement it —
 the server's own rspamd signs for them. The mailbox Setup tab consumes this to drive its
 per-domain DKIM rows; see

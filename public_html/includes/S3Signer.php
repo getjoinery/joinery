@@ -14,6 +14,9 @@
  * management node's backup broker), and every finished write is reported to
  * it with its bytes and sha256. The request paths are the same either way.
  *
+ * @version 1.17 - signing is AwsSigV4's, the platform's one SigV4 signer (headers and presigned links alike);
+ *                 useTestClock() / useTestTransport() pin signatures without a network
+ *                 (specs/email_provider_sdk_removal.md WP6)
  * @version 1.16 - a request that carries bytes is tried 4 times, pausing 5 s, 20 s, 80 s (was 3, pausing 2 s, 4 s);
  *                 failure_text(): the provider's answer and how many tries it took, for an error message
  * @version 1.15 - an S3LinkReader lists for list() and signs the GET presign() is asked for: a target whose owner
@@ -107,6 +110,12 @@ class S3Signer {
 
 	/** Set below 1 by a test so a transfer retry does not wait its full pause. */
 	public static $retry_pause_scale = 1;
+
+	/** @var int|null a test process's fixed clock (useTestClock) */
+	private static $test_clock = null;
+
+	/** @var callable|null a test process's stand-in for curl (useTestTransport) */
+	private static $test_transport = null;
 	// Extra wall clock, on top of one attempt's timeout, that retries may consume.
 	// This is what bounds the total: an attempt that burns the entire transfer
 	// timeout leaves no room for another, which is the right answer — a transfer
@@ -471,7 +480,7 @@ class S3Signer {
 		}
 		$headers = [
 			'x-amz-object-lock-mode'              => (string)$creds['object_lock']['mode'],
-			'x-amz-object-lock-retain-until-date' => self::lock_until($creds['object_lock']['days']),
+			'x-amz-object-lock-retain-until-date' => self::lock_until($creds['object_lock']['days'], self::now()),
 		];
 		if ($whole_put && is_string($body)) {
 			$headers['content-md5'] = base64_encode(md5($body, true));
@@ -968,13 +977,12 @@ class S3Signer {
 			list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, $path);
 		}
 
-		// Sorted querystring
-		ksort($params);
-		$canonical_qs = '';
-		foreach ($params as $k => $v) {
-			if ($canonical_qs !== '') $canonical_qs .= '&';
-			$canonical_qs .= rawurlencode($k) . '=' . rawurlencode($v);
+		// The query as sent is the query as signed: sorted and encoded once.
+		$query = [];
+		foreach ((array)$params as $k => $v) {
+			$query[(string)$k] = (string)$v;
 		}
+		$canonical_qs = AwsSigV4::canonicalQuery($query);
 
 		// A streamed upload or a download-to-file gets the long per-attempt window;
 		// everything else is a small control call.
@@ -1006,7 +1014,7 @@ class S3Signer {
 			$result = ($link !== null)
 				? self::attempt_link($method, $link, $body, $body_size, $content_type, $sink_file, $attempt_timeout, $extra_headers)
 				: self::attempt(
-					$method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
+					$method, $creds, $region, $scheme, $host, $canonical_uri, $query, $canonical_qs,
 					$body, $body_size, $content_type, $sink_file, $attempt_timeout, $extra_headers
 				);
 
@@ -1072,11 +1080,8 @@ class S3Signer {
 	 *
 	 * Returns the raw outcome plus a 'retryable' verdict; the caller owns the loop.
 	 */
-	private static function attempt($method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
+	private static function attempt($method, $creds, $region, $scheme, $host, $canonical_uri, array $query, $canonical_qs,
 	                                $body, $body_size, $content_type, $sink_file, $attempt_timeout, array $extra_headers = []) {
-
-		$amz_date = gmdate('Ymd\THis\Z');
-		$date_stamp = gmdate('Ymd');
 
 		// No body: SHA256(""). String body (a multipart part, a control XML): its
 		// real hash, so the provider verifies the bytes it received are the bytes
@@ -1091,11 +1096,9 @@ class S3Signer {
 			$payload_hash = 'UNSIGNED-PAYLOAD';
 		}
 
-		$headers = [
-			'host' => $host,
-			'x-amz-content-sha256' => $payload_hash,
-			'x-amz-date' => $amz_date,
-		];
+		// Every header sent is signed: curl sends exactly these, nothing
+		// changes them afterwards.
+		$headers = [];
 		if ($content_type !== null) {
 			$headers['content-type'] = $content_type;
 		}
@@ -1106,36 +1109,31 @@ class S3Signer {
 			$headers[strtolower((string)$k)] = (string)$v;
 		}
 
-		// Canonical headers (sorted, lowercase keys, trimmed values)
+		$signed = AwsSigV4::signHeaders([
+			'method'              => (string)$method,
+			'host'                => $host,
+			'path'                => $canonical_uri,
+			'query'               => $query,
+			'headers'             => $headers,
+			'payload_hash'        => $payload_hash,
+			'service'             => self::SERVICE,
+			'region'              => $region,
+			'access_key'          => $creds['access_key'],
+			'secret_key'          => $creds['secret_key'],
+			'time'                => self::now(),
+			'double_encode_path'  => false,
+			'sign_content_sha256' => true,
+		]);
+		$authorization = $signed['Authorization'];
+		unset($signed['Authorization']);
+		$headers = $signed + $headers;
 		ksort($headers);
-		$canonical_headers = '';
-		$signed_header_names = [];
-		foreach ($headers as $k => $v) {
-			$canonical_headers .= $k . ':' . trim($v) . "\n";
-			$signed_header_names[] = $k;
-		}
-		$signed_headers = implode(';', $signed_header_names);
-
-		$canonical_request = "{$method}\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\n{$signed_headers}\n{$payload_hash}";
-
-		$credential_scope = "{$date_stamp}/{$region}/" . self::SERVICE . "/aws4_request";
-		$string_to_sign = "AWS4-HMAC-SHA256\n{$amz_date}\n{$credential_scope}\n" . hash('sha256', $canonical_request);
-
-		$k_date    = hash_hmac('sha256', $date_stamp, 'AWS4' . $creds['secret_key'], true);
-		$k_region  = hash_hmac('sha256', $region, $k_date, true);
-		$k_service = hash_hmac('sha256', self::SERVICE, $k_region, true);
-		$k_signing = hash_hmac('sha256', 'aws4_request', $k_service, true);
-		$signature = hash_hmac('sha256', $string_to_sign, $k_signing);
-
-		$authorization = "AWS4-HMAC-SHA256 Credential={$creds['access_key']}/{$credential_scope}, SignedHeaders={$signed_headers}, Signature={$signature}";
 
 		$url = $scheme . '://' . $host . $canonical_uri . ($canonical_qs !== '' ? '?' . $canonical_qs : '');
 
-		// Build header array for curl
+		// curl sets Host itself.
 		$curl_headers = ['Authorization: ' . $authorization];
 		foreach ($headers as $k => $v) {
-			// curl sets Host automatically; skip ours to avoid duplicate.
-			if (strtolower($k) === 'host') continue;
 			$curl_headers[] = $k . ': ' . $v;
 		}
 
@@ -1163,6 +1161,14 @@ class S3Signer {
 
 	/** The HTTP half of an attempt: send, read the answer, and say whether a retry could help. */
 	private static function execute($method, $url, array $curl_headers, $body, $body_size, $sink_file, $attempt_timeout, array $extra_headers) {
+		if (self::$test_transport !== null) {
+			$answer = (array)(self::$test_transport)($method, $url, $curl_headers);
+			return [
+				'transport_failed' => false, 'curl_errno' => 0, 'curl_error' => '',
+				'status' => (int)($answer['status'] ?? 200), 'body' => (string)($answer['body'] ?? ''),
+				'headers' => (array)($answer['headers'] ?? []), 'retryable' => false,
+			];
+		}
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, $url);
 		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
@@ -1366,49 +1372,30 @@ class S3Signer {
 
 		list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, '/' . ltrim((string)$path, '/'));
 
-		$signed = ['host' => $host];
+		$signed = [];
 		foreach ($headers as $k => $v) {
 			$signed[strtolower(trim((string)$k))] = trim((string)$v);
 		}
-		ksort($signed);
-
-		$region     = $creds['region'];
-		$amz_date   = gmdate('Ymd\THis\Z');
-		$date_stamp = gmdate('Ymd');
-		$scope      = "{$date_stamp}/{$region}/" . self::SERVICE . "/aws4_request";
-
-		$params = [
-			'X-Amz-Algorithm'     => 'AWS4-HMAC-SHA256',
-			'X-Amz-Credential'    => $creds['access_key'] . '/' . $scope,
-			'X-Amz-Date'          => $amz_date,
-			'X-Amz-Expires'       => (string)$expires,
-			'X-Amz-SignedHeaders' => implode(';', array_keys($signed)),
-		];
+		$params = [];
 		foreach ($query as $k => $v) {
 			$params[(string)$k] = (string)$v;
 		}
-		ksort($params, SORT_STRING);
-		$canonical_qs = '';
-		foreach ($params as $k => $v) {
-			if ($canonical_qs !== '') { $canonical_qs .= '&'; }
-			$canonical_qs .= rawurlencode($k) . '=' . rawurlencode($v);
-		}
 
-		$canonical_headers = '';
-		foreach ($signed as $k => $v) {
-			$canonical_headers .= $k . ':' . $v . "\n";
-		}
-		$canonical_request = "{$method}\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\n" . implode(';', array_keys($signed)) . "\nUNSIGNED-PAYLOAD";
-		$string_to_sign    = "AWS4-HMAC-SHA256\n{$amz_date}\n{$scope}\n" . hash('sha256', $canonical_request);
-
-		$k_date    = hash_hmac('sha256', $date_stamp, 'AWS4' . $creds['secret_key'], true);
-		$k_region  = hash_hmac('sha256', $region, $k_date, true);
-		$k_service = hash_hmac('sha256', self::SERVICE, $k_region, true);
-		$k_signing = hash_hmac('sha256', 'aws4_request', $k_service, true);
-		$signature = hash_hmac('sha256', $string_to_sign, $k_signing);
-
-		return $scheme . '://' . $host . $canonical_uri . '?' . $canonical_qs
-			. '&X-Amz-Signature=' . $signature;
+		return $scheme . '://' . $host . $canonical_uri . '?' . AwsSigV4::presignQuery([
+			'method'             => $method,
+			'host'               => $host,
+			'path'               => $canonical_uri,
+			'query'              => $params,
+			'headers'            => $signed,
+			'payload_hash'       => 'UNSIGNED-PAYLOAD',
+			'service'            => self::SERVICE,
+			'region'             => $creds['region'],
+			'access_key'         => $creds['access_key'],
+			'secret_key'         => $creds['secret_key'],
+			'time'               => self::now(),
+			'expires'            => $expires,
+			'double_encode_path' => false,
+		]);
 	}
 
 	/**
@@ -1451,6 +1438,34 @@ class S3Signer {
 		// self-hosted endpoints (MinIO and friends), which are usually host:port.
 		return [strtolower($parsed['scheme'] ?? 'https'),
 			$parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '')];
+	}
+
+	/** The signing clock: the real one, or a test's fixed one. */
+	private static function now() {
+		return self::$test_clock ?? time();
+	}
+
+	/**
+	 * Sign at a fixed time for the rest of this process; null restores the
+	 * real clock. Test processes only.
+	 */
+	public static function useTestClock(?int $time) {
+		if (php_sapi_name() !== 'cli') {
+			throw new LogicException('S3Signer::useTestClock is for test processes only.');
+		}
+		self::$test_clock = $time;
+	}
+
+	/**
+	 * Hand every signed request to $fn($method, $url, $curl_headers) instead
+	 * of curl, which answers ['status', 'body', 'headers']; null restores the
+	 * network. Test processes only.
+	 */
+	public static function useTestTransport(?callable $fn) {
+		if (php_sapi_name() !== 'cli') {
+			throw new LogicException('S3Signer::useTestTransport is for test processes only.');
+		}
+		self::$test_transport = $fn;
 	}
 
 	private static function validate_creds($creds) {

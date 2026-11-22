@@ -2,9 +2,10 @@
 /**
  * SesProvider - Amazon SES (Simple Email Service) email service provider
  *
- * Implements EmailServiceProvider using aws/aws-sdk-php's SESv2 client.
+ * Talks to the SESv2 REST JSON API directly (https://email.{region}.amazonaws.com),
+ * through ProviderHttp, each attempt signed by AwsSigV4.
  * Batch sending is per-recipient since SES has no native non-templated bulk API.
- * Also implements ApiSubmissionRelay via SESv2 sendEmail with Content.Raw so
+ * Also implements ApiSubmissionRelay via SESv2 SendEmail with Content.Raw so
  * inbound forwarding and the hidden-origin compose path can relay raw MIME
  * through the same AWS credential — over an HTTP API, so the submitting box's
  * IP never enters the delivered Received: chain.
@@ -14,16 +15,30 @@
  * DKIM row. (SES selects the verified identity — and its DKIM keys — from the
  * message's From domain automatically, so raw relays need no path selection.)
  *
+ * CREDENTIALS ARE TYPED-IN KEYS ONLY. Both ses_access_key_id and
+ * ses_secret_access_key must be set; blank keys mean SES is not configured.
+ *
+ * @version 1.7 - Simple Body is always a JSON object, {} when there is neither HTML nor text (review B20);
+ *   a send counts only when the answer parses with a MessageId; a From display name is quoted per RFC
+ *   5322, so a comma in it no longer splits the address
+ * @version 1.6 - SESv2 over ProviderHttp + AwsSigV4, no AWS SDK (specs/email_provider_sdk_removal.md WP5):
+ *   typed-in keys only (hasCredentials() gone, both keys required); the region is checked before it
+ *   becomes a host name; Raw.Data is sent base64; error codes read from x-amzn-ErrorType or __type, and
+ *   both credential naming sets read as Credentials Rejected (B8); a DKIM identity path is URL-encoded
  * @version 1.5
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
-use Aws\SesV2\SesV2Client;
-use Aws\Exception\AwsException;
-
 class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource {
+
+    /** Error codes that mean the key pair itself was refused, in both AWS naming sets. */
+    const CREDENTIAL_ERRORS = ['UnrecognizedClientException', 'InvalidSignatureException',
+        'InvalidClientTokenId', 'SignatureDoesNotMatch'];
+
+    /** @var callable|null a test process's clock, returning unix seconds */
+    private static $test_clock = null;
 
     public static function getKey(): string {
         return 'ses';
@@ -42,18 +57,24 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         $settings = Globalvars::get_instance();
         $errors = [];
 
-        // Either explicit static credentials, or rely on role credentials (both blank is OK).
         $access_key = $settings->get_setting('ses_access_key_id');
         $secret_key = $settings->get_setting('ses_secret_access_key');
 
-        if (!empty($access_key) && empty($secret_key)) {
+        if (empty($access_key) && empty($secret_key)) {
+            $errors[] = 'SES needs an access key ID and a secret access key';
+        } elseif (empty($secret_key)) {
             $errors[] = 'SES access key ID set but secret access key missing';
-        }
-        if (empty($access_key) && !empty($secret_key)) {
+        } elseif (empty($access_key)) {
             $errors[] = 'SES secret access key set but access key ID missing';
         }
-        if (empty($settings->get_setting('ses_region'))) {
+        $region = (string)$settings->get_setting('ses_region');
+        if ($region === '') {
             $errors[] = 'SES region not configured';
+        } else {
+            $region_error = self::regionError($region);
+            if ($region_error !== null) {
+                $errors[] = $region_error;
+            }
         }
 
         return [
@@ -63,19 +84,20 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
     }
 
     /**
-     * Whether the admin has actually entered SES credentials.
-     *
-     * Distinct from validateConfiguration(): SES treats blank static keys as
-     * valid because it can fall back to IAM role / instance credentials at send
-     * time. But "region set, keys blank" is indistinguishable from "nothing
-     * configured", so the admin validation panel must not fire a live API call
-     * in that state. Credentials count as present only when both static keys
-     * are supplied.
+     * Why a region cannot be used, or null when it can. Checked before the
+     * region goes into a host name. China and the isolated regions use other
+     * host names than amazonaws.com and are refused by name; everything else
+     * must look like a region (GovCloud's us-gov-west-1 does, and so will a
+     * prefix AWS adds later).
      */
-    public static function hasCredentials(): bool {
-        $settings = Globalvars::get_instance();
-        return !empty($settings->get_setting('ses_access_key_id'))
-            && !empty($settings->get_setting('ses_secret_access_key'));
+    public static function regionError(string $region): ?string {
+        if (str_starts_with($region, 'cn-') || strpos($region, '-iso') !== false) {
+            return 'SES region ' . $region . ' is not supported: China and isolated AWS regions use other host names.';
+        }
+        if (!preg_match('/^[a-z]{2}(-[a-z]+)+-\d+$/', $region)) {
+            return 'SES region "' . $region . '" is not an AWS region name (for example us-east-1).';
+        }
+        return null;
     }
 
     /**
@@ -84,109 +106,92 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
     public static function validateApiConnection(): array {
         $settings = Globalvars::get_instance();
         $region = $settings->get_setting('ses_region') ?: 'us-east-1';
-        $access_key = $settings->get_setting('ses_access_key_id');
-        $secret_key = $settings->get_setting('ses_secret_access_key');
         $configured_domain = $settings->get_setting('ses_verified_domain');
+        $details = ['Region' => $region];
 
         try {
-            $client = self::buildClient($region, $access_key, $secret_key);
-            $result = $client->getAccount();
-
-            $details = [
-                'Region' => $region,
-            ];
-            if (!empty($access_key)) {
-                $details['Credentials'] = 'Static (Access Key)';
-            } else {
-                $details['Credentials'] = 'Instance / IAM Role';
-            }
-
-            $production = $result->get('ProductionAccessEnabled');
-            $details['Production Access'] = $production ? 'Yes' : 'No (Sandbox)';
-
-            $sending = $result->get('SendingEnabled');
-            $details['Sending Enabled'] = $sending ? 'Yes' : 'No';
-
-            $quota = $result->get('SendQuota');
-            if (is_array($quota)) {
-                if (isset($quota['Max24HourSend'], $quota['SentLast24Hours'])) {
-                    $details['24h Quota'] = intval($quota['SentLast24Hours']) . ' / ' . intval($quota['Max24HourSend']);
-                }
-                if (isset($quota['MaxSendRate'])) {
-                    $details['Max Send Rate'] = $quota['MaxSendRate'] . '/sec';
-                }
-            }
-
-            if (!empty($configured_domain)) {
-                $details['Verified Domain'] = $configured_domain;
-            }
-
+            $resp = self::call('GET', '/v2/email/account');
+        } catch (ProviderHttpException $e) {
             return [
-                'success' => true,
-                'label' => 'API Connection Valid',
+                'success' => false,
+                'label' => 'Endpoint Unreachable',
                 'details' => $details,
-                'error' => null,
+                'error' => 'Region not reachable — check ses_region. (' . $e->getMessage() . ')',
             ];
-        } catch (AwsException $e) {
-            $code = $e->getAwsErrorCode();
-            $details = ['Region' => $region];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'label' => 'API Connection Failed',
+                'details' => $details,
+                'error' => $e->getMessage(),
+            ];
+        }
 
-            if ($code === 'InvalidClientTokenId' || $code === 'SignatureDoesNotMatch') {
+        if (!$resp->ok()) {
+            list($code, $message) = self::errorOf($resp);
+            if (in_array($code, self::CREDENTIAL_ERRORS, true)) {
                 $error = 'Invalid AWS credentials. Check Access Key ID and Secret Access Key.';
                 $label = 'Credentials Rejected';
-            } elseif ($code === 'AccessDenied' || $code === 'AccessDeniedException') {
+            } elseif (str_starts_with($code, 'AccessDenied')) {
                 $error = 'IAM permissions insufficient — need ses:GetAccount and ses:SendEmail.';
                 $label = 'Access Denied';
-            } elseif (strpos((string) $code, 'Endpoint') !== false) {
-                $error = 'Region not reachable — check ses_region.';
-                $label = 'Endpoint Unreachable';
             } else {
-                $error = $e->getAwsErrorMessage() ?: $e->getMessage();
+                $error = 'SES answered ' . $resp->status . ': ' . ($message !== '' ? $message : ($code !== '' ? $code : 'no message'));
                 $label = 'API Connection Failed';
             }
-
             return [
                 'success' => false,
                 'label' => $label,
                 'details' => $details,
                 'error' => $error,
             ];
-        } catch (\Exception $e) {
-            return [
-                'success' => false,
-                'label' => 'API Connection Failed',
-                'details' => ['Region' => $region],
-                'error' => $e->getMessage(),
-            ];
         }
+
+        $result = $resp->json() ?? [];
+        $details['Production Access'] = !empty($result['ProductionAccessEnabled']) ? 'Yes' : 'No (Sandbox)';
+        $details['Sending Enabled'] = !empty($result['SendingEnabled']) ? 'Yes' : 'No';
+
+        $quota = $result['SendQuota'] ?? null;
+        if (is_array($quota)) {
+            if (isset($quota['Max24HourSend'], $quota['SentLast24Hours'])) {
+                $details['24h Quota'] = intval($quota['SentLast24Hours']) . ' / ' . intval($quota['Max24HourSend']);
+            }
+            if (isset($quota['MaxSendRate'])) {
+                $details['Max Send Rate'] = $quota['MaxSendRate'] . '/sec';
+            }
+        }
+
+        if (!empty($configured_domain)) {
+            $details['Verified Domain'] = $configured_domain;
+        }
+
+        return [
+            'success' => true,
+            'label' => 'API Connection Valid',
+            'details' => $details,
+            'error' => null,
+        ];
     }
 
     public function send(EmailMessage $message): bool {
         $settings = Globalvars::get_instance();
 
         try {
-            $client = self::buildClient(
-                $settings->get_setting('ses_region') ?: 'us-east-1',
-                $settings->get_setting('ses_access_key_id'),
-                $settings->get_setting('ses_secret_access_key')
-            );
-
             $params = $this->buildSendParams($message, $settings);
             $params['Destination'] = $this->buildDestination(
                 $message->getRecipients(),
                 $message->getCc(),
                 $message->getBcc()
             );
-
-            $client->sendEmail($params);
-            return true;
-        } catch (AwsException $e) {
-            error_log('[SesProvider] Send failed: ' . ($e->getAwsErrorMessage() ?: $e->getMessage()));
-            return false;
+            $error = self::sendEmail($params);
         } catch (\Exception $e) {
-            error_log('[SesProvider] Send failed: ' . $e->getMessage());
+            $error = $e->getMessage();
+        }
+        if ($error !== null) {
+            error_log('[SesProvider] Send failed: ' . $error);
             return false;
         }
+        return true;
     }
 
     public function sendBatch(EmailMessage $message, array $recipients): array {
@@ -194,29 +199,24 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         $failed = [];
 
         try {
-            $client = self::buildClient(
-                $settings->get_setting('ses_region') ?: 'us-east-1',
-                $settings->get_setting('ses_access_key_id'),
-                $settings->get_setting('ses_secret_access_key')
-            );
-
             $base_params = $this->buildSendParams($message, $settings);
-
-            foreach ($recipients as $email) {
-                $params = $base_params;
-                $params['Destination'] = ['ToAddresses' => [$email]];
-
-                try {
-                    $client->sendEmail($params);
-                } catch (AwsException $e) {
-                    error_log('[SesProvider] Batch send failed for ' . $email . ': '
-                        . ($e->getAwsErrorMessage() ?: $e->getMessage()));
-                    $failed[] = $email;
-                }
-            }
         } catch (\Exception $e) {
             error_log('[SesProvider] Batch setup failed: ' . $e->getMessage());
-            $failed = $recipients;
+            return ['success' => false, 'failed_recipients' => array_values($recipients)];
+        }
+
+        foreach ($recipients as $email) {
+            $params = $base_params;
+            $params['Destination'] = ['ToAddresses' => [$email]];
+            try {
+                $error = self::sendEmail($params);
+            } catch (\Exception $e) {
+                $error = $e->getMessage();
+            }
+            if ($error !== null) {
+                error_log('[SesProvider] Batch send failed for ' . $email . ': ' . $error);
+                $failed[] = $email;
+            }
         }
 
         return [
@@ -239,9 +239,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
             return $this->buildRawSendParams($message, $settings);
         }
 
-        $from = $message->getFromName()
-            ? $message->getFromName() . ' <' . $message->getFrom() . '>'
-            : $message->getFrom();
+        $from = self::formatAddress((string)$message->getFrom(), (string)$message->getFromName());
 
         $body = [];
         if ($message->getHtmlBody()) {
@@ -256,7 +254,8 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
             'Content' => [
                 'Simple' => [
                     'Subject' => ['Data' => $message->getSubject(), 'Charset' => 'UTF-8'],
-                    'Body' => $body,
+                    // An object always: with neither part, [] would encode as a list.
+                    'Body' => (object)$body,
                 ],
             ],
         ];
@@ -279,6 +278,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
      * EmailMessage->PHPMailer mapping — the one place that mapping lives — then
      * handed to SES. FromEmailAddress is omitted so SES uses the MIME From header
      * (matching relayRawMessage()); the caller still fills Destination.
+     * Raw.Data is a blob, which the JSON API carries base64-encoded.
      */
     private function buildRawSendParams(EmailMessage $message, Globalvars $settings): array {
         require_once(PathHelper::getIncludePath('includes/SmtpMailer.php'));
@@ -289,7 +289,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         $raw = $mailer->getSentMIMEMessage();
 
         $params = [
-            'Content' => ['Raw' => ['Data' => $raw]],
+            'Content' => ['Raw' => ['Data' => base64_encode($raw)]],
         ];
 
         $config_set = $settings->get_setting('ses_configuration_set');
@@ -328,24 +328,123 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         return $destination;
     }
 
+    // ── Transport ───────────────────────────────────────────────────────
+
     /**
-     * Build the SES v2 client. If credentials are blank, the SDK auto-discovers
-     * via the standard AWS provider chain (env vars, instance metadata, ~/.aws/credentials).
+     * "Name <email>", the name quoted per RFC 5322 when it holds anything
+     * but letters, digits, spaces and the atom specials.
      */
-    private static function buildClient(string $region, ?string $access_key, ?string $secret_key): SesV2Client {
-        $config = [
-            'version' => '2019-09-27',
-            'region' => $region,
-        ];
-
-        if (!empty($access_key) && !empty($secret_key)) {
-            $config['credentials'] = [
-                'key' => $access_key,
-                'secret' => $secret_key,
-            ];
+    private static function formatAddress(string $email, string $name): string {
+        $name = trim($name);
+        if ($name === '') {
+            return $email;
         }
+        if (!preg_match("/^[A-Za-z0-9!#$%&'*+\/=?^_`{|}~ -]+\z/", $name)) {
+            $name = '"' . addcslashes($name, '"\\') . '"';
+        }
+        return $name . ' <' . $email . '>';
+    }
 
-        return new SesV2Client($config);
+    /**
+     * POST /v2/email/outbound-emails. Null when SES accepted the message,
+     * otherwise why not (SES's code and message).
+     */
+    private static function sendEmail(array $params): ?string {
+        $resp = self::call('POST', '/v2/email/outbound-emails', $params);
+        if ($resp->ok()) {
+            $id = ($resp->json() ?? [])['MessageId'] ?? null;
+            return (is_string($id) && $id !== '') ? null : 'SES answered ' . $resp->status . ' without a MessageId';
+        }
+        list($code, $message) = self::errorOf($resp);
+        return 'SES answered ' . $resp->status . ($code !== '' ? ' ' . $code : '')
+            . ($message !== '' ? ': ' . $message : '');
+    }
+
+    /**
+     * One signed SESv2 request. $path is the path as sent (already encoded).
+     * Retried twice on a 429, a pre-send failure, a 5xx (the AWS SDK's default
+     * retried these, and SES sends keep that) and a Throttling* code.
+     *
+     * @throws RuntimeException when the keys are missing
+     * @throws InvalidArgumentException when the region is unusable
+     * @throws ProviderHttpException when no response came back
+     */
+    private static function call(string $method, string $path, ?array $json = null): ProviderHttpResponse {
+        $settings = Globalvars::get_instance();
+        $access_key = (string)$settings->get_setting('ses_access_key_id');
+        $secret_key = (string)$settings->get_setting('ses_secret_access_key');
+        if ($access_key === '' || $secret_key === '') {
+            throw new RuntimeException('SES needs an access key ID and a secret access key.');
+        }
+        $region = (string)($settings->get_setting('ses_region') ?: 'us-east-1');
+        $region_error = self::regionError($region);
+        if ($region_error !== null) {
+            throw new InvalidArgumentException($region_error);
+        }
+        $host = 'email.' . $region . '.amazonaws.com';
+
+        $options = [
+            'retries'   => 2,
+            'retry_5xx' => true,
+            'retry_if'  => function (ProviderHttpResponse $resp) {
+                return str_starts_with(self::errorOf($resp)[0], 'Throttling');
+            },
+            'sign' => function (array $headers, string $body) use ($method, $host, $path, $region, $access_key, $secret_key) {
+                $signed = [];
+                foreach ($headers as $name => $value) {
+                    if (strcasecmp((string)$name, 'content-type') === 0) {
+                        $signed['content-type'] = $value;
+                    }
+                }
+                return AwsSigV4::signHeaders([
+                    'method' => $method, 'host' => $host, 'path' => $path,
+                    'headers' => $signed, 'payload_hash' => hash('sha256', $body),
+                    'service' => 'ses', 'region' => $region,
+                    'access_key' => $access_key, 'secret_key' => $secret_key,
+                    'time' => self::now(), 'double_encode_path' => true,
+                ]);
+            },
+        ];
+        if ($json !== null) {
+            $options['json'] = $json;
+        }
+        return ProviderHttp::request($method, 'https://' . $host . $path, $options);
+    }
+
+    /**
+     * [code, message] of an SES error answer. The code comes from the
+     * x-amzn-ErrorType header or the body's __type, trimmed at any ':' (and
+     * any namespace before a '#'); the message from message or Message.
+     */
+    private static function errorOf(ProviderHttpResponse $resp): array {
+        $body = $resp->json() ?? [];
+        $code = (string)($resp->header('x-amzn-ErrorType') ?? '');
+        if ($code === '') {
+            $code = (string)($body['__type'] ?? '');
+        }
+        $code = explode(':', $code, 2)[0];
+        if (($hash = strrpos($code, '#')) !== false) {
+            $code = substr($code, $hash + 1);
+        }
+        $message = (string)($body['message'] ?? $body['Message'] ?? '');
+        return [trim($code), $message];
+    }
+
+    private static function now(): int {
+        return self::$test_clock !== null ? (int)(self::$test_clock)() : time();
+    }
+
+    /**
+     * Sign with $clock (fn(): int) instead of time(), for the rest of this
+     * process; null restores the real clock.
+     *
+     * @throws LogicException outside the CLI
+     */
+    public static function useTestClock(?callable $clock): void {
+        if (php_sapi_name() !== 'cli') {
+            throw new LogicException('SesProvider::useTestClock is for test processes only.');
+        }
+        self::$test_clock = $clock;
     }
 
     // ── DkimRecordSource ────────────────────────────────────────────────
@@ -357,26 +456,23 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
      * domain is not an identity in this account/region.
      */
     public static function getDkimStatus(string $domain): array {
-        $settings = Globalvars::get_instance();
         try {
-            $client = self::buildClient(
-                $settings->get_setting('ses_region') ?: 'us-east-1',
-                $settings->get_setting('ses_access_key_id'),
-                $settings->get_setting('ses_secret_access_key')
-            );
-            $identity = $client->getEmailIdentity(['EmailIdentity' => $domain]);
-        } catch (AwsException $e) {
-            if ($e->getAwsErrorCode() === 'NotFoundException') {
-                return ['status' => 'not_registered', 'records' => []];
-            }
-            error_log('[SesProvider] getDkimStatus(' . $domain . ') failed: '
-                . ($e->getAwsErrorMessage() ?: $e->getMessage()));
-            return ['status' => 'unreachable', 'records' => []];
+            $resp = self::call('GET', '/v2/email/identities/' . rawurlencode($domain));
         } catch (\Throwable $e) {
             error_log('[SesProvider] getDkimStatus(' . $domain . ') failed: ' . $e->getMessage());
             return ['status' => 'unreachable', 'records' => []];
         }
+        if (!$resp->ok()) {
+            list($code, $message) = self::errorOf($resp);
+            if ($code === 'NotFoundException') {
+                return ['status' => 'not_registered', 'records' => []];
+            }
+            error_log('[SesProvider] getDkimStatus(' . $domain . ') failed: SES answered '
+                . $resp->status . ' ' . $code . ($message !== '' ? ': ' . $message : ''));
+            return ['status' => 'unreachable', 'records' => []];
+        }
 
+        $identity = $resp->json() ?? [];
         $records = [];
         foreach (($identity['DkimAttributes']['Tokens'] ?? []) as $token) {
             $records[] = [
@@ -391,7 +487,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
     // ── RawMessageRelay ─────────────────────────────────────────────────
 
     /**
-     * Relay raw MIME via SESv2 sendEmail with Content.Raw.Data, reusing the
+     * Relay raw MIME via SESv2 SendEmail with Content.Raw.Data, reusing the
      * same AWS credential the send() path uses. FromEmailAddress is omitted so
      * SES uses the From header already in the raw message (the router rewrote
      * it to the verified address). SES owns bounce handling and uses its own
@@ -402,26 +498,11 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
         $settings = Globalvars::get_instance();
         $results = [];
-
-        try {
-            $client = self::buildClient(
-                $settings->get_setting('ses_region') ?: 'us-east-1',
-                $settings->get_setting('ses_access_key_id'),
-                $settings->get_setting('ses_secret_access_key')
-            );
-        } catch (\Exception $e) {
-            error_log('[SesProvider] relayRawMessage client setup failed: ' . $e->getMessage());
-            foreach ($destinations as $destination) {
-                $results[$destination] = false;
-            }
-            return $results;
-        }
-
         $config_set = $settings->get_setting('ses_configuration_set');
 
         foreach ($destinations as $destination) {
             $params = [
-                'Content' => ['Raw' => ['Data' => $raw_mime]],
+                'Content' => ['Raw' => ['Data' => base64_encode($raw_mime)]],
                 'Destination' => ['ToAddresses' => [$destination]],
             ];
             if (!empty($config_set)) {
@@ -429,16 +510,14 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
             }
 
             try {
-                $client->sendEmail($params);
-                $results[$destination] = true;
-            } catch (AwsException $e) {
-                error_log('[SesProvider] relayRawMessage failed to ' . $destination . ': '
-                    . ($e->getAwsErrorMessage() ?: $e->getMessage()));
-                $results[$destination] = false;
+                $error = self::sendEmail($params);
             } catch (\Exception $e) {
-                error_log('[SesProvider] relayRawMessage failed to ' . $destination . ': ' . $e->getMessage());
-                $results[$destination] = false;
+                $error = $e->getMessage();
             }
+            if ($error !== null) {
+                error_log('[SesProvider] relayRawMessage failed to ' . $destination . ': ' . $error);
+            }
+            $results[$destination] = ($error === null);
         }
 
         return $results;

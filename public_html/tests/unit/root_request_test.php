@@ -23,6 +23,7 @@
  *
  * @version 1.10 - the removal calls pass the request's install id (spec plugin_install_identity A10)
  * @version 1.9 - scratch queue and site are harness_scratch_dir(), removed however the run ends
+ * @version 1.9 - fourteen kinds: reconcile_composer is gone (specs/plugin_own_vendor.md)
  * @version 1.8 - the PHP-side checks run against a scratch RootState directory, with the outcomes beside the queue
  *                as root keeps them (specs/shell_command_audit.md D1)
  * @version 1.7 - fifteen kinds: run_plugin_remover, the uninstall moment of a plugin with a host_remover, carried
@@ -112,7 +113,8 @@ check(strpos($installer, "'unsigned_package_installed'") !== false
 // verifies a staged upload, writes something that is not executed, or seals
 // this server's data root to the site's own recovery key, which its backups
 // already trust. If that stops being true, this is the check that should stop it.
-check(count(RootRequest::KINDS) === 15, 'there are fifteen kinds', implode(', ', RootRequest::KINDS));
+check(count(RootRequest::KINDS) === 14, 'there are fourteen kinds', implode(', ', RootRequest::KINDS));
+check(!in_array('reconcile_composer', RootRequest::KINDS, true), 'no reconcile_composer: a plugin ships its own vendor/ (plugin_own_vendor)');
 
 // B43: the TPM2 choice. The queue is the web user's to write, so only the
 // stricter way is read from a request: data_root_encrypt's tpm2 'off' (and

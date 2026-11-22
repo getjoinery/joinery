@@ -2,7 +2,10 @@
 /**
  * MailgunProvider - Mailgun email service provider
  *
- * Implements EmailServiceProvider using the Mailgun PHP SDK (v3.x).
+ * Implements EmailServiceProvider over Mailgun's v3 HTTP API, through
+ * ProviderHttp: HTTP basic auth (user 'api', password the key), against
+ * https://api.mailgun.net or the mailgun_eu_api_link when set. Mailgun
+ * answers success with 200, 201 or 202.
  * Supports batch sending in groups of 500 using Mailgun recipient-variables.
  * Also implements ApiSubmissionRelay (messages.mime) so inbound forwarding and
  * the hidden-origin compose path can relay raw MIME through the same
@@ -17,6 +20,16 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
+ * @version 1.13 - recipient-variables that cannot be encoded fail the chunk rather than going out empty
+ *   (B13); every file part carries its own Content-Disposition, so a cid or name is sent whole and
+ *   quoted, never basename()'d (B18); the pre-send domain lookup is asked once, no retries (B21); a
+ *   batch leaves out the pinned Message-Id, which one recipient's copy alone can carry (B15)
+ * @version 1.12 - requests go through ProviderHttp, no Mailgun SDK (specs/email_provider_sdk_removal.md WP4);
+ *   one field builder serves send() and sendBatch(), so a batch carries Reply-To, custom headers,
+ *   attachments and the text part (B2); a raw relay no longer sends a 'sender' parameter messages.mime
+ *   does not have, the envelope sender is Mailgun's (B4); an attachment that yields no bytes fails the
+ *   send (B6); a new sending domain is created with 2048-bit DKIM and https tracking links; operator
+ *   errors are in our own words; a domain whose events cannot be read is not counted as asked
  * @version 1.11 - send() and sendBatch() go through the From domain when the account has it active, so
  *   the signature matches the From address (B169); dkimSigningDomain() says which domain signs
  * @version 1.10 - getSendingDomainError(): why the last sending-domain lookup failed
@@ -33,9 +46,12 @@
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
-use Mailgun\Mailgun;
-
 class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource, SendingDomainRegistrar, SingleKeyProvider, SendReceiptSource, DeliveryEventSource {
+
+    const DEFAULT_API_BASE = 'https://api.mailgun.net';
+
+    /** Recipients per send call (Mailgun's limit). */
+    const CHUNK = 500;
 
     /** @var ?array the send response of the last accepted send() — see lastSendReceipt() */
     private $last_receipt = null;
@@ -47,15 +63,6 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
 
     public static function getKey(): string {
         return 'mailgun';
-    }
-
-    /** The configured Mailgun SDK client (honors the EU API link when set). */
-    private static function client(): Mailgun {
-        $settings = Globalvars::get_instance();
-        $eu_link = $settings->get_setting('mailgun_eu_api_link');
-        return $eu_link
-            ? Mailgun::create($settings->get_setting('mailgun_api_key'), $eu_link)
-            : Mailgun::create($settings->get_setting('mailgun_api_key'));
     }
 
     public static function getLabel(): string {
@@ -89,16 +96,73 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         ];
     }
 
+    // ── Transport ───────────────────────────────────────────────────────
+
+    /**
+     * One API call. An HTTP error status comes back for the caller to read;
+     * only a failure with no response throws (ProviderHttpException).
+     * $retry_5xx is for reads: a 5xx on a send may mean it was accepted.
+     */
+    private static function call(string $method, string $path, array $options = [], bool $retry_5xx = false, int $retries = 2): ProviderHttpResponse {
+        $settings = Globalvars::get_instance();
+        $base = trim((string)$settings->get_setting('mailgun_eu_api_link'));
+        if ($base === '') {
+            $base = self::DEFAULT_API_BASE;
+        }
+        $options['auth'] = ['api', (string)$settings->get_setting('mailgun_api_key')];
+        $options['retries'] = $retries;
+        $options['retry_5xx'] = $retry_5xx;
+        return ProviderHttp::request($method, rtrim($base, '/') . $path, $options);
+    }
+
+    /** Mailgun counts 200, 201 and 202 as success. */
+    private static function succeeded(ProviderHttpResponse $resp): bool {
+        return in_array($resp->status, [200, 201, 202], true);
+    }
+
+    /**
+     * What a failed answer means, in words an operator can act on. $about_domain
+     * says the request named a domain, so a 404 means the account lacks it.
+     */
+    private static function describeError(ProviderHttpResponse $resp, bool $about_domain = false): string {
+        if ($resp->status === 401) {
+            return 'Mailgun rejected the API key.';
+        }
+        if ($resp->status === 404 && $about_domain) {
+            return 'This domain is not in the Mailgun account.';
+        }
+        $json = $resp->json();
+        $message = is_array($json) && isset($json['message']) && is_string($json['message'])
+            ? $json['message'] : trim(substr(strip_tags($resp->body), 0, 200));
+        return 'Mailgun answered ' . $resp->status . ($message !== '' ? ': ' . $message : '');
+    }
+
+    /**
+     * GET /v3/domains/{domain}. $retries is 0 for the lookup a send makes
+     * before it starts: that answer only picks a domain, and a send must not
+     * wait out backoff on a domains API that is down.
+     */
+    private static function showDomain(string $domain, int $retries = 2): ProviderHttpResponse {
+        return self::call('GET', '/v3/domains/' . rawurlencode($domain), [], true, $retries);
+    }
+
+    /** A domain show answer's state, lowercased, or ''. */
+    private static function stateOf(ProviderHttpResponse $resp): string {
+        $json = $resp->json();
+        return strtolower((string)($json['domain']['state'] ?? ''));
+    }
+
+    // ── Validation ──────────────────────────────────────────────────────
+
     /**
      * Optional: Live API validation for admin settings panel.
      */
     public static function validateApiConnection(): array {
         $settings = Globalvars::get_instance();
         $api_key = $settings->get_setting('mailgun_api_key');
-        $domain = $settings->get_setting('mailgun_domain');
-        $eu_link = $settings->get_setting('mailgun_eu_api_link');
+        $domain = (string)$settings->get_setting('mailgun_domain');
 
-        if (empty($api_key) || empty($domain)) {
+        if (empty($api_key) || $domain === '') {
             return [
                 'success' => false,
                 'label' => 'Not Configured',
@@ -108,146 +172,260 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         }
 
         try {
-            if ($eu_link) {
-                $mg = Mailgun::create($api_key, $eu_link);
-            } else {
-                $mg = Mailgun::create($api_key);
-            }
-
-            try {
-                $domain_info = $mg->domains()->show($domain);
-                $details = ['Domain' => $domain];
-
-                if ($domain_info && method_exists($domain_info, 'getDomain')) {
-                    $d = $domain_info->getDomain();
-                    if ($d) {
-                        if (method_exists($d, 'getName')) {
-                            $details['Name'] = $d->getName();
-                        }
-                        if (method_exists($d, 'getState')) {
-                            $details['Status'] = $d->getState();
-                        }
-                    }
-                }
-
-                return [
-                    'success' => true,
-                    'label' => 'API Key Valid',
-                    'details' => $details,
-                    'error' => null,
-                ];
-            } catch (\Exception $domain_ex) {
-                $error_msg = $domain_ex->getMessage();
-
-                // Try to find a similar domain to suggest
-                $suggested = null;
-                try {
-                    $all_domains = $mg->domains()->index();
-                    $entered_lower = strtolower($domain);
-                    foreach ($all_domains->getDomains() as $acct_domain) {
-                        $acct_name = strtolower($acct_domain->getName());
-                        if (stripos($entered_lower, $acct_name) !== false || stripos($acct_name, $entered_lower) !== false) {
-                            $suggested = $acct_domain->getName();
-                            break;
-                        }
-                    }
-                } catch (\Exception $list_ex) {
-                    // Couldn't list domains, skip suggestion
-                }
-
-                $details = ['Configured Domain' => $domain];
-                $error = $error_msg;
-
-                if ($suggested) {
-                    $details['Suggested Domain'] = $suggested;
-                    $error = 'Domain not found. Did you mean: ' . $suggested;
-                }
-
-                return [
-                    'success' => false,
-                    'label' => 'Mailgun Validation Failed',
-                    'details' => $details,
-                    'error' => $error,
-                ];
-            }
-        } catch (\Exception $e) {
+            $resp = self::showDomain($domain);
+        } catch (ProviderHttpException $e) {
             return [
                 'success' => false,
                 'label' => 'API Connection Failed',
                 'details' => [],
-                'error' => $e->getMessage(),
+                'error' => 'Mailgun did not answer: ' . $e->getMessage(),
             ];
         }
+
+        if (self::succeeded($resp)) {
+            $details = ['Domain' => $domain];
+            $d = $resp->json()['domain'] ?? null;
+            if (is_array($d)) {
+                if (isset($d['name'])) {
+                    $details['Name'] = (string)$d['name'];
+                }
+                if (isset($d['state'])) {
+                    $details['Status'] = (string)$d['state'];
+                }
+            }
+            return [
+                'success' => true,
+                'label' => 'API Key Valid',
+                'details' => $details,
+                'error' => null,
+            ];
+        }
+
+        $error = self::describeError($resp, true);
+        $details = ['Configured Domain' => $domain];
+
+        // A key that works but a domain the account lacks: suggest a near match.
+        if ($resp->status !== 401) {
+            $suggested = null;
+            try {
+                $list = self::call('GET', '/v3/domains', ['query' => ['limit' => 100, 'skip' => 0]], true);
+                if (self::succeeded($list)) {
+                    $entered_lower = strtolower($domain);
+                    foreach ((array)($list->json()['items'] ?? []) as $item) {
+                        $acct_name = strtolower((string)($item['name'] ?? ''));
+                        if ($acct_name !== '' && (stripos($entered_lower, $acct_name) !== false || stripos($acct_name, $entered_lower) !== false)) {
+                            $suggested = (string)$item['name'];
+                            break;
+                        }
+                    }
+                }
+            } catch (ProviderHttpException $e) {
+                // Couldn't list domains, skip suggestion
+            }
+            if ($suggested) {
+                $details['Suggested Domain'] = $suggested;
+                $error = 'Domain not found. Did you mean: ' . $suggested;
+            }
+        }
+
+        return [
+            'success' => false,
+            'label' => 'Mailgun Validation Failed',
+            'details' => $details,
+            'error' => $error,
+        ];
     }
 
-    public function send(EmailMessage $message): bool {
-        $settings = Globalvars::get_instance();
+    // ── Sending ─────────────────────────────────────────────────────────
 
-        if ($settings->get_setting('mailgun_eu_api_link')) {
-            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-        } else {
-            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
+    public function send(EmailMessage $message): bool {
+        $this->last_receipt = null;
+        try {
+            $fields = $this->buildFields($message);
+        } catch (RuntimeException $e) {
+            error_log('[MailgunProvider] Send failed: ' . $e->getMessage());
+            return false;
         }
 
         // The From domain when the account has it active, so the signature
         // matches the From address for DMARC (B169); else the configured domain.
         $domain = self::apiDomainForSender((string)$message->getFrom());
 
-        $email_to_send = [
-            'from' => $message->getFromName() . '<' . $message->getFrom() . '>',
-            'subject' => $message->getSubject(),
-        ];
-
-        if ($message->getHtmlBody()) {
-            $email_to_send['html'] = $message->getHtmlBody();
-            $text = $message->getTextBody();
-            if ($text !== null && $text !== '') {
-                $email_to_send['text'] = $text;
-            }
-        } else {
-            $email_to_send['text'] = $message->getTextBody();
-        }
-
-        // Cc / Bcc, custom headers (Message-Id / In-Reply-To / References for
-        // threaded reply-forward), reply-to, and attachments — so a relay send
-        // carries the same envelope as the SMTP path, never silently dropping them.
-        $this->applyExtras($email_to_send, $message);
-
-        $recipients = $message->getRecipients();
-        $sending_groups = array_chunk($recipients, 500, true);
         $all_sent = true;
-        $this->last_receipt = null;
-
-        foreach ($sending_groups as $sending_group) {
-            $mailgun_recipients = [];
-            $recipient_variables = [];
-
-            foreach ($sending_group as $recipient) {
-                $mailgun_recipients[] = $recipient['name'] . '<' . $recipient['email'] . '>';
-                $recipient_variables[$recipient['email']] = ['name' => $recipient['name']];
+        foreach (array_chunk($message->getRecipients(), self::CHUNK, true) as $group) {
+            $to = [];
+            $vars = [];
+            foreach ($group as $recipient) {
+                $to[] = $this->formatAddress($recipient);
+                $vars[$recipient['email']] = ['name' => $recipient['name'] ?? ''];
             }
-
-            $email_to_send['to'] = implode(',', $mailgun_recipients);
-            $email_to_send['recipient-variables'] = json_encode($recipient_variables);
-
-            try {
-                $response = $mg->messages()->send($domain, $email_to_send);
-                // A compose is one chunk; on a batch the receipt is the last chunk's.
-                $this->last_receipt = array(
-                    'id'       => method_exists($response, 'getId') ? trim((string)$response->getId(), '<> ') : null,
-                    'response' => method_exists($response, 'getMessage') ? (string)$response->getMessage() : null,
-                );
-            } catch (\Exception $e) {
-                error_log("[MailgunProvider] Send failed: " . $e->getMessage());
+            $response = $this->postMessage($domain, $fields, $to, $vars);
+            if ($response === null) {
                 $all_sent = false;
+                continue;
             }
+            // A compose is one chunk; on a batch the receipt is the last chunk's.
+            $json = $response->json() ?? [];
+            $this->last_receipt = array(
+                'id'       => isset($json['id']) ? trim((string)$json['id'], '<> ') : null,
+                'response' => isset($json['message']) ? (string)$json['message'] : null,
+            );
         }
 
         return $all_sent;
     }
 
+    public function sendBatch(EmailMessage $message, array $recipients): array {
+        try {
+            // No pinned Message-Id: each recipient gets their own message,
+            // and one ID shared by all of them would make them one message.
+            $fields = $this->buildFields($message, false);
+        } catch (RuntimeException $e) {
+            error_log('[MailgunProvider] Batch send failed: ' . $e->getMessage());
+            return ['success' => false, 'failed_recipients' => array_values($recipients)];
+        }
+
+        // The From domain when the account has it active, so the signature
+        // matches the From address for DMARC (B169); else the configured domain.
+        $domain = self::apiDomainForSender((string)$message->getFrom());
+
+        $failed_recipients = [];
+        foreach (array_chunk(array_values($recipients), self::CHUNK) as $group) {
+            $vars = [];
+            foreach ($group as $email) {
+                $vars[$email] = ['name' => $email];
+            }
+            if ($this->postMessage($domain, $fields, $group, $vars) === null) {
+                // The entire chunk fails together.
+                $failed_recipients = array_merge($failed_recipients, $group);
+            }
+        }
+
+        return [
+            'success' => empty($failed_recipients),
+            'failed_recipients' => $failed_recipients,
+        ];
+    }
+
     public function lastSendReceipt(): ?array {
         return $this->last_receipt;
+    }
+
+    /**
+     * One POST /v3/{domain}/messages for one chunk of recipients. The chunk's
+     * To line and recipient-variables join the shared fields. Returns the
+     * response when Mailgun accepted it, null (logged) when not.
+     */
+    private function postMessage(string $domain, array $fields, array $to, array $vars): ?ProviderHttpResponse {
+        // recipient-variables is what makes Mailgun send each address its own
+        // copy. A chunk never goes without it: a name that is not valid UTF-8
+        // is substituted, and anything else that cannot be encoded fails the
+        // chunk rather than sending every recipient one shared To line.
+        $encoded = json_encode($vars, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_SLASHES);
+        if ($encoded === false) {
+            error_log('[MailgunProvider] Send failed: recipient-variables could not be encoded: ' . json_last_error_msg());
+            return null;
+        }
+        $fields[] = ['name' => 'to', 'contents' => implode(',', $to)];
+        $fields[] = ['name' => 'recipient-variables', 'contents' => $encoded];
+        try {
+            $resp = self::call('POST', '/v3/' . rawurlencode($domain) . '/messages', ['multipart' => $fields]);
+        } catch (ProviderHttpException $e) {
+            error_log('[MailgunProvider] Send failed: ' . $e->getMessage());
+            return null;
+        }
+        if (!self::succeeded($resp)) {
+            error_log('[MailgunProvider] Send failed: ' . self::describeError($resp, true));
+            return null;
+        }
+        return $resp;
+    }
+
+    /**
+     * Every multipart field of a send but the recipients: from, subject, the
+     * html and text parts, Cc/Bcc, Reply-To, the pinned Message-Id, custom
+     * headers as h: fields (In-Reply-To / References ride along for threaded
+     * mail), and the files. send() and sendBatch() both use it, so a batch
+     * carries everything a single send does.
+     *
+     * Each attachment is an 'attachment' file part; an inline part is an
+     * 'inline' file part whose filename IS the cid the body points at
+     * (cid:<cid>), which is how Mailgun references it. Every file part has a
+     * filename: Guzzle makes a file part only when it has one.
+     *
+     * @throws RuntimeException when an attachment yields no bytes
+     */
+    private function buildFields(EmailMessage $message, bool $with_message_id = true): array {
+        $fields = [];
+        $add = function (string $name, $value) use (&$fields) {
+            $fields[] = ['name' => $name, 'contents' => (string)$value];
+        };
+
+        $add('from', $this->formatAddress(['email' => (string)$message->getFrom(), 'name' => (string)$message->getFromName()]));
+        $add('subject', (string)$message->getSubject());
+        if ($message->getHtmlBody()) {
+            $add('html', $message->getHtmlBody());
+            $text = $message->getTextBody();
+            if ($text !== null && $text !== '') {
+                $add('text', $text);
+            }
+        } else {
+            $add('text', (string)$message->getTextBody());
+        }
+
+        $cc = $message->getCc();
+        if (!empty($cc)) {
+            $add('cc', implode(',', array_map(array($this, 'formatAddress'), $cc)));
+        }
+        $bcc = $message->getBcc();
+        if (!empty($bcc)) {
+            $add('bcc', implode(',', array_map(array($this, 'formatAddress'), $bcc)));
+        }
+        if ($message->getReplyTo()) {
+            $add('h:Reply-To', $message->getReplyTo());
+        }
+        if ($with_message_id && $message->getMessageId()) {
+            $add('h:Message-Id', $message->getMessageId());
+        }
+        foreach ($message->getHeaders() as $name => $value) {
+            $add('h:' . $name, $value);
+        }
+
+        foreach ($message->getAttachments() as $attachment) {
+            $content = EmailMessage::attachmentContent($attachment);
+            $inline = !empty($attachment['cid']);
+            $part = $inline ? 'inline' : 'attachment';
+            $filename = $inline ? (string)$attachment['cid'] : $content['name'];
+            $fields[] = [
+                'name'     => $part,
+                'contents' => $content['bytes'],
+                'filename' => $filename,
+                'headers'  => [
+                    'Content-Type'        => $content['type'],
+                    'Content-Disposition' => self::fileDisposition($part, $filename),
+                ],
+            ];
+        }
+        return $fields;
+    }
+
+    /**
+     * A file part's Content-Disposition, written here rather than by Guzzle:
+     * Guzzle's own runs basename() on the filename, which cuts a cid holding
+     * a slash, and does not escape a quote. The filename is quoted per RFC
+     * 7578 (backslash and quote escaped, line breaks dropped).
+     */
+    private static function fileDisposition(string $part, string $filename): string {
+        $filename = str_replace(["\r", "\n"], '', $filename);
+        $filename = addcslashes($filename, '"\\');
+        return 'form-data; name="' . $part . '"; filename="' . $filename . '"';
+    }
+
+    /** Render one EmailMessage recipient ['email','name'] as "Name <email>". */
+    private function formatAddress(array $addr): string {
+        $email = $addr['email'] ?? '';
+        $name = trim((string)($addr['name'] ?? ''));
+        return $name !== '' ? ($name . ' <' . $email . '>') : $email;
     }
 
     // ── DeliveryEventSource ─────────────────────────────────────────────
@@ -257,7 +435,8 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
      * through the configured mailgun_domain, a raw relay through the sender's
      * own active domain (apiDomainForSender), so both are asked, configured
      * first; the first domain with events answers. A domain the key may not read
-     * (Mailgun scopes keys per domain) is skipped, not fatal — the lookup is
+     * (Mailgun scopes keys per domain) is skipped, not fatal: only a 2xx counts
+     * as asked, so a 401 is "not asked", never "asked, no events". The lookup is
      * null only when no domain could be asked at all.
      */
     public function deliveryEvents(string $message_id_header, string $from_domain): ?array {
@@ -274,19 +453,25 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         $relay_domain = self::apiDomainForSender('timeline@' . $from_domain);
         $domains = array_values(array_unique(array_filter(array($configured, $relay_domain))));
 
-        $mg = self::client();
         $events = array();
         $asked = 0;
         foreach ($domains as $domain) {
             try {
-                $page = $mg->events()->get($domain, array('message-id' => $message_id, 'limit' => 100));
-            } catch (\Throwable $e) {
+                $resp = self::call('GET', '/v3/' . rawurlencode($domain) . '/events',
+                    ['query' => ['message-id' => $message_id, 'limit' => 100]], true);
+            } catch (ProviderHttpException $e) {
                 error_log('[MailgunProvider] events lookup failed for ' . $domain . ': ' . $e->getMessage());
                 continue;
             }
+            if (!self::succeeded($resp)) {
+                error_log('[MailgunProvider] events lookup failed for ' . $domain . ': ' . self::describeError($resp, true));
+                continue;
+            }
             $asked++;
-            foreach ($page->getItems() as $item) {
-                $events[] = self::describeEvent($item);
+            foreach ((array)($resp->json()['items'] ?? array()) as $item) {
+                if (is_array($item)) {
+                    $events[] = self::describeEvent($item);
+                }
             }
             if ($events) {
                 break;
@@ -300,31 +485,33 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         return array('status' => self::worstStatus($events), 'events' => $events);
     }
 
-    /** One Mailgun event as the timeline's neutral shape. */
-    private static function describeEvent($item): array {
-        $event = strtolower((string)$item->getEvent());
-        $delivery = $item->getDeliveryStatus();
+    /** One Mailgun event (the API's JSON item) as the timeline's neutral shape. */
+    private static function describeEvent(array $item): array {
+        $event = strtolower((string)($item['event'] ?? ''));
+        $delivery = is_array($item['delivery-status'] ?? null) ? $item['delivery-status'] : array();
+        $reason = (string)($item['reason'] ?? '');
         $detail = '';
         if (!empty($delivery['message'])) {
             $detail = (string)$delivery['message'];
         } elseif (!empty($delivery['description'])) {
             $detail = (string)$delivery['description'];
-        } elseif ($item->getReason() !== '') {
-            $detail = (string)$item->getReason();
+        } elseif ($reason !== '') {
+            $detail = $reason;
         }
         if (!empty($delivery['code']) && $detail !== '' && strpos($detail, (string)$delivery['code']) !== 0) {
             $detail = $delivery['code'] . ' ' . $detail;
         }
         // Mailgun distinguishes a bounce it will retry from one it will not.
         if ($event === 'failed') {
-            $event = (strtolower((string)$item->getSeverity()) === 'temporary') ? 'deferred' : 'failed';
+            $event = (strtolower((string)($item['severity'] ?? '')) === 'temporary') ? 'deferred' : 'failed';
         } elseif ($event === 'rejected') {
             $event = 'failed';
         }
         return array(
-            'time'      => gmdate('Y-m-d H:i:s', $item->getTimestamp()),
+            // Mailgun's timestamp is a float (seconds with a fraction).
+            'time'      => gmdate('Y-m-d H:i:s', (int)($item['timestamp'] ?? 0)),
             'event'     => $event,
-            'recipient' => (string)$item->getRecipient(),
+            'recipient' => (string)($item['recipient'] ?? ''),
             'detail'    => trim($detail),
         );
     }
@@ -354,115 +541,6 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         return $status;
     }
 
-    /**
-     * Stamp Cc/Bcc, reply-to, custom headers, and attachments onto a Mailgun
-     * array-format send payload. Custom headers become Mailgun "h:" params (so
-     * Message-Id / In-Reply-To / References ride along for threaded mail);
-     * attachments map to Mailgun's attachment file specs (filePath for on-disk,
-     * fileContent for in-memory bytes from attachData()).
-     */
-    private function applyExtras(array &$payload, EmailMessage $message): void {
-        $cc = $message->getCc();
-        if (!empty($cc)) {
-            $payload['cc'] = implode(',', array_map(array($this, 'formatAddress'), $cc));
-        }
-        $bcc = $message->getBcc();
-        if (!empty($bcc)) {
-            $payload['bcc'] = implode(',', array_map(array($this, 'formatAddress'), $bcc));
-        }
-        if ($message->getReplyTo()) {
-            $payload['h:Reply-To'] = $message->getReplyTo();
-        }
-        if ($message->getMessageId()) {
-            $payload['h:Message-Id'] = $message->getMessageId();
-        }
-        foreach ($message->getHeaders() as $name => $value) {
-            $payload['h:' . $name] = $value;
-        }
-
-        $files = array();
-        $inline = array();
-        foreach ($message->getAttachments() as $attachment) {
-            if (isset($attachment['data']) && !empty($attachment['cid'])) {
-                // Inline (embedded) image: Mailgun references an inline part by its
-                // filename, so the on-wire filename IS the cid the body points at
-                // (cid:<cid>). Sent in the separate 'inline' field.
-                $inline[] = array('fileContent' => $attachment['data'], 'filename' => $attachment['cid']);
-            } elseif (isset($attachment['data'])) {
-                $files[] = array('fileContent' => $attachment['data'], 'filename' => $attachment['name']);
-            } elseif (isset($attachment['path'])) {
-                $files[] = array('filePath' => $attachment['path'], 'filename' => $attachment['name']);
-            }
-        }
-        if (!empty($files)) {
-            $payload['attachment'] = $files;
-        }
-        if (!empty($inline)) {
-            $payload['inline'] = $inline;
-        }
-    }
-
-    /** Render one EmailMessage recipient ['email','name'] as "Name <email>". */
-    private function formatAddress(array $addr): string {
-        $email = $addr['email'] ?? '';
-        $name = trim((string)($addr['name'] ?? ''));
-        return $name !== '' ? ($name . ' <' . $email . '>') : $email;
-    }
-
-    public function sendBatch(EmailMessage $message, array $recipients): array {
-        $settings = Globalvars::get_instance();
-
-        if ($settings->get_setting('mailgun_eu_api_link')) {
-            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'), $settings->get_setting('mailgun_eu_api_link'));
-        } else {
-            $mg = Mailgun::create($settings->get_setting('mailgun_api_key'));
-        }
-
-        // The From domain when the account has it active, so the signature
-        // matches the From address for DMARC (B169); else the configured domain.
-        $domain = self::apiDomainForSender((string)$message->getFrom());
-
-        $email_to_send = [
-            'from' => $message->getFromName() . '<' . $message->getFrom() . '>',
-            'subject' => $message->getSubject(),
-        ];
-
-        if ($message->getHtmlBody()) {
-            $email_to_send['html'] = $message->getHtmlBody();
-        } else {
-            $email_to_send['text'] = $message->getTextBody();
-        }
-
-        // Chunk recipients into groups of 500 (Mailgun limit)
-        $sending_groups = array_chunk($recipients, 500);
-        $failed_recipients = [];
-
-        foreach ($sending_groups as $group) {
-            $mailgun_recipients = [];
-            $recipient_variables = [];
-
-            foreach ($group as $email) {
-                $mailgun_recipients[] = $email;
-                $recipient_variables[$email] = ['name' => $email];
-            }
-
-            $email_to_send['to'] = implode(',', $mailgun_recipients);
-            $email_to_send['recipient-variables'] = json_encode($recipient_variables);
-
-            try {
-                $mg->messages()->send($domain, $email_to_send);
-            } catch (\Exception $e) {
-                error_log("[MailgunProvider] Batch chunk failed: " . $e->getMessage());
-                // Track which recipients failed (entire chunk fails together)
-                $failed_recipients = array_merge($failed_recipients, $group);
-            }
-        }
-
-        return [
-            'success' => empty($failed_recipients),
-            'failed_recipients' => $failed_recipients,
-        ];
-    }
 
     // ── DkimRecordSource ────────────────────────────────────────────────
 
@@ -473,26 +551,28 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
      */
     public static function getDkimStatus(string $domain): array {
         try {
-            $show = self::client()->domains()->show($domain);
-        } catch (\Mailgun\Exception\HttpClientException $e) {
-            return ($e->getCode() === 404)
-                ? ['status' => 'not_registered', 'records' => []]
-                : ['status' => 'unreachable', 'records' => []];
-        } catch (\Throwable $e) {
+            $resp = self::showDomain($domain);
+        } catch (ProviderHttpException $e) {
             error_log('[MailgunProvider] getDkimStatus(' . $domain . ') failed: ' . $e->getMessage());
+            return ['status' => 'unreachable', 'records' => []];
+        }
+        if ($resp->status === 404) {
+            return ['status' => 'not_registered', 'records' => []];
+        }
+        if (!self::succeeded($resp)) {
             return ['status' => 'unreachable', 'records' => []];
         }
 
         $records = [];
-        foreach ($show->getOutboundDNSRecords() as $rec) {
-            $name = (string)$rec->getName();
+        foreach ((array)($resp->json()['sending_dns_records'] ?? []) as $rec) {
+            $name = (string)($rec['name'] ?? '');
             if (stripos($name, '_domainkey') === false) {
                 continue;
             }
             $records[] = [
-                'type'  => strtoupper((string)$rec->getType()),
+                'type'  => strtoupper((string)($rec['record_type'] ?? '')),
                 'name'  => $name,
-                'value' => (string)$rec->getValue(),
+                'value' => (string)($rec['value'] ?? ''),
             ];
         }
         return ['status' => 'ok', 'records' => $records];
@@ -505,27 +585,40 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
      * existing registration is 'ok'. DKIM authority is forced to $domain
      * itself so the keys are issued for the subdomain rather than inherited
      * from its parent; inherited authority breaks strict DMARC alignment.
+     * The key is 2048-bit, as the platform's own DKIM keys are, and tracking
+     * links use https.
      */
     public static function createSendingDomain(string $domain): array {
         try {
-            self::client()->domains()->show($domain);
+            $show = self::showDomain($domain);
+        } catch (ProviderHttpException $e) {
+            return ['status' => 'unreachable', 'error' => 'Mailgun did not answer: ' . $e->getMessage()];
+        }
+        if (self::succeeded($show)) {
             return ['status' => 'ok']; // already registered
-        } catch (\Mailgun\Exception\HttpClientException $e) {
-            if ($e->getCode() !== 404) {
-                return ['status' => 'unreachable', 'error' => $e->getMessage()];
-            }
-            // 404 — not registered yet; fall through to create.
-        } catch (\Throwable $e) {
-            return ['status' => 'unreachable', 'error' => $e->getMessage()];
         }
+        if ($show->status !== 404) {
+            return ['status' => 'unreachable', 'error' => self::describeError($show, true)];
+        }
+        // 404 — not registered yet; create it.
         try {
-            self::client()->domains()->create($domain, null, null, null, true /* forceDkimAuthority */);
-            unset(self::$sending_domain_state[$domain]); // state cache is now stale
-            return ['status' => 'ok'];
-        } catch (\Throwable $e) {
+            $resp = self::call('POST', '/v3/domains', ['form' => [
+                'name'                 => $domain,
+                'force_dkim_authority' => 'true',
+                'dkim_key_size'        => '2048',
+                'web_scheme'           => 'https',
+            ]]);
+        } catch (ProviderHttpException $e) {
             error_log('[MailgunProvider] createSendingDomain(' . $domain . ') failed: ' . $e->getMessage());
-            return ['status' => 'error', 'error' => $e->getMessage()];
+            return ['status' => 'error', 'error' => 'Mailgun did not answer: ' . $e->getMessage()];
         }
+        if (!self::succeeded($resp)) {
+            $error = self::describeError($resp);
+            error_log('[MailgunProvider] createSendingDomain(' . $domain . ') failed: ' . $error);
+            return ['status' => 'error', 'error' => $error];
+        }
+        unset(self::$sending_domain_state[$domain]); // state cache is now stale
+        return ['status' => 'ok'];
     }
 
     /**
@@ -536,13 +629,15 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
      */
     public static function verifySendingDomain(string $domain): string {
         try {
-            self::client()->domains()->verify($domain);
-        } catch (\Mailgun\Exception\HttpClientException $e) {
-            if ($e->getCode() === 404) {
+            $resp = self::call('PUT', '/v3/domains/' . rawurlencode($domain) . '/verify');
+            if ($resp->status === 404) {
                 self::$sending_domain_state[$domain] = 'not_registered';
                 return 'not_registered';
             }
-        } catch (\Throwable $e) {
+            if (!self::succeeded($resp)) {
+                error_log('[MailgunProvider] verifySendingDomain(' . $domain . ') failed: ' . self::describeError($resp, true));
+            }
+        } catch (ProviderHttpException $e) {
             error_log('[MailgunProvider] verifySendingDomain(' . $domain . ') failed: ' . $e->getMessage());
         }
         unset(self::$sending_domain_state[$domain]);
@@ -560,15 +655,15 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             $state = '';
             $error = '';
             try {
-                $d = self::client()->domains()->show($domain)->getDomain();
-                $state = ($d && method_exists($d, 'getState')) ? strtolower((string)$d->getState()) : '';
-            } catch (\Mailgun\Exception\HttpClientException $e) {
-                if ($e->getCode() === 404) {
+                $resp = self::showDomain($domain);
+                if (self::succeeded($resp)) {
+                    $state = self::stateOf($resp);
+                } elseif ($resp->status === 404) {
                     $state = 'not_registered';
                 } else {
-                    $error = 'Mailgun did not answer (' . $e->getCode() . '): ' . $e->getMessage();
+                    $error = self::describeError($resp, true);
                 }
-            } catch (\Throwable $e) {
+            } catch (ProviderHttpException $e) {
                 // API did not answer — leave ''.
                 $error = 'Mailgun did not answer: ' . $e->getMessage();
             }
@@ -608,10 +703,10 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
         if (!array_key_exists($domain, self::$sending_domain_state)) {
             $state = '';
             try {
-                $d = self::client()->domains()->show($domain)->getDomain();
-                $state = ($d && method_exists($d, 'getState')) ? strtolower((string)$d->getState()) : '';
-            } catch (\Throwable $e) {
-                // Not in the account, or the API did not answer — fall back.
+                $resp = self::showDomain($domain, 0);
+                $state = self::succeeded($resp) ? self::stateOf($resp) : '';
+            } catch (ProviderHttpException $e) {
+                // The API did not answer — fall back.
             }
             self::$sending_domain_state[$domain] = $state;
         }
@@ -635,37 +730,43 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
     // ── RawMessageRelay ─────────────────────────────────────────────────
 
     /**
-     * Relay raw MIME via Mailgun's MIME endpoint (SDK sendMime), reusing the
-     * same mailgun_api_key the send() path uses. Mailgun owns bounce handling
-     * and its own SPF/DKIM align with the sending domain, so the SRS envelope
-     * sender is best-effort here — the From-header rewrite the router already
-     * performed is what carries deliverability. See specs and email_system.md.
+     * Relay raw MIME via Mailgun's messages.mime endpoint, reusing the same
+     * mailgun_api_key the send() path uses: one 'to' field per destination and
+     * the message as a file part named 'message'. The message always travels
+     * as content, never as a path to read.
      *
-     * sendMime delivers to all recipients in one call, so the result is
-     * all-or-nothing: every destination maps to the same success/failure,
-     * matching the per-destination shape forwardEmail() expects.
+     * messages.mime has no envelope-sender parameter: Mailgun sets the
+     * return-path itself and owns bounce handling, and its SPF/DKIM align with
+     * the sending domain. $envelope_sender therefore only chooses the domain
+     * the relay submits through (apiDomainForSender); the From-header rewrite
+     * the router already performed is what carries deliverability.
+     *
+     * One call delivers to every destination, so the result is all-or-nothing:
+     * every destination maps to the same success/failure, matching the
+     * per-destination shape forwardEmail() expects.
      */
     public function relayRawMessage(string $raw_mime, string $envelope_sender, array $destinations): array {
-        $mg = self::client();
-
         // Submit through the envelope sender's own sending domain when the
         // account has it active — the API path domain is Mailgun's signing
         // identity, and this is what makes DKIM align with the From domain.
         $domain = self::apiDomainForSender($envelope_sender);
 
-        // Best-effort envelope sender: Mailgun honors o:sender on the MIME
-        // endpoint where it can; it otherwise owns the return-path.
-        $params = [];
-        if ($envelope_sender !== '') {
-            $params['sender'] = $envelope_sender;
+        $fields = [];
+        foreach ($destinations as $destination) {
+            $fields[] = ['name' => 'to', 'contents' => (string)$destination];
         }
+        $fields[] = ['name' => 'message', 'contents' => $raw_mime, 'filename' => 'message',
+            'headers' => ['Content-Type' => 'message/rfc822']];
 
-        $ok = true;
+        $ok = false;
         try {
-            $mg->messages()->sendMime($domain, $destinations, $raw_mime, $params);
-        } catch (\Exception $e) {
+            $resp = self::call('POST', '/v3/' . rawurlencode($domain) . '/messages.mime', ['multipart' => $fields]);
+            $ok = self::succeeded($resp);
+            if (!$ok) {
+                error_log('[MailgunProvider] relayRawMessage failed: ' . self::describeError($resp, true));
+            }
+        } catch (ProviderHttpException $e) {
             error_log('[MailgunProvider] relayRawMessage failed: ' . $e->getMessage());
-            $ok = false;
         }
 
         $results = [];

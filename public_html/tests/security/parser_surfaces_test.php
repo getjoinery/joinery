@@ -23,6 +23,7 @@
  *
  * Run: php tests/security/parser_surfaces_test.php
  *
+ * @version 1.4 - Route53DnsDriver reads its own API's XML answers (specs/email_provider_sdk_removal.md WP7)
  * @version 1.3 - SeoPageMetadata parses staff-written bodies only; no view outside the listed ones hands it a body
  * @version 1.2 - ReleaseVerifier: verify_release.php's CLI unzips the agent binaries of the release it checks
  * @version 1.1 - BackupObjects reads this site's own gzipped objects index back off its backup storage
@@ -50,6 +51,7 @@ $allowed = array(
 	'plugins/server_manager/includes/publish_upgrade.php' => 'the archive we are building',
 	'includes/EmailTemplateRenderer.php'                         => 'the deployment\'s own email templates',
 	'includes/dns/drivers/NamecheapDnsDriver.php'        => 'the DNS provider\'s API response under our own credentials',
+	'includes/dns/drivers/Route53DnsDriver.php'          => 'the DNS provider\'s API response under our own credentials',
 	'plugins/server_manager/includes/domain_registrar/NamecheapRegistrar.php' => 'the registrar\'s API response under our own credentials',
 	'plugins/mailbox/includes/import/ZipReader.php'      => 'an archive the owner uploaded to import, once, under their eye',
 	'plugins/mailbox/includes/import/TarReader.php'      => 'an archive the owner uploaded to import, once, under their eye',

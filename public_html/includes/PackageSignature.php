@@ -37,6 +37,8 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.11 - excluded(): under public_html/plugins/<name>/vendor/ only .git folders and .gitignore files
+ *                 are left out, so a library's cache/, logs/ or uploads/ folder is signed (specs/plugin_own_vendor.md WP1)
  * @version 1.10 - verifyTree() judges a sandboxed plugin as it does any plugin: unsigned, it is a failure;
  *                 its argument positions are unchanged (the fourth is always handed back empty)
  * @version 1.9 - verifyTree(): a core manifest that lists another release's VERSION than the code's is
@@ -161,6 +163,15 @@ class PackageSignature {
 		}
 		if (in_array($segments[0], self::EXCLUDED_TOP_LEVEL, true)) {
 			return true;
+		}
+		// A plugin's own vendor/ (specs/plugin_own_vendor.md) is code that
+		// nothing writes at runtime, and libraries are full of folders named
+		// cache/, logs/ or uploads/ (psr/cache). The site's mutable-folder
+		// segments have no reason to apply there: every file is signed but a
+		// .git folder's and a .gitignore (above).
+		if (count($segments) >= 5 && $segments[0] === 'public_html' && $segments[1] === 'plugins'
+				&& $segments[2] !== '' && $segments[3] === 'vendor') {
+			return in_array('.git', $segments, true);
 		}
 		foreach ($segments as $segment) {
 			if (in_array($segment, self::EXCLUDED_SEGMENTS, true)) {

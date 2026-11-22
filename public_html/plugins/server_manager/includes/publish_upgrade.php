@@ -541,6 +541,20 @@
 			}
 		}
 
+		// A published plugin's own libraries (specs/plugin_own_vendor.md):
+		// built as the platform requires, fresh against the plugin's own
+		// lock, and never one library at two builds, against core's lock or
+		// another published plugin. Asked before anything is written.
+		$vendor_refusals = publish_plugin_vendor_refusals($build_root, $full_site_dir);
+		if (!empty($vendor_refusals)) {
+			publish_output("\nRefusing to publish {$version} — a plugin's own vendor/ is not ready:");
+			foreach ($vendor_refusals as $line) {
+				publish_output("  - {$line}");
+			}
+			publish_output("\nFix it in the plugin folder, commit, and publish again. Nothing has been written.");
+			exit(1);
+		}
+
 
 		// =====================================================
 		// The public log this release will be written to
@@ -2237,6 +2251,54 @@
 	 * counts: one git ignores (a runtime cache) was never going to ship. Paths
 	 * relative to $dir.
 	 */
+	/**
+	 * Why the published plugins' own vendor/ trees cannot ship, as lines
+	 * (specs/plugin_own_vendor.md): ComposerValidator::pluginVendorProblems()
+	 * for each (its platform needs are the node's business, not this box's),
+	 * then clashes against core's composer.lock and each other published
+	 * plugin, and library files git ignores in the working repository
+	 * $repo (the site directory, a git checkout; never the build root, an
+	 * export that holds no ignored files). Empty when every one can.
+	 */
+	function publish_plugin_vendor_refusals($build_root, $repo = null) {
+		$lines = array();
+		$base = rtrim($build_root, '/') . '/public_html';
+		$core = ComposerValidator::lockPackages($base . '/composer.lock');
+		$seen = array();
+		foreach (glob($base . '/plugins/*/plugin.json') ?: array() as $plugin_json) {
+			$dir = dirname($plugin_json);
+			$name = basename($dir);
+			$data = json_decode((string)file_get_contents($plugin_json), true);
+			if (!is_array($data) || ($data['included_in_publish'] ?? true) === false || !empty($data['deprecated'])) {
+				continue;
+			}
+			if (!is_dir($dir . '/vendor')) {
+				continue;
+			}
+			foreach (ComposerValidator::pluginVendorProblems($dir, false) as $problem) {
+				$lines[] = $name . ': ' . $problem;
+			}
+			$ignored = $repo !== null ? ComposerValidator::ignoredVendorFiles($repo, $name) : null;
+			if (!empty($ignored)) {
+				$lines[] = $name . ': git ignores these library files, so they would not ship: '
+					. implode(', ', array_slice($ignored, 0, 10)) . (count($ignored) > 10 ? ' and ' . (count($ignored) - 10) . ' more' : '')
+					. '; remove the library\'s .gitignore or force-add them';
+			}
+			$others = $core !== null ? array('core' => $core) : array();
+			foreach ($seen as $other => $packages) {
+				$others['plugin ' . $other] = $packages;
+			}
+			foreach (ComposerValidator::vendorOverlaps($dir, $others) as $clash) {
+				$lines[] = $clash;
+			}
+			$packages = ComposerValidator::vendorPackages($dir . '/vendor');
+			if ($packages !== null) {
+				$seen[$name] = $packages;
+			}
+		}
+		return $lines;
+	}
+
 	function publish_unlisted_members($dir, $site_root, $ships = null) {
 		$found = array();
 		$dir = rtrim($dir, '/');

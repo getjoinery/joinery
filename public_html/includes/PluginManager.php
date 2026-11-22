@@ -13,6 +13,10 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.26 - activation refuses a plugin whose own vendor/ is not built as required, needs what this PHP
+ *   lacks, or clashes with core's or another active plugin's libraries (specs/plugin_own_vendor.md WP3)
+ * @version 1.25 - requires.composer is refused: a plugin ships its libraries in its own vendor/, so activation
+ *   installs nothing and never needs root for them (specs/plugin_own_vendor.md WP4)
  * @version 1.24 - the menu prune counts a plugin on disk with no row as not active, so entries core declared before the plugin took them over do not outlive it
  * @version 1.23 - every install has an install id and a ledger of what it made (PluginInstallIdentity, spec
  *                plugin_install_identity): install finishes the earlier install's ledger before it makes its
@@ -66,13 +70,6 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  *                untouched (specs/package_signing.md WP2). Returns whether it
  *                placed anything.
  */
-/**
- * Activation needs composer packages that are not installed, and installing
- * them is root's job. Its own type so the page can offer to queue the work
- * instead of showing the operator a failure they cannot act on.
- */
-class PluginComposerNeedsRootException extends Exception {}
-
 class PluginManager extends AbstractExtensionManager {
 
     /**
@@ -718,6 +715,14 @@ class PluginManager extends AbstractExtensionManager {
             $results['errors'][] = $error;
         }
 
+        // A plugin's libraries live in its own vendor/, which its signature
+        // covers (specs/plugin_own_vendor.md). The shared vendor/ is core's.
+        if (isset($manifest['requires']['composer'])) {
+            $results['valid'] = false;
+            $results['errors'][] = "plugin.json has requires.composer: ship the library in the plugin's own vendor/ "
+                . '(composer install in the plugin folder) and remove requires.composer';
+        }
+
         // Maturity status is honest labeling only and gates nothing, but an
         // unknown value is a manifest error, not a silently ignored string.
         if (isset($manifest['status'])
@@ -1000,27 +1005,16 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Cannot activate plugin '$name': " . implode('; ', $validation['errors']));
         }
 
-        // Reconcile the plugin's declared composer packages (requires.composer)
-        // into the root install. Composer is userland, so this is the one
-        // dependency tier that genuinely installs at activation; a failed
-        // resolve (conflict, no network) refuses activation with composer's
-        // output. Spec plugin_dependency_installation.
-        //
-        // Installing a package writes vendor/, which is code the pool executes
-        // and so not the pool's to write (specs/implemented/read_only_tree.md). When the
-        // packages are already there nothing is written and activation goes
-        // ahead from anywhere; when they are not, a web request says so and the
-        // page queues a reconcile_composer request for root.
-        $composer_validator = new ComposerValidator();
-        if (!$composer_validator->pluginPackagesPresent([$name])) {
-            if (php_sapi_name() !== 'cli') {
-                throw new PluginComposerNeedsRootException(
-                    "Cannot activate plugin '$name': it declares composer packages that are not installed, "
-                    . 'and installing them writes vendor/, which only root does here.');
-            }
-            if (!$composer_validator->reconcilePluginPackages([$name])) {
-                throw new Exception("Cannot activate plugin '$name': composer dependency reconcile failed. "
-                    . implode('; ', $composer_validator->getErrors()));
+        // A plugin's own libraries (specs/plugin_own_vendor.md): its vendor/
+        // is built as the platform requires, needs nothing this PHP lacks,
+        // and holds no library core or another active plugin has at another
+        // build. Nothing is installed: the libraries came with the plugin.
+        $plugin_dir = PathHelper::getAbsolutePath('plugins/' . $name);
+        if (is_dir($plugin_dir . '/vendor')) {
+            $vendor_problems = ComposerValidator::pluginVendorProblems($plugin_dir, true);
+            $vendor_problems = array_merge($vendor_problems, (new ComposerValidator())->pluginActivationClashes($plugin_dir));
+            if ($vendor_problems) {
+                throw new Exception("Cannot activate plugin '$name': its vendor/: " . implode('; ', $vendor_problems));
             }
         }
 

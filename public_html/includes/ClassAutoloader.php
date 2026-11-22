@@ -16,6 +16,15 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.11.1 - a miss raised while plugins' autoload.php files are being required (a files entry needing
+ *   another plugin's class) is answered from the loaders already kept, not dropped (reviewer2 C10)
+ * @version 1.11.0 - a library class that extends or implements another library class loads (the re-entry guard
+ *   covers only the require phase); requirePluginVendor() for a function-only library; a loader a throwing `files`
+ *   entry left registered is taken out; a plugin whose sandboxing cannot be asked is never loaded (reviewer2 C1-C3, C7)
+ * @version 1.10.0 - loadPluginVendor(): a namespaced miss is offered to the libraries an active plugin ships in its
+ *   own vendor/ (specs/plugin_own_vendor.md WP2). Never a sandboxed plugin's, never under restrictToCore(); each
+ *   plugin's autoload.php is required once, in a try, its loader unregistered and asked after core's, by plugin
+ *   name; forgetPlugin() parks a loader rather than dropping it
  * @version 1.9.0 - theme_aware_path() takes only a name some theme or plugin also ships to the theme chain
  *   (overridable()); every other core class resolves without a setting, so a cached page opens no database link
  * @version 1.8.0 - the map is read from APCu through ApcuStore::fetch(): a planted object is never built (unseal_daemon.md C4)
@@ -95,6 +104,19 @@ class ClassAutoloader {
 	/** Paths already logged as refused, so a poisoned map logs once per process, not once per lookup. */
 	private static $refused_logged = array();
 
+	/** plugin name => composer ClassLoader for its own vendor/, unregistered, asked by loadPluginVendor(). */
+	private static $vendor_loaders = array();
+	/** plugin name => true once its vendor/autoload.php was tried, whatever came of it. */
+	private static $vendor_tried = array();
+	/** Plugin names with a vendor/autoload.php on disk, or null until looked. */
+	private static $vendor_candidates = null;
+	/** True while loadPluginVendor() works out who is eligible and requires their autoload.php, against re-entry. */
+	private static $in_vendor_lookup = false;
+	/** The eligible list the last completed lookup worked out, for a miss raised while requiring. */
+	private static $vendor_last_eligible = array();
+	/** @var array|null tests: ['plugins_dir' => path, 'eligible' => names or fn(): names, 'sandboxed' => names] */
+	private static $vendor_test = null;
+
 	/**
 	 * Register the autoloader. Safe to call repeatedly.
 	 */
@@ -104,6 +126,227 @@ class ClassAutoloader {
 		}
 		self::$registered = true;
 		spl_autoload_register(array(__CLASS__, 'load'));
+		// After load(), and after core's own composer loader, which composer
+		// prepends: core's copy of a library always wins.
+		spl_autoload_register(array(__CLASS__, 'loadPluginVendor'));
+	}
+
+	/**
+	 * Offer a namespaced miss to the libraries plugins ship in their own
+	 * vendor/ (specs/plugin_own_vendor.md).
+	 *
+	 * Which plugins: the active ones and any let in by allowPlugin(), never a
+	 * sandboxed one (its code runs only in the jail, and composer's autoload.php
+	 * runs a package's `files` entries the moment it is required). Nothing at
+	 * all under restrictToCore(). A site whose plugins carry no vendor/ pays one
+	 * glob per request that has a namespaced miss (statics reset with each FPM
+	 * request), and nothing more. Once any plugin ships a vendor/, such a miss
+	 * reads the active plugins, so a cached page can then open a database link.
+	 *
+	 * Each plugin's autoload.php is required at most once per process, inside a
+	 * try: a library that throws costs that plugin, logged once, never the
+	 * request. The loader composer returns is unregistered at once (composer
+	 * prepends it, which would put the plugin's copy of a shared library ahead
+	 * of core's mid-request) and asked from here, in plugin-name order. A
+	 * plugin's own ComposerAutoloaderInitJoineryPlugin_<name> class already
+	 * declared by some other file means two trees collide; that plugin is
+	 * skipped, since a second declaration is a fatal no catch stops.
+	 *
+	 * @param string $class
+	 */
+	public static function loadPluginVendor($class) {
+		if (self::$core_only || strpos($class, '\\') === false) {
+			return;
+		}
+		$candidates = self::vendor_candidates();
+		if (empty($candidates) && empty(self::$vendor_loaders)) {
+			return;
+		}
+		// The guard covers working out who is eligible and requiring their
+		// autoload.php (a package's `files` entry may raise a miss of its own).
+		// It does not cover asking the loaders: including a class that extends
+		// or implements another library class raises a nested miss, which must
+		// reach the same loaders (reviewer2 C1).
+		if (self::$in_vendor_lookup) {
+			$eligible = self::$vendor_last_eligible;
+		} else {
+			self::$in_vendor_lookup = true;
+			try {
+				$eligible = self::vendor_eligible();
+				// Set before the requires: a files entry run by one of them may
+				// need a class from a plugin already required (reviewer2 C10).
+				self::$vendor_last_eligible = $eligible;
+				foreach ($eligible as $name) {
+					if (!isset(self::$vendor_tried[$name]) && isset($candidates[$name])) {
+						self::$vendor_tried[$name] = true;
+						self::require_plugin_vendor($name);
+					}
+				}
+			} finally {
+				self::$in_vendor_lookup = false;
+			}
+		}
+		foreach ($eligible as $name) {
+			if (isset(self::$vendor_loaders[$name]) && self::$vendor_loaders[$name]->loadClass($class)) {
+				if (self::defined_now($class)) {
+					return;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Load a plugin's own vendor/ now, for a library used only through
+	 * functions (composer's `files` entries), which no class miss would load.
+	 * A plugin calls this; it never requires its vendor/autoload.php itself,
+	 * since composer would then leave its loader first in line, ahead of
+	 * core's (reviewer2 C2). Returns whether the plugin's libraries are loaded.
+	 * Refused for a plugin that is not active or let in, or is sandboxed.
+	 */
+	public static function requirePluginVendor($name) {
+		$name = (string)$name;
+		if (self::$core_only || !in_array($name, self::vendor_eligible(), true)) {
+			return false;
+		}
+		if (!isset(self::$vendor_tried[$name])) {
+			self::$vendor_tried[$name] = true;
+			self::require_plugin_vendor($name);
+		}
+		return isset(self::$vendor_loaders[$name]);
+	}
+
+	/** Plugin names whose folder holds vendor/autoload.php, looked for once per process (allowPlugin() looks again). */
+	private static function vendor_candidates() {
+		if (self::$vendor_candidates === null) {
+			$found = array();
+			foreach ((array)glob(self::vendor_plugins_dir() . '/*/vendor/autoload.php') as $path) {
+				$found[basename(dirname(dirname($path)))] = true;
+			}
+			self::$vendor_candidates = $found;
+		}
+		return self::$vendor_candidates;
+	}
+
+	/**
+	 * The plugins whose vendor/ may answer now, sorted: active or allowed in,
+	 * not sandboxed. Asked on every miss, so a plugin activated or allowed in
+	 * mid-process is seen; an active set that cannot be read counts only the
+	 * allowed plugins, and nothing is remembered from that answer.
+	 */
+	private static function vendor_eligible() {
+		if (self::$vendor_test !== null) {
+			$eligible = self::$vendor_test['eligible'] ?? array();
+			$names = (array)(is_callable($eligible) ? $eligible() : $eligible);
+		} else {
+			$complete = true;
+			$names = self::active_plugins($complete);
+		}
+		$names = array_merge($names, array_keys(self::$allowed_by_plugin));
+		$out = array();
+		foreach (array_unique($names) as $name) {
+			$name = (string)$name;
+			if ($name === '' || $name[0] === '.' || $name !== basename($name)) {
+				continue;
+			}
+			if (self::vendor_is_sandboxed($name)) {
+				continue;
+			}
+			$out[] = $name;
+		}
+		sort($out, SORT_STRING);
+		return $out;
+	}
+
+	private static function vendor_is_sandboxed($name) {
+		if (self::$vendor_test !== null) {
+			return in_array($name, (array)(self::$vendor_test['sandboxed'] ?? array()), true);
+		}
+		if (!class_exists('SandboxPlugins')) {
+			// The question cannot be asked: never load it (reviewer2 C7).
+			return true;
+		}
+		return SandboxPlugins::isSandboxedDir(self::vendor_plugins_dir() . '/' . $name);
+	}
+
+	private static function vendor_plugins_dir() {
+		return self::$vendor_test !== null
+			? rtrim((string)self::$vendor_test['plugins_dir'], '/')
+			: rtrim(PathHelper::getIncludePath('plugins'), '/');
+	}
+
+	/** Require one plugin's vendor/autoload.php under its own trust rule, and keep its loader. */
+	private static function require_plugin_vendor($name) {
+		$plugin_dir = self::vendor_plugins_dir() . '/' . $name;
+		$vendor = $plugin_dir . '/vendor';
+		$autoload = $vendor . '/autoload.php';
+		$real_plugin = realpath($plugin_dir);
+		$real_vendor = realpath($vendor);
+		// Computed, never read from the map: the path must be this plugin's own
+		// vendor/autoload.php, and neither vendor nor autoload.php a link.
+		if ($real_plugin === false || $real_vendor === false || is_link($vendor) || is_link($autoload)
+				|| $real_vendor !== $real_plugin . '/vendor'
+				|| realpath($autoload) !== $real_vendor . '/autoload.php' || !is_file($autoload)) {
+			error_log('[ClassAutoloader] plugin ' . $name . ': vendor/autoload.php is not the plugin\'s own file; not loaded');
+			return;
+		}
+		$init = 'ComposerAutoloaderInitJoineryPlugin_' . $name;
+		try {
+			if (class_exists($init, false)) {
+				// Declared already: by this plugin requiring its own autoload.php
+				// (keep that loader), or by another tree (a collision: skip).
+				$file = (new ReflectionClass($init))->getFileName();
+				if ($file === false || realpath($file) !== $real_vendor . '/composer/autoload_real.php') {
+					error_log('[ClassAutoloader] plugin ' . $name . ': ' . $init . ' is already declared by another file; its vendor/ is not loaded');
+					return;
+				}
+				$loader = $init::getLoader();
+			} else {
+				$loader = require $autoload;
+			}
+			if (!is_object($loader) || !method_exists($loader, 'loadClass')) {
+				error_log('[ClassAutoloader] plugin ' . $name . ': vendor/autoload.php returned no class loader; not used');
+				return;
+			}
+			if (method_exists($loader, 'unregister')) {
+				$loader->unregister();
+			}
+			self::$vendor_loaders[$name] = $loader;
+		} catch (Throwable $e) {
+			// Composer registers its loader (first in line) before it runs the
+			// `files` entries, so a throwing entry leaves it registered: take it
+			// out again (reviewer2 C3). The plugin's loader is not used after a
+			// failed `files` entry: its libraries are half set up.
+			if (class_exists($init, false)) {
+				try {
+					$file = (new ReflectionClass($init))->getFileName();
+					if ($file !== false && realpath($file) === $real_vendor . '/composer/autoload_real.php') {
+						$stuck = $init::getLoader();
+						if (is_object($stuck) && method_exists($stuck, 'unregister')) {
+							$stuck->unregister();
+						}
+					}
+				} catch (Throwable $ignored) {
+				}
+			}
+			error_log('[ClassAutoloader] plugin ' . $name . ': loading vendor/ failed (' . get_class($e) . ': '
+				. $e->getMessage() . '); skipped');
+		}
+	}
+
+	/**
+	 * Point loadPluginVendor() at a fixture plugins folder with a fixed list of
+	 * eligible and sandboxed plugins, or null to go back to the site's. Forgets
+	 * every loader it kept. CLI only.
+	 */
+	public static function usePluginVendorForTest(?array $setup) {
+		if (php_sapi_name() !== 'cli') {
+			throw new LogicException('ClassAutoloader::usePluginVendorForTest is for test processes only.');
+		}
+		self::$vendor_test = $setup;
+		self::$vendor_candidates = null;
+		self::$vendor_loaders = array();
+		self::$vendor_tried = array();
+		self::$vendor_last_eligible = array();
 	}
 
 	/**
@@ -149,9 +392,16 @@ class ClassAutoloader {
 		}
 		self::$allowed_by_plugin[$plugin] = array_keys($map);
 		self::$allowed = array_merge(self::$allowed, $map);
+		// A plugin unpacked since this process looked may carry a vendor/.
+		self::$vendor_candidates = null;
 	}
 
-	/** End allowPlugin() for this plugin. Classes already loaded stay loaded. */
+	/**
+	 * End allowPlugin() for this plugin. Classes already loaded stay loaded.
+	 * Its vendor/ loader is parked, not dropped: kept but not asked until the
+	 * plugin is eligible again (activated in the same process, say), when it
+	 * answers without a second require.
+	 */
 	public static function forgetPlugin($plugin) {
 		$plugin = basename((string)$plugin);
 		foreach (self::$allowed_by_plugin[$plugin] ?? array() as $class) {

@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php --only=tests/unit/shell_call_sites_test.php
  *
+ * @version 1.2 - ComposerValidator's two prune calls and upgrade.php's three (specs/email_provider_sdk_removal.md WP8)
  * @version 1.1 - SandboxRunner's proc_open read: an argv array, no shell
  * @version 1.0
  */
@@ -37,6 +38,9 @@ $read = array(
 	'includes/BackupRunner.php'                                     => 3,
 	'includes/BackupVerifier.php'                                   => 1,
 	'includes/BackupVerifyLauncher.php'                             => 1,
+	// 3 read 2026-11-22: the prune's install into its copy and runShell() (email_provider_sdk_removal
+	// WP8; every path escapeshellarg'd, owner and group integers), and installIfNeeded()'s install.
+	// The reconcile's two calls left with plugin_own_vendor WP4.
 	'includes/ComposerValidator.php'                                => 3,
 	'includes/DeploymentHelper.php'                                 => 9,
 	'includes/DocumentText.php'                                     => 1,
@@ -69,7 +73,9 @@ $read = array(
 	'utils/install_extension.php'                                   => 1,
 	'utils/legacy_content_cleanup.php'                              => 1,
 	'utils/root_request.php'                                        => 5,
-	'utils/upgrade.php'                                             => 15,
+	// +3 read 2026-11-22 (email_provider_sdk_removal WP8): upgrade_reload_web_php()'s two calls,
+	// whose $prefix is '' or the run's 'sudo -n ', and the prune script's run.
+	'utils/upgrade.php'                                             => 18,
 );
 
 /** The class the classifier gives the one call in $php, placed in a scratch tree. */

@@ -109,3 +109,8 @@ __pycache__/
 
 # The private specs repository (getjoinery/joinery-specs) is cloned here.
 /public_html/specs/
+
+# A plugin ships its libraries in its own vendor/, which its signature covers
+# (specs/plugin_own_vendor.md): nothing in it is ignored. This must stay the
+# last line: the last matching pattern decides.
+!public_html/plugins/*/vendor/**

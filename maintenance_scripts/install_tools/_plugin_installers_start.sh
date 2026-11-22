@@ -3,6 +3,11 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.61 - reconcile_composer leaves the root request kinds: a plugin ships its libraries in its own
+#                 vendor/ (specs/plugin_own_vendor.md)
+# Version: 2.60 - A tick puts vendor/ back when a composer prune stopped between its two renames:
+#                 vendor/ missing and vendor.prune-old present is renamed back, outside the upgrade's lock
+#                 (specs/email_provider_sdk_removal.md WP8)
 # Version: 2.59 - the sandboxed-plugin runner's installer leaves CORE_INSTALLERS: nothing runs a sandboxed plugin's code on the box;
 #                site_housekeeping.sh takes what it installed off the machine.
 # Version: 2.58 - an installer that exits INSTALLER_REFUSED_EXIT (78) declined to install here: its
@@ -1150,6 +1155,21 @@ kernel_settings_hold() {
         echo "host converger: $(date -u '+%Y-%m-%d %H:%M:%S') ${key} was ${got}; put back to ${want}"
     done < <(kernel_settings_state)
 }
+
+# --- A composer prune that stopped mid-swap ----------------------------------
+# ComposerValidator::pruneUnneededPackages() swaps a pruned copy in for vendor/.
+# Where mv cannot exchange the two atomically it renames vendor/ to
+# vendor.prune-old and the copy to vendor/; a crash between those two renames
+# leaves no vendor/ and every page fatal. Put it back. Runs on every tick,
+# even one with nothing to converge, and never while the upgrade holds its
+# lock (the block above), so it cannot race a prune mid-swap.
+if [[ "${MACHINE}" == "0" && ! -e "${SITE_ROOT}/vendor" && -d "${SITE_ROOT}/vendor.prune-old" && ! -L "${SITE_ROOT}/vendor.prune-old" ]]; then
+    if mv -T -- "${SITE_ROOT}/vendor.prune-old" "${SITE_ROOT}/vendor"; then
+        echo "host installers: ${SITENAME} had no vendor/ after an interrupted prune - put vendor.prune-old back"
+    else
+        echo "host installers: ${SITENAME} has no vendor/ and vendor.prune-old could not be renamed back" >&2
+    fi
+fi
 
 # --- The agent runs wherever it is installed (agent restart audit H5) ---------
 # systemd restarts an agent that exits, and the cron keepalive starts one on a
@@ -2304,14 +2324,14 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same fifteen as RootRequest::KINDS, and no more. install_package
+            # The same fourteen as RootRequest::KINDS, and no more. install_package
             # installs a staged upload only after root has verified it against
             # the release key, or on the owner's acknowledgement checked
             # against the second-factor marker (RootRequest::PACKAGE_KIND).
             # remove_plugin deletes plugins/<name> only after root has read the
             # row as uninstalled and the manifest as not is_system (PluginRemoval);
             # run_plugin_remover runs the plugin's host_remover first, then the same.
-            upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
+            upgrade|install_plugin|install_theme|install_package|\
             write_agent_files|save_doc|set_receives_upgrades|remove_plugin|\
             data_root_encrypt|data_root_reseal|data_root_rekey|data_root_tpm2_off|\
             run_plugin_installer|run_plugin_remover) : ;;

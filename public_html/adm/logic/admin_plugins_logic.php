@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.9 - no composer-packages branch on activate: a plugin ships its libraries in its own vendor/ (specs/plugin_own_vendor.md)
  * @version 1.8 - `remover_declared`: which plugins on disk declare a host_remover, and ?installer_request= also
  *                shows a run_plugin_remover request's panel (specs/plugin_host_removal.md D7)
  * @version 1.7 - `installer_status`: each active plugin's last host installer run, and ?installer_request=
@@ -264,15 +265,6 @@ function admin_plugins_logic(array $input): LogicResult {
 						// on the page that then activates it.
 						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" asks for things no admin has approved yet. '
 							. '<a href="' . htmlspecialchars(SandboxPluginManager::approvalUrl($plugin_name)) . '">Review and approve them</a>.';
-						$message_type = 'warning';
-					} catch (PluginComposerNeedsRootException $e) {
-						// Not a failure the operator can act on by retrying:
-						// the packages have to be installed by root, so queue
-						// that and tell them to come back to the button.
-						$root_request_id = RootRequest::submit('reconcile_composer',
-							array('plugin' => $plugin_name), (int)$session->get_user_id());
-						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" needs composer packages that '
-							. 'only root installs here. They are queued; activate it again when this finishes.';
 						$message_type = 'warning';
 					} catch (Exception $e) {
 						$message = 'Failed to activate plugin "' . htmlspecialchars($plugin_name) . '": ' . htmlspecialchars($e->getMessage());

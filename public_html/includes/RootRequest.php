@@ -30,6 +30,7 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.11 - reconcile_composer is gone: a plugin ships its libraries in its own vendor/ (specs/plugin_own_vendor.md)
  * @version 1.10 - the install_package note names the publishing box, which takes no unsigned package (D6)
  * @version 1.9 - a request written into a queue that moved while it was being written is taken back and
  *                refused out loud (reviewer1 B4)
@@ -77,7 +78,6 @@ class RootRequest {
 		'install_plugin',          // fetch from the upgrade source, verify, DB install
 		'install_theme',           // the same for a theme
 		'install_package',         // a staged upload: verify, then install (see below)
-		'reconcile_composer',
 		'write_agent_files',
 		'save_doc',
 		'set_receives_upgrades',   // {type, name, value}: the fork mark in a theme's or plugin's live manifest

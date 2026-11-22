@@ -8,8 +8,9 @@
  *
  *   - PHP extensions: root composer.json `ext-*` requires (core) plus every
  *     bundled plugin's plugin.json `requires.extensions`.
- *   - Composer packages: every plugin's plugin.json `requires.composer`
- *     (core packages live directly in root composer.json and need no listing).
+
+ * A plugin's PHP libraries are not listed here: a plugin ships them in its
+ * own vendor/ (specs/plugin_own_vendor.md).
  *   - System packages beyond extensions: root composer.json
  *     `extra.joinery-system-packages` plus every plugin's `requires.packages`;
  *     emitted by --apt only, as "name|name".
@@ -23,14 +24,13 @@
  * Usage:
  *   php utils/list_dependencies.php                    # extensions, one per line
  *   php utils/list_dependencies.php --apt              # mapped to apt package names
- *   php utils/list_dependencies.php --composer         # plugin-declared composer packages (pkg=constraint)
- *   php utils/list_dependencies.php --orphans          # composer packages no plugin declares (subset of --composer universe)
  *   php utils/list_dependencies.php --active-only ...  # restrict plugin scan to active plugins (needs DB)
  *   php utils/list_dependencies.php --json ...         # JSON object output instead of lines
  *
  * Exit codes: 0 success, 1 usage/parse error, 2 --active-only without a
  * reachable database.
  *
+ * @version 1.5 - no --composer or --orphans: plugins ship their libraries in their own vendor/ (specs/plugin_own_vendor.md)
  * @version 1.4 - a name ending in a dash is dropped too: to apt-get install, NAME- means remove NAME (reviewer1 B2)
  * @version 1.3 - an extension name that is not a plain apt-safe name is dropped, as a system package already
  *                was: the installer hands these to apt as root (specs/shell_command_audit.md U3)
@@ -56,12 +56,10 @@ foreach ($args as $arg) {
 	switch ($arg) {
 		case '--extensions': $mode = 'extensions'; break;
 		case '--apt':        $mode = 'extensions'; $as_apt = true; break;
-		case '--composer':   $mode = 'composer'; break;
-		case '--orphans':    $mode = 'orphans'; break;
 		case '--json':       $as_json = true; break;
 		case '--active-only': $active_only = true; break;
 		case '--help': case '-h':
-			echo "Usage: php utils/list_dependencies.php [--extensions|--apt|--composer|--orphans] [--active-only] [--json]\n";
+			echo "Usage: php utils/list_dependencies.php [--extensions|--apt] [--active-only] [--json]\n";
 			exit(0);
 		default:
 			fwrite(STDERR, "Unknown option: {$arg}\n");
@@ -204,38 +202,6 @@ function ld_system_packages($public_html, $manifests) {
 	return $packages;
 }
 
-/** Plugin-declared composer packages as name => constraint (last wins on dupes). */
-function ld_composer_packages($manifests) {
-	$packages = array();
-	foreach ($manifests as $manifest) {
-		foreach (($manifest['requires']['composer'] ?? array()) as $package => $constraint) {
-			// Same vendor/package shape check as ComposerValidator::collectPluginComposerRequires().
-			if (is_string($package) && is_string($constraint)
-					&& preg_match('#^[a-z0-9]([_.\-]?[a-z0-9]+)*/[a-z0-9](([_.]|-{1,2})?[a-z0-9]+)*$#i', $package)) {
-				$packages[strtolower($package)] = $constraint;
-			}
-		}
-	}
-	ksort($packages);
-	return $packages;
-}
-
-/**
- * Composer packages present in root composer.json that no plugin declares
- * AND that are marked as plugin-managed. Plugin-managed entries are the ones
- * the reconcile step added; hand-authored core requires are never orphans.
- * The marker is the "extra.joinery-plugin-packages" list in composer.json,
- * maintained by ComposerValidator::reconcilePluginPackages().
- */
-function ld_orphans($public_html, $manifests) {
-	$composer = ld_read_json($public_html . '/composer.json');
-	$managed = $composer['extra']['joinery-plugin-packages'] ?? array();
-	$declared = array_keys(ld_composer_packages($manifests));
-	$orphans = array_values(array_diff(array_map('strtolower', $managed), $declared));
-	sort($orphans);
-	return $orphans;
-}
-
 $manifests = ld_plugin_manifests($public_html);
 if ($active_only) {
 	$manifests = ld_filter_active($public_html, $manifests);
@@ -258,26 +224,6 @@ switch ($mode) {
 		} else {
 			foreach ($output as $line) {
 				echo $line . "\n";
-			}
-		}
-		break;
-	case 'composer':
-		$packages = ld_composer_packages($manifests);
-		if ($as_json) {
-			echo json_encode($packages, JSON_PRETTY_PRINT) . "\n";
-		} else {
-			foreach ($packages as $package => $constraint) {
-				echo "{$package}={$constraint}\n";
-			}
-		}
-		break;
-	case 'orphans':
-		$orphans = ld_orphans($public_html, $manifests);
-		if ($as_json) {
-			echo json_encode($orphans, JSON_PRETTY_PRINT) . "\n";
-		} else {
-			foreach ($orphans as $package) {
-				echo $package . "\n";
 			}
 		}
 		break;
