@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.16 - a sandboxed plugin's public pages count among the pages its view draws
 // @version 1.15 - an uninstalled plugin whose files are back on disk after its removal finished offers Install; a
 //                not-yet-installed sandboxed plugin shows its manifest's name, description and version
 // @version 1.14 - a sandboxed plugin whose view draws pages says they are not shown without the strict script policy
@@ -265,7 +266,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                         try {
                             $sbx_manifest = SandboxPlugins::manifest($plugin['name']);
                             $draws_pages = false;
-                            foreach (array_merge($sbx_manifest->adminPages(), $sbx_manifest->profilePages()) as $sbx_page) {
+                            foreach (array_merge($sbx_manifest->adminPages(), $sbx_manifest->profilePages(), $sbx_manifest->publicPages()) as $sbx_page) {
                                 $draws_pages = $draws_pages || SandboxPages::isPluginDrawn($sbx_page);
                             }
                             if ($draws_pages && !SandboxPages::strictScriptsEnforced()) {

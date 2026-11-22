@@ -50,6 +50,11 @@
  * or from bytes, and reading one's bytes, then go to the site. Its row is a
  * model like any other, read and written through SystemBase::$remote_store.
  *
+ * Cache (StaticPageCache::invalidatePath()) asks joinery_fence_page_refresh(),
+ * below, so a plugin drops its own public pages' cached copies as native code
+ * drops its pages'.
+ *
+ * @version 1.5 - StaticPageCache::invalidatePath() asks the site (joinery_fence_page_refresh, page.refresh)
  * @version 1.4 - files: File::$remote (sandbox_runtime_files.php, spec sandboxed_plugin_uploads)
  * @version 1.3 - mail: EmailSender::$remote (sandbox_runtime_mail.php, spec sandboxed_plugin_email)
  * @version 1.2 - the model layer (sandbox_runtime_models.php): SystemBase::$remote_store, the plugin's models,
@@ -74,6 +79,15 @@ function joinery_fence_mail_remote(): EmailRemote {
 function joinery_fence_file_remote(): FileRemote {
 	require_once __DIR__ . '/sandbox_runtime_files.php';
 	return new SandboxRemoteFiles();
+}
+
+/**
+ * The fence's StaticPageCache::invalidatePath(): the site drops the cached
+ * copies, of the plugin's own pages under /{plugin}/ only (page.refresh).
+ * Defined only here, in the fence's runtime, which the site never loads.
+ */
+function joinery_fence_page_refresh(string $path, bool $with_children): int {
+	return (int)(SandboxPipe::ask('page.refresh', array('path' => $path, 'with_children' => $with_children))['removed'] ?? 0);
 }
 
 /** What a stand-in throws for something the fence does not have. */

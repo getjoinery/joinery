@@ -145,6 +145,7 @@
         "/rss20_feed",
         "/sandbox_asset",
         "/sandbox_frame",
+        "/sandbox_public_page",
         "/services_connected",
         "/setup",
         "/sitemap",

@@ -14,12 +14,19 @@
  * sandboxed frame needs (it has no origin to name); that is safe only because
  * the outer page's frame-src keeps the frame on core's framed route.
  *
+ * @version 1.1 - the token from the session's mirror cookie first, so a visitor not signed in on a public page can call
  * @version 1.0
  */
 (function () {
 	'use strict';
-	var meta = document.querySelector('meta[name="joinery-api-csrf"]');
-	var csrf = meta ? meta.content : '';
+	// The session's API token: the mirror cookie, which a visitor not signed
+	// in has and a cached page cannot carry, or the page's meta tag.
+	var csrf = function () {
+		var m = document.cookie.match(/(?:^|; )joinery_api_csrf=([^;]+)/);
+		if (m) return decodeURIComponent(m[1]);
+		var meta = document.querySelector('meta[name="joinery-api-csrf"]');
+		return meta ? meta.content : '';
+	};
 	var frames = document.querySelectorAll('iframe.jy-sandbox-frame');
 	if (!frames.length) {
 		return;
@@ -53,7 +60,7 @@
 		fetch('/api/v1/action/sandbox_frame_call', {
 			method: 'POST',
 			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf() },
 			body: JSON.stringify({
 				plugin: frame.getAttribute('data-sbx-plugin'),
 				kind: frame.getAttribute('data-sbx-kind'),

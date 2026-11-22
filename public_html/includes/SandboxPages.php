@@ -8,6 +8,9 @@
  * answered and reads a table's rows. A member's page's logic is
  * logic/sandbox_page_logic.php, which is also the API action the apps call.
  *
+ * @version 1.7 - the public kind (spec sandboxed_plugin_public_pages): framed and drawn public pages, a public page's
+ *                redirects to its own public pages, no uploads, the spam checks' inputs in a visitor's POST forms,
+ *                and the checks' fields never handed to the plugin
  * @version 1.6 - uploads: a drawn page's call carries the request's files (requestFiles()) when the plugin was
  *                approved for them, and its cleaner keeps file inputs (spec sandboxed_plugin_uploads)
  * @version 1.5 - framePrelude(): core's first script in the frame removes the WebRTC constructors, which
@@ -209,9 +212,14 @@ class SandboxPages {
 		return !empty($page['frame']);
 	}
 
+	/** A page kind as the routes name it: admin, member or public. */
+	public static function kind($kind): string {
+		return in_array($kind, array('admin', 'public'), true) ? $kind : 'member';
+	}
+
 	/** The framed route's address for one page. */
 	public static function frameUrl(string $plugin, string $kind, string $slug): string {
-		return self::FRAME_PATH . '?' . http_build_query(array('plugin' => $plugin, 'kind' => $kind === 'admin' ? 'admin' : 'member', 'page' => $slug));
+		return self::FRAME_PATH . '?' . http_build_query(array('plugin' => $plugin, 'kind' => self::kind($kind), 'page' => $slug));
 	}
 
 	/** The one frame source an outer page allows: this site's framed route (PublicPageBase::restrict_frames_to()). */
@@ -229,22 +237,24 @@ class SandboxPages {
 		return self::provenance($manifest)
 			. '<iframe class="jy-sandbox-frame" src="' . htmlspecialchars(self::frameUrl($manifest->name(), $kind, $page['slug'])) . '"'
 			. ' sandbox="allow-scripts" referrerpolicy="no-referrer" title="' . htmlspecialchars((string)$page['title']) . '"'
-			. ' data-sbx-plugin="' . htmlspecialchars($manifest->name()) . '" data-sbx-kind="' . ($kind === 'admin' ? 'admin' : 'member') . '"'
+			. ' data-sbx-plugin="' . htmlspecialchars($manifest->name()) . '" data-sbx-kind="' . self::kind($kind) . '"'
 			. ' data-sbx-page="' . htmlspecialchars((string)$page['slug']) . '"'
 			. ' style="width: 100%; height: 600px; border: 0; display: block;"></iframe>'
 			. '<script src="/assets/js/sandbox-frame.js?v=' . (int)@filemtime(PathHelper::getIncludePath('assets/js/sandbox-frame.js')) . '"></script>';
 	}
 
 	/**
-	 * A framed page the signed-in viewer may open, or why not: the plugin
-	 * active, the page framed and approved (a member page; a framed admin
-	 * page is a grant too), the viewer at the admin pages' class for an admin
-	 * page and passing design 11's check.
+	 * A framed page this viewer may open, or why not: the plugin active, the
+	 * page framed and approved (a member or public page; a framed admin page
+	 * is a grant too), a signed-in viewer for a member or admin page, at the
+	 * admin pages' class for an admin page and passing design 11's check.
+	 * A public page is anyone's.
 	 *
 	 * @return array|string the page, or the refusal
 	 */
 	public static function framedPage(string $plugin, string $kind, string $slug, SessionControl $session) {
-		if (!preg_match(SandboxManifest::NAME_PATTERN, $plugin) || !SandboxPlugins::isActive($plugin) || !$session->is_logged_in()) {
+		if (!preg_match(SandboxManifest::NAME_PATTERN, $plugin) || !SandboxPlugins::isActive($plugin)
+				|| ($kind !== 'public' && !$session->is_logged_in())) {
 			return 'That page does not exist.';
 		}
 		$manifest = SandboxPlugins::manifest($plugin);
@@ -262,6 +272,9 @@ class SandboxPages {
 			}
 			$pages = $manifest->adminPages();
 			$approved = $effective['framed_admin_pages'];
+		} elseif ($kind === 'public') {
+			$pages = $manifest->publicPages();
+			$approved = $effective['public_pages'];
 		} else {
 			$pages = $manifest->profilePages();
 			$approved = $effective['member_pages'];
@@ -309,17 +322,19 @@ class SandboxPages {
 	 * Draw a plugin-drawn page: call the plugin's view in the fence, then
 	 * clean what it returned in the parser jail (SandboxHtmlCleaner).
 	 *
-	 * @param string $kind 'admin' or 'member'
+	 * @param string $kind 'admin', 'member' or 'public'
 	 * @param string $here the page's own address (every form posts to it)
-	 * @return array{ok:bool, html?:string, title?:string, redirect?:string, message?:string}
+	 * @param array|null $access a public page's visitor not signed in: {checked_post} (SandboxHost::page())
+	 * @return array{ok:bool, html?:string, title?:string, redirect?:string, message?:string, post_forms?:int}
 	 */
-	public static function drawPluginPage(string $plugin, string $kind, array $page, string $here, array $query, array $fields, string $method, ?User $user, array $files = array()): array {
+	public static function drawPluginPage(string $plugin, string $kind, array $page, string $here, array $query, array $fields, string $method, ?User $user, array $files = array(), ?array $access = null): array {
 		if (!self::strictScriptsEnforced()) {
 			return array('ok' => false, 'message' => self::NO_STRICT_POLICY);
 		}
-		$uploads = !empty(SandboxConsent::effective($plugin)['uploads']);
+		// A public page takes no uploads: a kept file is the viewer's (design 1).
+		$uploads = $kind !== 'public' && !empty(SandboxConsent::effective($plugin)['uploads']);
 		$files = ($uploads && $method === 'POST') ? self::requestFiles($files) : array();
-		$result = SandboxHost::page($plugin, $kind, $page['slug'], $method, $query, $fields, $user, $files);
+		$result = SandboxHost::page($plugin, $kind, $page['slug'], $method, $query, $fields, $user, $files, $access);
 		if ($result['status'] !== SandboxLog::STATUS_OK) {
 			return array('ok' => false, 'message' => (string)$result['message']);
 		}
@@ -332,7 +347,11 @@ class SandboxPages {
 			return array('ok' => true, 'redirect' => $target);
 		}
 		$body = is_string($out['body'] ?? null) ? $out['body'] : '';
+		// A public page's POST forms are found by the cleaner, which marks
+		// each with a token of this call's (reviewer2 R1).
+		$token = $kind === 'public' ? bin2hex(random_bytes(16)) : '';
 		$clean = DocumentText::parseWith('SandboxHtmlCleaner', $body, array(
+			'post_marker' => $token,
 			'page_url'    => $here,
 			'asset_url'   => self::assetUrl($plugin),
 			'image_hosts' => SandboxConsent::effective($plugin)['outbound_hosts'],
@@ -345,17 +364,28 @@ class SandboxPages {
 			return array('ok' => false, 'message' => 'The plugin\'s page could not be shown safely.');
 		}
 		$title = is_string($out['title'] ?? null) && trim($out['title']) !== '' ? mb_substr(trim($out['title']), 0, 80) : (string)$page['title'];
-		return array('ok' => true, 'html' => $clean['text'], 'title' => $title);
+		$html = $clean['text'];
+		$post_forms = 0;
+		if ($token !== '') {
+			$marker = SandboxHtmlCleaner::postMarker($token);
+			$post_forms = substr_count($html, $marker);
+			// A visitor not signed in: the site's spam checks at the end of
+			// every POST form, added after cleaning, as a native public form
+			// has them; for anyone else the markers go.
+			$html = str_replace($marker, ($access !== null && $post_forms > 0) ? SandboxPublicPages::spamInputs() : '', $html);
+		}
+		return array('ok' => true, 'html' => $html, 'title' => $title, 'post_forms' => $post_forms);
 	}
 
 	/**
 	 * A redirect the plugin asked for, as an address: only to one of its own
-	 * pages of the same kind, with a plain query, or null.
+	 * pages of the same kind (a public page to its own public pages, P8),
+	 * with a plain query, or null.
 	 */
 	public static function redirectTarget(string $plugin, string $kind, array $redirect): ?string {
 		$slug = (string)($redirect['page'] ?? '');
 		$manifest = SandboxPlugins::manifest($plugin);
-		$pages = $kind === 'admin' ? $manifest->adminPages() : $manifest->profilePages();
+		$pages = $kind === 'admin' ? $manifest->adminPages() : ($kind === 'public' ? $manifest->publicPages() : $manifest->profilePages());
 		$found = false;
 		foreach ($pages as $p) {
 			$found = $found || $p['slug'] === $slug;
@@ -363,14 +393,15 @@ class SandboxPages {
 		if (!$found) {
 			return null;
 		}
-		$url = $kind === 'admin' ? SandboxPluginManager::adminPageUrl($plugin, $slug) : self::profilePageUrl($plugin, $slug);
+		$url = $kind === 'admin' ? SandboxPluginManager::adminPageUrl($plugin, $slug)
+			: ($kind === 'public' ? SandboxPublicPages::url($plugin, $slug) : self::profilePageUrl($plugin, $slug));
 		$query = array();
 		foreach ((array)($redirect['query'] ?? array()) as $k => $v) {
 			if (is_string($k) && preg_match('~^[a-z][a-z0-9_]{0,39}$~D', $k) && $k !== 'plugin' && $k !== 'page' && is_scalar($v)) {
 				$query[$k] = mb_substr((string)$v, 0, 500);
 			}
 		}
-		return $query ? $url . '&' . http_build_query($query) : $url;
+		return $query ? $url . (strpos($url, '?') === false ? '?' : '&') . http_build_query($query) : $url;
 	}
 
 	/**
@@ -398,7 +429,9 @@ class SandboxPages {
 		$clean = function (array $in) {
 			$out = array();
 			foreach ($in as $k => $v) {
-				if (!is_string($k) || in_array($k, array('plugin', 'page'), true) || count($out) >= 100) {
+				// Core's own names, and the spam checks' fields, which core read.
+				if (!is_string($k) || in_array($k, array('plugin', 'page'), true)
+						|| in_array($k, SandboxHtmlCleaner::SPAM_CHECK_NAMES, true) || count($out) >= 100) {
 					continue;
 				}
 				if (is_scalar($v)) {

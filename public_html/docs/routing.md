@@ -174,7 +174,7 @@ Two guarantees:
 - **Inactive plugin → hard 404.** A plugin-delegated route is exclusively owned by its plugin. When the plugin is inactive or absent, the URL 404s outright — it never falls through to a theme or base view of the same name.
 - **The plugin gate runs before `check_setting`.** The gating setting row is seeded at plugin activation, so on a never-activated install it does not exist; checking the plugin first is what keeps that case a 404 instead of a silent fall-through.
 
-Use plugin delegation for top-level URLs a plugin owns. Plugin pages under the plugin's own namespace (`/plugins/{plugin}/...`, `/profile/{plugin}/...`) need no serve.php entry — they auto-discover.
+Use plugin delegation for top-level URLs a plugin owns. Plugin pages under the plugin's own namespace (`/{plugin}/...`, `/profile/{plugin}/...`, `/admin/{plugin}/...`; see [Plugin Developer Guide](plugin_developer_guide.md)) need no serve.php entry — they auto-discover.
 
 #### Permission levels and the `min_permission => 0` gotcha
 

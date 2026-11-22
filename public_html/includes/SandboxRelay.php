@@ -20,6 +20,7 @@
  *   file.upload   {tmp_name, name, type, owner_id, restrictions}  File::createFromUpload() of one of this call's uploads
  *   file.bytes    {part, more, name, type, owner_id, restrictions}  File::createFromBytes(), the bytes base64 in parts
  *   file.read     {id, offset}                                 read_bytes() of a file it reaches, base64, one part
+ *   page.refresh  {path, with_children}                        StaticPageCache::invalidatePath() under its own /{plugin}/
  *
  * Record and action asks go to this site's own API over this machine's
  * loopback, signed with the plugin's key, which is loaded here by plugin name
@@ -67,6 +68,16 @@
  * approved records grant on File for the verb. Bytes cross in parts of
  * FILE_PART_BYTES, up to half the call's memory past the runtime's.
  *
+ * A call for a visitor not signed in (a public page; the envelope's
+ * `anonymous`, which core sets, spec sandboxed_plugin_public_pages design 3)
+ * reads only, unless it answers a form POST that passed the site's spam
+ * checks: then it may make at most MAX_ANON_WRITES record writes and actions, and address at
+ * most MAX_ANON_RECIPIENTS people, each counted against the visitor's
+ * network (ANON_MAIL_FEATURE), and never send a batch.
+ *
+ * @version 1.8 - a call for a visitor not signed in reads only outside a checked form POST, and within one writes
+ *               and mails a little (anonymousGate()); page.refresh drops its own public pages' cached copies
+ *               (spec sandboxed_plugin_public_pages)
  * @version 1.7 - a file it keeps carries its install id (fil_install_id), and its own-files reach is by tag and id,
  *               so a later plugin of the same name reaches none of them (spec plugin_install_identity A1)
  * @version 1.6 - a Drive file is read only to a plugin: rename and trash refused (reviewer2 B1, owner 2026-11-21)
@@ -187,6 +198,28 @@ class SandboxRelay {
 	/** The header that names the viewer to the API (apiv1.php, ApiAuth::$sandbox_viewer). */
 	const VIEWER_HEADER = 'X-Joinery-Sandbox-Viewer';
 
+	/** Record writes, actions and page.refresh asks together one checked anonymous POST may make (P14, P18). */
+	const MAX_ANON_WRITES = 10;
+
+	/** People one checked anonymous POST may address, To, Cc and Bcc together (P5). */
+	const MAX_ANON_RECIPIENTS = 3;
+
+	/** Each person an anonymous call mails counts here, per network: 10 an hour (P5). */
+	const ANON_MAIL_FEATURE = 'sandbox_public_mail';
+	const ANON_MAIL_PER_HOUR = 10;
+
+	/** The asks a call for a visitor not signed in may make outside a checked POST: it reads. */
+	const ANON_READ_ASKS = array('record.get', 'record.list', 'log', 'email.render', 'file.read');
+
+	/** @var array|null core's word that this call is for a visitor not signed in: {checked_post} */
+	private $anonymous = null;
+
+	/** @var int record writes this anonymous call made */
+	private $anon_writes = 0;
+
+	/** @var int people this anonymous call addressed */
+	private $anon_recipients = 0;
+
 	public function __construct(string $plugin, array $envelope = array()) {
 		$this->plugin = $plugin;
 		$this->deadline = microtime(true) + SandboxManifest::MAX_TIMEOUT_MS / 1000;
@@ -194,6 +227,8 @@ class SandboxRelay {
 		// member it is for; a signal or a schedule carries none.
 		$id = $envelope['input']['user']['id'] ?? null;
 		$this->viewer = is_int($id) && $id > 0 ? $id : null;
+		// Also core's: a public page's call for a visitor not signed in.
+		$this->anonymous = is_array($envelope['anonymous'] ?? null) ? $envelope['anonymous'] : null;
 		$memory = $envelope['limits']['memory_mb'] ?? null;
 		$this->memory_mb = is_int($memory) && $memory > 0 ? min($memory, SandboxManifest::memoryCeilingMb()) : SandboxManifest::DEFAULT_MEMORY_MB;
 		// The request's uploads, as core put them in the envelope (SandboxPages::requestFiles()).
@@ -224,6 +259,13 @@ class SandboxRelay {
 	public function handle(array $ask): array {
 		$kind = (string)$ask['ask'];
 		try {
+			$gate = $this->anonymousGate($kind, $ask);
+			if ($gate !== null) {
+				return $gate;
+			}
+			if ($kind === 'page.refresh') {
+				return $this->pageRefresh($ask);
+			}
 			if (isset(self::RECORD_VERBS[$kind])) {
 				return $this->record($kind, $ask);
 			}
@@ -248,6 +290,80 @@ class SandboxRelay {
 			$this->note('ask', mb_substr($kind, 0, 40), 'error', 'failed');
 			return array('ok' => false, 'error' => 'The ask failed.');
 		}
+	}
+
+	// ---- a visitor not signed in ----------------------------------------------
+
+	/**
+	 * Null when the ask may go on; otherwise the refusal. Only a call for a
+	 * visitor not signed in is held: it reads, unless it answers a checked
+	 * form POST (design 3); within one, its writes, the people it mails and
+	 * the network's mail count are capped (P14, P5). An ask counted here
+	 * and then refused further on still counts.
+	 */
+	private function anonymousGate(string $kind, array $ask): ?array {
+		if ($this->anonymous === null) {
+			return null;
+		}
+		$short = mb_substr($kind, 0, 40);
+		if (empty($this->anonymous['checked_post'])) {
+			if (in_array($kind, self::ANON_READ_ASKS, true)) {
+				return null;
+			}
+			return $this->refuse('visitor', $short, 'This call is for a visitor who is not signed in, and is not a form they sent, so it may only read.');
+		}
+		if ($kind === 'email.batch') {
+			return $this->refuse('visitor', $short, 'A visitor who is not signed in cannot have a batch of mail sent.');
+		}
+		// An action may store or send what a visitor typed as a write does, so
+		// it counts in the same cap (P18, reviewer2 R2).
+		if (in_array($kind, array('record.create', 'record.update', 'record.delete', 'action', 'page.refresh'), true)) {
+			if ($this->anon_writes >= self::MAX_ANON_WRITES) {
+				return $this->refuse('visitor', $short, 'A form a visitor who is not signed in sent may make at most ' . self::MAX_ANON_WRITES . ' changes.');
+			}
+			$this->anon_writes++;
+			return null;
+		}
+		if ($kind === 'email.send' && !empty(SandboxConsent::effective($this->plugin)['email'])) {
+			try {
+				$message = EmailMessage::fromTransfer(is_array($ask['message'] ?? null) ? $ask['message'] : array());
+			} catch (InvalidArgumentException $e) {
+				return null;
+			}
+			$people = count($message->getRecipients() ?: array()) + count($message->getCc() ?: array()) + count($message->getBcc() ?: array());
+			if ($this->anon_recipients + $people > self::MAX_ANON_RECIPIENTS) {
+				return $this->refuse('visitor', $short, 'A form a visitor who is not signed in sent may have mail sent to at most '
+					. self::MAX_ANON_RECIPIENTS . ' people.');
+			}
+			$state = RequestLogger::attempt_limit_state(self::ANON_MAIL_FEATURE, self::ANON_MAIL_PER_HOUR, 3600);
+			if ($state['count'] + $people > self::ANON_MAIL_PER_HOUR) {
+				return $this->refuse('visitor', $short, RequestLogger::attempt_unit_label() . ' has had mail sent to '
+					. self::ANON_MAIL_PER_HOUR . ' people in the last hour from forms anyone can send.');
+			}
+			$this->anon_recipients += $people;
+			for ($i = 0; $i < $people; $i++) {
+				RequestLogger::log(self::ANON_MAIL_FEATURE, 'recipient', true);
+			}
+		}
+		return null;
+	}
+
+	// ---- the page cache ------------------------------------------------------
+
+	/**
+	 * page.refresh: drop the cached copies of one of the plugin's own pages
+	 * (StaticPageCache::invalidatePath(), as native code calls it), under
+	 * /{plugin}/ only. Allowed where writes are.
+	 */
+	private function pageRefresh(array $ask): array {
+		$path = is_string($ask['path'] ?? null) ? '/' . trim($ask['path'], '/') : '';
+		$own = '/' . $this->plugin;
+		if ($path !== $own && strpos($path, $own . '/') !== 0 || strlen($path) > 200 || strpos($path, '..') !== false) {
+			return $this->refuse('cache', mb_substr($path, 0, 80), 'A plugin drops the cached copies of its own pages only, under ' . $own . '/.');
+		}
+		$removed = StaticPageCache::invalidatePath($path, !empty($ask['with_children']));
+		$this->note('cache', $path, 'ok', (int)$removed . ' dropped');
+		return array('ok' => true, 'removed' => (int)$removed);
 	}
 
 	// ---- records ---------------------------------------------------------

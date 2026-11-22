@@ -39,10 +39,16 @@
  *     "admin_pages":   [ {"slug", "title", "sections": [ … ]} ],   door 4; with no sections the
  *                                           plugin's own view draws the page (a plain page, cleaned by core)
  *     "profile_pages": [ {"slug", "title", "sections": [ … ]} ],
+ *     "public_pages":  [ {"slug", "title", "sections": [ … ], "cache": true, "cache_query": ["id"]} ],
+ *                                           pages anyone can open, at /{plugin}/{slug}; cached for visitors
+ *                                           not signed in unless "cache": false (spec sandboxed_plugin_public_pages)
  *     "menu": {"title": "Notifier"},
  *     "limits": {"memory_mb": 16, "timeout_ms": 5000}
  *   }
  *
+ * @version 1.10 - a form field may not take a name the site uses on the form (SandboxHtmlCleaner::RESERVED_NAMES)
+ * @version 1.9 - "public_pages": pages anyone can open, signed in or not, with "cache" and "cache_query"
+ *                (spec sandboxed_plugin_public_pages)
  * @version 1.8 - "id", required: 32 hex characters naming the plugin across its versions; a package with another
  *                id is a different plugin, refused over an installed one (spec plugin_install_identity D4)
  * @version 1.7 - a call's memory may be up to what the site gives a page request (memoryCeilingMb()), not 64 MB
@@ -79,6 +85,8 @@ class SandboxManifest {
 	const MODEL_PATTERN   = '~^[A-Z][A-Za-z0-9]{1,19}$~D';
 	const FIELD_PATTERN   = '~^[a-z][a-z0-9_]{0,19}$~D';
 	const SLUG_PATTERN    = '~^[a-z][a-z0-9_]{0,29}$~D';
+	/** A query name a public page may list in cache_query. */
+	const QUERY_NAME_PATTERN = '~^[a-z][a-z0-9_]{0,39}$~D';
 	const SIGNAL_PATTERN  = '~^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$~D';
 	const ACTION_PATTERN  = '~^[a-z0-9_]+(/[a-z0-9_]+)?$~D';
 	const HOST_PATTERN    = '~^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$~D';
@@ -190,7 +198,7 @@ class SandboxManifest {
 	public static function problems(array $d, ?string $expected_name = null): array {
 		$e = array();
 		$known = array('name', 'id', 'title', 'version', 'description', 'author', 'platform', 'permissions', 'signals',
-			'schedules', 'outbound_hosts', 'send_email', 'accept_uploads', 'settings', 'models', 'admin_pages', 'profile_pages', 'menu', 'limits');
+			'schedules', 'outbound_hosts', 'send_email', 'accept_uploads', 'settings', 'models', 'admin_pages', 'profile_pages', 'public_pages', 'menu', 'limits');
 		foreach (array_keys($d) as $key) {
 			if (!in_array($key, $known, true)) {
 				$e[] = "unknown key '" . self::show($key) . "'";
@@ -236,7 +244,7 @@ class SandboxManifest {
 		$settings = self::checkSettings($d['settings'] ?? array(), $e);
 		$models = self::checkModels($d['models'] ?? array(), is_string($name) ? $name : '', $e);
 		$slugs = array();
-		foreach (array('admin_pages', 'profile_pages') as $key) {
+		foreach (array('admin_pages', 'profile_pages', 'public_pages') as $key) {
 			self::checkPages($d[$key] ?? array(), $key, $models, $settings, $slugs, $e);
 		}
 		if (isset($d['menu'])) {
@@ -514,7 +522,9 @@ class SandboxManifest {
 			$e[] = "$key must be a list";
 			return;
 		}
-		$member = $key === 'profile_pages';
+		// A public page holds what a member page may, and no more (design 1).
+		$member = $key === 'profile_pages' || $key === 'public_pages';
+		$public = $key === 'public_pages';
 		foreach ($pages as $i => $page) {
 			$label = $key . '[' . $i . ']';
 			if (!is_array($page) || !is_string($page['slug'] ?? null) || !preg_match(self::SLUG_PATTERN, $page['slug'])) {
@@ -526,7 +536,31 @@ class SandboxManifest {
 				$e[] = "$label: the slug '$slug' is used twice";
 			}
 			$slugs[$key][$slug] = true;
-			if (array_diff(array_keys($page), array('slug', 'title', 'sections', 'frame', 'handlers'))) {
+			// A member page and a public page are both drawn by src/views/{slug}.php.
+			if ($public && isset($slugs['profile_pages'][$slug])) {
+				$e[] = "$label: the slug '$slug' is a member page's too, and both would be drawn by src/views/$slug.php";
+			}
+			if ($public) {
+				if (array_diff(array_keys($page), array('slug', 'title', 'sections', 'frame', 'handlers', 'cache', 'cache_query'))) {
+					$e[] = "$key.$slug may hold only slug, title, sections, frame, handlers, cache and cache_query";
+				}
+				if (array_key_exists('cache', $page) && !is_bool($page['cache'])) {
+					$e[] = "$key.$slug: cache is true or false";
+				}
+				// The query names that make a different page, each cached apart;
+				// a request with any other name is not cached (design 5).
+				if (array_key_exists('cache_query', $page)) {
+					if (!is_array($page['cache_query']) || !self::isList($page['cache_query']) || count($page['cache_query']) > 10) {
+						$e[] = "$key.$slug: cache_query is a list of at most 10 query names";
+					} else {
+						foreach ($page['cache_query'] as $q) {
+							if (!is_string($q) || !preg_match(self::QUERY_NAME_PATTERN, $q) || in_array($q, array('plugin', 'page'), true)) {
+								$e[] = "$key.$slug: '" . self::show($q) . "' is not a query name (a-z, 0-9 and _, not plugin or page)";
+							}
+						}
+					}
+				}
+			} elseif (array_diff(array_keys($page), array('slug', 'title', 'sections', 'frame', 'handlers'))) {
 				$e[] = "$key.$slug may hold only slug, title, sections, frame and handlers";
 			}
 			// The handlers a framed page's script may call through core's
@@ -592,7 +626,7 @@ class SandboxManifest {
 
 			case 'table':
 				if ($member) {
-					$e[] = "$label: a profile page cannot show a table; a model's rows are for admins";
+					$e[] = "$label: a member or public page cannot show a table; a model's rows are for admins";
 					break;
 				}
 				if (array_diff(array_keys($s), array('type', 'title', 'model', 'columns', 'order', 'limit'))) {
@@ -650,6 +684,10 @@ class SandboxManifest {
 						$e[] = "$flabel: '{$f['name']}' is used twice";
 					}
 					$seen[$f['name']] = true;
+					// Names core reads or adds itself on a page's form (reviewer2 R4).
+					if (in_array($f['name'], SandboxHtmlCleaner::RESERVED_NAMES, true)) {
+						$e[] = "$flabel: '{$f['name']}' is a name the site uses on the form itself (its page keys and spam checks); choose another";
+					}
 					if (array_diff(array_keys($f), array('name', 'label', 'type', 'required', 'options', 'help'))) {
 						$e[] = "$flabel may hold only name, label, type, required, options and help";
 					}
@@ -671,7 +709,7 @@ class SandboxManifest {
 
 			case 'settings':
 				if ($member) {
-					$e[] = "$label: a profile page cannot hold the plugin's settings";
+					$e[] = "$label: a member or public page cannot hold the plugin's settings";
 					break;
 				}
 				if (array_diff(array_keys($s), array('type', 'title'))) {
@@ -740,6 +778,9 @@ class SandboxManifest {
 
 	/** @return array[] */
 	public function profilePages(): array { return array_values($this->data['profile_pages'] ?? array()); }
+
+	/** Pages anyone can open, signed in or not, at /{plugin}/{slug}. */
+	public function publicPages(): array { return array_values($this->data['public_pages'] ?? array()); }
 
 	public function menu(): ?array { return $this->data['menu'] ?? null; }
 

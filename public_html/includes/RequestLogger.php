@@ -17,6 +17,8 @@
  * of limit it is.
  *
  * @version 1.12
+ * @changelog 1.13 - sandbox_plugin_rate_limit_state() is gone: a sandboxed plugin's key has no budget; its rows are
+ *   stamped 'sandbox:{install id}' (spec sandboxed_plugin_public_pages D3)
  * @changelog 1.12 - sandbox_plugin_rate_limit_state() and set_request_key(): every later row of the request carries one rql_key (a sandboxed
  *   plugin's key: 'sandbox:NAME'); address_rate_limit_state() leaves a sandboxed plugin's rows out, since
  *   they are metered by plugin (specs/sandboxed_php_plugins.md, reviewer2 E4)
@@ -54,7 +56,7 @@ class RequestLogger {
 	/** @var string|null The rql_key every later row of this request carries, unless log() is given one */
 	private static $request_key = null;
 
-	/** The prefix of a sandboxed plugin's rows' rql_key. */
+	/** The prefix of a sandboxed plugin's rows' rql_key, before its install id. */
 	const SANDBOX_KEY_PREFIX = 'sandbox:';
 
 	/** Stamp every later row of this request with one rql_key (null stops it). */
@@ -177,8 +179,9 @@ class RequestLogger {
 	 */
 	public static function address_rate_limit_state($feature, $max_requests, $window_seconds) {
 		// A sandboxed plugin's calls come from this machine's loopback, beside
-		// every other caller there; they are metered by plugin instead, so one
-		// plugin cannot spend the address's budget for the rest.
+		// every other caller there; they are left out (they have no budget:
+		// spec sandboxed_plugin_public_pages D3), so no plugin spends the
+		// address's budget for the rest.
 		return self::count_state($feature, $max_requests, $window_seconds, null,
 			"rql_ip_address = ? AND (rql_api_key_type IS NULL OR rql_api_key_type NOT IN ('"
 				. implode("', '", ApiKey::PER_PERSON_TYPES) . "'))"
@@ -213,18 +216,6 @@ class RequestLogger {
 		}
 		return self::count_state($feature, $max_requests, $window_seconds, $success_filter,
 			'rql_ip_address = ?', isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
-	}
-
-	/**
-	 * rate_limit_state() for one sandboxed plugin: the rows its key's requests
-	 * were stamped with (set_request_key(), 'sandbox:NAME'), wherever they
-	 * came from. Core's relay calls for every plugin from this machine's
-	 * loopback, so each plugin is its own caller.
-	 *
-	 * @return array{allowed:bool,count:int,retry_after:int}
-	 */
-	public static function sandbox_plugin_rate_limit_state($feature, $max_requests, $window_seconds, string $plugin) {
-		return self::rate_limit_state($feature, $max_requests, $window_seconds, null, null, self::SANDBOX_KEY_PREFIX . $plugin);
 	}
 
 	/**

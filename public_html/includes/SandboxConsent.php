@@ -23,6 +23,8 @@
  * disabled or deleted. Once they cannot, the plugin's credential is switched
  * off (User::save()) and the plugin waits on another admin's approval.
  *
+ * @version 1.11 - public pages (spec sandboxed_plugin_public_pages): each is a grant, its own kind, described as
+ *                 pages anyone can open, signed in or not
  * @version 1.10 - the File grant line says Drive files are read only; the uploads line no longer says "never other files"
  *                 (reviewer2 B1, B3)
  * @version 1.9 - a records grant on File says what it reaches: every file, read, renamed, trashed
@@ -43,6 +45,9 @@
  */
 
 class SandboxConsent {
+
+	/** The kinds of page grant: a page by its slug, approved by its title and words. */
+	const PAGE_KINDS = array('member_pages', 'public_pages', 'framed_admin_pages');
 
 	/**
 	 * What a manifest asks for, in a canonical shape two manifests can be
@@ -79,22 +84,16 @@ class SandboxConsent {
 		sort($hosts);
 		$member_pages = array();
 		foreach ($m->profilePages() as $page) {
-			if (!empty($page['frame'])) {
-				$member_pages[$page['slug']] = $page['title'] . ' (a framed page running the plugin\'s own script, walled off from the site)';
-				continue;
-			}
-			if (!isset($page['sections'])) {
-				// Drawn by its own code: it may show what it reads and ask anything.
-				$member_pages[$page['slug']] = $page['title'] . ' (drawn by the plugin, which may show what it can read and ask members for anything)';
-				continue;
-			}
-			$has_form = false;
-			foreach ($page['sections'] as $section) {
-				$has_form = $has_form || $section['type'] === 'form';
-			}
-			$member_pages[$page['slug']] = $page['title'] . ($has_form ? ' (with a form members fill in)' : '');
+			$member_pages[$page['slug']] = $page['title'] . self::pageWords($page, 'members');
 		}
 		ksort($member_pages);
+		// A page anyone can open, signed in or not: a grant, described as a
+		// member page is, since it shows and asks the same things of anyone.
+		$public_pages = array();
+		foreach ($m->publicPages() as $page) {
+			$public_pages[$page['slug']] = $page['title'] . self::pageWords($page, 'visitors');
+		}
+		ksort($public_pages);
 		// A framed admin page runs the plugin's script in an admin's browser:
 		// a grant, unlike a plain admin page (design 12).
 		$framed_admin_pages = array();
@@ -115,6 +114,7 @@ class SandboxConsent {
 			'email'          => $m->sendsEmail() ? array('send') : array(),
 			'uploads'        => $m->acceptsUploads() ? array('accept') : array(),
 			'member_pages'   => $member_pages,
+			'public_pages'   => $public_pages,
 			'framed_admin_pages' => $framed_admin_pages,
 		);
 	}
@@ -155,7 +155,7 @@ class SandboxConsent {
 				$out['schedules'][$name] = $words;
 			}
 		}
-		foreach (array('member_pages', 'framed_admin_pages') as $kind) {
+		foreach (self::PAGE_KINDS as $kind) {
 			foreach ($asked[$kind] ?? array() as $slug => $title) {
 				// A page that gains a form, or becomes framed, asks for more than it did.
 				if (($approved[$kind][$slug] ?? null) !== $title) {
@@ -171,7 +171,7 @@ class SandboxConsent {
 	 * approval covers. Nothing at all with no approval.
 	 */
 	public static function effective(string $plugin): array {
-		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'framed_admin_pages' => array());
+		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array());
 		try {
 			$asked = self::grantsOf(SandboxPlugins::manifest($plugin));
 		} catch (SandboxManifestException $e) {
@@ -199,7 +199,7 @@ class SandboxConsent {
 				$out['schedules'][$name] = $words;
 			}
 		}
-		foreach (array('member_pages', 'framed_admin_pages') as $kind) {
+		foreach (self::PAGE_KINDS as $kind) {
 			foreach ($asked[$kind] ?? array() as $slug => $title) {
 				if (($approved[$kind][$slug] ?? null) === $title) {
 					$out[$kind][$slug] = $title;
@@ -397,7 +397,32 @@ class SandboxConsent {
 		if (!empty($grants['member_pages'])) {
 			$out["Add these pages to members' menus"] = array_values($grants['member_pages']);
 		}
+		if (!empty($grants['public_pages'])) {
+			$out['Pages anyone can open, signed in or not. What they show and do runs with the access approved here']
+				= array_values($grants['public_pages']);
+		}
 		return $out;
+	}
+
+	/**
+	 * What a page is, after its title on the approval screen: framed, drawn
+	 * by the plugin, or with a form $who fill in. The words are part of the
+	 * grant, so a page that changes kind asks again.
+	 */
+	private static function pageWords(array $page, string $who): string {
+		if (!empty($page['frame'])) {
+			return ' (a framed page running the plugin\'s own script, walled off from the site)';
+		}
+		if (!isset($page['sections'])) {
+			// Drawn by its own code: it may show what it reads and ask anything.
+			return ' (drawn by the plugin, which may show what it can read and ask ' . $who . ' for anything)';
+		}
+		foreach ($page['sections'] as $section) {
+			if ($section['type'] === 'form') {
+				return ' (with a form ' . $who . ' fill in)';
+			}
+		}
+		return '';
 	}
 
 	private static function scheduleWords(array $s): string {

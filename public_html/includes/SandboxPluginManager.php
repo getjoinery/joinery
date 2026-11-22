@@ -27,6 +27,8 @@
  * what was approved: on activation, on a new approval, and when an active
  * plugin's files are replaced.
  *
+ * @version 1.4 - install, reconcile, deactivate and teardown drop the plugin's cached public pages
+ *                (SandboxPublicPages::dropCache(), spec sandboxed_plugin_public_pages design 5)
  * @version 1.3 - modelCollisions() refuses a model name a core or native class already has (its short name in the fence)
  * @version 1.2 - install() and activate() refuse while sandboxed plugins are switched off (SandboxPlugins::enabled())
  * @version 1.1 - approval before activation, compatibility (Q13), credential, receiver, scheduled runs
@@ -178,6 +180,8 @@ class SandboxPluginManager {
 	public static function install(string $name): void {
 		SandboxPlugins::demandEnabled();
 		self::syncTables($name);
+		// A copy an earlier install of this name left is never this one's page.
+		SandboxPublicPages::dropCache($name);
 	}
 
 	/** Where an admin reviews and approves what a sandboxed plugin asks for. */
@@ -219,6 +223,8 @@ class SandboxPluginManager {
 		SandboxCredentials::mint($name);
 		self::syncReceiver($name);
 		self::syncSchedules($name);
+		// What its public pages show may have changed with its files or approval.
+		SandboxPublicPages::dropCache($name);
 	}
 
 	/**
@@ -237,6 +243,7 @@ class SandboxPluginManager {
 		SignalDeliveryQueue::reset_cache();
 		SandboxPlugins::reset();
 		SandboxModels::reset();
+		SandboxPublicPages::dropCache($name);
 	}
 
 	/**
@@ -256,6 +263,7 @@ class SandboxPluginManager {
 		DeletionRule::pruneOrphanedRules();
 		SandboxPlugins::reset();
 		SandboxModels::reset();
+		SandboxPublicPages::dropCache($name);
 	}
 
 	/**

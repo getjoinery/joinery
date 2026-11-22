@@ -859,7 +859,6 @@ Who is counted depends on the credential:
 | Requests on an app credential | User, all their app credentials together | 20,000 (`ApiAuth::APP_REQUEST_LIMIT`), or the browser limit when higher | Per hour | `api_session_rate_limit_requests` / `_window` |
 | Failed app sign-ins (`app_access_auth`) | Source network (IPv4 address, IPv6 /64); and username | 60; 600 | Per 15 minutes | — |
 | Agent channel, device link, Drive upload | IP address | own buckets | Per hour | `api_agent_*`, `api_device_link_*`, `api_upload_*` |
-| A sandboxed plugin's key | Plugin | 1,000 | Per hour | `api_rate_limit_requests` / `_window`; not counted against the loopback address |
 
 A person's browser, their devices and their app credentials are three separate budgets, each counted on the requests made with that kind of credential. A desktop's first sync of a large folder (about two requests a file) or a mail program's first download of a mailbox slows itself when it reaches its budget and leaves the person's website working. The budget is per kind, never per key: linking another device or adding another app password buys no more requests.
 

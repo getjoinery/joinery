@@ -9,6 +9,7 @@
  * each one refused with the reason. It is the per-plugin log an author reads
  * (plugin_tiers.md WP8) and an admin checks when a plugin misbehaves.
  *
+ * @version 1.3 - sbl_ip_network: the network of a visitor not signed in; those rows have their own, shorter retention
  * @version 1.2 - sbl_install_id: the install of the plugin the call ran under; the log reads by it
  * @version 1.1 - KIND_PAGE: a page drawn by the plugin's own view
  * @version 1.0
@@ -37,10 +38,23 @@ class SandboxLog extends SystemBase {
 	const STATUS_BUSY        = 'busy';
 
 	public static $retention_policy = array(
-		'label'          => 'Sandboxed plugin call log',
-		'age_column'     => 'sbl_create_time',
-		'age_unit'       => 'days',
-		'window_setting' => 'sandbox_log_retention_days',
+		array(
+			'key'            => 'all',
+			'label'          => 'Sandboxed plugin call log',
+			'age_column'     => 'sbl_create_time',
+			'age_unit'       => 'days',
+			'window_setting' => 'sandbox_log_retention_days',
+		),
+		// A call for a visitor not signed in carries their network, and goes
+		// sooner (spec sandboxed_plugin_public_pages design 4).
+		array(
+			'key'            => 'anonymous',
+			'label'          => 'Sandboxed plugin calls for visitors not signed in',
+			'age_column'     => 'sbl_create_time',
+			'age_unit'       => 'days',
+			'only_where'     => 'sbl_ip_network IS NOT NULL',
+			'window_setting' => 'sandbox_anonymous_log_retention_days',
+		),
 	);
 
 	protected static $foreign_key_actions = array(
@@ -66,6 +80,9 @@ class SandboxLog extends SystemBase {
 		'sbl_calls'          => array('type' => 'jsonb'),
 		// Who asked, for a UI call made from a page.
 		'sbl_usr_user_id'    => array('type' => 'int4'),
+		// The network (IpAddress::network()) of a visitor not signed in, for a
+		// call from a public page; null for every other call.
+		'sbl_ip_network'     => array('type' => 'varchar(45)'),
 		'sbl_create_time'    => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 

@@ -179,13 +179,14 @@ try {
 	$row = new $class($id, TRUE);
 	check($row->key && !$row->get($prefix . '_delete_time'), 'and an admin can restore it');
 
-	section('Its API calls are metered as the plugin\'s');
+	section('Its API calls are stamped with its install, and have no budget');
 	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT COUNT(*) FROM rql_request_logs WHERE rql_feature = 'api' AND rql_key = ? AND rql_create_time > NOW() - INTERVAL '10 minutes'");
-	$q->execute(array(RequestLogger::SANDBOX_KEY_PREFIX . $name));
+	$q->execute(array(RequestLogger::SANDBOX_KEY_PREFIX . PluginInstallIdentity::idOf($name)));
 	$stamped = (int)$q->fetchColumn();
-	check($stamped >= 5, 'Each of its API requests is logged as the plugin\'s (' . $stamped . ')');
-	$state = RequestLogger::sandbox_plugin_rate_limit_state('api', 1000, 3600, $name);
-	check($state['count'] === $stamped, 'and counts against its own budget', json_encode($state));
+	check($stamped >= 5, 'Each of its API requests is logged with its install id (' . $stamped . ')');
+	check(!method_exists('RequestLogger', 'sandbox_plugin_rate_limit_state')
+		&& strpos((string)file_get_contents(PathHelper::getIncludePath('api/apiv1.php')), 'api_rate_limited($plugin_state') === false,
+		'No hourly budget is kept for a plugin\'s key (spec sandboxed_plugin_public_pages D3)');
 	$saved_addr = $_SERVER['REMOTE_ADDR'] ?? null;
 	$_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT COUNT(*) FROM rql_request_logs WHERE rql_feature = 'api' AND rql_ip_address = '127.0.0.1' AND rql_create_time > NOW() - INTERVAL '3600 seconds'");

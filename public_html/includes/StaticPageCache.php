@@ -6,6 +6,10 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 2.4 - a query whose names or values lose characters to the file name carries a hash of the real query,
+ *                so ?id=1-2 and ?id=12 are two pages, not one
+ * @version 2.3 - invalidatePath() inside a sandboxed plugin's fence asks the site (joinery_fence_page_refresh());
+ *                countPath(): how many copies of one path are cached
  * @version 2.1 - the URL in the cached page's comment is escaped: a path holding --> can't close it
  * @version 2.2 - no nonce code: pages carry none (specs/strict_script_policy.md WP10)
  * @version 2.0 - a page that already holds NONCE_PLACEHOLDER is never cached (a stored script could claim the nonce)
@@ -67,6 +71,7 @@ class StaticPageCache {
      */
     public static function setCacheDirForTests(?string $dir): void {
         self::$index = null;
+        self::$skip_request = false;
         self::$unreadable_logged = false;
         if ($dir === null) {
             self::$cache_dir = null;
@@ -298,13 +303,21 @@ class StaticPageCache {
             ksort($params);
             // Build parameter string
             $param_parts = [];
+            $changed = false;
             foreach ($params as $key => $value) {
                 // Sanitize parameter names and values
+                $raw_value = is_scalar($value) ? (string)$value : '';
                 $safe_key = preg_replace('/[^a-zA-Z0-9]/', '', (string)$key);
-                $safe_value = preg_replace('/[^a-zA-Z0-9]/', '', is_scalar($value) ? (string)$value : '');
+                $safe_value = preg_replace('/[^a-zA-Z0-9]/', '', $raw_value);
+                $changed = $changed || $safe_key !== (string)$key || $safe_value !== $raw_value;
                 $param_parts[] = $safe_key . '-' . $safe_value;
             }
             $safe_name .= '__' . implode('_', $param_parts);
+            // Stripping can make two queries one name (?id=1-2 and ?id=12);
+            // the real query's hash keeps them apart.
+            if ($changed) {
+                $safe_name .= '_' . substr(hash('sha256', http_build_query($params)), 0, 12);
+            }
         }
 
         // Truncate if too long (filesystem limit is usually 255 chars)
@@ -1171,6 +1184,12 @@ class StaticPageCache {
      * reaches every variant of its pages.
      */
     public static function invalidatePath($path, $with_children = false) {
+        // Inside a sandboxed plugin's fence there is no cache to reach: the
+        // site drops the copies, of the plugin's own pages only (SandboxRelay
+        // page.refresh), when the fence's runtime defines this.
+        if (function_exists('joinery_fence_page_refresh')) {
+            return joinery_fence_page_refresh((string)$path, (bool)$with_children);
+        }
         return $with_children ? self::invalidatePaths(array(), array($path)) : self::invalidatePaths(array($path), array());
     }
 
@@ -1230,6 +1249,27 @@ class StaticPageCache {
             self::saveIndex();
         }
         return $removed;
+    }
+
+    /**
+     * How many copies of one path (any query string) the index holds. A page
+     * whose every query is a new copy stops being cached at a cap of its own
+     * (a sandboxed plugin's public page, SandboxPublicPages::MAX_COPIES).
+     */
+    public static function countPath($path) {
+        self::init();
+        if (self::$cache_dir === null || self::indexUnavailable()) {
+            return 0;
+        }
+        $path = '/' . trim((string)$path, '/');
+        $n = 0;
+        foreach (self::loadIndex() as $hash => $entry) {
+            if ($hash !== self::CONFIG_KEY && is_array($entry) && isset($entry['url'])
+                    && '/' . trim((string)parse_url((string)$entry['url'], PHP_URL_PATH), '/') === $path) {
+                $n++;
+            }
+        }
+        return $n;
     }
 
     /**

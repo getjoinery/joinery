@@ -1571,6 +1571,14 @@ class RouteHelper {
             $view_full_path = PathHelper::getThemeFilePath(basename($view_file), dirname($view_file), 'system', null, null, false, false);
         }
 
+        // A sandboxed plugin's page anyone can open, at its own address
+        // /{plugin}/{slug} as a native plugin's views are: only where nothing
+        // else on the site answers, so it never takes a page the site has
+        // (spec sandboxed_plugin_public_pages).
+        if (!$view_full_path && SandboxPublicPages::forPath($request_path) !== null) {
+            $view_full_path = PathHelper::getAbsolutePath('views/sandbox_public_page.php');
+        }
+
         if (self::$match_only_mode && $view_full_path) {
             self::$match_only_result = [
                 'matched' => true,

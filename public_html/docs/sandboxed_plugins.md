@@ -169,6 +169,12 @@ manifest says can be code.
 | `settings` | no | `name`, `label`, `type` (`text`, `textarea`, `number`, `boolean`, `select`, `url`, `email`), `secret` (text and url only, no default), `default`, `required`, `options` (select), `help` |
 | `models` | no | Up to 20; see [Data](#data) |
 | `admin_pages`, `profile_pages` | no | `slug`, `title`, `sections` (`text`, `table`, `form`, `settings`); a profile page holds no table or settings |
+| `public_pages` | no | Pages anyone can open (see [Public pages](#public-pages)): what a profile page holds, plus `cache` (`true` or `false`, default `true`) and `cache_query` (up to 10 query names, each cached apart); a slug a profile page also uses is refused |
+
+A form field may not be named `plugin`, `page`, `action`, `section`,
+`website_url`, `antispam_question`, `antispam_question_answer`,
+`h-captcha-response` or `g-recaptcha-response`: the site uses those names on
+the form itself.
 | `menu` | no | `title`: one admin menu entry holding a link to each admin page |
 | `limits` | no | `memory_mb` (default 16) and `timeout_ms` (100-10000, default 5000) for each call. A call gets at most the memory the site gives a page request (`memory_limit` of the web server's PHP, 128 MB unless the site sets otherwise; `SandboxManifest::memoryCeilingMb()`), which is what a native plugin's code has; asking for more gives that |
 
@@ -344,6 +350,7 @@ Activate, and `PluginManager::activate()` refuses it
 | Send email | `send_email`: to any address, through the site's mail service, from any sender address it accepts (never a protected mailbox domain), using the site's email templates |
 | Accept uploaded files | `accept_uploads`: on its own pages, from the person viewing; each file kept in that person's account, private to them and admins; it reaches only the files it kept |
 | Add these pages to members' menus | `profile_pages`, saying which have a form members fill in and which the plugin draws |
+| Pages anyone can open, signed in or not. What they show and do runs with the access approved here | `public_pages`, saying the same of each |
 | Warning | personal records (all rows or own), or the files people upload to it, beside outside websites or email: it could send them off the site |
 
 and, as its own, its models, its admin pages and its settings. A record grant
@@ -520,7 +527,7 @@ named that way on the approval screen.
 `"frame": true` (and no sections) is the plugin's whole document, drawn by
 the same view, script and styles inline, served uncleaned in a frame. The
 outer page (the admin or member page) holds an `<iframe sandbox="allow-scripts">`
-of `/sandbox_frame?plugin=&kind=admin|member&page=` and core's bridge
+of `/sandbox_frame?plugin=&kind=admin|member|public&page=` and core's bridge
 `assets/js/sandbox-frame.js`, and its `frame-src` names that route alone
 (`PublicPageBase::restrict_frames_to()`): every policy the page sends is
 narrowed, and one more is sent, enforced whatever the site's own policy
@@ -548,7 +555,8 @@ out, except DNS prefetch, which is not covered in every browser.
 The frame's one way out is a message to the bridge, which acts only on
 messages from that frame's window and answers it alone:
 `{type: 'sbx-call', id, handler, data}` calls the plugin's own handler as the
-viewer (the action `sandbox_frame_call`, browser session only, answered by
+viewer (the action `sandbox_frame_call`, browser session only, a guest's for a
+public page only, answered by
 `on_ui` with `values` = `data` and `source` `frame`, `kind` and `page`), but
 only a handler the framed page lists in the manifest's `handlers`; an admin
 form's handler is never reachable from a member's frame and comes back as
@@ -558,6 +566,64 @@ A framed member page is named so on the approval screen, and a framed admin
 page is a grant of its own ("Run its own script in admins' browsers"), so a
 page that becomes framed waits on approval. Assets at `/sandbox_asset` need
 no sign-in: the frame loads them without the site's cookies.
+
+### Public pages
+
+A page in `public_pages` opens for anyone, signed in or not, at the plugin's
+own address, `/<plugin>/<slug>`, where a native plugin's views open;
+`/<plugin>` alone opens its page `index`. An address is answered here only
+when nothing else on the site answers it (`SandboxPublicPages::forPath()`,
+reached from RouteHelper's view lookup), so a plugin never takes one of the
+site's pages, and a plugin's name is never one of the reserved names
+(`PluginManager::RESERVED_NAMES`). It is drawn as a member page is: from its
+sections, by the plugin's view `src/views/{slug}.php` (told `kind`
+`public`), or framed (`/sandbox_frame?...&kind=public`). Its view is
+`views/sandbox_public_page.php` and its logic
+`logic/sandbox_public_page_logic.php`, which is no API action. It carries the
+line naming the plugin, and takes no uploads. Each page is a grant: one not
+approved is a 404.
+
+A signed-in visitor is the page's viewer, as on a member page. A visitor not
+signed in is no one: the call's `user` is null, so own-rows asks and uploads
+are refused, and the call is a visitor's:
+
+- **It reads.** A GET, a framed page's handler call and every other call
+  for such a visitor may read, log and fill a template, and nothing else: a
+  create, update or delete, an action, mail, an outside request or
+  `page.refresh` is refused for that call.
+- **A form it sent, once checked, may write a little.** A POST of a form the
+  site drew or cleaned first passes FormWriter's spam checks, each as the
+  site's settings have it (the honeypot, answered with a 404; the anti-spam
+  question; the captcha), before the plugin is called. The site puts those
+  inputs at the end of each POST form itself, after cleaning, where the
+  cleaner marked it with a token of the call's; their names
+  (`SandboxHtmlCleaner::SPAM_CHECK_NAMES`) are core's, never drawn by the
+  plugin nor handed to it. Such a call has the plugin's full approved access
+  within three caps that hold even with every spam check switched off: 10
+  record writes, actions and `page.refresh` asks together
+  (`SandboxRelay::MAX_ANON_WRITES`), 3 people addressed in all, To, Cc and
+  Bcc (`MAX_ANON_RECIPIENTS`), each counted against the visitor's network at
+  10 an hour (`sandbox_public_mail`), and no `email.batch`.
+- **Its own pool.** Visitors' calls run in `SandboxHost::ANON_SLOTS` (2) of
+  their own, never a member's slot, so no number of visitors makes a
+  member's or an admin's page busy; one at a time per network (an IPv4
+  address, an IPv6 /64; locks `anon_net_{0-63}` in `{site root}/cache/sandbox/`);
+  and `SandboxHost::PUBLIC_CALLS_PER_MINUTE` (60) a minute per network
+  (`sandbox_public_page`). A call refused for any of these writes nothing;
+  one that runs is logged with no user and the visitor's network
+  (`sbl_ip_network`), and kept `sandbox_anonymous_log_retention_days` (2).
+
+A visitor's GET goes through the static page cache as a native page's does:
+the bare address, or with only the query names `cache_query` lists (any
+other name is not cached), at most `SandboxPublicPages::MAX_COPIES` (200)
+copies a page, and never a page holding a POST form, a framed page, a draw
+that failed or was refused, or one with `"cache": false`. The frame's
+document is never cached. The plugin drops its own pages' copies as native
+code does, with `StaticPageCache::invalidatePath('/<plugin>/<slug>')`, which
+in the fence is the ask `page.refresh`, under its own address only and where
+writes are allowed. Installing, activating, approving, replacing its files,
+deactivating, a lapsed approval and uninstalling drop every copy under
+`/<plugin>/`.
 
 ## Calls
 
@@ -813,6 +879,7 @@ Every ask the fence writes, and what core does with it:
 | `file.upload` | `tmp_name`, `name`, `type`, `owner_id`, `restrictions` | `File::createFromUpload()` of one of this call's uploads; answers `record` |
 | `file.bytes` | `part` (base64), `more`; on the last part `name`, `type`, `owner_id`, `restrictions` | the parts gathered, then `File::createFromBytes()`; answers `record` |
 | `file.read` | `id`, `offset` | one 1 MB part of `read_bytes()` of a file it reaches; answers `bytes` (base64), `size`, `next` |
+| `page.refresh` | `path`, `with_children` | `StaticPageCache::invalidatePath()` of a path under `/<plugin>/`; answers `removed` |
 
 `model` is the plugin's own model by its short name (`SentLog`) or a core
 model it was approved for (`Event`). Record and action asks go to the site's
@@ -840,10 +907,11 @@ deadline, at a refusal or just after its answer, by closing the launcher's
 watch pipe (descriptor 3), since it cannot signal the supervisor; a call
 that answered is answered whatever the plugin does after. The launcher must
 carry `JOINERY_JAIL_FEATURES=watch-fd` (2.1.0), or every call is unavailable.
-A plugin's API requests are logged with `rql_key` `sandbox:{plugin}` and
-metered on a budget of their own (`api_rate_limit_requests` per
-`api_rate_limit_window`, per plugin), and left out of the loopback address's
-count, so one plugin cannot spend it for the rest. Over a container's plain
+A plugin's API requests are logged with `rql_key` `sandbox:{install id}`
+and left out of the loopback address's count, so one plugin cannot spend it
+for the rest. They have no request budget: the key is accepted only from this
+machine, and a plugin's load is bounded by its run slots, each call's time
+cap and its 200 asks a call. Over a container's plain
 HTTP the relay says `X-Forwarded-Proto: https`. What the process writes to standard error goes to the
 error log, capped and on one line. Signal and schedule calls run at most
 `SandboxHost::BACKGROUND_SLOTS` (2) at a time per site, beside the UI slots.

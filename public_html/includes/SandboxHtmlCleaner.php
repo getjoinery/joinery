@@ -38,7 +38,7 @@
  *
  * A class survives only from the kit's content classes (CLASSES), and
  * autocomplete only as on or off. Core's own control names (plugin, page,
- * action, section) are dropped, and a GET form is given the page's own
+ * action, section, and the spam checks' fields) are dropped, and a GET form is given the page's own
  * plugin and page as hidden fields (form_hidden), since a GET submit
  * replaces the action's query.
  *
@@ -48,6 +48,9 @@
  * plugin was approved to take uploaded files), upload_url (the site's uploads
  * address, /uploads/).
  *
+ * @version 1.4 - post_marker: each POST form of the stable output ends with a comment carrying a per-call token, so
+ *                core finds the forms from the DOM, never by matching markup (reviewer2 R1)
+ * @version 1.3 - the spam checks' field names are core's (RESERVED_NAMES, SPAM_CHECK_NAMES; spec sandboxed_plugin_public_pages)
  * @version 1.2 - uploads: a file input in a POST form, the form sent multipart; images under the uploads address
  *                (spec sandboxed_plugin_uploads)
  * @version 1.1 - reviewer2 H1-H5: core's control names dropped; classes from the kit's content list only; GET
@@ -99,9 +102,15 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 
 	/**
 	 * Control names that are core's, never a plugin's: the page logic reads
-	 * plugin, page, action and section, and FormWriter's token is _csrf_token.
+	 * plugin, page, action and section, FormWriter's token is _csrf_token,
+	 * and the spam checks core adds to a public page's form are its own
+	 * (SPAM_CHECK_NAMES), so a plugin cannot draw one already answered.
 	 */
-	const RESERVED_NAMES = array('_csrf_token', 'plugin', 'page', 'action', 'section');
+	const RESERVED_NAMES = array('_csrf_token', 'plugin', 'page', 'action', 'section',
+		'website_url', 'antispam_question', 'antispam_question_answer', 'h-captcha-response', 'g-recaptcha-response');
+
+	/** The fields of FormWriter's spam checks (honeypot, question, captcha), which core adds itself. */
+	const SPAM_CHECK_NAMES = array('website_url', 'antispam_question', 'antispam_question_answer', 'h-captcha-response', 'g-recaptcha-response');
 
 	/**
 	 * The classes a plugin's markup may use: the kit's content classes
@@ -128,7 +137,7 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 
 	public function __construct(array $options = array()) {
 		$this->options = $options + array('page_url' => '', 'asset_url' => '', 'image_hosts' => array(), 'form_hidden' => array(),
-			'uploads' => false, 'upload_url' => '');
+			'uploads' => false, 'upload_url' => '', 'post_marker' => '');
 	}
 
 	/**
@@ -145,7 +154,37 @@ class SandboxHtmlCleaner implements SandboxParserInterface {
 		if ($twice !== $once) {
 			throw new DocumentTextException('The page changes when it is read back (a mutation), so it is not shown.', 'failed');
 		}
-		return $once;
+		return $this->markPostForms($once);
+	}
+
+	/**
+	 * With the post_marker option (32 hex characters, new for each call), the
+	 * stable output with <!--sbxpost:TOKEN--> as the last child of each POST
+	 * form: core counts the forms and puts its spam-check inputs there. Read
+	 * from the DOM, so no attribute value can fake or hide a form, and the
+	 * token is not one the plugin can know.
+	 */
+	private function markPostForms(string $html): string {
+		$token = (string)$this->options['post_marker'];
+		if (!preg_match('~^[0-9a-f]{32}$~D', $token)) {
+			return $html;
+		}
+		$doc = Dom\HTMLDocument::createFromString('<!DOCTYPE html><html><head></head><body>' . $html . '</body></html>',
+			LIBXML_NOERROR, 'UTF-8');
+		if ($doc->body === null) {
+			return $html;
+		}
+		foreach ($doc->body->querySelectorAll('form') as $form) {
+			if ($form->getAttribute('method') === 'post') {
+				$form->appendChild($doc->createComment('sbxpost:' . $token));
+			}
+		}
+		return $doc->body->innerHTML;
+	}
+
+	/** The marker markPostForms() writes for $token. */
+	public static function postMarker(string $token): string {
+		return '<!--sbxpost:' . $token . '-->';
 	}
 
 	/** One parse, clean and write. */

@@ -140,7 +140,7 @@ $cases = array(
 	'a select setting with no options'         => array(function (&$x) { $x['settings'][1]['type'] = 'select'; }, 'needs options'),
 	'a table of a model it does not declare'   => array(function (&$x) { $x['admin_pages'][0]['sections'][0]['model'] = 'User'; }, "this plugin's models"),
 	'a table column that is not a field'       => array(function (&$x) { $x['admin_pages'][0]['sections'][0]['columns'][] = 'usr_password'; }, 'is not a field'),
-	'a table on a profile page'                => array(function (&$x) { $x['profile_pages'] = $x['admin_pages']; }, 'a profile page cannot show a table'),
+	'a table on a profile page'                => array(function (&$x) { $x['profile_pages'] = $x['admin_pages']; }, 'a member or public page cannot show a table'),
 	'a menu with no admin pages'               => array(function (&$x) { $x['admin_pages'] = array(); }, 'needs at least one admin page'),
 	'a memory limit past what a manifest may write' => array(function (&$x) { $x['limits']['memory_mb'] = SandboxManifest::MEMORY_SHAPE_MAX_MB + 1; }, 'memory_mb'),
 	'a timeout above the ceiling'              => array(function (&$x) { $x['limits']['timeout_ms'] = 60000; }, 'timeout_ms'),

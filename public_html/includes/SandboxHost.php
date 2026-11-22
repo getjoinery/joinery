@@ -30,7 +30,7 @@
  *
  * `input` per export: on_ui {handler, values, user: {id, permission, timezone}};
  * on_ui also carries source ('form', or 'frame' with kind and page);
- * on_page {page, kind: admin|member, method, query, fields, user};
+ * on_page {page, kind: admin|member|public, method, query, fields, user};
  * on_signal {signal, message_id, timestamp, data}; on_schedule {schedule, time}.
  *
  * The runner is SandboxRunner: one fenced process per call
@@ -45,6 +45,12 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.12 - a ui() or page() call with no user is always a visitor's (reviewer2 R5); the network's count is read
+ *                under its lock
+ * @version 1.11 - a call for a visitor not signed in, from a public page (spec sandboxed_plugin_public_pages design 4):
+ *                ANON_SLOTS of its own, one at a time per network, PUBLIC_CALLS_PER_MINUTE per network; a refusal
+ *                writes no log row; the envelope says it is anonymous and whether it answers a checked form POST
+ *                (anonymous), which the relay reads; its log row carries the visitor's network
  * @version 1.10 - a call's log row carries the plugin's install id (spec plugin_install_identity A5)
  * @version 1.9 - a page call's input carries files (the request's uploads, SandboxPages::requestFiles()); the public
  *                facts include upload_web_dir, which File::get_url() reads (spec sandboxed_plugin_uploads)
@@ -71,6 +77,22 @@ class SandboxHost {
 	/** Signal and schedule calls a site runs at once. */
 	const BACKGROUND_SLOTS = 2;
 
+	/**
+	 * Calls for visitors not signed in (public pages) a site runs at once,
+	 * apart from UI_SLOTS: no number of visitors can make a member's or an
+	 * admin's page busy (design 4).
+	 */
+	const ANON_SLOTS = 2;
+
+	/** The fixed number of lock files an anonymous call's network is hashed into: one call per network at a time. */
+	const NETWORK_LOCKS = 64;
+
+	/** Anonymous calls one network may make in a minute (an IPv4 address, an IPv6 /64). */
+	const PUBLIC_CALLS_PER_MINUTE = 60;
+
+	/** The attempt-limit feature an anonymous call is counted under (RequestLogger). */
+	const PUBLIC_LIMIT_FEATURE = 'sandbox_public_page';
+
 	/** What a call is answered with when its runner gives no reason. */
 	const NO_RUNNER_MESSAGE = 'Nothing on this server can run the plugin.';
 
@@ -91,7 +113,11 @@ class SandboxHost {
 	 */
 	public static function ui(string $plugin, string $handler, array $values, ?User $user, array $from = array()): array {
 		$user_id = $user ? (int)$user->key : null;
-		$slot = self::takeUiSlot($user_id);
+		$anonymous = self::anonymousAccess($user, $from['access'] ?? null);
+		$slot = $anonymous !== null ? self::takeAnonSlot() : self::takeUiSlot($user_id);
+		if ($anonymous !== null && !is_array($slot)) {
+			return self::anonRefusal($slot);
+		}
 		if (!is_array($slot)) {
 			$refusals = array(
 				'busy'      => array(SandboxLog::STATUS_BUSY, 'The plugin is busy with other requests. Try again in a moment.'),
@@ -111,7 +137,7 @@ class SandboxHost {
 				'values'  => $values,
 				'user'    => $user ? array('id' => (int)$user->key, 'permission' => (int)$user->get('usr_permission'),
 					'timezone' => (string)($user->get('usr_timezone') ?: '')) : null,
-			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'user_id' => $user ? (int)$user->key : null));
+			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'user_id' => $user ? (int)$user->key : null, 'anonymous' => $anonymous));
 		} finally {
 			foreach ($slot as $fh) {
 				flock($fh, LOCK_UN);
@@ -126,11 +152,16 @@ class SandboxHost {
 	 * per person, UI_SLOTS a site, UI_TIMEOUT_MS. The output is
 	 * {body, title, redirect}; SandboxPages cleans the body.
 	 *
-	 * @param string $kind 'admin' or 'member'
+	 * @param string $kind 'admin', 'member' or 'public'
+	 * @param array|null $access for a public page's visitor not signed in: {checked_post: bool} (design 3)
 	 */
-	public static function page(string $plugin, string $kind, string $slug, string $method, array $query, array $fields, ?User $user, array $files = array()): array {
+	public static function page(string $plugin, string $kind, string $slug, string $method, array $query, array $fields, ?User $user, array $files = array(), ?array $access = null): array {
 		$user_id = $user ? (int)$user->key : null;
-		$slot = self::takeUiSlot($user_id);
+		$anonymous = self::anonymousAccess($user, $access);
+		$slot = $anonymous !== null ? self::takeAnonSlot() : self::takeUiSlot($user_id);
+		if ($anonymous !== null && !is_array($slot)) {
+			return self::anonRefusal($slot);
+		}
 		if (!is_array($slot)) {
 			$status = $slot === 'error' ? SandboxLog::STATUS_UNAVAILABLE : SandboxLog::STATUS_BUSY;
 			return self::record($plugin, SandboxLog::KIND_PAGE, $slug, array('status' => $status,
@@ -139,7 +170,7 @@ class SandboxHost {
 		try {
 			return self::call($plugin, SandboxLog::KIND_PAGE, $slug, 'on_page', array(
 				'page'   => $slug,
-				'kind'   => $kind === 'admin' ? 'admin' : 'member',
+				'kind'   => in_array($kind, array('admin', 'public'), true) ? $kind : 'member',
 				'method' => $method === 'POST' ? 'POST' : 'GET',
 				'query'  => $query ?: new stdClass(),
 				'fields' => $fields ?: new stdClass(),
@@ -147,7 +178,7 @@ class SandboxHost {
 				'files'  => $files ?: new stdClass(),
 				'user'   => $user ? array('id' => (int)$user->key, 'permission' => (int)$user->get('usr_permission'),
 					'timezone' => (string)($user->get('usr_timezone') ?: '')) : null,
-			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'user_id' => $user_id));
+			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'user_id' => $user_id, 'anonymous' => $anonymous));
 		} finally {
 			foreach ($slot as $fh) {
 				flock($fh, LOCK_UN);
@@ -196,22 +227,59 @@ class SandboxHost {
 	/**
 	 * Make one call and record it.
 	 *
-	 * @param array $opts max_timeout_ms (a ceiling under the manifest's), user_id (who asked)
+	 * @param array $opts max_timeout_ms (a ceiling under the manifest's), user_id (who asked),
+	 *                    anonymous (a visitor not signed in: {checked_post}, carried in the envelope for the relay)
 	 */
 	public static function call(string $plugin, string $kind, string $name, string $export, array $input, array $opts = array()): array {
+		$anonymous = isset($opts['anonymous']) && is_array($opts['anonymous']) ? $opts['anonymous'] : null;
+		$network = $anonymous !== null ? IpAddress::network((string)($_SERVER['REMOTE_ADDR'] ?? '')) : null;
 		try {
 			$envelope = self::envelope($plugin, $export, $input);
 		} catch (Throwable $e) {
 			return self::record($plugin, $kind, $name, array(
 				'status' => SandboxLog::STATUS_ERROR,
 				'message' => 'The plugin cannot be called: ' . $e->getMessage(),
-			), $opts['user_id'] ?? null);
+			), $opts['user_id'] ?? null, $network);
 		}
 		if (isset($opts['max_timeout_ms'])) {
 			$envelope['limits']['timeout_ms'] = min($envelope['limits']['timeout_ms'], (int)$opts['max_timeout_ms']);
 		}
+		if ($anonymous !== null) {
+			// Core's word to the relay, which reads the envelope core built,
+			// never the plugin: this call is for a visitor not signed in, and
+			// only a checked form POST may write or send (design 3).
+			$envelope['anonymous'] = array('checked_post' => !empty($anonymous['checked_post']));
+		}
 		$result = self::run($envelope);
-		return self::record($plugin, $kind, $name, $result, $opts['user_id'] ?? null);
+		return self::record($plugin, $kind, $name, $result, $opts['user_id'] ?? null, $network);
+	}
+
+	/**
+	 * The access of a call for a visitor not signed in ({checked_post}), or
+	 * null for a person's call. ui() and page() are for people only
+	 * (signals and schedules go through call()), so a call with no user is
+	 * a visitor's whatever the caller passed: read only unless it says the
+	 * call answers a checked POST (reviewer2 R5). A signed-in visitor on a
+	 * public page is that page's viewer, with full access.
+	 */
+	private static function anonymousAccess(?User $user, $access): ?array {
+		if ($user !== null) {
+			return null;
+		}
+		return array('checked_post' => is_array($access) && !empty($access['checked_post']));
+	}
+
+	/** An anonymous call refused before it ran: nothing is written for it (design 4, P7). */
+	private static function anonRefusal(string $why): array {
+		$messages = array(
+			'limited' => 'This page has been opened too often from your network. Try again in a minute.',
+			'network_busy' => 'The plugin is still answering your last request. Try again in a moment.',
+			'busy'    => 'The plugin is busy with other requests. Try again in a moment.',
+			'error'   => 'The plugin cannot be called on this site right now.',
+		);
+		return array('status' => $why === 'error' ? SandboxLog::STATUS_UNAVAILABLE : SandboxLog::STATUS_BUSY,
+			'message' => $messages[$why] ?? $messages['busy'], 'output' => null, 'calls' => array(), 'duration_ms' => null,
+			'refused' => $why);
 	}
 
 	/**
@@ -295,7 +363,7 @@ class SandboxHost {
 	}
 
 	/** Write the call's log row and return the result with every key present. */
-	private static function record(string $plugin, string $kind, string $name, array $result, ?int $user_id): array {
+	private static function record(string $plugin, string $kind, string $name, array $result, ?int $user_id, ?string $network = null): array {
 		$result += array('output' => null, 'message' => '', 'calls' => array(), 'duration_ms' => null);
 		try {
 			$log = new SandboxLog(NULL);
@@ -320,6 +388,8 @@ class SandboxHost {
 			}
 			$log->set('sbl_calls', $calls);
 			$log->set('sbl_usr_user_id', $user_id);
+			// A visitor not signed in has no user; their network says who asked.
+			$log->set('sbl_ip_network', $network);
 			// The call's own record, which a page view (a page the plugin draws)
 			// makes too: the platform's bookkeeping, not the viewer's change.
 			SystemBase::server_initiated_write(function () use ($log) {
@@ -365,6 +435,49 @@ class SandboxHost {
 			fclose($mine);
 		}
 		return $site;
+	}
+
+	/**
+	 * The locks an anonymous call holds, after its network's count: its
+	 * network's (one call per network at a time, hashed into NETWORK_LOCKS
+	 * files so the lock folder never grows) and one of ANON_SLOTS. 'limited'
+	 * when the network made PUBLIC_CALLS_PER_MINUTE calls in the last
+	 * minute, 'network_busy', 'busy' or 'error' as takeUiSlot(). A call that
+	 * takes its slot is counted (one rql_ row); a refused one is not.
+	 *
+	 * @return resource[]|string
+	 */
+	private static function takeAnonSlot() {
+		$dir = self::lockDir();
+		if ($dir === null) {
+			return 'error';
+		}
+		$network = IpAddress::network((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+		$n = hexdec(substr(hash('sha256', $network), 0, 8)) % self::NETWORK_LOCKS;
+		$mine = @fopen($dir . '/anon_net_' . $n . '.lock', 'c');
+		if ($mine === false) {
+			error_log('[SandboxHost] cannot open a call lock in ' . $dir);
+			return 'error';
+		}
+		if (!flock($mine, LOCK_EX | LOCK_NB)) {
+			fclose($mine);
+			return 'network_busy';
+		}
+		// Counted while the network's lock is held, so two calls from one
+		// network cannot both pass at the last place.
+		if (!RequestLogger::check_attempt_limit(self::PUBLIC_LIMIT_FEATURE, self::PUBLIC_CALLS_PER_MINUTE, 60)) {
+			flock($mine, LOCK_UN);
+			fclose($mine);
+			return 'limited';
+		}
+		$site = self::takeSlot('anon_slot_', self::ANON_SLOTS);
+		if (!is_array($site)) {
+			flock($mine, LOCK_UN);
+			fclose($mine);
+			return $site;
+		}
+		RequestLogger::log(self::PUBLIC_LIMIT_FEATURE, 'call', true);
+		return array_merge(array($mine), $site);
 	}
 
 	/**

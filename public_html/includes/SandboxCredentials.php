@@ -16,6 +16,7 @@
  *   reprovision()  the sealed-secret reconciler's recipe for a secret that
  *               can no longer be opened (the database moved): mint again
  *
+ * @version 1.4 - a lapsed approval drops the plugin's cached public pages (spec sandboxed_plugin_public_pages)
  * @version 1.3 - own_records become Model:verb:own entries
  * @version 1.2 - the secret is opened by SandboxRelay only; nothing hands it to a runner
  * @version 1.1 - a lapse ends the approval (approver cleared), so restoring the admin leaves the plugin waiting
@@ -139,6 +140,8 @@ class SandboxCredentials {
 			self::suspend((string)$install->get('sbi_plugin'));
 			$install->set('sbi_usr_user_id', null);
 			$install->save();
+			// Its pages no longer show what the ended approval allowed.
+			SandboxPublicPages::dropCache((string)$install->get('sbi_plugin'));
 		}
 	}
 

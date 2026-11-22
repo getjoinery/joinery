@@ -2,6 +2,8 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.43 - a sandboxed plugin's key has no budget of its own; its rows are stamped sandbox:{install id}
+ *   and stay out of the loopback address's count (spec sandboxed_plugin_public_pages D3)
  * @version 2.42 - a collection filter value the database refuses for its column (a bad date, text for a
  *   number) answers 400, not a server error
  * @version 2.41 - a record or collection URL looks up the one model it names (LibraryFunctions::api_model_class())
@@ -642,10 +644,13 @@ $api_user  = $principal['api_user'];
 $auth_data = $principal['auth_data'];
 
 // A sandboxed plugin's key: core's relay calls from this machine's loopback
-// for every plugin on the site. Each plugin has a budget of its own, and its
-// rows are stamped so the loopback address's count leaves them out
-// (RequestLogger::address_rate_limit_state): one plugin's loop cannot shut out
-// the rest. The pre-authentication address check above saw none of its rows.
+// for every plugin on the site. The key is accepted only from here, and a
+// plugin's load is bounded by its run slots, time caps and asks per call
+// (SandboxHost, SandboxRunner), so it has no request budget. Its rows are
+// stamped with its install's id so the loopback address's count leaves them
+// out (RequestLogger::address_rate_limit_state): one plugin's calls cannot
+// shut out the rest. The pre-authentication address check above saw none of
+// its rows.
 $sandbox_plugin = ($api_entry !== null && $api_entry->get('apk_type') === ApiKey::TYPE_MACHINE) ? $api_entry->sandbox_plugin() : null;
 // A request a sandboxed plugin makes as the member viewing its page (an
 // own-rows grant, design 8): core's relay names the member in a header, the
@@ -668,11 +673,7 @@ if ($viewer_header !== null) {
 	$auth_data = array('current_user_id' => (int)$viewer->key, 'current_user_permission' => 0) + $auth_data;
 }
 if ($sandbox_plugin !== null) {
-	RequestLogger::set_request_key(RequestLogger::SANDBOX_KEY_PREFIX . $sandbox_plugin);
-	$plugin_state = RequestLogger::sandbox_plugin_rate_limit_state('api', $api_rate_limit, $api_rate_window, $sandbox_plugin);
-	if (!$plugin_state['allowed']) {
-		api_rate_limited($plugin_state, 'The sandboxed plugin ' . $sandbox_plugin, $api_rate_limit, $api_rate_window);
-	}
+	RequestLogger::set_request_key(RequestLogger::SANDBOX_KEY_PREFIX . (PluginInstallIdentity::idOf($sandbox_plugin) ?? ''));
 }
 
 // Rate limiting by person, now that the caller has a name. A signed-in person

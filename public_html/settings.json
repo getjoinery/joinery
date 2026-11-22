@@ -1074,6 +1074,17 @@
       "helptext": "Each call to a sandboxed plugin, with what it used and what was refused, is kept this long. 0 keeps them indefinitely."
     },
     {
+      "name": "sandbox_anonymous_log_retention_days",
+      "default": "2",
+      "group": "logging",
+      "label": "Days to keep sandboxed plugin calls made for visitors not signed in",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "A call a sandboxed plugin's public page makes for a visitor who is not signed in is logged with the visitor's network, and kept this long. 0 keeps them as long as the rest of the call log."
+    },
+    {
       "name": "sandboxed_plugins_enabled",
       "default": "0",
       "group": "diagnostics",
