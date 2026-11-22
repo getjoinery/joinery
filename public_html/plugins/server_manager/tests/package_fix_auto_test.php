@@ -295,6 +295,16 @@ check(count($needs) === 1 && strpos($needs[0][1]['body'], 'CVE-2026-115561') !==
 	&& strpos($needs[0][1]['body'], '2 of its fixes') !== false, 'one email names both', json_encode(array_column(array_column($needs, 1), 'body')));
 check(($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'built', 'and the one that went on is built');
 
+section('A failed build on upstream\'s release says why the commits did not fit too');
+
+$sent = array(); $issued = array(); $channel = array();
+$r = PackageFixAuto::run($opts(array('now' => $now, 'state' => array(),
+	'write' => function () { return array('status' => 'written', 'fallback' => 'upstream_release', 'failed' => array('CVE-2026-115560' => 'patch 1 failed: hunk 2')); },
+	'build' => function () { throw new Exception('Ubuntu patch 0009 does not fit 8.5.13'); })));
+$needs = array_values(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; }));
+check(count($needs) === 1 && strpos($needs[0][1]['body'], 'patch 1 failed: hunk 2') !== false && strpos($needs[0][1]['body'], 'Ubuntu patch 0009') !== false,
+	'both reasons are in the one email', json_encode(array_column(array_column($needs, 1), 'body')));
+
 section('reviewer2 B14: a person\'s recipe already carries it');
 
 $sent = array(); $issued = array(); $channel = array();

@@ -34,6 +34,7 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.5 - a failed build on upstream's release also says why the fix commits did not fit
  * @version 1.4 - fixes of one package that could not go on with the rest are told in one email, not one each
  *                (live on dev, 2026-11-22: 7 PostgreSQL CVEs sent 7 emails)
  * @version 1.3 - an attempt that needed a person is tried again once this tree's release changes (a key committed
@@ -348,7 +349,14 @@ class PackageFixAuto {
 						@rename($prev, $dir);
 					}
 				}
-				throw new PackageFixAutoStop('building and testing it', $e->getMessage());
+				// Built on upstream's release because no commit fitted: say why
+				// the commits did not, too, not only why the release failed.
+				$why = $e->getMessage();
+				if (($w['fallback'] ?? null) === 'upstream_release' && !empty($w['failed'])) {
+					$why = 'upstream\'s fix commits did not fit (' . implode('; ', array_map(function ($c, $y) { return $c . ': ' . $y; },
+						array_keys((array)$w['failed']), (array)$w['failed'])) . '), so upstream\'s fixed release was tried, and: ' . $why;
+				}
+				throw new PackageFixAutoStop('building and testing it', $why);
 			}
 			self::removeTree($prev);
 			$state['automatic'][$source] = $line;
