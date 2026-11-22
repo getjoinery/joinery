@@ -2121,3 +2121,14 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM amu_admin_menus WHERE amu_slug = 'report-problem' AND amu_location = 'admin_sidebar'";
 	$migrations[] = $migration;
+
+	// A removed passphrase wrapping of any vault keeps its row and loses its
+	// blob (UserEncryptionWrapping::soft_delete() scrubs from here on; this
+	// reaches the server-held vaults' rows retired before it did, which 243
+	// left). Idempotent.
+	$migration = array();
+	$migration['database_version'] = '247';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE uew_user_encryption_wrappings SET uew_wrapped_secret_key = 'scrubbed' WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NOT NULL AND uew_wrapped_secret_key NOT IN ('', 'scrubbed')";
+	$migrations[] = $migration;

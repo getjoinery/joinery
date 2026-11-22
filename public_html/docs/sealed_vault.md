@@ -174,10 +174,14 @@ Fortress folders and the password manager need a passkey that can hold a key.
 When such a passkey arrives, the unlock removes the phrase
 (`vault_unlock_passkey`) and the root takes content from then on.
 
-**A removed passphrase leaves no blob.** `replaceRootPassphrase()` retires the
-old wrapping and replaces its `uew_wrapped_secret_key` with `scrubbed`: the row
-stays for the record, the secret under the phrase does not. Pinned by
-`tests/vault/vault_ceremonies_test.php`.
+**A removed passphrase leaves no blob.** On either vault, a passphrase wrapping
+that is removed keeps its row for the record and has its
+`uew_wrapped_secret_key` replaced with `scrubbed`
+(`UserEncryptionWrapping::soft_delete()`, so every path that retires one does
+it): a secret under a phrase can be guessed against a copy of the database for
+as long as the blob exists. Passkey and recovery wrappings keep theirs; their
+keys cannot be guessed, and a retired passkey wrapping still opens an old
+generation. Pinned by `tests/vault/vault_ceremonies_test.php`.
 
 **One setup.** The Security page and the setup wizard make the account vault,
 the root vault and the codes in one step (`VaultKeyring.setupVault()`, over

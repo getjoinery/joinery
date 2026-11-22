@@ -226,6 +226,18 @@ check($left === array(VaultClientCustody::SCRUBBED), 'a removed passphrase leave
 check(!VaultClientCustody::rootOpensByPassphrase($fp_uid), 'and the root is no longer one a passphrase opens');
 check($make_content($fp_uid) === '' && VaultClientCustody::hasContentVaults($fp_uid), 'a content vault is then accepted');
 
+// The same on the account vault, by whichever path retires the row: the
+// model scrubs a passphrase wrapping as it is removed.
+$fp_account = UserEncryptionVault::loadForUser($fp_uid);
+$account_phrases = new MultiUserEncryptionWrapping(array('vault_id' => $fp_account->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE));
+check($account_phrases->count() === 1, 'the account vault holds the passphrase wrapping', (string)$account_phrases->count());
+foreach ($account_phrases as $account_phrase) {
+	$account_phrase->soft_delete();
+}
+$q->execute(array((int)$fp_account->key));
+$left = $q->fetchAll(PDO::FETCH_COLUMN);
+check($left === array(UserEncryptionWrapping::SCRUBBED), 'a removed passphrase leaves no wrapped secret on the account vault either', json_encode(array_map('strlen', $left)));
+
 // With content under the root, the phrase cannot come back.
 $db_k4 = DbConnector::get_instance()->get_db_link();
 $db_k4->beginTransaction();

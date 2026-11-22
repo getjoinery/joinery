@@ -43,6 +43,7 @@ class UserEncryptionWrappingException extends SystemBaseException {}
  * in it (`uew_code_index`): one code makes a wrapping on the account vault
  * and one on the root vault, and using it spends both together.
  *
+ * @version 1.6 - soft_delete() scrubs a passphrase wrapping: a removed passphrase leaves no blob to guess against
  * @version 1.5 - access_owner_is(): a wrapping is its vault owner's, so a member enrols and stores their own unlockers
  * @version 1.4 - TYPE_ROOT; uew_code_set / uew_code_index pair a code's wrappings
  * @version 1.3 - reserved (empty) rows are excluded by default and swept by the
@@ -70,6 +71,8 @@ class UserEncryptionWrapping extends SystemBase {
 	const TYPE_PASSKEY    = 'passkey';
 	const TYPE_RECOVERY   = 'recovery';
 	const TYPE_PASSPHRASE = 'passphrase';
+	/** What a removed passphrase wrapping holds in place of its wrapped secret. */
+	const SCRUBBED = 'scrubbed';
 	/** A content scope's secret, wrapped under a key derived from the root vault. */
 	const TYPE_ROOT       = 'root';
 
@@ -272,6 +275,22 @@ class UserEncryptionWrapping extends SystemBase {
 	/** The wrap-list entry for this row: the KEK the unlocker derived, and this row's AD. */
 	public function wrapEntry(string $kek): array {
 		return array('kek' => $kek, 'ad' => $this->ad());
+	}
+
+	/**
+	 * A removed passphrase wrapping keeps its row and loses its wrapped
+	 * secret. A secret wrapped under a phrase can be guessed against a copy of
+	 * the database for as long as the blob exists, and nothing reads a removed
+	 * one. Passkey and recovery wrappings keep theirs: their keys cannot be
+	 * guessed, and VaultPreviousKeys::adoptRetired() opens retired passkey
+	 * wrappings.
+	 */
+	function soft_delete() {
+		if ((string)$this->get('uew_unlocker_type') === self::TYPE_PASSPHRASE
+				&& (string)$this->get('uew_wrapped_secret_key') !== '') {
+			$this->set('uew_wrapped_secret_key', self::SCRUBBED);
+		}
+		return parent::soft_delete();
 	}
 
 	/**
