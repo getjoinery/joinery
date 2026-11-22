@@ -32,6 +32,7 @@
  * lines go and the move's card tells the whole story, with "Stop managing this
  * site" once the customer wants us gone.
  *
+ * @version 1.26 - let_go_server cancels a bundle bought for the server's site; joined_servers carries bundle_id
  * @version 1.25 - a server the buyer already runs: add_server, claim_server (?claim= from the site's Management Node
  *   page) and let_go_server (JoinedServers)
  * @version 1.24 - remove_site: a buyer stops our management of a site on their own server, or removes an order that
@@ -168,11 +169,15 @@ function profile_sites_logic(array $input): LogicResult {
 			$mine = new ManagedNode((int)($input['mgn_managed_node_id'] ?? 0), TRUE);
 			$mine_name = (string)$mine->get('mgn_name');
 			// let_go() refuses a server that is not this buyer's own.
-			SystemBase::rule_checked_write(function () use ($mine, $user_id) { JoinedServers::let_go($mine, (int)$user_id); });
+			$let_go = array('bundle_cancelled' => false);
+			SystemBase::rule_checked_write(function () use ($mine, $user_id, &$let_go) { $let_go = JoinedServers::let_go($mine, (int)$user_id); });
 			$text = 'We have stopped managing ' . htmlspecialchars($mine_name) . ' and taken it off this page. Your server is untouched. '
+				. ($let_go['bundle_cancelled'] ? 'Its email and backups subscription is cancelled and runs to the end of the period you have paid for. ' : '')
 				. 'Your site\'s own Management Node page says so within a few minutes, with the Disconnect button that ends the connection on its side.';
 			$kind = DisplayMessage::MESSAGE_ANNOUNCEMENT;
 		} catch (Throwable $e) {
+			error_log('profile_sites: user ' . (int)$user_id . ' could not let go of node ' . (int)($input['mgn_managed_node_id'] ?? 0)
+				. ': ' . $e->getMessage());
 			$text = 'That server could not be removed from here. Write to us and we will do it.';
 			$kind = DisplayMessage::MESSAGE_ERROR;
 		}
@@ -462,7 +467,9 @@ function profile_sites_logic(array $input): LogicResult {
 		'joined_servers'    => array_map(function ($node) {
 			return array('id' => (int)$node->key, 'name' => (string)$node->get('mgn_name'),
 				'since' => (string)$node->get('mgn_agent_paired_time'),
-				'connected' => trim((string)$node->get('mgn_agent_public_key')) !== '');
+				'connected' => trim((string)$node->get('mgn_agent_public_key')) !== '',
+				'bundle_id' => ($joined_bundle = JoinedServers::bundle_order_item_id($node)),
+				'bundle_cancels' => SiteRemoval::bundle_cancellable($joined_bundle));
 		}, JoinedServers::for_user((int)$user_id)),
 		'joined_waiting'    => JoinedServers::waiting_for_user((int)$user_id),
 		'claim_request'     => ($claim !== '' && ($claim_row = JoinedServers::request_for($claim)) !== null)

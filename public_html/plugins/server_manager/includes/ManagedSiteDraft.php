@@ -280,8 +280,10 @@ class ManagedSiteDraft {
 		}
 		foreach ($names as $name) {
 			foreach (array('https://' . $name, 'https://' . $name . '/', 'http://' . $name, 'http://' . $name . '/') as $url) {
-				if (count(new MultiManagedNode(array('mgn_site_url' => $url, 'deleted' => false))) > 0) {
-					return true;
+				foreach (new MultiManagedNode(array('mgn_site_url' => $url, 'deleted' => false)) as $holder) {
+					if ($holder->holds_site_address()) {
+						return true;
+					}
 				}
 			}
 		}

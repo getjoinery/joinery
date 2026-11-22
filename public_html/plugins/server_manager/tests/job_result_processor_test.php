@@ -1532,6 +1532,23 @@ check(ManagedNode::adopt_reported_site_domain($sd_twin, $sd_domain, 'status chec
 	&& trim((string)$sd_twin->get('mgn_site_url')) === '',
 	'an address another node holds is refused', (string)$sd_twin->get('mgn_site_url'));
 
+// A node we were told to stop managing does not hold it: the same machine,
+// added again, gets its site address (walkthrough finding 168).
+$sd_let_go = jrp_node(array('mgn_site_url' => 'https://gone' . $sd_tag . '.example.com', 'mgn_enabled' => false));
+$sd_back = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)), 'mgn_site_url' => ''));
+check(ManagedNode::adopt_reported_site_domain($sd_back, 'gone' . $sd_tag . '.example.com', 'status check') === 'filled',
+	'an address held only by a let-go node is filled', (string)$sd_back->get('mgn_site_url'));
+
+// So does a row whose agent said goodbye; a disabled row that still has its
+// agent, and an enabled row that never had one, keep theirs.
+$sd_left = jrp_node(array('mgn_site_url' => 'https://left' . $sd_tag . '.example.com', 'mgn_agent_left_time' => gmdate('Y-m-d H:i:s')));
+$sd_paired_off = jrp_node(array('mgn_site_url' => 'https://off' . $sd_tag . '.example.com', 'mgn_enabled' => false,
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x1c", 32))));
+$sd_keyless = jrp_node(array('mgn_site_url' => 'https://ssh' . $sd_tag . '.example.com'));
+check(!$sd_let_go->holds_site_address() && !$sd_left->holds_site_address()
+	&& $sd_paired_off->holds_site_address() && $sd_keyless->holds_site_address(),
+	'only a keyless row that was let go or left gives its address up');
+
 // ...unless the two are a copy and its source.
 $sd_copy = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x1f", 32)), 'mgn_site_url' => '',
 	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$sd_node->key));

@@ -20,6 +20,7 @@
  * listed on that account's Your Sites, where the owner can stop our
  * management of it again (let_go()).
  *
+ * @version 1.1 - let_go() cancels a bundle bought for the server's site (bundle_order_item_id; walkthrough Q37)
  * @version 1.0
  */
 class JoinedServers {
@@ -164,17 +165,44 @@ class JoinedServers {
 	}
 
 	/**
-	 * Its owner stops our management of a server they added: the agent is
-	 * forgotten, checks and backups stop, and it leaves their page. The
-	 * server is theirs and is not touched.
+	 * The order line of the email and backups bundle its owner bought for
+	 * this server's site, or 0. The site is the address the server reports
+	 * (mgn_site_url); the bundle is the one paying for the owner's service
+	 * rows for that address.
 	 */
-	public static function let_go(ManagedNode $node, int $user_id): void {
+	public static function bundle_order_item_id(ManagedNode $node): int {
+		$user_id = (int)$node->get('mgn_owner_usr_user_id');
+		$host = strtolower((string)parse_url(trim((string)$node->get('mgn_site_url')), PHP_URL_HOST));
+		if ($user_id <= 0 || $host === '' || !class_exists('ServiceTenant')) {
+			return 0;
+		}
+		foreach (ServiceTenant::forHost($user_id, $host) as $row) {
+			if ((int)$row->get('svt_odi_order_item_id') > 0 && !$row->get('svt_revoked_time')) {
+				return (int)$row->get('svt_odi_order_item_id');
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * Its owner stops our management of a server they added: the agent is
+	 * forgotten, checks and backups stop, a bundle bought for its site is
+	 * cancelled to the end of its paid period, and it leaves their page.
+	 * The server is theirs and is not touched.
+	 *
+	 * @return array{bundle_cancelled: bool}
+	 */
+	public static function let_go(ManagedNode $node, int $user_id): array {
 		if (!$node->key || $node->get('mgn_delete_time') || (int)$node->get('mgn_owner_usr_user_id') !== $user_id || $user_id <= 0) {
 			throw new RuntimeException('That server is not one you added.');
 		}
+		// The bundle first: a cancel its payment provider refuses throws, and
+		// nothing has been stopped yet.
+		$bundle_cancelled = SiteRemoval::cancel_bundle(self::bundle_order_item_id($node));
 		InstanceTransferFinish::let_go_node($node);
 		$node->load();
 		$node->set('mgn_owner_usr_user_id', null);
 		$node->save();
+		return array('bundle_cancelled' => $bundle_cancelled);
 	}
 }

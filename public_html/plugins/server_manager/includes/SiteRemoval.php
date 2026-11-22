@@ -17,6 +17,7 @@
  * bundle) is not offered here: money has to go back first, which is a
  * person's step.
  *
+ * @version 1.2 - cancel_bundle() and bundle_cancellable(), shared with a server its owner added (JoinedServers::let_go)
  * @version 1.1 - a bundle bought later for the site's address is cancelled with it (bundle_order_item_id)
  * @version 1.0 - walkthrough Q36
  */
@@ -50,6 +51,28 @@ class SiteRemoval {
 		return round($paid, 2);
 	}
 
+	/**
+	 * Cancel an email and backups bundle to the end of its paid period.
+	 * False when there is none, or it is already cancelled or ending.
+	 */
+	public static function cancel_bundle(int $order_item_id): bool {
+		if (!self::bundle_cancellable($order_item_id)) {
+			return false;
+		}
+		(new OrderItem($order_item_id, TRUE))->cancel_subscription_by_system('period_end');
+		return true;
+	}
+
+	/** Is this bundle line a subscription still running, with no end set. */
+	public static function bundle_cancellable(int $order_item_id): bool {
+		if ($order_item_id <= 0 || !class_exists('OrderItem')) {
+			return false;
+		}
+		$line = new OrderItem($order_item_id, TRUE);
+		return $line->key && $line->get('odi_is_subscription') && !$line->get('odi_subscription_cancelled_time')
+			&& !$line->get('odi_subscription_cancel_at_period_end');
+	}
+
 	/** The question the button asks, in the buyer's words. */
 	public static function question(CustomerCloudProvision $provision): string {
 		$domain = (string)$provision->get('cvp_domain');
@@ -57,7 +80,7 @@ class SiteRemoval {
 			return 'Stop our management of ' . $domain . ' and remove it from this page? Your server keeps running and nothing on it '
 				. 'is changed. We stop its updates, alerts and backups; backups already stored with us are deleted after '
 				. ServiceTenant::RETENTION_DAYS . ' days.'
-				. ($provision->bundle_order_item_id() > 0
+				. (self::bundle_cancellable($provision->bundle_order_item_id())
 					? ' Its email and backups subscription is cancelled and runs to the end of the period you have paid for.' : '')
 				. ' To have it managed again later, add it from this page.';
 		}
@@ -76,18 +99,12 @@ class SiteRemoval {
 		}
 		$bundle_cancelled = false;
 		if ($kind === self::KIND_STOP) {
+			// The bundle first: a cancel its payment provider refuses throws,
+			// and nothing has been stopped yet.
+			$bundle_cancelled = self::cancel_bundle($provision->bundle_order_item_id());
 			$node = InstanceTransfers::node_of($provision);
 			if ($node !== null && ($node->get('mgn_enabled') || $node->get('mgn_agent_public_key'))) {
 				InstanceTransferFinish::let_go_node($node);
-			}
-			$bundle_id = $provision->bundle_order_item_id();
-			if ($bundle_id > 0 && class_exists('OrderItem')) {
-				$line = new OrderItem($bundle_id, TRUE);
-				if ($line->key && $line->get('odi_is_subscription') && !$line->get('odi_subscription_cancelled_time')
-						&& !$line->get('odi_subscription_cancel_at_period_end')) {
-					$line->cancel_subscription_by_system('period_end');
-					$bundle_cancelled = true;
-				}
 			}
 		}
 		$provision->set('cvp_error', $kind === self::KIND_STOP

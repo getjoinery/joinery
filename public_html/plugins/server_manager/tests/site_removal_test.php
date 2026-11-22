@@ -115,6 +115,9 @@ $later = srm_site($buyer, 'srm-later-' . $run, 'done', 'customer', array('cvp_mg
 check($later->bundle_order_item_id() === 0 && strpos(SiteRemoval::question($later), 'subscription is cancelled') === false,
 	'a site with no bundle has none, and the question says nothing of one');
 $bundle = srm_line($buyer, '2.99');
+$bundle->set('odi_is_subscription', true);
+$bundle->set('odi_subscription_status', 'active');
+$bundle->save();
 $tenant = new ServiceTenant(NULL);
 $tenant->set('svt_usr_user_id', (int)$buyer->key);
 $tenant->set('svt_service', ServiceTenant::SERVICE_MAIL);
@@ -127,6 +130,9 @@ $tenant->save();
 harness_register_row('svt_service_tenants', 'svt_service_tenant_id', $tenant->key);
 check($later->bundle_order_item_id() === (int)$bundle->key, 'the line that pays for its service rows is found');
 check(strpos(SiteRemoval::question($later), 'subscription is cancelled') !== false, 'and the question says it is cancelled with the site');
+$bundle->set('odi_subscription_cancel_at_period_end', true);
+$bundle->save();
+check(strpos(SiteRemoval::question($later), 'subscription is cancelled') === false, 'a bundle already ending is not said to be cancelled');
 $with = srm_site($buyer, 'srm-with-' . $run, 'done', 'customer', array('cvp_services_order_item_id' => 424242));
 check($with->bundle_order_item_id() === 424242, 'a bundle bought with the site is the one on its order');
 check($hosted->bundle_order_item_id() === 0, 'a site we host has no bundle line');

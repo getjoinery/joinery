@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.79 - holds_site_address(): a row with no agent key that was let go or whose agent left holds its site address against nobody (adopt_reported_site_domain, ManagedSiteDraft::serves_already)
  * @version 1.78 - mgn_owner_usr_user_id: the account a server its owner added is listed under (JoinedServers)
  * @version 1.77 - hosting_billing_refusal(): a site whose hosting subscription still bills is not hidden or removed (hosting_after_purchase B10); reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.76 - prepare() lets an empty SSH user through to the column's default (root): a node made
@@ -974,6 +975,23 @@ class ManagedNode extends SystemBase {
 	}
 
 	/**
+	 * Whether this row still speaks for the site address it records. A row
+	 * with no agent key that was let go (disabled) or whose agent said
+	 * goodbye (mgn_agent_left_time) keeps the address as a record of what it
+	 * was, and holds it against nobody: the same machine connected again is a
+	 * new row and takes it, and the name can be ordered as a new site.
+	 */
+	public function holds_site_address(): bool {
+		if (trim((string)$this->get('mgn_site_url')) === '') {
+			return false;
+		}
+		if (trim((string)$this->get('mgn_agent_public_key')) !== '') {
+			return true;
+		}
+		return $this->get('mgn_enabled') && !$this->get('mgn_agent_left_time');
+	}
+
+	/**
 	 * Take the site domain the node's agent reported ($source names where). It
 	 * fills an empty mgn_site_url as https://<domain>, so a node that joined on
 	 * its own gets the site address uptime checks and site copies need. It never
@@ -1014,6 +1032,9 @@ class ManagedNode extends SystemBase {
 		foreach (array($url, $url . '/') as $candidate) {
 			foreach (new MultiManagedNode(array('mgn_site_url' => $candidate, 'deleted' => false)) as $holder) {
 				if ((int)$holder->key === (int)$node->key) {
+					continue;
+				}
+				if (!$holder->holds_site_address()) {
 					continue;
 				}
 				$pair = ($copy_of && (int)$holder->key === $copy_of)

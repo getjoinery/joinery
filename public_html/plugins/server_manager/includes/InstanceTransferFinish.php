@@ -24,6 +24,7 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.6 - let_go_node() disables the node last, so a step that throws is run again by pressing again
  * @version 1.5 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.4 - link_node_services(): the node-linked mail and backup rows, shared with an own-Linode site built with the
  *                email and backups bundle (specs/own_linode_we_install.md W5); a newly built site's mail row may be unverified ($mail_verified), and its backups link without its mail ($link_mail)
@@ -466,6 +467,18 @@ class InstanceTransferFinish {
 	 * @return array{incidents: int, backups_released: bool}
 	 */
 	public static function let_go_node(ManagedNode $node): array {
+		// The node is disabled last: a step that throws leaves it as it was,
+		// and pressing again runs every step.
+		$released = false;
+		$shelf = ServiceTenant::forNode((int)$node->key, ServiceTenant::SERVICE_SHELF);
+		if ($shelf !== null && (string)$shelf->get('svt_state') !== ServiceTenant::STATE_RELEASED) {
+			JoineryServices::releaseRow($shelf);
+			$released = true;
+		}
+
+		$closed = IncidentReconciler::close_for_node((int)$node->key,
+			'Its customer stopped our management of this site; nothing here watches it now.');
+
 		AgentChannelEndpoint::forgetAgent($node);
 		$node->set('mgn_backup_policy', json_encode(array('enabled' => false)));
 		$node->set('mgn_uptime_enabled', false);
@@ -474,16 +487,6 @@ class InstanceTransferFinish {
 			. 'Its customer stopped our management on ' . gmdate('Y-m-d') . ': agent forgotten, backups and uptime checks off, '
 			. 'node disabled. Stored backups are pruned ' . ServiceTenant::RETENTION_DAYS . ' days after that.'));
 		$node->save();
-
-		$closed = IncidentReconciler::close_for_node((int)$node->key,
-			'Its customer stopped our management of this site; nothing here watches it now.');
-
-		$released = false;
-		$shelf = ServiceTenant::forNode((int)$node->key, ServiceTenant::SERVICE_SHELF);
-		if ($shelf !== null && (string)$shelf->get('svt_state') !== ServiceTenant::STATE_RELEASED) {
-			JoineryServices::releaseRow($shelf);
-			$released = true;
-		}
 		return array('incidents' => $closed, 'backups_released' => $released);
 	}
 }

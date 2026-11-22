@@ -7,6 +7,7 @@
  * with. The Connect card renders only for a bring-your-own-cloud site that is
  * still waiting for its account link; a hosted buyer connects nothing.
  *
+ * @version 2.31 - a server the buyer added shows its bundle, and its stop question says the bundle is cancelled
  * @version 2.30 - Servers you run: a server the buyer added themselves, the claim step and the Add a server card
  * @version 2.29 - Stop managing and remove on a site on the buyer's own server; Remove on an order that never built
  * @version 2.28 - the page does not reload itself while a one-time password is shown (another site building took it
@@ -501,11 +502,16 @@ echo $page->render_messages();
 			<dt>Server</dt><dd>Your own. We do not host it or bill you for it.</dd>
 			<dt>Management</dt>
 			<dd><?php echo $server['connected'] ? 'Managed by us: updates, alerts and health checks' : 'Not connected'; ?></dd>
+			<?php if ($server['bundle_id'] > 0): ?>
+			<dt>Joinery Managed Bundle</dt><dd>Included: email and backups through us, with your subscription.</dd>
+			<?php endif; ?>
 		</dl>
 		<p class="sms-remove"><?php echo PublicPage::action_button('Stop managing and remove', '/profile/server_manager', array(
 			'hidden'  => array('action' => 'let_go_server', 'mgn_managed_node_id' => (int)$server['id']),
 			'confirm' => 'Stop our management of ' . $server['name'] . ' and remove it from this page? Your server keeps running and '
-				. 'nothing on it is changed. To have it managed again later, add it from this page.',
+				. 'nothing on it is changed.'
+				. ($server['bundle_cancels'] ? ' Its email and backups subscription is cancelled and runs to the end of the period you have paid for.' : '')
+				. ' To have it managed again later, add it from this page.',
 			'class'   => 'btn btn-ghost btn-sm',
 		)); ?></p>
 	</article>

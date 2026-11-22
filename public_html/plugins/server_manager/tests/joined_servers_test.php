@@ -47,6 +47,7 @@ function jsv_subscriber($user) {
 	$line->set('odi_subscription_status', 'active');
 	$line->save(); $line->load();
 	harness_register_row('odi_order_items', 'odi_order_item_id', $line->key);
+	return $line;
 }
 
 section('The address a buyer types becomes their own site\'s Management Node page');
@@ -97,7 +98,35 @@ section('The owner lets it go');
 $threw = false;
 try { JoinedServers::let_go($mine[0], (int)$free->key); } catch (RuntimeException $e) { $threw = true; }
 check($threw, 'nobody else can let go of it');
-JoinedServers::let_go($mine[0], (int)$paying->key);
+// A bundle bought for the server's site goes with it (walkthrough Q37).
+check(JoinedServers::bundle_order_item_id($mine[0]) === 0, 'a server whose site has no bundle has none');
+$bundle = jsv_subscriber($paying);
+$site_host = 'jsv-' . $run . '.example.com';
+$tenant = new ServiceTenant(NULL);
+$tenant->set('svt_usr_user_id', (int)$paying->key);
+$tenant->set('svt_service', ServiceTenant::SERVICE_MAIL);
+$tenant->set('svt_state', ServiceTenant::STATE_ACTIVE);
+$tenant->set('svt_paid_until', '2036-01-01 00:00:00');
+$tenant->set('svt_slug', 'jsv' . preg_replace('/[^a-z0-9]/', '', strtolower((string)$run)));
+$tenant->set('svt_host', $site_host);
+$tenant->set('svt_odi_order_item_id', (int)$bundle->key);
+$tenant->save();
+harness_register_row('svt_service_tenants', 'svt_service_tenant_id', $tenant->key);
+$mine[0]->set('mgn_site_url', 'https://' . $site_host);
+$mine[0]->save();
+check(JoinedServers::bundle_order_item_id($mine[0]) === (int)$bundle->key, 'the bundle bought for its site\'s address is found');
+// The cancel comes first: this line is linked to no payment provider, so the
+// store refuses it, and nothing has been stopped.
+$refused = false;
+try { JoinedServers::let_go($mine[0], (int)$paying->key); } catch (Throwable $e) { $refused = true; }
+$still = new ManagedNode((int)$mine[0]->key, TRUE);
+check($refused && $still->get('mgn_enabled') && (int)$still->get('mgn_owner_usr_user_id') === (int)$paying->key
+	&& trim((string)$still->get('mgn_agent_public_key')) !== '',
+	'a bundle the store cannot cancel stops the let-go before anything is changed');
+$bundle->set('odi_subscription_cancel_at_period_end', true);
+$bundle->save();
+$let_go = JoinedServers::let_go($mine[0], (int)$paying->key);
+check($let_go['bundle_cancelled'] === false, 'a bundle already ending is left as it is');
 $gone = new ManagedNode((int)$mine[0]->key, TRUE);
 check(JoinedServers::for_user((int)$paying->key) === array() && !$gone->get('mgn_enabled')
 	&& trim((string)$gone->get('mgn_agent_public_key')) === '', 'it leaves their page, its agent forgotten and the node disabled');
