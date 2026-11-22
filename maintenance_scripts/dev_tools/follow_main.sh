@@ -15,9 +15,14 @@
 #   3a. Holds the site's scheduled-task passes off from before the fast-forward until
 #      update_database has run (the hold a test takes, tests/lib/harness.php): a pass in
 #      between ran the new code against the old schema and read columns not there yet.
+#   3b. Installs the libraries the lock file names (composer install --no-dev) whenever
+#      public_html/composer.lock differs from the one last installed, the way a release's
+#      upgrade does. Checked on every run, so a failed install is tried again next minute.
 #   4. Runs update_database --upgrade when the commits touched what it applies: a data class,
 #      a migration, or a declaration it seeds (settings.json, admin_menus.json,
-#      permissions.json, a plugin.json).
+#      permissions.json, a plugin.json). One that failed is run again after the next pull
+#      or library install, whatever that touched: it refuses while the libraries do not
+#      match the lock file, and nothing else would ever run it again.
 #
 # First, the agent source (joinery-agent) is brought to its own origin/main the
 # same way, steps 1 to 3: a publish builds the agent it bundles from that
@@ -29,6 +34,9 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.6 - installs the lock file's libraries when it changes, and runs a failed update_database
+#               again after the next pull or install. dev's vendor/ had not moved since 10-14, and once the
+#               lock moved past it (guzzle 7.17.0) every update_database refused (11-22).
 # @version 1.5 - scheduled-task passes are held off across the fast-forward and update_database;
 #               a pass in that window warned on every new column (cvp_domain_renew_quote, 11-16)
 # @version 1.4 - update_database runs with --upgrade, the way a release's upgrade runs it. Run plain,
@@ -59,6 +67,10 @@ else
 fi
 BRANCH="main"
 LOCK="${HOME}/.cache/follow_main.lock"
+COMPOSER="${FOLLOW_MAIN_COMPOSER:-composer}"   # override only in the scratch-clone test
+UPDATE_DB_LOG="${HOME}/.cache/follow_main.update_database.log"
+UPDATE_DB_PENDING="${HOME}/.cache/follow_main.update_database.pending"   # the last one failed
+VENDOR_STAMP="${HOME}/.cache/follow_main.composer_lock"   # the lock file last installed (its hash)
 
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) follow_main: $*"; }
 
@@ -104,6 +116,43 @@ follow_agent() {
 }
 follow_agent
 
+# The libraries the lock file names, installed when it differs from the one
+# installed last. Returns 0 when it installed, 1 when there was nothing to do,
+# 2 when the install failed (said; the next run tries again).
+sync_vendor() {
+    local lock="$REPO/public_html/composer.lock" want have
+    [ -f "$lock" ] || return 1
+    want="$(sha256sum "$lock" | cut -d' ' -f1)"
+    have="$(cat "$VENDOR_STAMP" 2>/dev/null)"
+    [ "$want" = "$have" ] && return 1
+    # No install recorded yet: whatever update_database last did may have been
+    # refused over the libraries, so it runs once they are in.
+    [ -z "$have" ] && touch "$UPDATE_DB_PENDING"
+    if (cd "$REPO/public_html" && "$COMPOSER" install --no-dev --no-interaction --no-progress -q) \
+            > "${HOME}/.cache/follow_main.composer.log" 2>&1; then
+        printf '%s\n' "$want" > "$VENDOR_STAMP"
+        say "libraries installed from composer.lock (log: ~/.cache/follow_main.composer.log)"
+        return 0
+    fi
+    say "composer install FAILED (log: ~/.cache/follow_main.composer.log)"
+    return 2
+}
+
+# update_database --upgrade, as a release's upgrade runs it: without --upgrade
+# declared indexes are never created and column type changes are only warned
+# about. It reports a failed step as '#Failed: N' and may still exit 0.
+run_update_database() {
+    if ${FOLLOW_MAIN_UPDATE_DB:-php "$REPO/public_html/utils/update_database.php"} --upgrade > "$UPDATE_DB_LOG" 2>&1 \
+       && ! grep -q -E '#Failed: [1-9]' "$UPDATE_DB_LOG"; then
+        rm -f "$UPDATE_DB_PENDING"
+        say "update_database ran (log: ~/.cache/follow_main.update_database.log)"
+        return 0
+    fi
+    touch "$UPDATE_DB_PENDING"
+    say "update_database FAILED (log: ~/.cache/follow_main.update_database.log)"
+    return 1
+}
+
 cd "$REPO" || { say "no checkout at $REPO"; exit 1; }
 
 if ! git fetch -q origin "$BRANCH" 2>/tmp/follow_main.fetch.$$; then
@@ -115,7 +164,16 @@ rm -f /tmp/follow_main.fetch.$$
 
 old="$(git rev-parse HEAD)"
 new="$(git rev-parse "origin/${BRANCH}")"
-[ "$old" = "$new" ] && exit 0
+if [ "$old" = "$new" ]; then
+    # Nothing to pull, but a failed install is tried again, and an update_database
+    # it held back runs once it succeeds.
+    publish_building && exit 0
+    sync_vendor
+    if [ $? -eq 0 ] && [ -e "$UPDATE_DB_PENDING" ]; then
+        run_update_database || exit 1
+    fi
+    exit 0
+fi
 
 # Modes are the converger's (see 1.2), so only content and untracked files count.
 if [ -n "$(git -c core.fileMode=false status --porcelain)" ]; then
@@ -156,15 +214,12 @@ if ! git -c core.fileMode=false merge -q --ff-only "$new" 2>&1; then
 fi
 say "at $(git log -1 --format='%h %s' "$new") (was $(git rev-parse --short "$old"))"
 
-if git diff --name-only "$old" "$new" | grep -q -E '^public_html/((plugins/[^/]+/)?data/.*_class\.php|migrations/|settings\.json$|admin_menus\.json$|permissions\.json$|plugins/[^/]+/plugin\.json$)'; then
-    # It reports a failed step as '#Failed: N' and may still exit 0.
-    # --upgrade, as a release's upgrade runs it: without it declared indexes are
-    # never created and column type changes are only warned about.
-    if php "$REPO/public_html/utils/update_database.php" --upgrade > "${HOME}/.cache/follow_main.update_database.log" 2>&1 \
-       && ! grep -q -E '#Failed: [1-9]' "${HOME}/.cache/follow_main.update_database.log"; then
-        say "update_database ran (log: ~/.cache/follow_main.update_database.log)"
-    else
-        say "update_database FAILED (log: ~/.cache/follow_main.update_database.log)"
-        exit 1
-    fi
+sync_vendor
+vendor=$?
+[ "$vendor" -eq 2 ] && touch "$UPDATE_DB_PENDING"   # it would refuse the mismatch; run it after the install
+
+if git diff --name-only "$old" "$new" | grep -q -E '^public_html/((plugins/[^/]+/)?data/.*_class\.php|migrations/|settings\.json$|admin_menus\.json$|permissions\.json$|plugins/[^/]+/plugin\.json$)' \
+        || [ -e "$UPDATE_DB_PENDING" ]; then
+    [ "$vendor" -eq 2 ] && exit 1   # said above; the next run installs, then runs it
+    run_update_database || exit 1
 fi

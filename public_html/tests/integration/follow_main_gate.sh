@@ -10,7 +10,10 @@
 # follow_main.sh (dev's every-minute pull of main) run against a scratch clone
 # through FOLLOW_MAIN_REPO: a file whose mode alone differs from git is the
 # host converger's doing and does not stop the pull; an edited file or an
-# untracked one does, and says so.
+# untracked one does, and says so. A changed composer.lock installs its
+# libraries, and an update_database that failed runs again once they are in.
+#
+# @version 1.1 - the library install and the update_database retry
 
 set -u
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -42,7 +45,23 @@ ahead() {
     printf '%s\n' "$1" > "$T/work/maintenance_scripts/b.txt"
     g -C "$T/work" add -A && g -C "$T/work" commit -q -m "$1" && g -C "$T/work" push -q origin main
 }
-run() { HOME="$T/home" FOLLOW_MAIN_REPO="$T/dev" FOLLOW_MAIN_AGENT_REPO="${AGENT_DEV:-}" bash "$SCRIPT" 2>&1; }
+# Stand-ins for composer and update_database: each logs its call; composer
+# fails while $T/composer_fails exists, update_database while $T/db_fails does.
+mkdir -p "$T/bin"
+cat > "$T/bin/composer" <<EOS
+#!/bin/bash
+echo "composer \$*" >> "$T/calls"
+[ ! -e "$T/composer_fails" ]
+EOS
+cat > "$T/bin/update_db" <<EOS
+#!/bin/bash
+echo "update_db \$*" >> "$T/calls"
+[ ! -e "$T/db_fails" ]
+EOS
+chmod 755 "$T/bin/composer" "$T/bin/update_db"
+run() { HOME="$T/home" FOLLOW_MAIN_REPO="$T/dev" FOLLOW_MAIN_AGENT_REPO="${AGENT_DEV:-}" \
+    FOLLOW_MAIN_COMPOSER="$T/bin/composer" FOLLOW_MAIN_UPDATE_DB="$T/bin/update_db" bash "$SCRIPT" 2>&1; }
+calls() { grep -c "^$1" "$T/calls" 2>/dev/null || true; }
 mkdir -p "$T/home"
 
 echo "== A mode the converger set is not a local edit =="
@@ -88,6 +107,40 @@ out="$(run)"
 chk "an edited agent checkout is not pulled, and says so" "$(g -C "$T/adev" log -1 --format=%s)/$(grep -c 'agent: NOT pulled' <<<"$out")" "a2/1"
 chk "and the site's own pull goes on regardless" "$(g -C "$T/dev" log -1 --format=%s)" "four"
 AGENT_DEV=""
+
+echo "== A changed lock file installs its libraries; a failed update_database runs again =="
+mkdir -p "$T/work/public_html"
+echo '{"v":1}' > "$T/work/public_html/composer.lock"
+g -C "$T/work" add -A && g -C "$T/work" commit -q -m lock1 && g -C "$T/work" push -q origin main
+rm -f "$T/calls"
+out="$(run)"
+chk "the first pull with a lock file installs it" "$(calls composer)" "1"
+chk "with no install on record, update_database runs once after it" "$(calls update_db)" "1"
+out="$(run)"
+chk "an unchanged lock file installs nothing" "$(calls composer)/$(calls update_db)" "1/1"
+echo '{"v":2}' > "$T/work/public_html/composer.lock"
+g -C "$T/work" add -A && g -C "$T/work" commit -q -m lock2 && g -C "$T/work" push -q origin main
+touch "$T/composer_fails"
+out="$(run)"
+chk "a failed install says so, and update_database waits for it" "$(calls composer)/$(calls update_db)/$(grep -c 'composer install FAILED' <<<"$out")" "2/1/1"
+rm "$T/composer_fails"
+out="$(run)"
+chk "the next run, with nothing to pull, installs and then runs update_database" "$(calls composer)/$(calls update_db)" "3/2"
+out="$(run)"
+chk "and then rests" "$(calls composer)/$(calls update_db)/${out:-quiet}" "3/2/quiet"
+mkdir -p "$T/work/public_html/data"
+echo '<?php' > "$T/work/public_html/data/x_class.php"
+g -C "$T/work" add -A && g -C "$T/work" commit -q -m dataclass && g -C "$T/work" push -q origin main
+touch "$T/db_fails"
+out="$(run)"
+chk "a data class pull runs update_database, which fails, saying so" "$(calls update_db)/$(grep -c 'update_database FAILED' <<<"$out")" "3/1"
+rm "$T/db_fails"
+ahead five
+out="$(run)"
+chk "the next pull runs it again though it touched no data class" "$(calls update_db)/$(grep -c 'update_database ran' <<<"$out")" "4/1"
+ahead six
+out="$(run)"
+chk "after a success a plain pull leaves it alone" "$(calls update_db)" "4"
 
 echo
 echo "follow_main gate: $passed passed, $failed failed"
