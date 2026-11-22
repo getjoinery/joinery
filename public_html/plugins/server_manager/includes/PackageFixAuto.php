@@ -34,6 +34,12 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.7 - the set every machine has is issued again when it, the copy mirrors pass on, predates this
+ *                tree's release, read when the check runs: a build can outlast an upgrade (live: joinerydemo on
+ *                0.8.647 refused getjoinery's 0.8.645 set while dev had re-issued only the test-first one)
+ * @version 1.6 - an attempt that needed a person is tried again when something that could change its outcome
+ *                changed (the source's key file, fixes/UPSTREAMS, RETRY_GENERATION), not on every release:
+ *                each release re-ran PHP's hour-long build on dev for nothing
  * @version 1.5 - a failed build on upstream's release also says why the fix commits did not fit
  * @version 1.4 - fixes of one package that could not go on with the rest are told in one email, not one each
  *                (live on dev, 2026-11-22: 7 PostgreSQL CVEs sent 7 emails)
@@ -75,6 +81,8 @@ class PackageFixAuto {
 	const SIGNAL_NEWS = 'package_fix.news';
 	const SIGNAL_ROLLED_OUT = 'package_fix.rolled_out';
 	const LINK = '/admin/server_manager/fleet_security';
+	/** Raise when a change to the runner itself should retry every stopped attempt. */
+	const RETRY_GENERATION = 1;
 
 	public static function state(): array {
 		return PackageFixChannel::readStateFile(self::STATE_FILE);
@@ -196,18 +204,21 @@ class PackageFixAuto {
 			}
 			$said[] = 'told of ' . count($new) . ' new fix(es)';
 		}
-		// Tried once per CVE; one that needed a person is tried again once this
-		// tree's release changes: a committed key or a runner fix comes with one.
+		// Tried once per CVE; one that needed a person is tried again when what
+		// could change its outcome changed: the source's key file, the upstream
+		// list, or the runner (RETRY_GENERATION). Not on every release.
 		$release = (string)($opts['release'] ?? trim((string)@file_get_contents($site . '/public_html/VERSION')));
 		$by_source = array();
+		$inputs = array();
 		foreach ($c['build'] as $u) {
+			$inputs[$u['source']] = $inputs[$u['source']] ?? self::retryInputs($site, $u['source'], $opts);
 			$a = $state['attempts'][$u['source'] . ' ' . $u['cve']] ?? null;
-			if ($a === null || (($a['status'] ?? '') === 'needs_person' && (string)($a['release'] ?? '') !== $release)) {
+			if ($a === null || (($a['status'] ?? '') === 'needs_person' && (string)($a['inputs'] ?? '') !== $inputs[$u['source']])) {
 				$by_source[$u['source']][$u['cve']] = $u;
 			}
 		}
 		foreach ($by_source as $source => $cves) {
-			$state = self::attempt($state, $site, $source, $cves, $watch, $now, $opts + array('release' => $release), $said, $dispatch);
+			$state = self::attempt($state, $site, $source, $cves, $watch, $now, $opts + array('inputs' => $inputs[$source]), $said, $dispatch);
 		}
 
 		$channel = $opts['channel_state'] ?? PackageFixChannel::state();
@@ -227,16 +238,21 @@ class PackageFixAuto {
 		// the set every machine has, less what is withdrawn.
 		// The set every machine has: as recorded, else as served wide, else the
 		// tree's own: never an empty set because the record was lost (B24).
+		$served_wide = array_key_exists('served_wide', $opts) ? $opts['served_wide'] : PackageFixChannel::read(PackageFixChannel::wideDir($site));
 		if (!is_array($state['wide_lines'] ?? null)) {
-			$served_wide = array_key_exists('served_wide', $opts) ? $opts['served_wide'] : PackageFixChannel::read(PackageFixChannel::wideDir($site));
 			$state['wide_lines'] = is_array($served_wide['lines'] ?? null) ? $served_wide['lines'] : $tree;
 		}
 		$wide_lines = $state['wide_lines'];
 		// A machine installed from a newer release refuses a channel issued
 		// before it: issue again once this tree's release moves (B23).
-		$served_release = (string)($served['release'] ?? '');
-		$stale = $served !== null && preg_match('/^\d+\.\d+\.\d+$/', $release) && preg_match('/^\d+\.\d+\.\d+$/', $served_release)
-			&& version_compare($served_release, $release, '<');
+		// The release as it is now: a build earlier in this run can outlast an
+		// upgrade. The copy that matters is the one mirrors pass on (channel-wide/).
+		$release = (string)($opts['release'] ?? trim((string)@file_get_contents($site . '/public_html/VERSION')));
+		$older = function ($ch) use ($release) {
+			$r = (string)($ch['release'] ?? '');
+			return is_array($ch) && preg_match('/^\d+\.\d+\.\d+$/', $release) && preg_match('/^\d+\.\d+\.\d+$/', $r) && version_compare($r, $release, '<');
+		};
+		$stale = $older($served_wide) || $older($served);
 		if (($state['wide_withdrawn'] ?? array()) != $state['withdrawn'] || $stale) {
 			$wide_set = PackageFixChannel::merge($wide_lines, array(), $state['withdrawn']);
 			$send($wide_set, true);
@@ -292,10 +308,10 @@ class PackageFixAuto {
 
 	/** Try one package: find and write the recipe, then build it. */
 	private static function attempt(array $state, string $site, string $source, array $cves, array $watch, int $now, array $opts, array &$said, callable $dispatch): array {
-		$release = (string)($opts['release'] ?? '');
-		$mark = function (array $state, string $status, string $step, string $reason) use ($source, $cves, $now, $release) {
+		$inputs = (string)($opts['inputs'] ?? '');
+		$mark = function (array $state, string $status, string $step, string $reason) use ($source, $cves, $now, $inputs) {
 			foreach (array_keys($cves) as $cve) {
-				$state['attempts'][$source . ' ' . $cve] = array('status' => $status, 'step' => $step, 'reason' => $reason, 'at' => $now, 'release' => $release);
+				$state['attempts'][$source . ' ' . $cve] = array('status' => $status, 'step' => $step, 'reason' => $reason, 'at' => $now, 'inputs' => $inputs);
 			}
 			return $state;
 		};
@@ -368,7 +384,7 @@ class PackageFixAuto {
 			$left = array();
 			foreach (($w['fallback'] ?? null) === 'upstream_release' ? array() : (array)($w['failed'] ?? array()) as $cve => $why) {
 				if (isset($cves[$cve])) {
-					$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now, 'release' => $release);
+					$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now, 'inputs' => $inputs);
 					$left[$cve] = $why;
 				}
 			}
@@ -637,6 +653,19 @@ class PackageFixAuto {
 	private static function withdrawRequests(): array {
 		$r = json_decode((string)Globalvars::get_instance()->get_setting(self::WITHDRAW_SETTING), true);
 		return is_array($r) ? $r : array();
+	}
+
+	/**
+	 * What could change a stopped attempt's outcome for $source, as one hash:
+	 * its key file, the upstream list, and RETRY_GENERATION.
+	 */
+	public static function retryInputs(string $site, string $source, array $opts = array()): string {
+		if (isset($opts['retry_inputs'])) {
+			return (string)call_user_func($opts['retry_inputs'], $source);
+		}
+		$fixes = rtrim($site, '/') . '/' . PackageFixPublisher::SOURCE_SUBDIR;
+		return hash('sha256', self::RETRY_GENERATION . "\0" . (string)@file_get_contents($fixes . '/UPSTREAMS')
+			. "\0" . (string)@file_get_contents($fixes . '/upstream_keys/' . $source . '.asc'));
 	}
 
 	/** Remove the requests this run took; one pressed meanwhile stays. */
