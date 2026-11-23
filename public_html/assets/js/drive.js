@@ -8,6 +8,7 @@
  * The page's #drive-config and #drive-initial JSON blocks carry its settings and
  * first listing.
  *
+ * @version 1.3 - uploads go through the shared transport (assets/js/drive-upload.js, JoineryDriveUpload)
  * @version 1.2 - notices show inside an open dialog and stay longer for longer messages */
 (function () {
 	'use strict';
@@ -1348,17 +1349,6 @@
 		Array.prototype.forEach.call(files, function (f) { uploadOne(f); });
 	}
 
-	async function sha256Hex(file) {
-		if (!(window.crypto && crypto.subtle)) return null;
-		try {
-			var buf = await file.arrayBuffer();
-			var digest = await crypto.subtle.digest('SHA-256', buf);
-			return Array.prototype.map.call(new Uint8Array(digest), function (b) {
-				return b.toString(16).padStart(2, '0');
-			}).join('');
-		} catch (e) { return null; }
-	}
-
 	async function uploadOne(file) {
 		var uploads = $('drvUploads');
 		var row = el('div', 'drv-upload-row');
@@ -1411,43 +1401,16 @@
 				body = file;
 				initBody.name = file.name;
 				// Hash small/medium files client-side to enable the dedup short-circuit.
-				var sha = file.size <= 64 * 1024 * 1024 ? await sha256Hex(file) : null;
+				var sha = file.size <= 64 * 1024 * 1024 ? await JoineryDriveUpload.sha256Hex(file) : null;
 				if (sha) initBody.sha256 = sha;
 			}
 			if (state.view === 'mine' && state.folderId) initBody.folder_id = state.folderId;
 
-			var init = await api.post('drive_upload_init', initBody);
-			if (init.deduped) { done(); return; }
-
-			var token = init.upload_token, chunkBytes = init.chunk_bytes || 8388608;
-			var total = body.size;
-			var offset = 0;
-			while (offset < total) {
-				var end = Math.min(offset + chunkBytes, total);
-				var resp = await putChunk(token, body.slice(offset, end), offset, end - 1, total);
-				if (resp.status === 409) { var j = await resp.json(); offset = (j.data && j.data.received_bytes) || 0; continue; }
-				if (!resp.ok) { fail('chunk failed'); return; }
-				var ok = await resp.json();
-				offset = ok.data.received_bytes;
-				progress(offset / total);
-			}
-			await api.post('drive_upload_complete', Object.assign({ upload_token: token }, completeExtra));
+			await JoineryDriveUpload.send(body, initBody, completeExtra, progress);
 			done();
 		} catch (e) {
 			fail((e && e.message) ? e.message : 'failed');
 		}
-	}
-
-	function putChunk(token, blob, start, end, total) {
-		return fetch('/api/v1/drive_upload/' + encodeURIComponent(token), {
-			method: 'PUT',
-			headers: {
-				'X-Joinery-Csrf': api.csrf(),
-				'Content-Range': 'bytes ' + start + '-' + end + '/' + total,
-				'Content-Type': 'application/octet-stream'
-			},
-			body: blob
-		});
 	}
 
 	// ---- nav / view --------------------------------------------------------
