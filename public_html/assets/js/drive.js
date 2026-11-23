@@ -8,7 +8,7 @@
  * The page's #drive-config and #drive-initial JSON blocks carry its settings and
  * first listing.
  *
- * @version 1.1 - settings and first listing from JSON blocks (no inline script) */
+ * @version 1.2 - notices show inside an open dialog and stay longer for longer messages */
 (function () {
 	'use strict';
 
@@ -83,8 +83,20 @@
 			link.style.cssText = 'color:#fff;text-decoration:underline;margin-left:.5rem';
 			t.appendChild(link);
 		}
-		document.body.appendChild(t);
-		setTimeout(function () { t.remove(); }, link ? 10000 : 3200);
+		// An open modal dialog sits in the top layer, above anything on the
+		// body, so a notice raised while one is open goes inside it; if the
+		// dialog closes first, the notice moves out to the page. It stays long
+		// enough to read: longer messages stay longer.
+		var dlg = document.querySelector('dialog[open]');
+		var host = dlg || document.body;
+		host.appendChild(t);
+		if (dlg) {
+			dlg.addEventListener('close', function () {
+				if (t.isConnected) document.body.appendChild(t);
+			}, { once: true });
+		}
+		var ms = Math.max(3200, String(msg).length * 60);
+		setTimeout(function () { t.remove(); }, link ? Math.max(10000, ms) : ms);
 	}
 
 	// ---- vault unlock (client-custody, scope 'drive') ----------------------
