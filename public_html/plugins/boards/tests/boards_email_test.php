@@ -24,6 +24,7 @@
  *
  * Run: php tests/run.php test-db --filter=boards_email
  *
+ * @version 1.1 - pins the member file types list its attachment check assumes
  * @version 1.0
  */
 
@@ -254,6 +255,10 @@ try { BoardsEmail::createFromMessage($board, $todo, $editor, $dup_msg, array());
 check($twice, 'and making a card from a message that has one is refused');
 
 section('Attachments are adopted without copying bytes');
+
+// What a card takes is the site's member file types list; pinned here so the
+// check does not flip with operator configuration.
+harness_set_setting_mem('allowed_upload_extensions', 'png,pdf,txt,csv');
 
 $files_before = (int)$db->query("SELECT COUNT(*) FROM fil_files WHERE fil_source = 'boards_attachment'")->fetchColumn();
 $att_mid = bem_send($back, $editor_mail, 'With files', 'see attached', $pass, array('attachments' => array(
