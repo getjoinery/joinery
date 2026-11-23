@@ -79,8 +79,10 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 		// e.g. HTML files with embedded JavaScript code.
 		// Please also read the SECURITY.md document in this repository.
 
-		//'accept_file_types' => '/\.(gif|jpe?g|png|pdf|xls|doc|xlsx|docx|mp3|mp4|m4a)$/i',
-		'accept_file_types' => '/\.('.str_replace(',', '|', $settings->get_setting('allowed_upload_extensions')).')$/i',
+		// An admin uploads any file. Nothing here can become code or a page:
+		// File::createFromUpload() stores it under an inert name and it is served
+		// as a download unless it is a plain image.
+		'accept_file_types' => '/.+$/i',
 		// Replaces dots in filenames with the given string.
 		// Can be disabled by setting it to false or an empty string.
 		// Note that this is a security feature for servers that support

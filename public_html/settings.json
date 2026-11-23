@@ -1098,11 +1098,11 @@
     },
     {
       "name": "allowed_upload_extensions",
-      "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a",
+      "default": "gif,jpeg,jpg,png,avif,webp,heic,pdf,txt,csv,xls,xlsx,doc,docx,ppt,pptx,odt,ods,zip,mp3,m4a,wav,mp4,mov",
       "group": "files",
-      "label": "Allowed upload extensions",
+      "label": "File types members may attach",
       "type": "text",
-      "helptext": "Comma separated, lowercase, no dots. An extension absent from this list is refused on upload. An extension the server would execute (php, phtml, phar, cgi, sh and the like) is refused here, because this list is what decides whether an upload can become code.",
+      "helptext": "Comma separated, lowercase, no dots. A member can attach only these file types to a message, a forum post or a board card. It does not apply to Drive, to email, or to files an admin uploads, which take any file.",
       "vault_gated": true,
       "validation": {
         "pattern": "/^(?!.*\\b(?:php\\d*|phtml|phar|pht|phps|phpt|inc|cgi|pl|py|sh|bash|shtml|htaccess|htpasswd)\\b)[a-z0-9]+(?:,[a-z0-9]+)*$/",

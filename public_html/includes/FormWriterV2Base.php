@@ -7,6 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.37.0 - form option label_position: 'left' puts each text field's and dropdown's label beside it
+ * @version 2.36.2 - file_upload_full() takes any file type: the admin uploader has no extension list
  * @version 2.36.1 - a form rendered by a command-line run that has already printed (a scheduled task indexing pages) starts no session
  * @version 2.36.0 - submitbutton takes 'busy': the words it shows, disabled, once its form posts
  * @version 2.35.0 - hiddeninput takes 'browser_timezone': the browser fills it with the visitor's time zone
@@ -2427,9 +2429,21 @@ abstract class FormWriterV2Base {
         $html .= ' method="' . htmlspecialchars($this->options['method']) . '"';
         $html .= ' action="' . htmlspecialchars($this->options['action']) . '"';
 
-        // Additional attributes
+        // Additional attributes. 'label_position' => 'left' puts each text
+        // field's and dropdown's label beside it (the UI kit draws it from the
+        // jy-labels-left class; narrow screens keep labels above).
+        $form_classes = array();
         if (!empty($this->options['class'])) {
-            $html .= ' class="' . htmlspecialchars($this->options['class']) . '"';
+            $form_classes[] = $this->options['class'];
+        }
+        $label_position = $this->options['label_position'] ?? 'above';
+        if ($label_position === 'left') {
+            $form_classes[] = 'jy-labels-left';
+        } elseif ($label_position !== 'above') {
+            throw new Exception("FormWriter: form '{$this->form_id}' asks for label_position '{$label_position}'; use above or left.");
+        }
+        if ($form_classes) {
+            $html .= ' class="' . htmlspecialchars(implode(' ', $form_classes)) . '"';
         }
         if (!empty($this->options['enctype'])) {
             $html .= ' enctype="' . htmlspecialchars($this->options['enctype']) . '"';
@@ -3889,8 +3903,6 @@ abstract class FormWriterV2Base {
         }
 
         $settings = Globalvars::get_instance();
-        $allowed_extensions = $settings->get_setting('allowed_upload_extensions');
-        $accept_attr = '.' . str_replace(',', ',.', $allowed_extensions);
 
         // Get actual PHP upload limits
         $upload_max = ini_get('upload_max_filesize');
@@ -3913,17 +3925,16 @@ abstract class FormWriterV2Base {
     ?>
         <!-- File Drop Zone -->
         <div id="file-drop-zone" class="file-drop-zone"
-            data-allowed-extensions="<?php echo htmlspecialchars((string)$allowed_extensions); ?>"
             data-max-size="<?php echo (int)$max_size; ?>"
             data-max-size-display="<?php echo htmlspecialchars($max_size_display); ?>"
             style="border: 2px dashed #ccc; border-radius: 5px; padding: 20px; text-align: center; margin-bottom: 20px; background-color: #f9f9f9; transition: all 0.3s ease; cursor: pointer;">
             <div style="font-size: 48px; color: #999; margin-bottom: 10px;">☁️</div>
             <h3 style="color: #666; margin: 10px 0;">Drop files here or click to browse</h3>
-            <p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo htmlspecialchars($max_size_display); ?> | Allowed types: <?php echo htmlspecialchars(strtoupper(str_replace(',', ', ', (string)$allowed_extensions))); ?></p>
+            <p style="color: #999; margin: 10px 0;">Maximum file size: <?php echo htmlspecialchars($max_size_display); ?></p>
             <div style="margin-top: 10px;">
                 <label class="button primary" style="cursor: pointer; display: inline-block; position: relative; overflow: hidden;">
                     📁 Browse Files
-                    <input type="file" id="file-input" multiple accept="<?php echo htmlspecialchars($accept_attr); ?>" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
+                    <input type="file" id="file-input" multiple style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
                 </label>
             </div>
         </div>

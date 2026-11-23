@@ -34,6 +34,8 @@
  *
  * Run:  php tests/functional/files/upload_safety_test.php
  *
+ * @version 1.3 - the allowed_upload_extensions setting cannot change a minted name; it is the member tools' list
+ *   (File::member_upload_allowed()), and the admin uploader takes any type
  * @version 1.2 - the minted name is inert: an allowlisted extension or .bin, one extension only, sanitized before the check
  * @version 1.1 - the unrecognized-bytes check uses fixed signature-free bytes (random ones
  *   sometimes carried a real signature)
@@ -69,16 +71,12 @@ class UploadSafetyProbe extends UploadHandler
 
 $settings = Globalvars::get_instance();
 
-// The options the admin upload page builds — in particular the allowlist is
-// assembled from the allowed_upload_extensions setting, so the test exercises
-// the real regex-construction pipeline. The value is pinned in memory: the
-// accept/refuse checks below assume png in and php out, and must not flip
-// with operator configuration.
+// The member file types list is pinned in memory: the accept/refuse checks
+// below assume png in and php out, and must not flip with operator
+// configuration.
 harness_set_setting_mem('allowed_upload_extensions', 'gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a');
 $allowed = $settings->get_setting('allowed_upload_extensions');
-$probe = new UploadSafetyProbe(array(
-    'accept_file_types' => '/\.(' . str_replace(',', '|', $allowed) . ')$/i',
-));
+$probe = new UploadSafetyProbe(array('accept_file_types' => '/.+$/i'));
 
 $upload_dir = $settings->get_setting('upload_dir');
 $fast_dir   = dirname($upload_dir) . '/static_files/uploads';
@@ -165,27 +163,40 @@ check($wrote, 'the sanitized name is a writable path (no ValueError)');
 @unlink($probe_path);
 
 // ---------------------------------------------------------------------------
-section('Extension allowlist applies to the sanitized name');
+section('The uploader collapses a double extension; an admin uploads any type');
 
-// The gate runs against the cleaned name, so a double extension must already
-// have been collapsed before it is tested.
 check($probe->trim_name('evil.php.png') === 'evil-php.png', 'double extension collapsed to one');
 check($probe->trim_name('shell.phtml.png') === 'shell-phtml.png', 'phtml double extension collapsed');
-check($probe->accepts($probe->trim_name('evil.php.png')), 'collapsed double extension is accepted as a png');
-check(!$probe->accepts($probe->trim_name('evil.php')), 'a bare .php name is refused');
-check(!$probe->accepts($probe->trim_name('.htaccess')), 'htaccess is refused');
-check(!$probe->accepts($probe->trim_name('no_extension')), 'an extensionless name is refused');
-check(!$probe->accepts($probe->trim_name('evil.png.php')), 'png-then-php is refused (php is the real extension)');
+// The admin uploader names no file types (the stored name is inert whatever
+// arrives: see the minted-name checks below).
+$admin_logic = (string)file_get_contents(PathHelper::getIncludePath('adm/logic/admin_file_upload_process_logic.php'));
+check(strpos($admin_logic, "'accept_file_types' => '/.+$/i'") !== false && strpos($admin_logic, 'allowed_upload_extensions') === false,
+    'the admin uploader accepts any file name and does not read the member list');
 
-// The allowlist is case-insensitive, so an uppercase extension is accepted
-// rather than slipping past as unrecognized.
-check($probe->accepts('UPPER.PNG'), 'uppercase extension accepted');
-check(!$probe->accepts('UPPER.PHP'), 'uppercase php still refused');
+// ---------------------------------------------------------------------------
+section('Member tools take only the listed file types');
 
-// Every extension the setting names must actually pass its own gate — a stray
-// space in the setting would silently disable one, and nothing else would say so.
-foreach (array_map('trim', explode(',', $allowed)) as $ext) {
-    check($probe->accepts('sample.' . $ext), 'configured extension is accepted: ' . $ext);
+// What a member may attach to a message, a forum post or a board card is the
+// allowed_upload_extensions setting, read by File::member_upload_allowed().
+check(File::member_upload_allowed('photo.png'), 'a listed type is accepted');
+check(File::member_upload_allowed('UPPER.PNG'), 'an uppercase extension is accepted');
+check(File::member_upload_allowed('evil.php.png'), 'the last extension is the one that counts');
+foreach (array('evil.php', 'UPPER.PHP', '.htaccess', 'no_extension', 'evil.png.php', 'page.html', 'tool.exe', 'notes.psd', '') as $refused) {
+    check(!File::member_upload_allowed($refused), 'refused: ' . json_encode($refused));
+}
+// Every extension the setting names must actually pass — a stray space in the
+// setting would silently disable one, and nothing else would say so.
+foreach (File::member_upload_extensions() as $ext) {
+    check(File::member_upload_allowed('sample.' . $ext), 'configured extension is accepted: ' . $ext);
+}
+harness_set_setting_mem('allowed_upload_extensions', ' png , pdf,');
+check(File::member_upload_extensions() === array('png', 'pdf'), 'spaces and an empty entry in the setting are ignored');
+check(File::member_upload_allowed('a.pdf') && !File::member_upload_allowed('a.jpg'), 'the setting, not a fixed list, decides');
+harness_set_setting_mem('allowed_upload_extensions', $allowed);
+foreach (array('plugins/forum/includes/ForumUploads.php', 'plugins/boards/includes/BoardsUploads.php',
+        'plugins/messenger/includes/MessengerUploads.php') as $tool) {
+    check(strpos((string)file_get_contents(PathHelper::getIncludePath($tool)), 'File::member_upload_allowed(') !== false,
+        $tool . ' asks the member rule');
 }
 
 // ---------------------------------------------------------------------------
@@ -314,11 +325,22 @@ foreach ($hostile as $exe) {
     check(substr($m, -4) === '.bin', 'an executable name (' . json_encode($exe) . ') lands as .bin', 'got: ' . $m);
 }
 $m = $mint->invoke(null, 'quote.txt');
-check(substr($m, -4) === '.txt', 'an inert extension beyond the upload allowlist is kept', 'got: ' . $m);
+check(substr($m, -4) === '.txt', 'an inert extension is kept', 'got: ' . $m);
 $m = $mint->invoke(null, 'a.php.jpg');
 check(substr_count($m, '.') === 1 && substr($m, -4) === '.jpg', 'an inner dot becomes an underscore: one extension only', 'got: ' . $m);
 $m = $mint->invoke(null, 'Report Q3.pdf');
 check(preg_match('/^Report_Q3_[a-z0-9]{8}\.pdf$/', $m) === 1, 'an ordinary name keeps its extension', 'got: ' . $m);
+// The setting says what a member may attach. It never names a file on
+// disk, so a value that lists an executable or script extension changes nothing.
+harness_set_setting_mem('allowed_upload_extensions', 'png,php,js,html,psd');
+foreach (array('x.php', 'x.js', 'x.html', 'x.psd') as $listed) {
+    $m = $mint->invoke(null, $listed);
+    check(substr($m, -4) === '.bin', 'an extension the setting lists (' . $listed . ') still lands as .bin', 'got: ' . $m);
+}
+harness_set_setting_mem('allowed_upload_extensions', 'png');
+$m = $mint->invoke(null, 'Report Q3.pdf');
+check(substr($m, -4) === '.pdf', 'an extension the setting leaves out keeps its name on disk', 'got: ' . $m);
+harness_set_setting_mem('allowed_upload_extensions', 'gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a');
 check(strpos($minted, '/') === false, 'the minter strips path separators', 'got: ' . $minted);
 check(preg_match('/^[A-Za-z0-9._\-]+$/', $minted) === 1, 'the minted name is limited to safe characters', 'got: ' . $minted);
 check(strpos($mint->invoke(null, "evil\x00.png"), "\x00") === false, 'the minter strips NUL');

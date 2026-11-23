@@ -98,7 +98,8 @@ check(strpos($html, 'data-jy-ajax-select="/api/v1/action/x?a=1&amp;b=2"') !== fa
 check(strpos($html, 'data-jy-navigate') !== false, 'navigate_on_change marks its select');
 check(strpos($html, 'data-jy-confirm="Delete O&#039;Brien&#039;s row?"') !== false, "a submit button's confirm is a kit attribute");
 check(strpos($html, 'data-placeholder="Find a &quot;photo&quot;"') !== false, "the image selector's search prompt is on its field");
-check(preg_match('/data-max-size="\d+"/', $html) === 1 && strpos($html, 'data-allowed-extensions="') !== false, "the uploader's limits are on its drop zone");
+check(preg_match('/data-max-size="\d+"/', $html) === 1, "the uploader's size limit is on its drop zone");
+check(strpos($html, 'data-allowed-extensions') === false && preg_match('/id="file-input"[^>]*accept=/', $html) !== 1, 'the uploader names no file types: an admin uploads any file');
 check(strpos($html, 'value="7&quot;&gt;&lt;b&gt;"') !== false && strpos($html, '"><b>') === false, "the uploader's hidden values are escaped");
 
 section('A JSON block cannot be closed by the data inside it');

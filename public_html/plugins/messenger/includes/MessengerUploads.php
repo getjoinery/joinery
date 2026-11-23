@@ -13,6 +13,7 @@
  * and nobody else can (MessengerAttachmentGate). An upload that is never
  * claimed simply stays the uploader's own private file.
  *
+ * @version 1.2.0 - a conversation takes only the site's member file types (File::member_upload_allowed())
  * @version 1.1.0 - FILE_SOURCE: the messenger_attachment origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.0.0
@@ -27,20 +28,6 @@ class MessengerUploads {
 	/** Origin tag (fil_source) on a photo or file sent in a conversation,
 	 *  declared under "fileSources" in plugin.json. */
 	const FILE_SOURCE = 'messenger_attachment';
-
-	/**
-	 * File types a conversation refuses outright.
-	 *
-	 * Not a security boundary — the bytes are served as a download with the
-	 * platform's own headers, never executed — but a chat has no business
-	 * carrying a program, and refusing at the door is clearer than storing one
-	 * and hoping nobody runs it.
-	 */
-	const BLOCKED_EXTENSIONS = array(
-		'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phps', 'phar',
-		'exe', 'com', 'bat', 'cmd', 'scr', 'msi', 'dll', 'jar', 'app',
-		'sh', 'bash', 'zsh', 'ps1', 'vbs', 'js', 'jse', 'wsf', 'hta',
-	);
 
 	/**
 	 * Store one uploaded file for later attaching.
@@ -81,8 +68,8 @@ class MessengerUploads {
 		if ($name === '') {
 			$name = 'attachment';
 		}
-		$extension = strtolower((string)pathinfo($name, PATHINFO_EXTENSION));
-		if ($extension !== '' && in_array($extension, self::BLOCKED_EXTENSIONS, true)) {
+		// Only the site's listed member file types travel in a conversation.
+		if (!File::member_upload_allowed($name)) {
 			throw new MessengerRefusal('That kind of file cannot be sent in a message.');
 		}
 

@@ -62,6 +62,9 @@ interface FileRemote {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.24.0 - a stored name's extension comes from INERT_EXTENSIONS alone; the allowed_upload_extensions setting
+ *                   no longer decides it, so no setting value can put an executable name on disk.
+ *                   member_upload_allowed(): that setting is what a member may attach with a member tool
  * @version 1.23.2 - fil_install_id: the install of the sandboxed plugin that kept the file (spec plugin_install_identity A1)
  * @version 1.23.1 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.23.0 - File::$remote (FileRemote): in a sandboxed plugin's fence, createFromUpload(),
@@ -685,28 +688,42 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
-	 * Extensions a stored name may keep beyond the site's allowed upload
-	 * extensions: data no server executes. Every other extension (php, php1,
-	 * phtml, inc, cgi, exe and whatever comes next) is kept as a word and the
-	 * name ends in .bin, since bytes from an inbound attachment never meet the
-	 * upload allowlist. An allowlist, so a new executable shape is inert by
-	 * default rather than by someone remembering to list it.
+	 * The extensions a stored name may end in: data no server executes. Every
+	 * other extension (php, php1, phtml, inc, cgi, exe, js, html and whatever
+	 * comes next) is kept as a word and the name ends in .bin. An allowlist in
+	 * code, so a new executable shape is inert by default rather than by
+	 * someone remembering to list it, and no setting can widen it: the
+	 * allowed_upload_extensions setting says what a member may attach
+	 * (member_upload_allowed()), never what a file is called on disk.
 	 */
-	const INERT_EXTENSIONS = array('txt', 'csv', 'tsv', 'md', 'json', 'xml', 'ics', 'vcf', 'eml', 'msg', 'rtf', 'odt', 'ods',
+	const INERT_EXTENSIONS = array('gif', 'jpeg', 'jpg', 'png', 'avif', 'webp', 'pdf', 'xls', 'doc', 'xlsx', 'docx',
+		'mp3', 'mp4', 'm4a',
+		'txt', 'csv', 'tsv', 'md', 'json', 'xml', 'ics', 'vcf', 'eml', 'msg', 'rtf', 'odt', 'ods',
 		'odp', 'ppt', 'pptx', 'pages', 'numbers', 'key', 'epub', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'tar',
 		'heic', 'heif', 'tif', 'tiff', 'bmp', 'ico', 'svg', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'wav', 'ogg', 'flac',
 		'aac', 'opus', 'jpe', 'bin');
 
 	/** Whether a stored name may end in this (already sanitized, lowercase) extension. */
 	public static function stored_extension_allowed(string $ext): bool {
-		if ($ext === '' || !preg_match('/^[a-z0-9]{1,10}$/', $ext)) {
-			return false;
-		}
-		if (in_array($ext, self::INERT_EXTENSIONS, true)) {
-			return true;
-		}
-		$allowed = array_map('trim', explode(',', strtolower((string)Globalvars::get_instance()->get_setting('allowed_upload_extensions'))));
-		return in_array($ext, $allowed, true);
+		return $ext !== '' && preg_match('/^[a-z0-9]{1,10}$/', $ext) === 1
+			&& in_array($ext, self::INERT_EXTENSIONS, true);
+	}
+
+	/** The extensions a member may attach with a member tool (the allowed_upload_extensions setting). */
+	public static function member_upload_extensions(): array {
+		$listed = explode(',', strtolower((string)Globalvars::get_instance()->get_setting('allowed_upload_extensions')));
+		return array_values(array_filter(array_map('trim', $listed), 'strlen'));
+	}
+
+	/**
+	 * May a member attach a file of this name with a member tool (a message, a
+	 * forum post, a board card)? Only a name whose extension the site lists.
+	 * A policy for those tools, not a safety rule: Drive, mail and an admin's
+	 * upload take any file, and every stored file is inert whatever it is.
+	 */
+	public static function member_upload_allowed(string $name): bool {
+		$ext = strtolower((string)pathinfo(trim($name), PATHINFO_EXTENSION));
+		return $ext !== '' && in_array($ext, self::member_upload_extensions(), true);
 	}
 
 	private static function _mint_unique_name($display_name) {

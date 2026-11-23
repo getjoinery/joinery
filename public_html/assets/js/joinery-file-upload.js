@@ -2,8 +2,9 @@
  * FormWriter's bulk file uploader (FormWriterV2Base::file_upload_full()):
  * drag and drop, a queue, and one POST per file to
  * /admin/admin_file_upload_process. The drop zone carries the server's limits
- * as data-allowed-extensions, data-max-size (bytes) and data-max-size-display.
+ * as data-max-size (bytes) and data-max-size-display. Any file type is taken.
  *
+ * @version 1.1 - no file type check: an admin uploads any file
  * @version 1.0
  */
 (function() {
@@ -15,8 +16,6 @@
     // The drop zone first: it carries the server's limits.
     const dropZone = document.getElementById('file-drop-zone');
     if (!dropZone) return;
-    const allowedExtensions = dropZone.dataset.allowedExtensions || '';
-    const allowedTypes = new RegExp('\\.(' + allowedExtensions.replace(/,/g, '|') + ')$', 'i');
     const maxFileSize = parseInt(dropZone.dataset.maxSize, 10) || 0; // Maximum file size in bytes
 
     // DOM elements
@@ -66,12 +65,6 @@
     // Add files to the list
     function addFiles(files) {
         Array.from(files).forEach(file => {
-            // Validate file type using server setting
-            if (!allowedTypes.test(file.name)) {
-                showToast('Invalid file type: ' + file.name + '. Allowed: ' + allowedExtensions, 'error');
-                return;
-            }
-
             // Validate file size using server limit
             if (file.size > maxFileSize) {
                 showToast('File too large: ' + file.name + '. Maximum size: ' + (dropZone.dataset.maxSizeDisplay || ''), 'error');

@@ -9,6 +9,7 @@
  * way the finished attachment is a File gated on the board, so the people with a
  * role on the board can open it and nobody else can (BoardsAttachmentGate).
  *
+ * @version 1.2.0 - a card takes only the site's member file types (File::member_upload_allowed())
  * @version 1.1.0 - FILE_SOURCE: the boards_attachment origin tag lives here, declared
  *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.0.0
@@ -20,24 +21,9 @@ class BoardsUploads {
 	 *  background image), declared under "fileSources" in plugin.json. */
 	const FILE_SOURCE = 'boards_attachment';
 
-	/**
-	 * File types a card refuses outright.
-	 *
-	 * Not a security boundary — the bytes are served as a download with the
-	 * platform's own headers, never executed — but a task board has no business
-	 * carrying a program, and refusing at the door is clearer than storing one and
-	 * hoping nobody runs it.
-	 */
-	const BLOCKED_EXTENSIONS = array(
-		'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phps', 'phar',
-		'exe', 'com', 'bat', 'cmd', 'scr', 'msi', 'dll', 'jar', 'app',
-		'sh', 'bash', 'zsh', 'ps1', 'vbs', 'js', 'jse', 'wsf', 'hta',
-	);
-
-	/** Is this a file name a card refuses? */
+	/** Is this a file name a card refuses? Only the site's listed member file types attach. */
 	public static function isBlockedName(string $name): bool {
-		$extension = strtolower((string)pathinfo(trim($name), PATHINFO_EXTENSION));
-		return $extension !== '' && in_array($extension, self::BLOCKED_EXTENSIONS, true);
+		return !File::member_upload_allowed($name);
 	}
 
 	/** The most bytes one attachment may be. */

@@ -2132,3 +2132,15 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE uew_user_encryption_wrappings SET uew_wrapped_secret_key = 'scrubbed' WHERE uew_unlocker_type = 'passphrase' AND uew_delete_time IS NOT NULL AND uew_wrapped_secret_key NOT IN ('', 'scrubbed')";
 	$migrations[] = $migration;
+
+	// The member file types list (allowed_upload_extensions) is what a member
+	// may attach to a message, a forum post or a board card. A site still on
+	// the factory list gains the everyday types those tools carried before
+	// (text, zip, slides, phone photos and video); a list an operator edited
+	// is left as they set it. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '248';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'gif,jpeg,jpg,png,avif,webp,heic,pdf,txt,csv,xls,xlsx,doc,docx,ppt,pptx,odt,ods,zip,mp3,m4a,wav,mp4,mov' WHERE stg_name = 'allowed_upload_extensions' AND stg_value = 'gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a'";
+	$migrations[] = $migration;

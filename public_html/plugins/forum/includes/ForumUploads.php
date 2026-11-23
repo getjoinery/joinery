@@ -9,6 +9,7 @@
  * gate, so it is exactly as visible as the post, and an EntityAttachment row
  * lists it. A File nobody claims within a day is removed by ForumMaintenance.
  *
+ * @version 1.1.0 - a post takes only the site's member file types (File::member_upload_allowed())
  * @version 1.0.0
  */
 
@@ -27,16 +28,9 @@ class ForumUploads {
 	const UPLOAD_RATE = 30;
 	const UPLOAD_WINDOW = 600;
 
-	/** File types a post refuses outright (served as downloads anyway; refused for clarity). */
-	const BLOCKED_EXTENSIONS = array(
-		'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'phps', 'phar',
-		'exe', 'com', 'bat', 'cmd', 'scr', 'msi', 'dll', 'jar', 'app',
-		'sh', 'bash', 'zsh', 'ps1', 'vbs', 'js', 'jse', 'wsf', 'hta', 'svg', 'html', 'htm',
-	);
-
+	/** Is this a file name a post refuses? Only the site's listed member file types attach. */
 	public static function isBlockedName(string $name): bool {
-		$extension = strtolower((string)pathinfo(trim($name), PATHINFO_EXTENSION));
-		return $extension !== '' && in_array($extension, self::BLOCKED_EXTENSIONS, true);
+		return !File::member_upload_allowed($name);
 	}
 
 	public static function maxBytes(): int {
