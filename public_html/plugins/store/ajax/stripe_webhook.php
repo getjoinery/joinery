@@ -223,6 +223,7 @@ try {
 
             if ($order_items) {
                 $ended_tier_line = null;
+                $told = array();
                 foreach ($order_items as $order_item) {
                     $ends = (string)$order_item->get('odi_subscription_cancelled_time');
                     if ((string)$order_item->get('odi_subscription_status') === 'incomplete_expired' && $ends !== '') {
@@ -230,16 +231,26 @@ try {
                         error_log("Stripe webhook: subscription $subscription_id line #" . $order_item->key . " already ended as incomplete_expired");
                         continue;
                     }
+                    // Read before it is overwritten: a line already cancelled was
+                    // ended on this site (a cancel at once, a refund, a site
+                    // refused, discarded or moved), and whoever did that told the
+                    // buyer. A first payment never made is no ending to tell.
+                    $ended_here = (string)$order_item->get('odi_subscription_status') === 'canceled';
+                    $never_paid = in_array('incomplete_expired',
+                        array((string)$order_item->get('odi_subscription_status'), (string)($subscription->status ?? '')), true);
                     _stripe_webhook_subscription_ended($order_item, $subscription_id, false);
                     if ($ended_tier_line === null && TierBilling::lineGrantsTier($order_item)) {
                         $ended_tier_line = $order_item;
                     }
+                    // The buyer hears that it ended (a tier line from the tier, below).
+                    $told[] = '#' . $order_item->key . ' ' . ($ended_here ? 'ended on this site'
+                        : ($never_paid ? 'the first payment was never made' : SubscriptionEmails::ended($order_item)));
                 }
                 // The tier is revoked once, for the tier line among them.
                 if ($ended_tier_line !== null && $ended_tier_line->get('odi_usr_user_id')) {
                     TierBilling::handleSubscriptionExpired($ended_tier_line->get('odi_usr_user_id'), $ended_tier_line);
                 }
-                error_log("Stripe webhook: subscription $subscription_id deleted");
+                error_log("Stripe webhook: subscription $subscription_id deleted; ended notice: " . implode(', ', $told));
             } else {
                 error_log("Stripe webhook: no order item found for subscription $subscription_id");
             }
@@ -253,50 +264,59 @@ try {
         case 'invoice.payment_succeeded':
             $invoice = $event->data->object;
             $subscription_id = $invoice->subscription;
-
             if ($subscription_id) {
-                $order_items = new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id]);
-                $order_items->load();
+                // Every line the subscription pays for: one checkout can put
+                // several on it (a hosted site and its services).
+                $order_items = StripeHelper::subscription_current_lines((string)$subscription_id);
 
-                if ($order_items->count() > 0) {
-                    $order_item = $order_items->get(0);
-                    // Was this line in trouble before this charge landed? Read
-                    // BEFORE the status is overwritten: a recovery is only a
-                    // recovery relative to the state it recovered from, and
-                    // every ordinary renewal is already active.
-                    $was_in_trouble = in_array((string)$order_item->get('odi_subscription_status'),
-                        array('past_due', 'unpaid', 'incomplete'), true);
-                    $order_item->set('odi_subscription_status', 'active');
-
+                if ($order_items) {
+                    $period_end = null;
                     if ($invoice->lines && $invoice->lines->data) {
                         foreach ($invoice->lines->data as $line) {
                             if ($line->period && $line->period->end) {
-                                $order_item->set('odi_subscription_period_end', date('Y-m-d H:i:s', $line->period->end));
+                                $period_end = date('Y-m-d H:i:s', $line->period->end);
                                 break;
                             }
                         }
                     }
 
-                    $order_item->save();
+                    $recovered = 0;
+                    foreach ($order_items as $order_item) {
+                        // Was this line in trouble before this charge landed? Read
+                        // BEFORE the status is overwritten: a recovery is only a
+                        // recovery relative to the state it recovered from, and
+                        // every ordinary renewal is already active.
+                        $was_in_trouble = in_array((string)$order_item->get('odi_subscription_status'),
+                            array('past_due', 'unpaid', 'incomplete'), true);
+                        $order_item->set('odi_subscription_status', 'active');
+                        if ($period_end !== null) {
+                            $order_item->set('odi_subscription_period_end', $period_end);
+                        }
+                        $order_item->save();
 
-                    // A failed charge broadcasts subscription.payment_failed, so
-                    // whatever started a clock on that has to be able to hear the
-                    // charge that fixed it. Without this, nothing on the platform
-                    // can clear a grace period: subscription.expired carries only
-                    // user and tier ids, and a successful invoice dispatched
-                    // nothing at all.
-                    if ($was_in_trouble) {
-                        require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-                        SignalBus::dispatch('subscription.payment_recovered', array(
-                            'order_item_id'            => $order_item->key,
-                            'user_id'                  => $order_item->get('odi_usr_user_id'),
-                            'provider'                 => 'stripe',
-                            'provider_subscription_id' => $subscription_id,
-                        ));
+                        // A failed charge broadcasts subscription.payment_failed, so
+                        // whatever started a clock on that has to be able to hear the
+                        // charge that fixed it. Without this, nothing on the platform
+                        // can clear a grace period: subscription.expired carries only
+                        // user and tier ids, and a successful invoice dispatched
+                        // nothing at all.
+                        if ($was_in_trouble) {
+                            $recovered++;
+                            require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+                            SignalBus::dispatch('subscription.payment_recovered', array(
+                                'order_item_id'            => $order_item->key,
+                                'user_id'                  => $order_item->get('odi_usr_user_id'),
+                                'provider'                 => 'stripe',
+                                'provider_subscription_id' => $subscription_id,
+                            ));
+                        }
                     }
 
+                    // The buyer's receipt for a renewal, once for the invoice.
+                    $receipt = SubscriptionEmails::renewal_paid($invoice, $order_items, $stripe_helper);
+
                     error_log("Stripe webhook: payment succeeded for subscription $subscription_id"
-                        . ($was_in_trouble ? ' (recovered)' : ''));
+                        . ($recovered ? ' (recovered)' : '') . '; renewal receipt: ' . $receipt);
                 }
                 else {
                     // No line yet: a card checkout whose buyer confirmed with
@@ -323,23 +343,26 @@ try {
             $subscription_id = $invoice->subscription;
 
             if ($subscription_id) {
-                $order_items = new MultiOrderItem(['odi_stripe_subscription_id' => $subscription_id]);
-                $order_items->load();
+                // Every line the subscription pays for is unpaid, and whatever
+                // each pays for hears of it (a hosted site starts its grace).
+                $order_items = StripeHelper::subscription_current_lines((string)$subscription_id);
 
-                if ($order_items->count() > 0) {
-                    $order_item = $order_items->get(0);
-                    $order_item->set('odi_subscription_status', 'past_due');
-                    $order_item->save();
-
+                if ($order_items) {
                     require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
-                    SignalBus::dispatch('subscription.payment_failed', array(
-                        'order_item_id'            => $order_item->key,
-                        'user_id'                  => $order_item->get('odi_usr_user_id'),
-                        'provider'                 => 'stripe',
-                        'provider_subscription_id' => $subscription_id,
-                    ));
+                    foreach ($order_items as $order_item) {
+                        $order_item->set('odi_subscription_status', 'past_due');
+                        $order_item->save();
 
-                    // Send payment failure email (with dedup)
+                        SignalBus::dispatch('subscription.payment_failed', array(
+                            'order_item_id'            => $order_item->key,
+                            'user_id'                  => $order_item->get('odi_usr_user_id'),
+                            'provider'                 => 'stripe',
+                            'provider_subscription_id' => $subscription_id,
+                        ));
+                    }
+
+                    // One payment failure email for the subscription (with dedup)
+                    $order_item = $order_items[0];
                     $user_id = $order_item->get('odi_usr_user_id');
                     if ($user_id) {
                         _stripe_webhook_send_payment_failure_email($user_id, $order_item);

@@ -5,6 +5,7 @@
  * Safety net: checks PayPal subscription status for all active PayPal subscriptions.
  * Catches cancellations or status changes that webhooks may have missed.
  *
+ * @version 1.1 - keeps each line's next payment date as PayPal has it, status changed or not
  * @version 1.0
  */
 
@@ -22,7 +23,7 @@ class PaypalSubscriptionReconciler {
         $dbconnector = DbConnector::get_instance();
         $dblink = $dbconnector->get_db_link();
 
-        $sql = "SELECT odi_order_item_id, odi_paypal_subscription_id, odi_subscription_status
+        $sql = "SELECT odi_order_item_id, odi_paypal_subscription_id, odi_subscription_status, odi_subscription_period_end
                 FROM odi_order_items
                 WHERE odi_paypal_subscription_id IS NOT NULL
                 AND odi_paypal_subscription_id != ''
@@ -89,6 +90,18 @@ class PaypalSubscriptionReconciler {
                     $changed++;
 
                     error_log("SyncPaypalSubscriptions: subscription {$item['odi_paypal_subscription_id']} status changed from $current_status to $new_status");
+                }
+                elseif (isset($details['billing_info']['next_billing_time'])) {
+                    // The next payment date, kept current: a new line has none
+                    // until its first renewal, and the renewal reminder reads it.
+                    $next = gmdate('Y-m-d H:i:s', strtotime($details['billing_info']['next_billing_time']));
+                    $have = trim((string)$item['odi_subscription_period_end']);
+                    if ($have === '' || strtotime($have . ' UTC') !== strtotime($next . ' UTC')) {
+                        $order_item = new OrderItem($item['odi_order_item_id'], TRUE);
+                        $order_item->set('odi_subscription_period_end', $next);
+                        $order_item->save();
+                        $changed++;
+                    }
                 }
             } catch (Exception $e) {
                 error_log("SyncPaypalSubscriptions: error syncing {$item['odi_paypal_subscription_id']}: " . $e->getMessage());

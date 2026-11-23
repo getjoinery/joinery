@@ -1,0 +1,14 @@
+{
+  "name": "Subscription renewal reminders",
+  "description": "Emails a subscriber a few days before a subscription renews, once per renewal. Which plans are reminded is the store setting 'Email a reminder before a renewal'; dry run lists who would be told.",
+  "activate_on_install": true,
+  "default_frequency": "daily",
+  "default_time": "09:00:00",
+  "config_fields": {
+    "days_ahead": {
+      "label": "Days before the renewal",
+      "type": "number",
+      "default": 7
+    }
+  }
+}

@@ -24,6 +24,7 @@
  *
  * Run: php plugins/store/tests/stripe_webhook_invoice_test.php [base_url] [origin_ip]
  *
+ * @version 1.2 - every line of a subscription takes the event; an invoice that is no renewal is not receipted
  * @version 1.1 - invoice.paid
  * @version 1.0
  */
@@ -91,6 +92,15 @@ $line->load();
 harness_register_row('pro_products', 'pro_product_id', $product->key);
 harness_register_row('ord_orders', 'ord_order_id', $order->key);
 harness_register_row('odi_order_items', 'odi_order_item_id', $line->key);
+// A second line on the same subscription, as a site and its services bought together are.
+$line2 = new OrderItem(NULL);
+$line2->set('odi_ord_order_id', $order->key);
+$line2->set('odi_pro_product_id', $product->key);
+$line2->set('odi_stripe_subscription_id', $sub_id);
+$line2->set('odi_subscription_status', 'active');
+$line2->save();
+$line2->load();
+harness_register_row('odi_order_items', 'odi_order_item_id', $line2->key);
 
 section('invoice.payment_failed');
 
@@ -103,6 +113,9 @@ list($ok, $err) = swi_logged($evt);
 check($line->get('odi_subscription_status') === 'past_due', 'the line is past_due: the save was made with no one signed in',
 	'status ' . $line->get('odi_subscription_status') . '; logged: ' . $err);
 check($ok === true, 'and the endpoint logged the event as handled', $err);
+$line2->load();
+check($line2->get('odi_subscription_status') === 'past_due', 'every line of the subscription is past_due, not only one',
+	'second line: ' . $line2->get('odi_subscription_status'));
 
 section('invoice.payment_succeeded');
 
@@ -120,6 +133,13 @@ check($line->get('odi_subscription_status') === 'active', 'the line is active ag
 check(strtotime((string)$line->get('odi_subscription_period_end') . ' UTC') === $period_end,
 	'and carries the invoice\'s period end', (string)$line->get('odi_subscription_period_end'));
 check($ok === true, 'and the endpoint logged the event as handled', $err);
+$line2->load();
+check($line2->get('odi_subscription_status') === 'active'
+	&& strtotime((string)$line2->get('odi_subscription_period_end') . ' UTC') === $period_end,
+	'the second line of the subscription is active with the same period end',
+	$line2->get('odi_subscription_status') . ' ' . $line2->get('odi_subscription_period_end'));
+check(trim((string)$line->get('odi_receipted_invoice_id')) === '' && trim((string)$line2->get('odi_receipted_invoice_id')) === '',
+	'an invoice with no renewal reason is not receipted');
 
 section('invoice.paid (marked paid by hand in Stripe)');
 

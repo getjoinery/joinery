@@ -13,6 +13,7 @@
  * Store-owned registry. Fail soft: a product with no fulfillment provider simply
  * has nothing to fulfill.
  *
+ * @version 1.7.0 - FulfillmentTellsBuyer: a provider that tells a subscription's buyer of its cancel and ending itself
  * @version 1.6.0 - fulfill() may return 'after_purchase_message', the provider's own word for the line on the
  *                  confirmation page and receipt
  * @version 1.5.0 - FulfillmentCancelNotice: a provider may say what cancelling a line does to what it pays for
@@ -85,6 +86,17 @@ interface FulfillmentProvider {
 interface FulfillmentCancelNotice {
     /** What cancelling this line does to what it pays for, or '' for nothing to add. */
     public function cancelNotice(OrderItem $order_item): string;
+}
+
+/**
+ * Optional, for a provider that tells a subscription's buyer itself when the
+ * subscription is cancelled and when it ends (a hosted site's own notices).
+ * The store then sends no cancel or ended email for the line
+ * (SubscriptionEmails), so the buyer is told once.
+ */
+interface FulfillmentTellsBuyer {
+    /** Does this provider tell this line's buyer of its cancel and its ending? */
+    public function tellsBuyerOfEnding(OrderItem $order_item): bool;
 }
 
 class FulfillmentRegistry {

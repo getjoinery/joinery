@@ -49,6 +49,7 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.25 - tellsBuyerOfEnding(): a site's buyer is told of its cancel and ending by hosting's own notices, not the store
  * @version 1.24 - Refuse refunds every line bought for the site, cancels its subscriptions, revokes a licence bought
  *                with it and emails the buyer (walkthrough Q33); site_lines()
  * @version 1.23 - the confirmation page says a held order is being checked, and names a licence already owned
@@ -96,7 +97,7 @@
 require_once(PathHelper::getIncludePath('plugins/store/includes/FulfillmentRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedSiteRequirement.php'));
 
-class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancelNotice {
+class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancelNotice, FulfillmentTellsBuyer {
 
 	public function key(): string {
 		return 'customer_cloud';
@@ -261,6 +262,20 @@ class CustomerCloudFulfillment implements FulfillmentProvider, FulfillmentCancel
 	 * grace, then it is shut down; its backups are kept from the end of the
 	 * period (HostedTrialSignals). (hosting_after_purchase S2)
 	 */
+	public function tellsBuyerOfEnding(OrderItem $order_item): bool {
+		// A site this store sold: HostingBuyerNotices tells its buyer of a
+		// cancel, the grace and the shutdown, and a site refused, discarded or
+		// moved to its buyer's own account is told in that flow's own words.
+		// A removed site's row counts: its subscription ends after it.
+		$rows = new MultiCustomerCloudProvision(array('external_order_item_id' => (int)$order_item->key));
+		foreach ($rows as $provision) {
+			if ($provision->local_order_item() !== null) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public function cancelNotice(OrderItem $order_item): string {
 		// A PayPal cancel ends the subscription at once: there is no period
 		// left for the site to run to (B29).

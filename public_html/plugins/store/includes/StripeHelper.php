@@ -896,6 +896,23 @@ class StripeHelper {
 			?? ($sub->customer->invoice_settings->default_payment_method ?? null);
 	}
 
+	/**
+	 * What the next invoice of a subscription will charge, as Stripe states
+	 * it: ['minor' => the amount in the currency's smallest unit, 'currency'
+	 * => its code], or null when Stripe has no next invoice for it (cancelled,
+	 * ended).
+	 */
+	public function upcoming_invoice_amount(string $subscription_id): ?array {
+		try {
+			$invoice = $this->client()->invoices->upcoming(['subscription' => $subscription_id]);
+		} catch (\Stripe\Exception\ExceptionInterface $e) {
+			return null;
+		}
+		return isset($invoice->amount_due)
+			? array('minor' => (int)$invoice->amount_due, 'currency' => (string)($invoice->currency ?? ''))
+			: null;
+	}
+
 	public function get_subscription($stripe_subscription_id){
 		$stripe_subscription = $this->client()->subscriptions->retrieve($stripe_subscription_id);
 		return $stripe_subscription;

@@ -714,6 +714,7 @@ rehearsal (level 3) is the Backups page's own button, a person's choice.
 | `tasks/RetentionSweep.php` | Runs every declared `$retention_policy` |
 | `tasks/WeeklyEventsDigest.php` | Example email digest task |
 | `plugins/store/tasks/ReconcileSubscriptions.php` | Subscription backstop across all providers |
+| `plugins/store/tasks/SubscriptionRenewalReminders.php` | Emails a subscriber a few days before a renewal, once per renewal |
 | `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Example ordered-phase task |
 | `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile), the backup storage check and `verify_backup` dispatch |
 | `tasks/BackupVerify.php` | A site opening and reading its own newest backup on its interval |

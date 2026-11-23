@@ -24,7 +24,8 @@ The plugin is a **commercial extension** (`license: Joinery-Commercial`, `requir
 | `includes/StripeHelper.php` / `PaypalHelper.php` | Payment provider clients |
 | `includes/requirements/` | Product requirements (data collected from buyers at checkout) — see [Product Requirements](product_requirements.md) |
 | `data/stripe_customers_class.php` | User ↔ Stripe customer mapping (`StripeCustomer::GetForUser()`) |
-| `tasks/` | `ReconcileStripeSubscriptions`, `SyncPaypalSubscriptions` scheduled tasks |
+| `includes/SubscriptionEmails.php` | Every email the store sends a subscriber about a subscription — see [Subscription emails](#subscription-emails) |
+| `tasks/` | `ReconcileSubscriptions` (daily backstop against the payment providers), `SubscriptionRenewalReminders` scheduled tasks |
 
 ## Extension-Point Registrations (serve.php)
 
@@ -161,6 +162,30 @@ The PayPal buttons send the cart hash the page was shown with, and the record
 action refuses a cart changed since, before PayPal is asked for anything. A
 PayPal payment is captured in the buyer's browser, and only the return
 completes it: no PayPal webhook completes a one-time order.
+
+## Subscription emails
+
+`SubscriptionEmails` (`plugins/store/includes/SubscriptionEmails.php`) is the one place the store writes to a subscriber about a subscription it bills. Each email is a template on the site's email templates page.
+
+| When | Template | Sent from | Switch |
+|---|---|---|---|
+| A renewal is charged | `subscription_renewal_receipt` | the Stripe webhook's paid-invoice case | `store_renewal_receipts` |
+| The buyer cancels on the Billing page | `subscription_cancelled`, naming every line the subscription pays for | `orders_recurring_action_logic` | always |
+| The buyer takes a cancel back | `subscription_reactivated` | `orders_recurring_action_logic` | always |
+| The subscription ends | `subscription_expired` | the Stripe webhook's `customer.subscription.deleted`; PayPal's `CANCELLED` (a cancel made at PayPal) and `EXPIRED` | `store_subscription_ended_emails` |
+| A renewal is a few days off | `subscription_renewal_reminder` | the `SubscriptionRenewalReminders` task, daily | `store_renewal_reminders`: never, yearly plans only, every plan |
+
+The three settings are on the store's settings page under Subscriptions. A failed payment's email (`subscription_payment_failed`) and a tier change's emails are sent where they happen and have no switch.
+
+**The renewal receipt.** Stripe marks each invoice with why it was made (`billing_reason`). `subscription_cycle` is a renewal and is receipted; `subscription_create` is the first payment, which the order's own receipt covers; `subscription_update` is a plan change, receipted unless the subscription has a tier line (a tier change sends its own email). An invoice that charged nothing, or was marked paid by hand, sends nothing. The amount is the invoice's `amount_paid`, so a coupon shows. Stripe sends two events for one paid invoice; the receipt goes once because sending first writes the invoice id to `odi_receipted_invoice_id` on the subscription's oldest line, and only the request whose write changes the row sends. A PayPal renewal gets no receipt from the store: PayPal emails its own for every payment. With `store_renewal_receipts` on, leave the payment provider's own "successful payments" email off, or each renewal brings two.
+
+**Several lines on one subscription.** One checkout can put several lines on one Stripe subscription (a hosted site and its services). A paid or failed invoice is applied to every current line (`StripeHelper::subscription_current_lines()`), each line's listeners hear `subscription.payment_failed` and `subscription.payment_recovered`, and the receipt and the reminder name all of them in one email.
+
+**The reminder.** `SubscriptionEmails::remind_due()` reads the store's own lines, not the provider: an active subscription billed by Stripe or PayPal, not cancelled, whose `odi_subscription_period_end` falls within the task's `days_ahead` (7 unless set). One email per subscription, recorded per line in `odi_renewal_reminded_for` (the period end reminded), so each renewal is reminded once. For a Stripe subscription the amount is what Stripe will charge next (`StripeHelper::upcoming_invoice_amount()`); where that cannot be read the email names no amount. A PayPal line's next payment date comes from PayPal's `RENEWED` event and from the daily `ReconcileSubscriptions` task, which copies PayPal's `next_billing_time` onto every active line. App Store and Google Play subscriptions are not reminded; those stores tell their own buyers.
+
+**A product that tells its buyer itself.** A fulfillment provider that implements `FulfillmentTellsBuyer` and answers true from `tellsBuyerOfEnding($order_item)` keeps the store's cancel and ended emails off its lines, so the buyer is told once. A hosted site's line does (`CustomerCloudFulfillment`): hosting's own notices cover the cancel, the grace and the shutdown, and a site that was refused, discarded or moved is told by that flow. A line that grants a tier gets its ended email from `TierBilling::handleSubscriptionExpired()`. A line already marked cancelled when the provider's ended event arrives gets none: it was ended on this site (a cancel at once, a refund, a site refused or discarded), and that action told the buyer.
+
+An email that fails never undoes the payment, the cancel or the ending it reports. A receipt or reminder that could not be sent gives its record back, so the next event or the next daily run tries again.
 
 ## Test mode
 

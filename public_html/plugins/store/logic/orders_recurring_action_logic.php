@@ -3,6 +3,7 @@
  * Cancel a subscription, or take back a cancel at period end ('action' =>
  * 'resume'), as its buyer (or an admin acting for them).
  *
+ * @version 1.3 - the buyer is emailed what they did: the cancel and when it ends, or that billing carries on (subscription_emails)
  * @version 1.2 - action resume: a cancel waiting for the end of the paid period is taken back (hosting_after_purchase S4)
  * @version 1.1 - refuses anything but a POST: the Cancel link let any site cancel a signed-in
  *                buyer's subscription
@@ -42,8 +43,10 @@ function orders_recurring_action_logic(array $input): LogicResult {
 	$order_item = new OrderItem($order_item_id, TRUE);
 	if (($input['action'] ?? '') === 'resume') {
 		$order_item->resume_subscription_order_item();
+		SubscriptionEmails::resumed($order_item);
 	} else {
 		$order_item->cancel_subscription_order_item(true, 'period_end');
+		SubscriptionEmails::cancel_confirmed($order_item);
 	}
 
 	// Redirect back

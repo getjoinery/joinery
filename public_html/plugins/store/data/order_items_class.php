@@ -20,6 +20,8 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.14 - odi_receipted_invoice_id, odi_renewal_reminded_for: what SubscriptionEmails has sent for the line;
+ *                a Stripe cancel writes the subscription's new state to every line it pays for, not only the one cancelled
  * @version 1.13 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.12 - a line refunded in full revokes the ownerships it granted (revoke_ownerships(); walkthrough Q35)
  * @version 1.11 - refund_in_full(): all that is left of a line's payment, and its subscription cancelled
@@ -113,6 +115,10 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	    'odi_app_store_original_transaction_id' => array('type'=>'varchar(64)'),
 	    'odi_play_purchase_token' => array('access_class' => 'restricted', 'type'=>'varchar(255)'),
 	    'odi_store_environment' => array('type'=>'varchar(20)'),
+	    // What SubscriptionEmails has sent for this line: the invoice its last
+	    // renewal receipt was for, and the renewal its last reminder was for.
+	    'odi_receipted_invoice_id' => array('type'=>'varchar(64)'),
+	    'odi_renewal_reminded_for' => array('type'=>'timestamp(6)'),
 	);
 
 function get_order() {
@@ -611,7 +617,18 @@ function get_order() {
 			if (!$stripe_helper->cancel_subscription($provider_id, $cancel_type)) {
 				throw new SystemDisplayablePermanentError("We were unable to cancel that subscription (" . $provider_id . ") Please contact the webmaster.");
 			}
-			$stripe_helper->update_subscription_in_order_item($this);
+			$now = $stripe_helper->update_subscription_in_order_item($this);
+			// The cancel is the whole subscription's: every other line it pays
+			// for (a site's services, bought with it) takes the same state now,
+			// so nothing reads a line as running after its subscription was
+			// cancelled here.
+			if ($provider_id !== '' && (is_object($now) || is_array($now))) {
+				foreach (StripeHelper::subscription_current_lines($provider_id) as $other) {
+					if ((int)$other->key !== (int)$this->key) {
+						$stripe_helper->apply_subscription_to_order_item($other, $now);
+					}
+				}
+			}
 		}
 		return $provider_id;
 	}

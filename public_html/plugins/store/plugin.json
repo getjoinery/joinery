@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.6.49",
+    "version": "1.6.50",
     "bootstrap": "includes/bootstrap.php",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, Apple/Google mobile billing, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
@@ -274,6 +274,43 @@
                 "1": "Yes",
                 "0": "No"
             }
+        },
+        {
+            "name": "store_renewal_receipts",
+            "default": "1",
+            "group": "subscriptions",
+            "label": "Email a receipt for each renewal",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            },
+            "helptext": "The subscriber is emailed each time a renewal is charged. Switch this off if your payment provider's own receipts are switched on, or each renewal brings two."
+        },
+        {
+            "name": "store_subscription_ended_emails",
+            "default": "1",
+            "group": "subscriptions",
+            "label": "Email a subscriber when a subscription ends",
+            "type": "select",
+            "options": {
+                "1": "Yes",
+                "0": "No"
+            },
+            "helptext": "For subscriptions that grant no tier. A tier's own ending email, and a hosted site's notices, go either way."
+        },
+        {
+            "name": "store_renewal_reminders",
+            "default": "year",
+            "group": "subscriptions",
+            "label": "Email a reminder before a renewal",
+            "type": "select",
+            "options": {
+                "0": "Never",
+                "year": "Yearly plans only",
+                "all": "Every plan"
+            },
+            "helptext": "Sent a week before the renewal by the Subscription renewal reminders task, which sets how many days ahead."
         },
         {
             "name": "subscription_cancellation_prorate",

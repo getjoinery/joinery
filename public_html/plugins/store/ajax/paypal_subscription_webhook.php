@@ -106,6 +106,9 @@ try {
             break;
 
         case 'BILLING.SUBSCRIPTION.CANCELLED':
+            // A cancel made on this site has told its buyer already, and
+            // marked the line; one made at PayPal is told here.
+            $cancelled_here = in_array((string)$order_item->get('odi_subscription_status'), array('canceled', 'cancelled'), true);
             $order_item->set('odi_subscription_status', 'cancelled');
             $order_item->set('odi_subscription_cancelled_time', $now);
             $order_item->set('odi_subscription_cancel_at_period_end', true);
@@ -125,7 +128,9 @@ try {
                 SubscriptionTier::GetUserTier($user_id);
             }
 
-            error_log("PayPal webhook: subscription $subscription_id cancelled");
+            error_log("PayPal webhook: subscription $subscription_id cancelled; ended notice: "
+                . ($cancelled_here ? 'cancelled on this site'
+                    : (TierBilling::lineGrantsTier($order_item) ? 'none (a tier line; its tier lapses on EXPIRED)' : SubscriptionEmails::ended($order_item))));
             break;
 
         case 'BILLING.SUBSCRIPTION.SUSPENDED':
@@ -144,7 +149,7 @@ try {
                 TierBilling::handleSubscriptionExpired($user_id, $order_item);
             }
 
-            error_log("PayPal webhook: subscription $subscription_id expired");
+            error_log("PayPal webhook: subscription $subscription_id expired; ended notice: " . SubscriptionEmails::ended($order_item));
             break;
 
         case 'BILLING.SUBSCRIPTION.RE-ACTIVATED':
@@ -193,10 +198,10 @@ try {
                 foreach ($notify_emails as $email) {
                     $email = trim($email);
                     if ($email) {
-                        EmailSender::sendPlain(
+                        EmailSender::quickSend(
                             $email,
                             'PayPal Subscription Payment Failed',
-                            "PayPal subscription $subscription_id has a failed payment.\nOrder Item ID: {$order_item->key}\n"
+                            "PayPal subscription $subscription_id has a failed payment. Order Item ID: {$order_item->key}"
                         );
                     }
                 }
