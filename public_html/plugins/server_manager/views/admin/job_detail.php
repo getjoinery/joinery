@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.44 - web_workers: the modules Apache loads, and whether HTTP/2 is among them
  * @version 1.43 - log_table_tail: an error read names the kind it was narrowed to
  * @version 1.42 - container_inventory: a Packages column, what each site runs of the sources a package fix can cover
  *                (our fix marked) and what its base took
@@ -868,6 +869,12 @@ if ($result) {
 				. ($sbits ? ' (' . htmlspecialchars(implode(', ', $sbits)) . ')' : '') . '</div>';
 		} else {
 			echo '<div class="small text-muted">Apache: ' . htmlspecialchars($ap === 'not_reported' ? 'no site on this machine' : 'its status page did not answer') . '</div>';
+		}
+		$mods = $result_data['apache_modules'] ?? 'unknown';
+		if (is_array($mods) && $mods) {
+			echo '<div class="small">HTTP/2 module: ' . (in_array('http2', $mods, true) ? 'loaded' : 'not loaded') . '</div>';
+			echo '<details class="small mb-1"><summary>Apache modules (' . count($mods) . ')</summary>'
+				. htmlspecialchars(implode(', ', $mods)) . '</details>';
 		}
 		$ev = $result_data['fpm_max_children_events_24h'] ?? 'unknown';
 		echo '<div class="small">PHP hit its ceiling in the last day: ' . (is_int($ev) ? (int)$ev . ' time(s)' : 'not read') . '</div>';

@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.172 - FILE_HEAD_FILES reads Apache's joinery-http2.conf (apache_http2, agent 1.130.0)
  * @version 1.171 - build_log_table_tail reads the site's error table (table errors, agent 1.127.0) and narrows it to one
  *                kind of error: script policy refusals, database errors, exceptions
  * @version 1.170 - build_decommission_node takes decommission_held_site (agent 1.123.0) for a held Starter site
@@ -2953,6 +2954,7 @@ class JobCommandBuilder {
 		'apache2_conf'            => 'apache2.conf',
 		'apache_mpm_event'        => 'Apache mpm_event.conf',
 		'apache_remoteip'         => 'Apache joinery-remoteip.conf',
+		'apache_http2'            => 'Apache joinery-http2.conf (HTTP/2 settings)',
 		'php_fpm_ini'             => 'PHP-FPM php.ini (settings only)',
 		'journald_size_limit'     => 'journald size-limit.conf',
 		'logrotate_site'          => 'logrotate for the site',

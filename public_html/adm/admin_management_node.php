@@ -8,6 +8,7 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.19 - the log list names Apache's joinery-http2.conf among the configuration files
  * @version 1.18 - a management node that answers it no longer knows this machine (the agent's disowned_time, agent 1.128.0)
  *                is said so, with Disconnect as the way to connect again; Disconnect keeps ?connect_to=
  * @version 1.17 - ?connect_to= fills in the management node's address, and a waiting request links to that node's
@@ -291,7 +292,7 @@ echo '<ul style="' . $bullets . '">'
 echo '<p class="mb-1"><strong>Host configuration files</strong> <span class="text-muted small">(first 400 lines)</span></p>';
 echo '<ul style="' . $bullets . '">'
    . '<li>fail2ban: <code>/etc/fail2ban/jail.local</code>, <code>jail.d/joinery-sshd.local</code>, <code>jail.d/joinery-apache.local</code></li>'
-   . '<li>Apache: <code>/etc/apache2/apache2.conf</code>, <code>mods-available/mpm_event.conf</code>, <code>conf-available/joinery-remoteip.conf</code>, this site\'s <code>sites-available</code> files</li>'
+   . '<li>Apache: <code>/etc/apache2/apache2.conf</code>, <code>mods-available/mpm_event.conf</code>, <code>conf-available/joinery-remoteip.conf</code>, <code>conf-available/joinery-http2.conf</code>, this site\'s <code>sites-available</code> files</li>'
    . '<li>PHP-FPM: <code>/etc/php/*/fpm/php.ini</code></li>'
    . '<li>Logging: <code>/etc/systemd/journald.conf.d/size-limit.conf</code>, this site\'s <code>/etc/logrotate.d</code> file</li>'
    . '<li>Scheduled tasks: this site\'s, the agent\'s and certbot\'s files in <code>/etc/cron.d/</code></li>'

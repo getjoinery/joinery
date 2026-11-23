@@ -64,10 +64,20 @@ esac
 STUB
 chmod 755 "$T/bin/curl"
 
+# An apache2ctl that lists modules as the real one does, with one line that is
+# not a module name.
+cat > "$T/bin/apache2ctl" <<'STUB'
+#!/bin/bash
+[ "$1" = "-M" ] || exit 1
+printf 'Loaded Modules:\n proxy_fcgi_module (shared)\n core_module (static)\n http2_module (shared)\n mpm_event_module (shared)\n evil"name_module (shared)\n'
+STUB
+chmod 755 "$T/bin/apache2ctl"
+
 echo "=== No site ==="
 PATH="$T/bin:$PATH" WEB_WORKERS_ROOT="$R" bash "$SCRIPT" > "$T/none.json" 2>/dev/null; rc=$?
-chk "exit 0, every key" "$rc/$(jv "$T/none.json" "" keys)" "0/site,apache,fpm,fpm_max_children_events_24h,generated_at"
+chk "exit 0, every key" "$rc/$(jv "$T/none.json" "" keys)" "0/site,apache,apache_modules,fpm,fpm_max_children_events_24h,generated_at"
 chk "no site: apache and fpm not reported, nothing asked" "$(jv "$T/none.json" apache)/$(jv "$T/none.json" fpm)/$(test -e "$T/curl.log" && echo asked || echo none)" "not_reported/not_reported/none"
+chk "no site: Apache's modules are still named" "$(jv "$T/none.json" apache_modules)" '["core","http2","mpm_event","proxy_fcgi"]'
 chk "a name that is not a host name is no site" "$(PATH="$T/bin:$PATH" WEB_WORKERS_ROOT="$R" bash "$SCRIPT" 'x.example --resolve evil' 2>/dev/null | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["apache"];')" "not_reported"
 
 echo "=== A site ==="
@@ -77,6 +87,7 @@ chk "the scoreboard by state" "$(jv "$T/site.json" apache.scoreboard.writing)/$(
 chk "PHP-FPM's pool numbers" "$(jv "$T/site.json" fpm.active)/$(jv "$T/site.json" fpm.listen_queue)/$(jv "$T/site.json" fpm.max_children_reached)/$(jv "$T/site.json" fpm.process_manager)" "9/4/3/ondemand"
 chk "the ceiling from the active version's pool files, [www], last file wins" "$(jv "$T/site.json" fpm.max_children)" "9"
 chk "the kill timeout from the same files, [www], last file wins, in seconds" "$(jv "$T/site.json" fpm.request_terminate_seconds)" "120"
+chk "Apache's modules: names only, sorted, _module dropped, a line that is not a name left out" "$(jv "$T/site.json" apache_modules)" '["core","http2","mpm_event","proxy_fcgi"]'
 chk "nothing but the named numbers passes: no request URI" "$(grep -c -E 'LEAK|request uri|secret' "$T/site.json")" "0"
 chk "ceiling reached in the last day, from the log and its rotation" "$(jv "$T/site.json" fpm_max_children_events_24h)" "2"
 chk "only the site's own name, pinned to loopback" "$(grep -c -v -- '--resolve mysite.example:[0-9]*:127.0.0.1' "$T/curl.log")" "0"
@@ -85,7 +96,7 @@ chk "never ?full" "$(grep -c 'full' "$T/curl.log")" "0"
 echo "=== Under mawk ==="
 ln -s "$(command -v mawk || command -v awk)" "$T/bin/awk"
 PATH="$T/bin:$PATH" WEB_WORKERS_ROOT="$R" bash "$SCRIPT" mysite.example > "$T/mawk.json" 2>/dev/null
-chk "the same answer with mawk as awk" "$(jv "$T/mawk.json" apache.busy)/$(jv "$T/mawk.json" fpm.max_children)/$(jv "$T/mawk.json" fpm.request_terminate_seconds)/$(jv "$T/mawk.json" fpm_max_children_events_24h)" "7/9/120/2"
+chk "the same answer with mawk as awk" "$(jv "$T/mawk.json" apache.busy)/$(jv "$T/mawk.json" fpm.max_children)/$(jv "$T/mawk.json" fpm.request_terminate_seconds)/$(jv "$T/mawk.json" fpm_max_children_events_24h)/$(jv "$T/mawk.json" apache_modules)" '7/9/120/2/["core","http2","mpm_event","proxy_fcgi"]'
 rm -f "$T/bin/awk"
 
 if [ "$(id -u)" != 0 ]; then
@@ -101,6 +112,9 @@ cat > "$T/bin/curl" <<'STUB'
 printf 'gone\n503'
 STUB
 PATH="$T/bin:$PATH" WEB_WORKERS_ROOT="$R" bash "$SCRIPT" mysite.example > "$T/down.json" 2>/dev/null; rc=$?
+printf '#!/bin/bash\nexit 1\n' > "$T/bin/apache2ctl"
+PATH="$T/bin:$PATH" WEB_WORKERS_ROOT="$R" bash "$SCRIPT" mysite.example > "$T/nomod.json" 2>/dev/null
+chk "an apache2ctl that does not answer: modules unknown" "$(jv "$T/nomod.json" apache_modules)" "unknown"
 chk "unknown, never zero, still exit 0" "$rc/$(jv "$T/down.json" apache)/$(jv "$T/down.json" fpm)" "0/unknown/unknown"
 
 echo "=== Static pins ==="

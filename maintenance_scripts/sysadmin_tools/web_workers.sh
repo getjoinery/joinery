@@ -3,6 +3,7 @@
 # web_workers.sh - is the web tier out of workers? Apache's scoreboard and
 # PHP-FPM's pool, as ONE JSON object on stdout.
 #
+# Version: 1.3 - apache_modules: the names of the modules Apache loads here, from apache2ctl -M
 # Version: 1.2 - fpm.request_terminate_seconds: the [www] pool's request_terminate_timeout, the
 #                limit that kills a worker mid-request (specs/ai_recipes_own_request.md)
 # Version: 1.1 - a PHP-FPM log that is there and cannot be read counts unknown, never 0 (reviewer2 K6)
@@ -30,6 +31,10 @@
 #     read; no line of a pool file is sent.
 #   - How often the ceiling was hit in the last day, counted from PHP-FPM's
 #     own log: the history the live status cannot give.
+#   - The modules Apache loads, as apache2ctl -M names them with the
+#     _module ending dropped: names only, at most 200, on a machine with no
+#     site too (a container host's Apache is its proxy). It answers whether
+#     a module such as http2 is loaded on this machine.
 #   - Every key is ALWAYS present: a source that cannot be read is the string
 #     "unknown", a machine with no site "not_reported". Exit 0 whenever the
 #     object was printed.
@@ -93,6 +98,19 @@ emit_apache() {
             for (i = 1; i <= n; i++) { k = names[keys[i]]; printf "%s\"%s\":%d", sep, k, cnt[k] + 0; sep = "," }
             printf "}}"
         }' <<< "$body"
+}
+
+# The modules Apache loads: apache2ctl -M prints " http2_module (shared)" a
+# line. Names only, sorted, at most 200; "unknown" when it cannot say.
+emit_apache_modules() {
+    local out
+    out="$(run apache2ctl -M)" || { printf '"unknown"'; return; }
+    sort <<< "$out" | awk '
+        NF == 2 && $1 ~ /^[a-z0-9_]+_module$/ && ($2 == "(static)" || $2 == "(shared)") && n < 200 {
+            name = $1; sub(/_module$/, "", name)
+            list = list (n++ ? "," : "") "\"" name "\""
+        }
+        END { if (n) printf "[%s]", list; else printf "\"unknown\"" }'
 }
 
 # The pool's pm.max_children as configured, last value wins in file order,
@@ -186,6 +204,6 @@ emit_max_children_events() {
         END { printf "%d", n + 0 }'
 }
 
-printf '{"site":"%s","apache":%s,"fpm":%s,"fpm_max_children_events_24h":%s,"generated_at":%d}\n' \
-    "$DOMAIN" "$(emit_apache)" "$(emit_fpm)" "$(emit_max_children_events)" "$(date +%s)"
+printf '{"site":"%s","apache":%s,"apache_modules":%s,"fpm":%s,"fpm_max_children_events_24h":%s,"generated_at":%d}\n' \
+    "$DOMAIN" "$(emit_apache)" "$(emit_apache_modules)" "$(emit_fpm)" "$(emit_max_children_events)" "$(date +%s)"
 exit 0

@@ -2752,13 +2752,16 @@ $ww = JobResultProcessor::sanitise_web_workers(array(
 		'listen_queue' => 4, 'max_listen_queue' => 12, 'max_children_reached' => 3, 'accepted' => 900, 'start_since_seconds' => 600,
 		'max_children' => 9, 'request uri' => '/secret?token=x'),
 	'fpm_max_children_events_24h' => 2,
+	'apache_modules' => array('proxy_fcgi', 'http2', 'evil<b>', 7, 'http2', 'mpm_event'),
 ));
+check($ww['apache_modules'] === array('http2', 'mpm_event', 'proxy_fcgi'), 'Apache module names only, once each, sorted', var_export($ww['apache_modules'], true));
 check($ww['site'] === 'mysite.exampleb' && $ww['apache']['scoreboard']['writing'] === 2 && !isset($ww['apache']['scoreboard']['bogus']),
 	'names reduced to their safe set, the scoreboard to its known states', var_export($ww, true));
 check(!isset($ww['fpm']['request uri']) && strpos(json_encode($ww), 'secret') === false, 'nothing but the named numbers is kept');
 check(strpos($ww['verdict'], 'Out of workers now.') === 0 && strpos($ww['verdict'], 'PHP: 9 of 9 busy, 4 waiting') !== false
 	&& strpos($ww['verdict'], 'ceiling 2 times') !== false, 'a saturated tier says so first', $ww['verdict']);
 $ww_none = JobResultProcessor::sanitise_web_workers(array('site' => '', 'apache' => 'not_reported', 'fpm' => 'not_reported', 'fpm_max_children_events_24h' => 0));
+check($ww_none['apache_modules'] === 'unknown', 'a node whose script names no modules reads unknown');
 check(strpos($ww_none['verdict'], 'no site of its own') !== false, 'a machine with no site says it has nothing to report', $ww_none['verdict']);
 $ww_free = JobResultProcessor::sanitise_web_workers(array('site' => 's', 'apache' => array('busy' => 1, 'idle' => 40, 'slots' => 150, 'scoreboard' => array()),
 	'fpm' => array('active' => 1, 'listen_queue' => 0, 'max_children' => 8), 'fpm_max_children_events_24h' => 0));

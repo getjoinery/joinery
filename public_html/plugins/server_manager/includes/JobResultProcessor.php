@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.146 - web_workers keeps apache_modules, the names of the modules Apache loads (web_workers.sh 1.3)
  * @version 1.145 - process_managed_domain_prepare keeps the site's reason (mailbox_inactive) beside its error
  * @version 1.144 - host_report_package_fixes keeps fetch_failed (host_report 1.44)
  * @version 1.143 - host_report_package_fixes keeps the channel serial a machine took (host_report 1.43, package_fixes_automatic WP7)
@@ -4111,6 +4112,10 @@ HTML;
 	 * PHP-FPM's pool, numbers held to their shape, and how often the pool hit
 	 * its ceiling in a day. Pure; the processor test drives it.
 	 *
+	 * apache_modules is the list of module names Apache loads on the machine
+	 * (http2, mpm_event, ...), or 'unknown' from a node whose script does not
+	 * say; it answers whether a module is on without reading a config file.
+	 *
 	 * request_terminate_seconds is the pool's kill timeout (0: none). A limit
 	 * under WEB_WORKERS_MODEL_CALL_SECONDS kills a worker mid model call, a
 	 * paid answer lost (specs/ai_recipes_own_request.md), so the verdict says so.
@@ -4139,10 +4144,21 @@ HTML;
 				$fpm[$k] = $nat($d['fpm'][$k] ?? null);
 			}
 		}
+		$modules = 'unknown';
+		if (is_array($d['apache_modules'] ?? null)) {
+			$modules = [];
+			foreach ($d['apache_modules'] as $m) {
+				if (is_string($m) && preg_match('/^[a-z0-9_]{1,64}$/', $m) && count($modules) < 200) {
+					$modules[] = $m;
+				}
+			}
+			$modules = array_values(array_unique($modules));
+			sort($modules);
+		}
 		$events = $nat($d['fpm_max_children_events_24h'] ?? null);
 		$out = ['read' => true,
 			'site' => substr(preg_replace('/[^A-Za-z0-9.-]/', '', (string)($d['site'] ?? '')), 0, 253),
-			'apache' => $apache, 'fpm' => $fpm,
+			'apache' => $apache, 'apache_modules' => $modules, 'fpm' => $fpm,
 			'fpm_max_children_events_24h' => $events !== null ? $events : 'unknown'];
 		$out['verdict'] = self::web_workers_verdict($out);
 		return $out;

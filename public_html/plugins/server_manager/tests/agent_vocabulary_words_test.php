@@ -150,7 +150,7 @@ if (!$src || !is_dir($src . '/primitives')) {
 	$agent_files = $mm[1];
 	$plane_files = array_keys(JobCommandBuilder::FILE_HEAD_FILES);
 	sort($agent_files); sort($plane_files);
-	check($agent_files === $plane_files && count($plane_files) === 27,
+	check($agent_files === $plane_files && count($plane_files) === 28,
 		'FILE_HEAD_FILES names exactly the agent\'s readable list', implode(',', array_diff($agent_files, $plane_files)) . ' / ' . implode(',', array_diff($plane_files, $agent_files)));
 }
 
