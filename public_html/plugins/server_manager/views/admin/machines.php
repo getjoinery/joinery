@@ -13,6 +13,7 @@
  *
  * Reading the providers takes a second or two per account.
  *
+ * @version 1.2 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.1 - a node with no agent offers Write down: a note is the only thing that can say what it runs
  * @version 1.0
  */
@@ -36,13 +37,6 @@ $page->admin_header(array(
 	'breadcrumbs'    => array('Server Manager' => '/admin/server_manager', 'Machines' => ''),
 	'session'        => $session,
 ));
-$display_messages = $session->get_messages('/admin/server_manager');
-foreach ($display_messages as $msg) {
-	$cls = ($msg->display_type == DisplayMessage::MESSAGE_ERROR) ? 'alert-danger' : 'alert-success';
-	echo '<div class="alert ' . $cls . '" role="alert">' . $h($msg->message)
-		. '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-}
-$session->mark_shown($display_messages);
 $page->begin_box(array());
 ?>
 <p>Every machine we pay for: those this management node manages, every server in our own cloud accounts, and those

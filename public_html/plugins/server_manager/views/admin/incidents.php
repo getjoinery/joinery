@@ -12,6 +12,7 @@
  * Superadmin only. Every write is a POST carrying the admin CSRF token, and
  * goes through IncidentTriage.
  *
+ * @version 1.4 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.3 - Resolve all cleared is gone: the reconciler resolves what clears before anyone looks
  * @version 1.2 - Waiting for proof (resolved, still happening) beside Resolved (resolved, cleared); Looking is gone
  * @version 1.1 - Resolve and Resolve all cleared ask what fixed it in a modal; the answer is a note on each
@@ -92,14 +93,6 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-$display_messages = $session->get_messages('/admin/server_manager');
-foreach ($display_messages as $msg) {
-	$cls = ($msg->display_type == DisplayMessage::MESSAGE_ERROR) ? 'alert-danger' : 'alert-success';
-	echo '<div class="alert ' . $cls . '" role="alert">' . htmlspecialchars($msg->message)
-		. '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-}
-$session->mark_shown($display_messages);
-$session->clear_clearable_messages();
 
 $e = function ($v) { return IncidentViews::e($v); };
 $csrf = SmAdminCsrf::token();

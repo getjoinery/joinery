@@ -6,6 +6,7 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.21 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 2.20 - the Delete buttons are kit confirms (data-jy-confirm, -typed, data-jy-submit)
  * @version 2.19 - backup key states: no 'pending' (old epochs are not reported)
  * @version 2.18 - the Stored Backups Delete and Delete all buttons work: their scripts are attribute-escaped (the
@@ -270,20 +271,6 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-// Display messages
-$display_messages = $session->get_messages('/admin/server_manager');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		$alert_class = $msg->display_type == DisplayMessage::MESSAGE_ERROR ? 'alert-danger' : 'alert-success';
-		echo '<div class="alert ' . $alert_class . '">';
-		echo htmlspecialchars($msg->message);
-		echo ' ' . $msg->report_link_html();
-		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-	}
-	// Rendered above, so these are spent; the footer drops them.
-	$session->mark_shown($display_messages);
-	$session->clear_clearable_messages();
-}
 
 if ($error) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';

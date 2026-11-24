@@ -14,6 +14,8 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_auto_test.php
  *
+ * @version 1.3 - a Try again never ends on the withdrawn build
+ * @version 1.2 - a stopped attempt is tried again when the advisory's commits change, and daily
  * @version 1.1 - one plain email per run, after the attempt; the soak waits for a machine the plane cannot reach
  *                whose own report says its site answers; a person's Try again of a withdrawn build
  * @version 1.0
@@ -301,6 +303,14 @@ check(($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'b
 	json_encode($r['state']['attempts'] ?? null));
 check(count(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; })) === 1, 'and the person was told once');
 
+$item = array(array('source' => 'openssl', 'cve' => 'CVE-2026-107494', 'fixed_in' => '3.5.10'));
+$w_none = array('drivers' => array('OpenSSL' => array('advisories' => array('CVE-2026-107494' => array('ids' => array())))));
+$w_commits = array('drivers' => array('OpenSSL' => array('advisories' => array('CVE-2026-107494' => array('ids' => array(), 'commits' => array('734c6cd7444bdbf589bfec917e47598c1b21ddd3'))))));
+$ri = function ($w, $t) use ($item) { return PackageFixAuto::retryInputs('/nonexistent', 'openssl', array(), $item, $w, $t); };
+check($ri($w_none, $now) === $ri($w_none, $now + 3600), 'the same advisory on the same day: the same inputs, not tried again');
+check($ri($w_none, $now) !== $ri($w_commits, $now), 'the advisory now names the fix commits: tried again (live: OpenSSL on dev, 2026-11-24)');
+check($ri($w_none, $now) !== $ri($w_none, $now + 86400), 'a new day: tried again, so a release tag published since is found');
+
 section('Fixes of one package that could not go on are told in one email');
 
 $sent = array(); $issued = array(); $channel = array();
@@ -310,8 +320,9 @@ $watch2['sources']['php8.5']['unfixed']['CVE-2026-115562'] = $watch2['sources'][
 $r = PackageFixAuto::run($opts(array('now' => $now, 'state' => array(), 'watch_state' => $watch2,
 	'write' => function () { return array('status' => 'written', 'failed' => array('CVE-2026-115561' => 'does not apply', 'CVE-2026-115562' => 'does not apply')); })));
 $needs = array_values(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; }));
-check(count($sent) === 1 && count($needs) === 1 && strpos($needs[0][1]['body'], 'Not in this build: CVE-2026-115561, CVE-2026-115562. Upstream') === false
-	&& strpos($needs[0][1]['body'], 'Not in this build: CVE-2026-115561, CVE-2026-115562. upstream\'s fix does not fit Ubuntu\'s version of the code.') !== false
+check(count($sent) === 1 && count($needs) === 1
+	&& strpos($needs[0][1]['body'], 'Not in this build: CVE-2026-115561, CVE-2026-115562. Upstream\'s fix does not fit Ubuntu\'s version of the code.') !== false
+	&& $needs[0][1]['title'] === 'Security fix ahead of Ubuntu: PHP 8.5 built (1 fix, testing now), 2 need a person (critical)'
 	&& strpos($needs[0][1]['body'], 'Done automatically') !== false && strpos($needs[0][1]['body'], '- Waiting for a person: PHP 8.5 (2 fixes)') !== false,
 	'one email: what was built, and the two that were not, by name', json_encode(array_column(array_column($needs, 1), 'body')));
 check(($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'built', 'and the one that went on is built');
@@ -338,6 +349,12 @@ $r = PackageFixAuto::run($opts(array('now' => $now, 'state' => array(),
 check($built === 0 && ($r['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'carried'
 	&& count(array_filter($sent, function ($x) { return ($x[1]['kind'] ?? '') === 'needs_person'; })) === 0,
 	'nothing is built and nobody is told a person is needed', json_encode($r['state']['attempts'] ?? null));
+
+$many = array();
+for ($i = 1; $i <= 32; $i++) { $many[] = 'CVE-2026-1163' . sprintf('%02d', $i); }
+$m = PackageFixAuto::newsMessage(array(), array('postgresql-18' => array('outcome' => 'built', 'cves' => $many, 'version' => '18.6-0ubuntu0.26.04.1+joinery3', 'left' => array())), array(), array(), 6);
+check(strpos($m['body'], 'CVE-2026-116305 and 27 more') !== false && $m['title'] === 'Security fix ahead of Ubuntu: PostgreSQL 18 built, testing now',
+	'32 fixes: five named and a count of the rest; the subject says it was built', $m['title'] . ' / ' . $m['body']);
 
 section('Plain reasons, from what the runner saw on dev (2026-11-22, 11-23)');
 
@@ -395,6 +412,13 @@ check($builds === 1 && ($r['state']['automatic']['php8.5']['version'] ?? '') ===
 	'built again at the next revision, to the test machines first; the old one stays withdrawn', json_encode($r['state']['automatic'] ?? null));
 check(count($sent) === 1 && strpos($sent[0][1]['body'], 'PHP 8.5: tried again (CVE-2026-115560).') !== false && strpos($sent[0][1]['body'], 'Done automatically') !== false,
 	'one email says it was tried again and built', json_encode($sent));
+$wrote = array();
+$r3 = PackageFixAuto::run($opts(array('now' => $now + 600, 'state' => $st, 'retry_requests' => array('php8.5' => $v2),
+	'build' => function () use ($line) { return $line('8.5.4-0ubuntu1.6+joinery2'); })));
+check(!isset($r3['state']['automatic']['php8.5']) && ($r3['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'needs_person'
+	&& strpos((string)($r3['state']['attempts']['php8.5 CVE-2026-115560']['reason'] ?? ''), 'already withdrawn') !== false,
+	'a build that comes out as the withdrawn version is not counted as built', json_encode($r3['state']['attempts'] ?? null));
+check(PackageFixAuto::withdrawnRevision($st, 'php8.5') === 2 && PackageFixAuto::withdrawnRevision($st, 'openssl') === 0, 'the highest withdrawn revision');
 $r2 = PackageFixAuto::run($opts(array('now' => $now + 1200, 'state' => $r['state'], 'retry_requests' => array('php8.5' => '8.5.4-0ubuntu1.6+joinery9')) + $o3));
 check($builds === 1 && strpos($r2['message'], 'ignored a Try again') !== false, 'a Try again of a build that was never withdrawn is ignored', $r2['message']);
 

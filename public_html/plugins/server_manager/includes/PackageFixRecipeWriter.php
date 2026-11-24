@@ -25,6 +25,8 @@
  *     last automatic one; nothing is written when the recipe would come out
  *     as it already is.
  *
+ * @version 1.4 - an automatic recipe whose revision was withdrawn is never left as it is: it is written again above
+ *                withdrawn_revision (live on dev, 2026-11-24: a Try again rebuilt the withdrawn +joinery2)
  * @version 1.3 - each find is handed the fix commits upstream's advisory names (a CVE's 'commits', else
  *                the watch's stored advisories: UpstreamFixWatch::commitsFor())
  * @version 1.2 - reviewer2's re-review: the automatic recipes' folder is made passable (0755) and the dry-run
@@ -92,6 +94,8 @@ class PackageFixRecipeWriter {
 	 *                     from the watch's stored advisories)
 	 * @param array $opts  ubuntu_version  required: the Ubuntu build to patch ('8.5.4-0ubuntu1.6')
 	 *                     min_revision    a revision the new one must be above (a channel's last)
+	 *                     withdrawn_revision  the highest withdrawn revision: an unchanged automatic recipe
+	 *                                     at or below it is written again, at the next revision
 	 *                     base_upstream   default: read from ubuntu_version
 	 *                     changelog_from  used when no earlier recipe names one
 	 *                     tests only: auto_dir, fixes_dir, upstreams_file, source_dir, date,
@@ -314,7 +318,8 @@ class PackageFixRecipeWriter {
 		$recipe = $comment . implode("\n", $body) . "\n";
 
 		$res['carried'] = $recipe_cves;
-		if ($auto && self::normal($auto['text']) === self::normal($recipe) && $auto['patches'] === $files) {
+		if ($auto && self::normal($auto['text']) === self::normal($recipe) && $auto['patches'] === $files
+				&& (int)$auto['revision'] > (int)($opts['withdrawn_revision'] ?? 0)) {
 			$res['status'] = 'unchanged';
 			$res['revision'] = $auto['revision'];
 			$res['version'] = $ubuntu . '+joinery' . $auto['revision'];

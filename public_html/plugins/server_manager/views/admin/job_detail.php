@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.47 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.46 - site_log host_converger: a host that logs the converger to the journal says so and points at unit_journal
  * @version 1.45 - unban_address: the jail, the address and whether a ban was lifted
  * @version 1.44 - web_workers: the modules Apache loads, and whether HTTP/2 is among them
@@ -181,7 +182,6 @@ if ($node_id) {
 }
 
 // Get display messages
-$display_messages = $session->get_messages('/admin/server_manager');
 
 $page = new AdminPage();
 $page->admin_header([
@@ -202,19 +202,6 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-// Display messages
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		$alert_class = $msg->display_type == DisplayMessage::MESSAGE_ERROR ? 'alert-danger' : 'alert-success';
-		echo '<div class="alert ' . $alert_class . '">';
-		echo htmlspecialchars($msg->message);
-		echo ' ' . $msg->report_link_html();
-		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-	}
-	// Rendered above, so these are spent; the footer drops them.
-	$session->mark_shown($display_messages);
-	$session->clear_clearable_messages();
-}
 
 $status_class = match($job->get('mjb_status')) {
 	'completed' => 'success',

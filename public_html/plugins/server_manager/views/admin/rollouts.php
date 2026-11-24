@@ -12,6 +12,7 @@
  * reload, shows where it is, and can be stopped. The AdvanceStagedRollouts
  * task moves it; loading this page moves it too.
  *
+ * @version 1.6 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.5 - a site that does not publish (SmPublishing) sees only the sentence saying so, and its POSTs do nothing
  * @version 1.4 - stages: # is the step's stage, and a rollout whose step failed says it is halting while the
  *                applies under way finish
@@ -95,15 +96,6 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-$display_messages = $session->get_messages('/admin/server_manager');
-foreach ($display_messages as $msg) {
-	$cls = ($msg->display_type == DisplayMessage::MESSAGE_ERROR) ? 'alert-danger' : 'alert-success';
-	echo '<div class="alert ' . $cls . '" role="alert">' . htmlspecialchars($msg->message)
-		. ($msg->report_link_html() !== '' ? ' ' . $msg->report_link_html() : '')
-		. '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-}
-$session->mark_shown($display_messages);
-$session->clear_clearable_messages();
 
 // The newest PUBLISHED release: what a node's apply_update pulls.
 $release = (string)(StagedRolloutRunner::published_release() ?? 'nothing published');

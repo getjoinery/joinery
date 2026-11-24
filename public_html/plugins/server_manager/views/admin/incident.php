@@ -14,6 +14,7 @@
  * goes through IncidentTriage, or IncidentAnalyst for Analyze (shown only
  * where the Joinery AI plugin is active).
  *
+ * @version 1.9 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.8 - the reload is data-jy-reload-after (no inline script)
  * @version 1.7 - the title's UTC times show in the viewer's zone (IncidentViews::localize_times)
  * @version 1.6 - a cleared never-do incident says it cleared, not that it clears on the next pass
@@ -83,14 +84,6 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-$display_messages = $session->get_messages('/admin/server_manager');
-foreach ($display_messages as $msg) {
-	$cls = ($msg->display_type == DisplayMessage::MESSAGE_ERROR) ? 'alert-danger' : 'alert-success';
-	echo '<div class="alert ' . $cls . '" role="alert">' . htmlspecialchars($msg->message)
-		. '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-}
-$session->mark_shown($display_messages);
-$session->clear_clearable_messages();
 
 if ($inc === null) {
 	$page->begin_box(['title' => 'Incident #' . $id]);

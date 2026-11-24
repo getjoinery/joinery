@@ -34,6 +34,13 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.11 - the email lists five CVE ids and a count of the rest, and its subject names each package's outcome
+ *                (built and testing, built with some left for a person, or a person needed)
+ * @version 1.10 - a Try again never ends on the withdrawn build: the writer is told the highest withdrawn revision,
+ *                and a build whose version is withdrawn stops as needing a person rather than counting as built
+ * @version 1.9 - a stopped attempt is also tried again when what upstream's advisory says of its CVEs changes (fixed
+ *                release, fix commits) and once a day, so a release tag published later is found (live on dev,
+ *                2026-11-24: OpenSSL's retry ran seconds before the watch first read its advisories' commits)
  * @version 1.8 - one plain email per run (owner, 2026-11-24): what was found and what came of it, sent after the
  *                build attempt, never "found" and then "a person is needed" a minute apart; reasons in plain words,
  *                the raw detail on the Fleet Security page; "Where everything stands" says what is stuck rather than
@@ -232,12 +239,14 @@ class PackageFixAuto {
 		}
 		// Tried once per CVE; one that needed a person is tried again when what
 		// could change its outcome changed: the source's key file, the upstream
-		// list, or the runner (RETRY_GENERATION). Not on every release.
+		// list, the runner (RETRY_GENERATION), what the advisory says of its
+		// CVEs, or the day (a tag upstream publishes later). Not on every release.
 		$release = (string)($opts['release'] ?? trim((string)@file_get_contents($site . '/public_html/VERSION')));
 		$by_source = array();
 		$inputs = array();
 		foreach ($c['build'] as $u) {
-			$inputs[$u['source']] = $inputs[$u['source']] ?? self::retryInputs($site, $u['source'], $opts);
+			$inputs[$u['source']] = $inputs[$u['source']] ?? self::retryInputs($site, $u['source'], $opts,
+				array_values(array_filter($c['build'], function ($x) use ($u) { return $x['source'] === $u['source']; })), $watch, $now);
 			$a = $state['attempts'][$u['source'] . ' ' . $u['cve']] ?? null;
 			if ($a === null || (($a['status'] ?? '') === 'needs_person' && (string)($a['inputs'] ?? '') !== $inputs[$u['source']])) {
 				$by_source[$u['source']][$u['cve']] = $u;
@@ -386,6 +395,7 @@ class PackageFixAuto {
 				return PackageFixRecipeWriter::write($source, $want, array(
 					'ubuntu_version' => PackageFixRecipeWriter::newestUbuntuVersion($source),
 					'min_revision'   => self::maxRevision($state, $source),
+					'withdrawn_revision' => self::withdrawnRevision($state, $source),
 				));
 			};
 			try {
@@ -427,6 +437,9 @@ class PackageFixAuto {
 						array_keys((array)$w['failed']), (array)$w['failed'])) . '), so upstream\'s fixed release was tried, and: ' . $why;
 				}
 				throw new PackageFixAutoStop('building and testing it', $why);
+			}
+			if (in_array((string)($line['version'] ?? ''), (array)($state['withdrawn'][$source] ?? array()), true)) {
+				throw new PackageFixAutoStop('building and testing it', 'the build came out as ' . $line['version'] . ', a version already withdrawn');
 			}
 			self::removeTree($prev);
 			$state['automatic'][$source] = $line;
@@ -650,9 +663,9 @@ class PackageFixAuto {
 				$rating = isset($ratings['critical']) ? 'critical' : 'high';
 				$ids = array_map(function ($u) { return $u['cve']; }, $by[$source]);
 				$lines[] = $name . ': ' . count($ids) . ' new ' . $rating . '-rated security fix' . (count($ids) === 1 ? '' : 'es')
-					. ' (' . implode(', ', $ids) . ')' . ($fixed_in !== '' ? ', fixed upstream in ' . $fixed_in : '') . ', not yet shipped by Ubuntu.';
+					. ' (' . self::cveList($ids) . ')' . ($fixed_in !== '' ? ', fixed upstream in ' . $fixed_in : '') . ', not yet shipped by Ubuntu.';
 			} else {
-				$lines[] = $name . ': tried again (' . implode(', ', self::sorted($news[$source]['cves'] ?? array())) . ').';
+				$lines[] = $name . ': tried again (' . self::cveList($news[$source]['cves'] ?? array()) . ').';
 			}
 			$n = $news[$source] ?? null;
 			$outcome = $n['outcome'] ?? self::lastOutcome($state, $source);
@@ -664,7 +677,7 @@ class PackageFixAuto {
 				if (!empty($n['left'])) {
 					$stuck[] = $name;
 					$left = self::sorted(array_keys($n['left']));
-					$lines[] = 'Not in this build: ' . implode(', ', $left) . '. ' . self::plainReason('finding the fix', implode('; ', $n['left'])) . '.'
+					$lines[] = 'Not in this build: ' . self::cveList($left) . '. ' . ucfirst(self::plainReason('finding the fix', implode('; ', $n['left']))) . '.'
 						. ' A person is needed for ' . (count($left) === 1 ? 'that one' : 'those') . ': ask a Claude session "build the package fix for '
 						. $source . ', ' . implode(' ', $left) . '".';
 				}
@@ -721,16 +734,24 @@ class PackageFixAuto {
 				array_keys($waiting), $waiting));
 		}
 
-		$names = array_map($name_of, $sources);
-		if ($stuck) {
-			$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: a person is needed for ' . implode(', ', array_values(array_unique($stuck)));
-			$other = array_values(array_diff($built, $stuck));
-			if ($other) { $title .= '; ' . implode(', ', $other) . ' built'; }
-		} elseif ($built) {
-			$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: ' . implode(', ', $built) . ' built, testing now';
-		} else {
-			$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: ' . implode(', ', $names);
+		$parts = array();
+		foreach ($sources as $source) {
+			$n = $news[$source] ?? null;
+			$outcome = $n['outcome'] ?? self::lastOutcome($state, $source);
+			$name = $name_of($source);
+			if ($outcome === 'built' && !empty($n['left'])) {
+				$parts[] = $name . ' built (' . self::fixCount(count((array)$n['cves'])) . ', testing now), ' . count($n['left']) . ' need a person';
+			} elseif ($outcome === 'built') {
+				$parts[] = $name . ' built, testing now';
+			} elseif ($outcome === 'needs_person') {
+				$parts[] = 'a person is needed for ' . $name;
+			} elseif ($outcome === 'carried') {
+				$parts[] = $name . ' already covered';
+			} else {
+				$parts[] = $name;
+			}
 		}
+		$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: ' . implode('; ', $parts);
 		if ($top === 'critical') { $title .= ' (critical)'; }
 		return array(
 			'kind'  => $stuck ? 'needs_person' : 'found',
@@ -791,6 +812,13 @@ class PackageFixAuto {
 		return $out;
 	}
 
+	/** At most five CVE ids, then how many more. */
+	private static function cveList(array $cves): string {
+		$cves = self::sorted($cves);
+		$more = count($cves) - 5;
+		return implode(', ', array_slice($cves, 0, 5)) . ($more > 0 ? ' and ' . $more . ' more' : '');
+	}
+
 	private static function fixCount(int $n): string {
 		return $n . ' fix' . ($n === 1 ? '' : 'es');
 	}
@@ -822,6 +850,15 @@ class PackageFixAuto {
 		}
 		foreach ((array)($state['withdrawn'][$source] ?? array()) as $v) { $versions[] = $v; }
 		foreach ($versions as $v) {
+			if (preg_match('/\+joinery(\d+)$/', (string)$v, $m)) { $max = max($max, (int)$m[1]); }
+		}
+		return $max;
+	}
+
+	/** The highest +joinery revision withdrawn for a source (0 when none). */
+	public static function withdrawnRevision(array $state, string $source): int {
+		$max = 0;
+		foreach ((array)($state['withdrawn'][$source] ?? array()) as $v) {
 			if (preg_match('/\+joinery(\d+)$/', (string)$v, $m)) { $max = max($max, (int)$m[1]); }
 		}
 		return $max;
@@ -914,15 +951,28 @@ class PackageFixAuto {
 
 	/**
 	 * What could change a stopped attempt's outcome for $source, as one hash:
-	 * its key file, the upstream list, and RETRY_GENERATION.
+	 * its key file, the upstream list, RETRY_GENERATION, what the advisory says
+	 * of each of its CVEs (fixed release, fix commits), and the UTC day, so an
+	 * attempt stopped for want of a tag upstream had not published yet is tried
+	 * again daily.
+	 *
+	 * @param array $items the watch's build items for $source
 	 */
-	public static function retryInputs(string $site, string $source, array $opts = array()): string {
+	public static function retryInputs(string $site, string $source, array $opts = array(), array $items = array(), array $watch = array(), int $now = 0): string {
 		if (isset($opts['retry_inputs'])) {
 			return (string)call_user_func($opts['retry_inputs'], $source);
 		}
 		$fixes = rtrim($site, '/') . '/' . PackageFixPublisher::SOURCE_SUBDIR;
+		$said = array();
+		foreach ($items as $u) {
+			$commits = UpstreamFixWatch::commitsFor($watch, (string)$u['cve']);
+			sort($commits);
+			$said[] = $u['cve'] . '|' . (string)($u['fixed_in'] ?? '') . '|' . implode(',', $commits);
+		}
+		sort($said);
 		return hash('sha256', self::RETRY_GENERATION . "\0" . (string)@file_get_contents($fixes . '/UPSTREAMS')
-			. "\0" . (string)@file_get_contents($fixes . '/upstream_keys/' . $source . '.asc'));
+			. "\0" . (string)@file_get_contents($fixes . '/upstream_keys/' . $source . '.asc')
+			. "\0" . implode("\n", $said) . "\0" . gmdate('Y-m-d', $now ?: time()));
 	}
 
 	private static function retryRequests(): array {

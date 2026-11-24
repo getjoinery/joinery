@@ -16,6 +16,8 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.8 - Try again stays offered until a build above the withdrawn one exists
+ * @version 1.7 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.6 - Try again on a withdrawn fix build (server_manager_package_fix_retry) and why it was withdrawn; each
  *                stopped fix says why in plain words, the raw detail folded under it
  * @version 1.5 - Security fixes ahead of Ubuntu: the package fix channel, its soak, what the automatic runner did,
@@ -116,13 +118,6 @@ $page->admin_header([
 	'session' => $session,
 ]);
 
-$display_messages = $session->get_messages('/admin/server_manager');
-foreach ($display_messages as $msg) {
-	$cls = ($msg->display_type == DisplayMessage::MESSAGE_ERROR) ? 'alert-danger' : 'alert-success';
-	echo '<div class="alert ' . $cls . '" role="alert">' . $h($msg->message)
-		. '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-}
-$session->mark_shown($display_messages);
 
 $page->begin_box(array());
 ?>
@@ -242,7 +237,10 @@ if ($pf_role !== 'none' || $pf_channel !== null) {
 				if (($w['source'] ?? '') === $source) { $why = (string)($w['why'] ?? ''); break; }
 			}
 			$last = (string)end($versions);
-			$retry_asked = isset($pf['retried'][$source]) && ($pf['retried'][$source]['version'] ?? '') === $last;
+			// Offered until a build above the withdrawn one exists, or while a press waits for the runner.
+			$pending = json_decode((string)Globalvars::get_instance()->get_setting(PackageFixAuto::RETRY_SETTING), true);
+			$auto_rev = preg_match('/\+joinery(\d+)$/', (string)($pf['automatic'][$source]['version'] ?? ''), $am) ? (int)$am[1] : 0;
+			$retry_asked = (is_array($pending) && ($pending[$source] ?? null) === $last) || $auto_rev > PackageFixAuto::withdrawnRevision($pf, $source);
 			echo '<div class="small text-muted d-flex gap-2 align-items-center">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions))
 				. ($why !== '' ? ' (' . $h($why) . ')' : '');
 			if ($pf_role === 'issuer' && !$retry_asked) {

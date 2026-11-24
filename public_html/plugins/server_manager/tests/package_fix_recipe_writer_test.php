@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_recipe_writer_test.php
  *
+ * @version 1.2 - an unchanged recipe at a withdrawn revision is written again above it
  * @version 1.1 - the fix commits upstream's advisory names reach the finder
  * @version 1.0
  */
@@ -150,6 +151,10 @@ $r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1001' => array('fix
 check($r['status'] === 'unchanged' && $r['revision'] === 2, 'the same inputs again: unchanged', json_encode($r));
 check(strpos($recipe_of('php8.5'), 'revision=2') !== false, 'and nothing rewritten');
 check($asked === array('CVE-2026-1002 8.5.4 8.5.13'), 'only the CVE not yet carried is looked for again', implode(' | ', $asked));
+$r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1001' => array('fixed_in' => '8.5.13'), 'CVE-2026-1002' => array('fixed_in' => '8.5.13')),
+	$opts(array('withdrawn_revision' => 2)));
+check($r['status'] === 'written' && $r['revision'] === 3 && strpos($recipe_of('php8.5'), 'revision=3') !== false,
+	'the same inputs, but revision 2 was withdrawn: written again as 3 (live: a Try again on dev rebuilt the withdrawn +joinery2)', json_encode($r));
 $r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1003' => array('fixed_in' => '8.5.13')), $opts(array('min_revision' => 5)));
 check($r['status'] === 'written' && $r['revision'] === 6, 'above the caller\'s floor', json_encode($r));
 check($r['carried'] === array('CVE-2026-129291', 'CVE-2026-1001', 'CVE-2026-1003'), 'the earlier automatic CVE is kept', implode(' ', $r['carried']));
