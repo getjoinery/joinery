@@ -661,7 +661,7 @@ a minute of a sandboxed folder arriving). Otherwise it starts
 
 ```
 joinery-jail --user=jpx-NAME --watch-fd=3 --timeout=S --rlimit-as=B --read=<runner> --read=<src/>
-    -- php -n -d extension=... -d memory_limit=NM utils/sandbox_php_runner.php <src/>
+    -- php -n -d enable_dl=0 -d extension=... -d memory_limit=NM utils/sandbox_php_runner.php <src/>
 ```
 
 with the manifest's limits (address space: the memory limit plus 96 MB for

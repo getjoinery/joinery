@@ -33,6 +33,7 @@
  * then the run's uid. Conversation is in strict turns: nothing more is read
  * from the process while an answer to it is unwritten.
  *
+ * @version 1.7 - the plugin's PHP starts with enable_dl=0: dl() loaded any extension on the machine, whatever the list said
  * @version 1.6 - the fence reads the file layer (utils/sandbox_runtime_files.php, spec sandboxed_plugin_uploads)
  * @version 1.5 - the fence reads the mail layer (utils/sandbox_runtime_mail.php, spec sandboxed_plugin_email); the
  *                runtime files are read from one list
@@ -285,7 +286,10 @@ class SandboxRunner {
 		}
 		$cmd = array_merge($cmd, array(
 			'--',
-			$php, '-n',
+			// enable_dl=0: the extensions named below are the ones a plugin
+			// has. With dl() left on, its code could load any extension on the
+			// machine by name (ffi, imagick), the list notwithstanding.
+			$php, '-n', '-d', 'enable_dl=0',
 		));
 		$dir = (string)ini_get('extension_dir');
 		foreach (self::EXTENSIONS as $ext) {

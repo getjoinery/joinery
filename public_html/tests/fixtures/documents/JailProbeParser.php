@@ -8,6 +8,7 @@
  *
  * Every probe is attempted and its outcome reported; nothing here asserts.
  *
+ * @version 1.2 - reports whether dl() could add an extension the process was not started with
  * @version 1.1 - stages where the extractor does (the fenced run's own folder when
  *   there is one), reads the config file rather than asking access(2), which
  *   Landlock does not answer, and reports /etc/passwd and /dev/shm itself
@@ -55,7 +56,18 @@ class JailProbeParser implements SandboxParserInterface {
 		$shm_writable = @file_put_contents($shm, 'x') !== false;
 		if ($shm_writable) @unlink($shm);
 
+		// Can this process give itself an extension it was not started with?
+		$dl = null;
+		foreach (array('ffi', 'imagick', 'soap', 'sqlite3', 'bcmath', 'intl', 'curl', 'pgsql') as $ext) {
+			if (extension_loaded($ext) || !function_exists('dl')) continue;
+			try {
+				if (@dl($ext) && extension_loaded($ext)) { $dl = $ext; break; }
+			} catch (Throwable $e) {}
+		}
+
 		return json_encode(array(
+			'dl_loaded'      => $dl,
+			'enable_dl'      => (string)ini_get('enable_dl'),
 			'uid'            => function_exists('posix_geteuid') ? posix_geteuid() : null,
 			'user'           => function_exists('posix_getpwuid') && function_exists('posix_geteuid')
 				? ((posix_getpwuid(posix_geteuid())['name'] ?? '')) : '',

@@ -36,6 +36,7 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.7.1 - the subprocess starts with enable_dl=0: it could load any extension on the machine by name
  * @version 1.7.0 - runTool(): one program on outside bytes, fenced like the extractor (djpeg for ImageDecoder);
  *   the fenced PHP loads gd and exif for ImageCutter
  * @version 1.6.0 - Word 97-2003 (.doc): a compound file read with byte arithmetic, the piece table's text with
@@ -518,6 +519,8 @@ class DocumentText {
 			self::phpBinary(),
 			'-d', 'memory_limit=' . self::MEMORY_LIMIT,
 			'-d', 'display_errors=stderr',
+			// The extensions named are the extensions it has: no dl() adds one.
+			'-d', 'enable_dl=0',
 			$script,
 			PathHelper::getComposerVendorPath(),
 		), array_map('strval', $args));

@@ -364,6 +364,14 @@ if (DocumentText::jailAvailable()) {
 	check(VaultHealth::checkParserJail()['state'] === 'unmet', 'and VaultHealth says so');
 	harness_skip('the fence from inside', 'launcher not installed on this box: run ' . VaultHealth::parserJailInstallCommand());
 }
+// With or without the launcher: the subprocess cannot give itself an
+// extension. dl() is on by default in the command-line PHP, and under `php -n`
+// it loaded any extension on the machine by name.
+check(is_array($probe) && array_key_exists('dl_loaded', $probe) && $probe['dl_loaded'] === null
+	&& in_array((string)($probe['enable_dl'] ?? '1'), array('0', ''), true),
+	'the subprocess cannot load an extension it was not started with (enable_dl=0)', json_encode(array($probe['dl_loaded'] ?? null, $probe['enable_dl'] ?? null)));
+check(strpos((string)file_get_contents(PathHelper::getIncludePath('includes/SandboxRunner.php')), "'-n', '-d', 'enable_dl=0'") !== false,
+	'and a sandboxed plugin\'s PHP is started the same way');
 check(strpos($sources['includes/DocumentText.php'], "JAIL_LAUNCHER = '/usr/local/sbin/joinery-jail'") !== false,
 	'the launcher lives outside the tree, where the web user cannot replace it');
 check(strpos($sources['includes/DocumentText.php'], 'JAIL_REQUIRED = false') !== false,
