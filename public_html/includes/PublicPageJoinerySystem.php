@@ -586,6 +586,8 @@ class PublicPageJoinerySystem extends PublicPageBase {
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <?php $this->global_includes_top($options); ?>
   <meta name="theme-color" content="#ffffff">
+  <?php // The admin's own icon, so the browser never falls back to a /favicon.ico the site does not have. ?>
+  <link rel="icon" type="image/svg+xml" href="/theme/joinery-system/assets/images/favicon.svg?v=<?php echo $this->asset_mtime('theme/joinery-system/assets/images/favicon.svg'); ?>">
   <link rel="preconnect" href="https://fonts.gstatic.com">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
