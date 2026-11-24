@@ -34,6 +34,7 @@
  *
  * Run:  php tests/functional/files/upload_safety_test.php
  *
+ * @version 1.4 - the admin uploader's reply carries the stored file's own address
  * @version 1.3 - the allowed_upload_extensions setting cannot change a minted name; it is the member tools' list
  *   (File::member_upload_allowed()), and the admin uploader takes any type
  * @version 1.2 - the minted name is inert: an allowlisted extension or .bin, one extension only, sanitized before the check
@@ -172,6 +173,8 @@ check($probe->trim_name('shell.phtml.png') === 'shell-phtml.png', 'phtml double 
 $admin_logic = (string)file_get_contents(PathHelper::getIncludePath('adm/logic/admin_file_upload_process_logic.php'));
 check(strpos($admin_logic, "'accept_file_types' => '/.+$/i'") !== false && strpos($admin_logic, 'allowed_upload_extensions') === false,
     'the admin uploader accepts any file name and does not read the member list');
+check(strpos($admin_logic, "\$thisfile->url = \$file->get_url('original', 'full');") !== false && strpos($admin_logic, 'unset($thisfile->deleteUrl') !== false,
+    "the uploader's reply names the stored file, not the uploaded name");
 
 // ---------------------------------------------------------------------------
 section('Member tools take only the listed file types');

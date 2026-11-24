@@ -192,8 +192,12 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			$thisfile->warning = $file->variant_refusal();
 		}
 
-		// Add the file ID to the response object
+		// Add the file ID to the response object, and answer the file's own
+		// address: it is stored under a minted name, never the uploaded one, so
+		// the handler's url and delete link name a file that does not exist.
 		$thisfile->file_id = $file->key;
+		$thisfile->url = $file->get_url('original', 'full');
+		unset($thisfile->deleteUrl, $thisfile->deleteType, $thisfile->thumbnailUrl);
 
 		// Attaching an uploaded file to an event session only happens from the
 		// event_manager session editor — gate on that plugin owning the class.
@@ -205,13 +209,6 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			$event_session->add_file($file->key);
 		}
 
-		/*
-		print_r($thisfile->name);
-		print_r($thisfile->size);
-		print_r($thisfile->type);
-		print_r($thisfile->url);
-		print_r($thisfile->thumbnailUrl);
-		*/
 	}
 
 	// Output the modified response with file IDs
