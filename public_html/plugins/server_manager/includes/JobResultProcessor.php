@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.148 - process_site_log keeps journal, the host converger's 'this host logs it to the journal' answer
  * @version 1.147 - process_unban_address: the jail, the address and how many bans the node lifted
  * @version 1.146 - web_workers keeps apache_modules, the names of the modules Apache loads (web_workers.sh 1.3)
  * @version 1.145 - process_managed_domain_prepare keeps the site's reason (mailbox_inactive) beside its error
@@ -2602,6 +2603,8 @@ HTML;
 			'file'           => substr($file, 0, 64),
 			'previous'       => !empty($data['previous']),
 			'present'        => !empty($data['present']),
+			// host_converger on a data-root host: the unit logs to the journal (agent 1.132.0).
+			'journal'        => !empty($data['journal']),
 			'size_bytes'     => max(0, (int)($data['size_bytes'] ?? 0)),
 			'modified_time'  => substr(preg_replace('/[^0-9TZ:\- ]/', '', (string)($data['modified_time'] ?? '')), 0, 32),
 			'lines_returned' => max(0, min((int)($data['lines_returned'] ?? 0), JobCommandBuilder::LOG_MAX_COUNT)),

@@ -1745,6 +1745,15 @@ check(in_array('site_log', JobResultProcessor::processable_types(), true)
 	&& in_array('log_table_tail', JobResultProcessor::processable_types(), true),
 	'both log words are types the processor reconciles');
 
+check($sr['journal'] === false, 'an ordinary file read is not a journal answer');
+$jj = jrp_job($jrp_log_node, 'site_log', json_encode(['api_version' => '1.0', 'data' => [
+	'file' => 'host_converger', 'present' => false, 'journal' => true, 'text' => '',
+]]));
+JobResultProcessor::process($jj);
+$jr = json_decode((string)$jj->get('mjb_result'), true);
+check($jr['journal'] === true && $jr['present'] === false && $jr['file'] === 'host_converger',
+	'a data-root host\'s host_converger answer keeps journal: true for the job page', json_encode($jr));
+
 $big = json_encode(['api_version' => '1.0', 'data' => [
 	'file' => 'error', 'present' => true, 'lines_returned' => 999999, 'text' => str_repeat('x', JobResultProcessor::LOG_EXCERPT_MAX_BYTES + 100),
 ]]);
