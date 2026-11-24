@@ -660,7 +660,17 @@ own — copy the pattern from `data/messages_class.php`. See
 #### Writing a Multi (collection) class
 
 Every single-row model has a companion **Multi** class (collection) in the same file, extending
-`SystemMultiBase`. It declares `$model_class` (the single-row class name) and implements
+`SystemMultiBase`. It declares `$model_class` (the single-row class name). That alone is a
+complete collection: the built-in query lists the model's table, filtered by any column the
+model declares and by `deleted`, and refuses an option that names no column.
+
+```php
+class MultiNote extends SystemMultiBase {
+	protected static $model_class = 'Note';
+}
+```
+
+A collection that needs option keys of its own (a renamed key, a range, a search) writes
 `getMultiResults()`, which translates caller-supplied option keys into SQL filters:
 
 ```php
@@ -733,7 +743,8 @@ The constructor signature is
 `__construct($options = array(), $order_by = array(), $limit = NULL, $offset = NULL, $operation = 'AND', $write_lock = FALSE)`.
 The **option keys are whatever `getMultiResults()` reads** (here `user_id`, `active`, `name_like`)
 — they are deliberately *not* the raw column names. Always read a Multi class's
-`getMultiResults()` to learn its accepted keys.
+`getMultiResults()` to learn its accepted keys. A class that writes none accepts its model's
+columns and `deleted`, and nothing else.
 
 Beyond those keys, any column the model declares is a filter too, by its full name or without
 the prefix (`mdt_status` or `status`), and `deleted` (true or false) works on every model with a

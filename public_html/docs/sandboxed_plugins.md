@@ -739,7 +739,9 @@ it is read 200 rows at a time. `count()` and `count_all()` work. Refused,
 each saying why: raw SQL, a string condition (`"IS NULL"`), a
 split-parenthesis OR, a NULL filter, an OR collection, two sort columns,
 `undelete()`, `permanent_delete()`, and a collection of the plugin's own that
-writes `getMultiResults()`. Core runs every save with the checks any API
+writes `getMultiResults()`. A collection of the plugin's that writes none and
+declares `$default_options` sends them as column filters on every list, so a
+default whose value is NULL is refused on every list, as any NULL filter is. Core runs every save with the checks any API
 caller gets. The plugin's own rules run in the fence first: a `prepare()` its
 code declares runs before the ask and may refuse the save, and an overridden
 `save()` runs as written; they bind only the plugin.

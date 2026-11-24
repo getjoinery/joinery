@@ -70,6 +70,15 @@ $data  = $files['data/scaffold_hardening_probes_class.php'] ?? '';
 
 ok('data class source was produced', $data !== '');
 
+// A manifest with no filters gets a collection with no getMultiResults(): the
+// built-in query lists by column and `deleted` (spec collection_default_query),
+// soft delete or not. One with a filter writes the method.
+ok('no filters: the Multi class has no getMultiResults()',
+    strpos($data, 'class MultiScaffoldHardeningProbe extends SystemMultiBase') !== false && strpos($data, 'getMultiResults') === false);
+$with_filter = (new ScaffoldGenerator(probe_manifest(['filters' => [['option' => 'account', 'column' => 'zqx_account_id']]])))->files();
+ok('a declared filter: the Multi class writes getMultiResults()',
+    strpos($with_filter['data/scaffold_hardening_probes_class.php'] ?? '', 'protected function getMultiResults(') !== false);
+
 // bug 4 — primary key name follows {prefix}_{singular}_id
 ok('bug 4: PK named zqx_scaffold_hardening_probe_id',
     strpos($data, "'zqx_scaffold_hardening_probe_id' =>") !== false);

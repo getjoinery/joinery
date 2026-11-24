@@ -89,6 +89,7 @@ class <?= $entity ?> extends SystemBase {
 
 class <?= $multi ?> extends SystemMultiBase {
 	protected static $model_class = '<?= $entity ?>';
+<?php if (!empty($filters)): // no filter of its own: the built-in query lists by column and `deleted` ?>
 
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
@@ -115,5 +116,6 @@ class <?= $multi ?> extends SystemMultiBase {
 
 		return $this->_get_resultsv2('<?= $table ?>', $filters, $this->order_by, $only_count, $debug);
 	}
+<?php endif; ?>
 }
 <?= $C ?>

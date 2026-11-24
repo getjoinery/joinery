@@ -4761,6 +4761,14 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	private function yes_no_option_keys() {
 		$class = get_class($this);
 		if (!isset(self::$yes_no_option_keys_cache[$class])) {
+			if (static::is_columns_only()) {
+				// No query of its own: an option is a column whatever the
+				// class's source mentions, and only core's `deleted` is a
+				// yes/no. (A presence key here would drop a column filter
+				// of "0" before the query ran.)
+				self::$yes_no_option_keys_cache[$class] = array('flag' => array('deleted' => true), 'presence' => array());
+				return self::$yes_no_option_keys_cache[$class];
+			}
 			$source = '';
 			$seen_files = array();
 			for ($rc = new ReflectionClass($class); $rc && $rc->getName() !== 'SystemMultiBase'; $rc = $rc->getParentClass()) {
@@ -4914,7 +4922,9 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		if (!is_array($this->options) || $this->options === array()) {
 			return array();
 		}
-		$known = $this->known_option_keys();
+		// A collection with no query of its own implements no option itself:
+		// every option is looked up as a column, whatever its source mentions.
+		$known = static::is_columns_only() ? array() : $this->known_option_keys();
 		if ($known === null) {
 			return array();
 		}
@@ -5001,7 +5011,9 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		if (!is_array($this->options) || $this->options === array()) {
 			return;
 		}
-		$known = $this->known_option_keys();
+		// With no query of its own, only what core answers is implemented:
+		// the source's mentions and $default_options keys count for nothing.
+		$known = static::is_columns_only() ? array() : $this->known_option_keys();
 		if ($known === null) {
 			return;
 		}
@@ -5392,11 +5404,47 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		return static::$model_class;
 	}
 	
+	/** Per-class cache for is_columns_only(). */
+	private static $columns_only_cache = array();
+
 	/**
-	 * Abstract method that must be implemented by concrete Multi classes
-	 * This method handles the specific query building for each Multi class
+	 * Whether this collection wrote no query of its own, and so lists with
+	 * the built-in getMultiResults() below. A fact about the class, not the
+	 * object: the constructor's yes/no reader, the column filters, the
+	 * unknown-option check and a sandboxed plugin's remote store all ask it
+	 * here (spec collection_default_query).
 	 */
-	abstract protected function getMultiResults($only_count = false, $debug = false);
+	final public static function is_columns_only(): bool {
+		$class = static::class;
+		if (!isset(self::$columns_only_cache[$class])) {
+			self::$columns_only_cache[$class] =
+				(new ReflectionMethod($class, 'getMultiResults'))->getDeclaringClass()->getName() === self::class;
+		}
+		return self::$columns_only_cache[$class];
+	}
+
+	/**
+	 * The query behind load() and count_all(). A collection writes its own
+	 * for options of its own (a join, a range, a renamed key). One that
+	 * writes none gets this: its model's table, filtered by any of the
+	 * model's columns (one value or a list, with or without the prefix) and
+	 * by `deleted`, which _get_resultsv2() adds from the options. An option
+	 * that names no column is refused there, never dropped.
+	 *
+	 * Not for a written query to call: a query is the class's own or this,
+	 * never half of each.
+	 */
+	protected function getMultiResults($only_count = false, $debug = false) {
+		if (!static::is_columns_only()) {
+			throw new SystemBaseException(get_class($this) . ' writes its own getMultiResults(); the built-in query is not called from it.');
+		}
+		$model = isset(static::$model_class) ? static::$model_class : null;
+		if (!$model || !class_exists($model) || empty($model::$tablename)
+				|| empty($model::$prefix) || empty($model::$field_specifications)) {
+			throw new SystemBaseException(get_class($this) . ' has no getMultiResults() and no model to list by its columns.');
+		}
+		return $this->_get_resultsv2($model::$tablename, array(), $this->order_by, $only_count, $debug);
+	}
 
 	// This is a very special function that takes the key of a specific timestamp column of a
 	// table, and after loading all of the elements selected in this MultiBase, will set that

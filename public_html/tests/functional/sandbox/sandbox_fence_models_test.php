@@ -32,6 +32,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_fence_models
  *
+ * @version 1.3 - a collection with no query of its own sends its default options (spec collection_default_query)
  * @version 1.2 - a filter's list of values (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.1 - reviewer2 G1-G3, G5, G6: a clashing model name, the plugin's prepare(), a class in plugin.php,
  *                the code line on the approval screen, fence-only declarations
@@ -97,6 +98,8 @@ function on_ui(array $input) {
 	$o['trash'] = sbx_try(function () use ($n2) { return $n2->soft_delete(); });
 	$o['trashed_time'] = (new Note($n2->key, TRUE))->get('delete_time') !== null;
 	$o['live_after_trash'] = count(new MultiNote(array('text' => 'alpha', 'deleted' => false)));
+	$o['all_after_trash'] = count(new MultiNote(array('text' => 'alpha')));
+	$o['default_live'] = sbx_try(function () { return count(new MultiSbxLiveNotes(array('text' => 'alpha'))); });
 	$o['undelete'] = sbx_try(function () use ($n2) { return $n2->undelete(); });
 	$o['permanent'] = sbx_try(function () use ($n2) { return $n2->permanent_delete(); });
 	$o['page'] = (new Page((int)$v['page'], TRUE))->get('pag_title');
@@ -123,6 +126,9 @@ PHP;
 		'plugin.php' => $plugin_php,
 		'data/Note.php' => "<?php\nclass Note extends Sbx_" . $name . "_Note {\n\tfunction shout() { return strtoupper((string)\$this->get('text')); }\n"
 			. "\tfunction prepare() { if (\$this->get('text') === 'bad') { throw new RuntimeException('no bad notes'); } }\n}\n",
+		// No query of its own, and a default option: a column filter the fence must send.
+		'data/LiveNotes.php' => "<?php\nclass MultiSbxLiveNotes extends SystemMultiBase {\n\tprotected static \$model_class = 'Note';\n"
+			. "\tprotected static \$default_options = array('deleted' => false);\n}\n",
 		'data/SqlNotes.php' => "<?php\nclass MultiSbxSqlNotes extends MultiNote {\n\tprotected function getMultiResults(\$only_count = false, \$debug = false) { return null; }\n}\n",
 	);
 }
@@ -152,6 +158,8 @@ function sbx_fm_checks(array $result, string $label, string $name, array $values
 	check(array_key_exists('missing', $o) && $o['missing'] === null, $label . ': a missing id loads no key');
 	check(($o['trash']['ok'] ?? null) === true && ($o['trashed_time'] ?? false) === true && ($o['live_after_trash'] ?? null) === 1,
 		$label . ': soft_delete() puts a row in the trash', json_encode(array($o['trash'] ?? null, $o['live_after_trash'] ?? null)));
+	check(($o['all_after_trash'] ?? 0) > ($o['live_after_trash'] ?? 0) && ($o['default_live']['ok'] ?? null) === ($o['live_after_trash'] ?? -1),
+		$label . ': a collection with no query of its own sends its default options as filters', json_encode(array($o['all_after_trash'] ?? null, $o['default_live'] ?? null)));
 	check(strpos((string)($o['undelete']['message'] ?? ''), 'admin') !== false && strpos((string)($o['permanent']['message'] ?? ''), 'never removes') !== false,
 		$label . ': restoring or removing a row is refused', json_encode(array($o['undelete'] ?? null, $o['permanent'] ?? null)));
 	check(($o['page'] ?? null) === $values['page_title'], $label . ': a core model it may read (Page) loads by id', json_encode($o['page'] ?? null));

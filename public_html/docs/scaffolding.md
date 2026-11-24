@@ -152,7 +152,7 @@ When `as:` is absent, the form type falls back to a mechanical DB-type default (
 Every part of the output is one of three things — no part is guessed:
 
 - **Derived** — the generator writes it fully from conventions + the field list: prefix/pkey/table, filenames, URLs, requires, permission checks, the `isFormSubmission()` guard, load-or-create, the editable-fields loop, `prepare()`+`save()`, redirect-after-POST, `process_logic()` wrappers, table/header/footer rendering, the `_logic_descriptor()` and its `fromDescriptor()` call.
-- **Declared** — comes verbatim (lightly transformed) from the manifest: field specs, the `api:`/`ai:` surface, `delete` actions, `getMultiResults()` filter branches.
+- **Declared** — comes verbatim (lightly transformed) from the manifest: field specs, the `api:`/`ai:` surface, `delete` actions, `getMultiResults()` filter branches (a manifest that declares no filter gets a collection with no `getMultiResults()`, which lists by the model's columns).
 - **Stubbed** — a labelled `// TODO:` placeholder a human fills in: cross-field validation, relationship loading, computed `export_as_array()`, and fields with no descriptor type (file uploads, rich text, custom widgets).
 
 ### Form generation

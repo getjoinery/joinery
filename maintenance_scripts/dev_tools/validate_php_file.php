@@ -8,6 +8,7 @@
  *
  * Usage: php validate_php_file.php <path_to_php_file>
  *
+ * @version 1.3 - a collection with no getMultiResults() of its own is checked for a model the built-in query can list
  * @version 1.2 - the method-name position starts set, so a call with no name after :: or -> reads no stale index
  * @version 1.1 - includes the file only when it just declares, or is a class file in includes/ or data/;
  *                a script (utils/upgrade.php ran a real upgrade) is read from its source, with the files it
@@ -1910,8 +1911,13 @@ class MethodExistenceTest {
                           . "\$model_class = '$class' (every model requires its Multi class)";
             } else {
                 $multi_class = $multi_by_model[$class];
-                if (!method_exists($multi_class, 'getMultiResults')) {
-                    $errors[] = "$multi_class: getMultiResults() is not implemented";
+                // A collection with no getMultiResults() of its own lists by its
+                // model's columns (SystemMultiBase's built-in query), which needs
+                // a model with a table, a prefix and field specifications.
+                if ($multi_class::is_columns_only()
+                        && (empty($class::$tablename) || empty($class::$prefix) || empty($class::$field_specifications))) {
+                    $errors[] = "$multi_class: no getMultiResults() of its own, and $class has no table, prefix "
+                              . "or field specifications for the built-in query to list by";
                 }
                 if ($multi_class !== 'Multi' . $class) {
                     $advisories[] = "$multi_class: collection class is conventionally named Multi{$class}";

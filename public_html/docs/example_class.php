@@ -543,8 +543,15 @@ class MultiExample extends SystemMultiBase
     protected static $model_class = 'Example';
     
     /**
-     * REQUIRED: Implement getMultiResults method
-     * This method handles all filtering logic and returns database results
+     * OPTIONAL: getMultiResults(), for option keys of this class's own
+     * (a renamed key, a range, a search, a join).
+     *
+     * A collection that writes no getMultiResults() is complete without it:
+     * SystemMultiBase's built-in query lists the model's table, filtered by
+     * any column the model declares (full name or without the prefix, one
+     * value or a list) and by `deleted`. Every option is then a column, and
+     * one that names no column is refused. Write this method only when the
+     * class needs more than that.
      *
      * Option keys are a contract: a caller passing a key this class does not
      * read gets UnknownMultiOptionException at query time, not a silently

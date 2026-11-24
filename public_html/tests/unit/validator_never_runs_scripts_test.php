@@ -69,4 +69,21 @@ check(strpos($out, 'File loaded successfully') !== false, 'a file that only decl
 $out = vnr_run($validator, PathHelper::getIncludePath('data/users_class.php'));
 check(strpos($out, 'File loaded successfully') !== false, 'a model class file with top-level code is still included', $out);
 
+// A collection with no getMultiResults() lists by its model's columns
+// (SystemMultiBase's built-in query), so its model needs what that query
+// reads. The check is the model contract's.
+section('A collection with no query of its own needs a model to list by');
+$model = function ($prefix) {
+	return "<?php\nclass VnrCdqThing extends SystemBase {\n\tpublic static \$prefix = '" . $prefix . "';\n\tpublic static \$tablename = 'vct_things';\n"
+		. "\tpublic static \$pkey_column = 'vct_thing_id';\n\tpublic static \$access_class = 'content';\n"
+		. "\tpublic static \$field_specifications = array(\n\t\t'vct_thing_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),\n\t);\n}\n"
+		. "class MultiVnrCdqThing extends SystemMultiBase {\n\tprotected static \$model_class = 'VnrCdqThing';\n}\n";
+};
+file_put_contents("$dir/things_class.php", $model(''));
+$out = vnr_run($validator, "$dir/things_class.php");
+check(strpos($out, 'MultiVnrCdqThing: no getMultiResults() of its own') !== false, 'a model with no prefix is reported', $out);
+file_put_contents("$dir/things_class.php", $model('vct'));
+$out = vnr_run($validator, "$dir/things_class.php");
+check(strpos($out, 'getMultiResults()') === false, 'a model the built-in query can list is not', $out);
+
 harness_finish();

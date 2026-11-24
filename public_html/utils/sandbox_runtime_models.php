@@ -46,6 +46,8 @@
  * A collection with no limit is read a page (200 rows) at a time, each page
  * one ask, within the call's 200 asks.
  *
+ * @version 1.3 - a collection with no query of its own sends its default options, which are column filters
+ *                (spec collection_default_query)
  * @version 1.2 - a filter takes a list of values, as natively; the [value, PDO::PARAM_*] form, which a column
  *                filter does not take natively, is a list too (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.1 - reviewer2 G1-G4: no short name a core class has; the plugin's prepare() runs; coreName() walks to
@@ -168,7 +170,9 @@ final class SandboxRemoteStore implements SystemBaseRemoteStore {
 	 * A collection's options as column filters: one value or a list of them
 	 * each, or deleted.
 	 * The class's own defaults it did not change are left out (they are the
-	 * class's own option keys, which only its SQL knows).
+	 * class's own option keys, which only its SQL knows), unless the
+	 * collection has no query of its own (SystemMultiBase::is_columns_only()):
+	 * its defaults are column filters like any other option.
 	 */
 	private static function filters(SystemMultiBase $multi): array {
 		$defaults = (new ReflectionProperty($multi, 'default_options'))->getValue();
@@ -176,7 +180,9 @@ final class SandboxRemoteStore implements SystemBaseRemoteStore {
 		$out = array();
 		foreach ((array)$multi->options as $key => $value) {
 			$key = (string)$key;
-			if (is_array($defaults) && array_key_exists($key, $defaults) && $defaults[$key] === $value) {
+			// A collection with no query of its own has no option keys of its
+			// own either: its defaults are column filters, and go to core.
+			if (!$multi::is_columns_only() && is_array($defaults) && array_key_exists($key, $defaults) && $defaults[$key] === $value) {
 				continue;
 			}
 			if ($key !== '' && $key[0] === '(') {
