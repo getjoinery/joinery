@@ -612,6 +612,15 @@ check(preg_match_all('/^\s*ServerName \{\{DOMAIN_NAME\}\}\s*\n(?:\s*\S.*\n){0,4}
     'AllowEncodedSlashes NoDecode on the main site\'s two hosts');
 check(substr_count($t210, "\n        AllowEncodedSlashes NoDecode\n") === 2, 'and nowhere else');
 check(is_file($history_dir . '/default_virtualhost-2.10.conf'), 'vhost_history carries 2.10');
+// 2.12: every /static_files/uploads/ address redirects to /uploads/, found on
+// disk or not. Apache handed a file it found there over itself, with none of
+// the site's headers, so a public SVG or XML upload ran script on the site's
+// own origin.
+check(strpos($t210, 'RewriteCond %{REQUEST_FILENAME} !-f') === false,
+    'no uploads redirect waits for the file to be missing: Apache never serves an upload itself');
+check(substr_count($t210, 'RewriteCond %{REQUEST_URI} ^/static_files/uploads/') === 4
+    && substr_count($t210, 'RewriteRule ^uploads/(.*)$') === 4, 'both uploads redirects on both hosts');
+check(is_file($history_dir . '/default_virtualhost-2.11.conf'), 'vhost_history carries 2.11');
 $oe = (string)file_get_contents(PathHelper::getIncludePath('plugins/office_editor/provisioning/install_office_editor.sh'));
 check(strpos($oe, "ProxyPass http://127.0.0.1:9980/cool upgrade=websocket retry=0 disablereuse=On nocanon\n") !== false,
     'the office editor proxies /cool with nocanon');
@@ -659,7 +668,7 @@ if ($cool_rule !== '') {
     }
 }
 
-foreach (array('default_virtualhost.conf' => '2.11', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
+foreach (array('default_virtualhost.conf' => '2.12', 'default_proxy_vhost.conf' => '1.05') as $tpl => $ver) {
     $t = (string)file_get_contents($tools_dir . '/' . $tpl);
     check(strpos($t, '#Version ' . $ver) === 0, "$tpl is $ver");
     preg_match_all('/<VirtualHost [^>]*:443>(.*?)<\/VirtualHost>/s', $t, $hosts);
