@@ -45,6 +45,10 @@ chk() {
 
 R="$T/root"; STUB="$T/s"; SRV="$T/srv/static_files/fixes"
 export PACKAGE_FIXES_ROOT="$R" STUB
+# The fallback fix server is never a real one: unset, it is getjoinery.com,
+# whose live channel the stand-in verifier would take on any path that asks
+# the fix servers. A check that wants a fallback names one.
+export UPGRADE_SERVER=file:///nonexistent
 mkdir -p "$T/bin" "$STUB/debs" "$R/etc/apt/sources.list.d" "$R/etc/apt/preferences.d" "$SRV"
 # apt-get: update records the list it was given and fails when told to;
 # source hands over Ubuntu's source files from $STUB/src/<source>_<version>/;
