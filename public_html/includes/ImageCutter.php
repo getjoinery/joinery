@@ -33,6 +33,11 @@
  * setting and the machine's memory can be read, and travels in the options:
  * the fenced side reads no setting.
  *
+ * @version 1.1 - a shrunk copy that would not fit this process beside the source is not asked for (a 30000 x 1250
+ *                JPEG answered an 86 MB BMP and the worker died for memory on every view); the scale the fenced
+ *                side names is held to a shrink; the palette for a transparent GIF is chosen from the opaque
+ *                picture and the see-through pixels are set after, so no highlight falls through; the fenced
+ *                ceiling is 200 MB
  * @version 1.0
  */
 class ImageCutter implements SandboxParserInterface {
@@ -42,10 +47,21 @@ class ImageCutter implements SandboxParserInterface {
 
 	/**
 	 * The most the fenced decode may estimate, whatever the site's ceiling:
-	 * the run's address space (DocumentText::JAIL_ADDRESS_SPACE_BYTES) also
-	 * holds PHP, its libraries and the source's bytes.
+	 * the run's address space (DocumentText::JAIL_ADDRESS_SPACE_BYTES, 640 MB)
+	 * also holds PHP and its libraries, the source's bytes twice (the EXIF
+	 * reader takes a copy) and, for a picture stored on its side, a second
+	 * full image while it is turned.
 	 */
-	const FENCE_CEILING_MB = 384;
+	const FENCE_CEILING_MB = 200;
+
+	/**
+	 * The most of an image this process holds at once: the source file's
+	 * bytes plus the shrunk copy djpeg hands back. A web worker's
+	 * memory_limit is 128 MB and a fatal for memory cannot be caught, so a
+	 * shrink that would not fit is not attempted (the image is decoded in
+	 * full inside the fence, or refused there in words).
+	 */
+	const WORKER_BUDGET_BYTES = 67108864;   // 64 MB
 
 	/**
 	 * Cut $sizes from the image at $src_path.
@@ -86,7 +102,28 @@ class ImageCutter implements SandboxParserInterface {
 
 		$answer = self::ask($bytes, $options);
 		if (isset($answer['shrink'])) {
-			$bmp = ImageDecoder::shrink_jpeg($bytes, (int)$answer['shrink'], $ceiling);
+			// The fenced side's word is not trusted for what this process then
+			// does: the scale is a shrink (1 to 7 eighths) or it is refused, and
+			// the shrunk copy must fit beside the source in this process.
+			$m = (int)$answer['shrink'];
+			$info = is_array($answer['info'] ?? null) ? $answer['info'] : array();
+			$w = (int)($info['width'] ?? 0);
+			$h = (int)($info['height'] ?? 0);
+			if ($m < 1 || $m > 7 || $w < 1 || $h < 1 || $w > 65535 || $h > 65535) {
+				throw new ImageDecodeRefused('The image could not be decoded; the file may be damaged.');
+			}
+			$room = self::WORKER_BUDGET_BYTES - strlen($bytes);
+			$bmp_bytes = 54 + 3 * (int)ceil($w * $m / 8) * (int)ceil($h * $m / 8) + 4 * (int)ceil($h * $m / 8);
+			if ($bmp_bytes > $room) {
+				// Too large to carry through here shrunk: decode it in full
+				// inside the fence, where the ceiling refuses it in words if
+				// that does not fit either.
+				$options['shrink'] = false;
+				$answer = self::ask($bytes, $options);
+			}
+		}
+		if (isset($answer['shrink'])) {
+			$bmp = ImageDecoder::shrink_jpeg($bytes, $m, $ceiling, $room);
 			unset($bytes);
 			$options['shrunk'] = is_array($answer['info'] ?? null) ? $answer['info'] : array();
 			$answer = self::ask($bmp, $options);
@@ -118,6 +155,10 @@ class ImageCutter implements SandboxParserInterface {
 				$e = new ImageDecodeRefused('The site ran out of memory while making sizes for this photo; it will be tried again later.');
 				$e->transient = true;
 				throw $e;
+			}
+			if (stripos($detail, 'answer too large') !== false) {
+				throw new ImageDecodeRefused('This image is too large to make sizes from (its sizes together are over '
+					. (int)(DocumentText::MAX_ANSWER_BYTES / 1048576) . ' MB). It was saved as uploaded.');
 			}
 			if (stripos($detail, 'timed out') !== false) {
 				throw new ImageDecodeRefused('The image took longer than ' . DocumentText::TIMEOUT_SECONDS . ' seconds to decode and was stopped.');
@@ -281,6 +322,12 @@ class ImageCutter implements SandboxParserInterface {
 	 * which the fence refuses, so the palette is chosen here: the commonest
 	 * colours of a small sample, in 5 bits a channel, each slot the average
 	 * of what fell in it. GD then maps every pixel to its nearest entry.
+	 *
+	 * A GIF has one transparent entry. The picture is mapped first, laid over
+	 * its own commonest colour, to at most 255 colours that are all real
+	 * ones; the transparent entry is added after, and given only to the
+	 * pixels the source says are see-through. No colour of the picture can
+	 * land on it, however near.
 	 */
 	private static function toPalette($image, $transparent) {
 		$w = imagesx($image);
@@ -307,40 +354,46 @@ class ImageCutter implements SandboxParserInterface {
 		unset($sample);
 		uasort($buckets, function ($a, $b) { return $b[0] <=> $a[0]; });
 
+		$colours = array();
+		foreach (array_slice($buckets, 0, $transparent ? 255 : 256, true) as $bucket) {
+			$colours[] = array((int)round($bucket[1] / $bucket[0]), (int)round($bucket[2] / $bucket[0]), (int)round($bucket[3] / $bucket[0]));
+		}
+		if (!$colours) {
+			$colours[] = array(0, 0, 0);
+		}
+
+		// The picture with nothing see-through in it: over its commonest colour.
+		$flat = imagecreatetruecolor($w, $h);
+		imagefill($flat, 0, 0, imagecolorallocate($flat, $colours[0][0], $colours[0][1], $colours[0][2]));
+		imagealphablending($flat, true);
+		imagecopy($flat, $image, 0, 0, 0, 0, $w, $h);
+
 		$out = imagecreate($w, $h);
-		$slots = 256;
-		$key_index = null;
+		foreach ($colours as $c) {
+			imagecolorallocate($out, $c[0], $c[1], $c[2]);
+		}
+		// The transparent entry takes its slot before the copy, and is named
+		// transparent before it too: GD maps no pixel to the entry that is
+		// already the transparent one, and with the slot taken the copy cannot
+		// spend it on a colour of the picture.
+		$key = false;
 		if ($transparent) {
-			// A GIF has one transparent entry. Give the see-through pixels one
-			// exact colour no kept colour is near, lay the image over it, and
-			// make that colour the transparent entry: every such pixel then
-			// maps to it and to nothing else.
-			$free = 0;
-			for ($k = 32767; $k >= 0; $k--) {
-				if (!isset($buckets[$k])) { $free = $k; break; }
+			$key = imagecolorallocate($out, 0, 0, 0);
+			if ($key !== false) {
+				imagecolortransparent($out, $key);
 			}
-			$kr = ((($free >> 10) & 31) << 3) | 4;
-			$kg = ((($free >> 5) & 31) << 3) | 4;
-			$kb = (($free & 31) << 3) | 4;
-			$flat = imagecreatetruecolor($w, $h);
-			imagefill($flat, 0, 0, imagecolorallocate($flat, $kr, $kg, $kb));
-			imagealphablending($flat, true);
-			imagecopy($flat, $image, 0, 0, 0, 0, $w, $h);
-			$image = $flat;
-			// Named transparent after the copy: GD maps no pixel to an entry
-			// that is already the transparent one.
-			$key_index = imagecolorallocate($out, $kr, $kg, $kb);
-			$slots--;
 		}
-		foreach (array_slice($buckets, 0, $slots, true) as $bucket) {
-			imagecolorallocate($out, (int)round($bucket[1] / $bucket[0]), (int)round($bucket[2] / $bucket[0]), (int)round($bucket[3] / $bucket[0]));
+		imagecopy($out, $flat, 0, 0, 0, 0, $w, $h);
+		unset($flat);
+		if ($key === false) {
+			return $out;
 		}
-		if (!$buckets && !$transparent) {
-			imagecolorallocate($out, 0, 0, 0);
-		}
-		imagecopy($out, $image, 0, 0, 0, 0, $w, $h);
-		if ($key_index !== null) {
-			imagecolortransparent($out, $key_index);
+		for ($y = 0; $y < $h; $y++) {
+			for ($x = 0; $x < $w; $x++) {
+				if (((imagecolorat($image, $x, $y) >> 24) & 0x7F) >= 64) {
+					imagesetpixel($out, $x, $y, $key);
+				}
+			}
 		}
 		return $out;
 	}

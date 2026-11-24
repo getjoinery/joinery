@@ -169,9 +169,11 @@ class RouteHelper {
      * @param array $exclude_from_cache File extensions to exclude from long caching
      * @param bool $versioned The URL carries the file's version, so the file behind it never changes:
      *                        served for a year and marked immutable (unless its type is excluded)
+     * @param bool $uploaded  The file is a public upload, not one of ours: its type comes from its
+     *                        stored name alone (uploadedFileHeaders()), never from its content
      * @return bool True if file served, false if rejected or not found
      */
-    public static function serveStaticFile($file_path, $cache_seconds = 43200, $exclude_from_cache = [], $versioned = false) {
+    public static function serveStaticFile($file_path, $cache_seconds = 43200, $exclude_from_cache = [], $versioned = false, $uploaded = false) {
         if (!file_exists($file_path) || is_dir($file_path)) {
             return false;
         }
@@ -209,6 +211,17 @@ class RouteHelper {
         header("Pragma: cache");
         header("Cache-Control: " . ($cache_control ?? "max-age=$actual_cache_seconds"));
         
+        // A public upload is a stranger's bytes under a name we minted. Its type
+        // is read from that name and nothing else, and only pictures, sound,
+        // video and PDF are shown in place; see uploadedFileHeaders().
+        if ($uploaded) {
+            foreach (self::uploadedFileHeaders($file_path) as $line) {
+                header($line);
+            }
+            readfile($file_path);
+            return true;
+        }
+
         // Set content type
         $content_type = self::getMimeType($file_path);
         header("Content-type: $content_type");
@@ -706,6 +719,52 @@ class RouteHelper {
      * @param string $filename File name or path
      * @return string MIME type
      */
+    /**
+     * What a public upload may be shown as in place, by the extension of its
+     * stored name: plain pictures, sound, video and PDF. None of these types
+     * is one a browser runs as a script or a page.
+     */
+    const UPLOADED_INLINE_TYPES = [
+        'gif' => 'image/gif', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'jpe' => 'image/jpeg',
+        'png' => 'image/png', 'webp' => 'image/webp', 'avif' => 'image/avif',
+        'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'wav' => 'audio/wav', 'ogg' => 'audio/ogg',
+        'flac' => 'audio/flac', 'aac' => 'audio/aac', 'opus' => 'audio/ogg',
+        'mp4' => 'video/mp4', 'm4v' => 'video/mp4', 'mov' => 'video/quicktime', 'webm' => 'video/webm',
+        'pdf' => 'application/pdf',
+    ];
+
+    /**
+     * The headers a public upload is served with on the pre-boot fast path,
+     * where the File model is not loaded.
+     *
+     * The type comes from the stored name's extension and never from the
+     * file's content: a content sniff called a file of JavaScript stored as
+     * x.bin application/javascript, and served in place from our own origin
+     * that is a script the site's script policy trusts. So a name on
+     * UPLOADED_INLINE_TYPES is shown in place as that type; an SVG is typed
+     * as one (a page's <img> still draws it) but handed over as a download
+     * under a sandbox, since opened as a page it runs script; and every
+     * other name is a download of unnamed bytes. Sniffing is off throughout.
+     *
+     * @return string[] header lines
+     */
+    public static function uploadedFileHeaders($file_path) {
+        $extension = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+        $name = str_replace(['"', '\\', "\r", "\n"], '', basename($file_path));
+        $headers = ['X-Content-Type-Options: nosniff'];
+        if (isset(self::UPLOADED_INLINE_TYPES[$extension])) {
+            $headers[] = 'Content-type: ' . self::UPLOADED_INLINE_TYPES[$extension];
+        } elseif ($extension === 'svg') {
+            $headers[] = 'Content-type: image/svg+xml';
+            $headers[] = "Content-Security-Policy: sandbox; default-src 'none'; style-src 'unsafe-inline'";
+            $headers[] = 'Content-Disposition: attachment; filename="' . $name . '"';
+        } else {
+            $headers[] = 'Content-type: application/octet-stream';
+            $headers[] = 'Content-Disposition: attachment; filename="' . $name . '"';
+        }
+        return $headers;
+    }
+
     public static function getMimeType($filename) {
         // For performance, try extension-based first for common web assets
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
@@ -1172,7 +1231,7 @@ class RouteHelper {
             $real_path = realpath($fast_path);
             $real_dir = realpath($fast_dir);
             if ($real_path && $real_dir && strpos($real_path, $real_dir . '/') === 0) {
-                self::serveStaticFile($real_path, 43200);
+                self::serveStaticFile($real_path, 43200, [], false, true);
                 exit();
             }
         }

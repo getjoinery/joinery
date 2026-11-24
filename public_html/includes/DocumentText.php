@@ -36,6 +36,8 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.7.2 - a subprocess's answer has a ceiling (MAX_ANSWER_BYTES, runTool()'s $max_out): one that ran past
+ *   what the caller's memory holds was a fatal no caller could catch
  * @version 1.7.1 - the subprocess starts with enable_dl=0: it could load any extension on the machine by name
  * @version 1.7.0 - runTool(): one program on outside bytes, fenced like the extractor (djpeg for ImageDecoder);
  *   the fenced PHP loads gd and exif for ImageCutter
@@ -132,6 +134,12 @@ class DocumentText {
 		'simplexml', 'tokenizer', 'xml', 'xmlreader', 'xmlwriter', 'zip');
 	/** Where the launcher puts a run's own folder (joinery_jail/main.go scratchPrefix). */
 	const JAIL_RUN_FOLDER_PREFIX = '/dev/shm/joinery-jail-run.';
+	/**
+	 * The most a subprocess may answer. Its answer is held in the caller's
+	 * memory (a web worker's memory_limit is 128 MB), so one that runs past
+	 * this is stopped and reported, never collected.
+	 */
+	const MAX_ANSWER_BYTES = 33554432;
 	/** Cap on returned text, in characters. */
 	const DEFAULT_MAX_CHARS = 50000;
 
@@ -592,7 +600,13 @@ class DocumentText {
 			return self::result(self::FAILED, null, '', 'could not spawn extractor');
 		}
 
-		$out = self::pump($pipes, $stdin);
+		$out = self::pump($pipes, $stdin, self::MAX_ANSWER_BYTES);
+		if ($out['overflow']) {
+			@proc_terminate($proc, 9);
+			proc_close($proc);
+			error_log('DocumentText: the subprocess answered more than ' . self::MAX_ANSWER_BYTES . ' bytes and was stopped (' . $label . ')');
+			return self::result(self::FAILED, null, '', 'answer too large');
+		}
 		$exit = proc_close($proc);
 
 		return self::interpret($exit, $out['stdout'], $out['stderr'], $label);
@@ -614,9 +628,10 @@ class DocumentText {
 	 * @param int      $timeout     wall-clock seconds
 	 * @param int      $limit_bytes address-space cap
 	 * @param bool     $fenced      false to skip the launcher (a test's stand-in script)
-	 * @return array{exit:int,stdout:string,stderr:string,fenced:bool}
+	 * @param int      $max_out     the most it may answer; past it the program is killed and `overflow` is true
+	 * @return array{exit:int,stdout:string,stderr:string,fenced:bool,overflow:bool}
 	 */
-	public static function runTool(array $argv, string $stdin, int $timeout, int $limit_bytes, bool $fenced = true): array {
+	public static function runTool(array $argv, string $stdin, int $timeout, int $limit_bytes, bool $fenced = true, int $max_out = self::MAX_ANSWER_BYTES): array {
 		$argv = array_map('strval', array_values($argv));
 		$timeout = max(1, $timeout);
 		$limit_bytes = max(16777216, $limit_bytes);
@@ -641,9 +656,14 @@ class DocumentText {
 		$pipes = array();
 		$proc = @proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
 		if (!is_resource($proc)) {
-			return array('exit' => 127, 'stdout' => '', 'stderr' => 'could not start ' . basename($argv[0]), 'fenced' => $in_fence);
+			return array('exit' => 127, 'stdout' => '', 'stderr' => 'could not start ' . basename($argv[0]), 'fenced' => $in_fence, 'overflow' => false);
 		}
-		$out = self::pump($pipes, $stdin);
+		$out = self::pump($pipes, $stdin, $max_out);
+		if ($out['overflow']) {
+			@proc_terminate($proc, 9);
+			proc_close($proc);
+			return array('exit' => 126, 'stdout' => '', 'stderr' => 'answered more than ' . $max_out . ' bytes', 'fenced' => $in_fence, 'overflow' => true);
+		}
 		// Read the end from the status, not proc_close(): a command killed by a
 		// signal must not read as one that exited with that number.
 		$deadline = microtime(true) + $timeout + 10;
@@ -659,7 +679,7 @@ class DocumentText {
 			$exit = !empty($status['signaled']) ? 128 + (int)$status['termsig'] : (int)$status['exitcode'];
 		}
 		proc_close($proc);
-		return array('exit' => $exit, 'stdout' => $out['stdout'], 'stderr' => $out['stderr'], 'fenced' => $in_fence);
+		return array('exit' => $exit, 'stdout' => $out['stdout'], 'stderr' => $out['stderr'], 'fenced' => $in_fence, 'overflow' => false);
 	}
 
 	/**
@@ -687,7 +707,7 @@ class DocumentText {
 	 * Write $stdin (if any) while draining stdout/stderr, so neither side can
 	 * fill a pipe and block the other.
 	 */
-	private static function pump(array $pipes, ?string $stdin): array {
+	private static function pump(array $pipes, ?string $stdin, int $max_out = 0): array {
 		stream_set_blocking($pipes[0], false);
 		stream_set_blocking($pipes[1], false);
 		stream_set_blocking($pipes[2], false);
@@ -704,6 +724,7 @@ class DocumentText {
 
 		$stdout = '';
 		$stderr = '';
+		$overflow = false;
 		while (true) {
 			$read = array();
 			if (is_resource($pipes[1])) $read[] = $pipes[1];
@@ -741,12 +762,20 @@ class DocumentText {
 					}
 					continue;
 				}
-				if ($r === $pipes[1]) $stdout .= $chunk; else $stderr .= $chunk;
+				if ($r === $pipes[1]) $stdout .= $chunk; elseif (strlen($stderr) < 65536) $stderr .= $chunk;
+			}
+			// What comes back is collected in this process's memory, and a
+			// fatal for memory cannot be caught. Past the ceiling the reading
+			// stops here and the caller ends the child.
+			if ($max_out > 0 && strlen($stdout) > $max_out) {
+				$overflow = true;
+				$stdout = '';
+				break;
 			}
 		}
 
 		foreach ($pipes as $p) { if (is_resource($p)) fclose($p); }
-		return array('stdout' => $stdout, 'stderr' => $stderr);
+		return array('stdout' => $stdout, 'stderr' => $stderr, 'overflow' => $overflow);
 	}
 
 	/** Exit code + stdout -> the caller's result array. */

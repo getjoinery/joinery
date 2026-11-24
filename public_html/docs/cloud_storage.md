@@ -677,8 +677,11 @@ emitted: the "never `url()`" rule, enforced at the model.
 - **Local row** — `is_viewable($session)`, then `File::serve_from_path()` with
   a cacheable posture (`public` for unrestricted rows, `private` for gated
   ones). Public rows are normally served earlier by the pre-boot fast path
-  (`RouteHelper`), which cannot load the `File` model and applies its own
-  conservative header backstop.
+  (`RouteHelper`), which cannot load the `File` model and types the file by
+  its stored name alone, never by its content
+  (`RouteHelper::uploadedFileHeaders()`): pictures, sound, video and PDF are
+  shown in place, an SVG is a sandboxed download typed for `<img>`, and every
+  other name is a download of unnamed bytes, with sniffing off throughout.
 
 Every gated or signed stream goes through `File::serve_from_path()`, which owns
 the serve-back header set: the stored magic-byte-detected `Content-Type`,

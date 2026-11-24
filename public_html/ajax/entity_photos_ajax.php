@@ -5,6 +5,7 @@
  * Manages entity photo associations (upload, delete, reorder, update_caption).
  * Does not load or know about entity models — only manages eph_entity_photos rows.
  *
+ * @version 1.2.0 - an upload that is not a plain image is refused: it makes a public file
  * @version 1.1.0 - the response carries `warning` when the photo was saved but its sizes refused
  * @version 1.0.0
  * @see /specs/pictures_refactor_spec.md
@@ -78,6 +79,16 @@ switch ($action) {
 		if (empty($uploaded_file['tmp_name']) || !is_uploaded_file($uploaded_file['tmp_name'])) {
 			http_response_code(400);
 			echo json_encode(['error' => 'No valid uploaded file']);
+			exit;
+		}
+
+		// A photo is a picture. This upload makes a public file, so anything
+		// that is not one of the plain image types is refused before it is kept:
+		// judged by its bytes, never by the name or type the browser sent.
+		$photo_type = File::detect_mime_file($uploaded_file['tmp_name']);
+		if (!File::is_inline_safe_type((string)$photo_type)) {
+			http_response_code(400);
+			echo json_encode(['error' => 'Please upload a JPEG, PNG, GIF, WebP or AVIF image.']);
 			exit;
 		}
 

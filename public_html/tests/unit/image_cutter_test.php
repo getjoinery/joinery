@@ -24,6 +24,8 @@
  *   - where the fence is installed, the decode ran as another user: this
  *     process's own readers were never called
  *
+ * @version 1.1 - a many-coloured transparent GIF has no holes; a shrunk copy too large for this process is never
+ *   collected; a program's answer has a ceiling (reviewer2 B2, B3, B4)
  * @version 1.0
  */
 
@@ -175,6 +177,70 @@ try {
 } catch (ImageDecodeRefused $e) {
 	check(false, 'the corner is the transparent entry', $e->getMessage());
 }
+
+// A picture with many colours and small near-white highlights: no colour of
+// the picture may come back see-through, and the see-through part stays so.
+$m = imagecreatetruecolor(600, 400);
+for ($y = 0; $y < 400; $y++) {
+	for ($x = 0; $x < 600; $x++) {
+		imagesetpixel($m, $x, $y, (((int)(40 + 200 * $x / 600)) << 16) | (((int)(40 + 200 * $y / 400)) << 8) | (int)(220 - 180 * $x / 600));
+	}
+}
+for ($i = 0; $i < 60; $i++) {
+	imagefilledrectangle($m, 160 + ($i % 10) * 40, 110 + (int)($i / 10) * 45, 163 + ($i % 10) * 40, 113 + (int)($i / 10) * 45, 0xFAFAFA);
+}
+imagetruecolortopalette($m, false, 255);
+$mt = imagecolorallocate($m, 255, 0, 255);
+imagefilledrectangle($m, 0, 0, 149, 99, $mt);
+imagecolortransparent($m, $mt);
+imagegif($m, $dir . '/many.gif'); unset($m);
+try {
+	$cut = ImageCutter::cut($dir . '/many.gif', array('fit' => array('width' => 300, 'height' => 200, 'crop' => false, 'quality' => 85)), 300, 200);
+	$out = @imagecreatefromstring($cut['variants']['fit'] ?? '');
+	$ti = $out ? imagecolortransparent($out) : -1;
+	$holes = 0; $kept = 0; $clear = 0;
+	for ($y = 0; $out && $y < 200; $y++) {
+		for ($x = 0; $x < 300; $x++) {
+			$is_t = imagecolorat($out, $x, $y) === $ti;
+			if ($x < 73 && $y < 48) { $clear++; if ($is_t) $kept++; }
+			elseif (($x > 77 || $y > 52) && $is_t) { $holes++; }
+		}
+	}
+	check($out && $ti >= 0 && $kept === $clear, 'a many-coloured GIF keeps its see-through part whole', "$kept of $clear");
+	check($holes === 0, 'and no colour of the picture, near-white highlights included, comes back see-through', $holes . ' holes');
+} catch (ImageDecodeRefused $e) {
+	check(false, 'a many-coloured GIF keeps its see-through part whole', $e->getMessage());
+}
+
+// ---------------------------------------------------------------------------
+section('a shrunk copy that would not fit this process is never collected');
+
+// A long thin JPEG: 24000 x 1000 needs 7/8 to keep 1080 of height, and at 7/8
+// its BMP is 55 MB. Carried through this process beside a web worker's 128 MB
+// limit that was a fatal on every view; it is decoded in full in the fence.
+$strip = imagecreatetruecolor(24000, 1000);
+imagefilledrectangle($strip, 0, 0, 5999, 999, imagecolorallocate($strip, 255, 0, 0));
+imagefilledrectangle($strip, 18000, 0, 23999, 999, imagecolorallocate($strip, 0, 0, 255));
+imagejpeg($strip, $dir . '/strip.jpg', 80); unset($strip);
+if (ImageDecoder::djpeg_path() === null) {
+	harness_skip('the long thin JPEG', 'djpeg is not installed: there is no shrunk copy to carry');
+} else {
+	$before = memory_get_peak_usage(true);
+	try {
+		$cut = ImageCutter::cut($dir . '/strip.jpg', $sizes, 1920, 1080);
+		check(isset($cut['variants']['fit']), 'the long thin JPEG gets its sizes');
+	} catch (ImageDecodeRefused $e) {
+		check(strpos($e->getMessage(), 'too large') !== false, 'the long thin JPEG is refused in words, not a crash', $e->getMessage());
+	}
+	$grew = (memory_get_peak_usage(true) - $before) / 1048576;
+	check($grew < 30, 'and this process never held its shrunk copy', round($grew) . ' MB');
+}
+$tool = DocumentText::runTool(array('/bin/cat'), str_repeat('x', 300000), 10, 268435456, false, 100000);
+check(!empty($tool['overflow']) && $tool['stdout'] === '', 'a program that answers more than it may is stopped, and its answer is not kept', json_encode(array($tool['exit'], strlen($tool['stdout']))));
+$tool = DocumentText::runTool(array('/bin/cat'), str_repeat('x', 50000), 10, 268435456, false, 100000);
+check(empty($tool['overflow']) && strlen($tool['stdout']) === 50000, 'one within the ceiling answers whole');
+$cutter_src = (string)file_get_contents(PathHelper::getIncludePath('includes/ImageCutter.php'));
+check(strpos($cutter_src, '$m < 1 || $m > 7') !== false, 'the scale the fenced side names is held to a shrink before djpeg is given it');
 
 // ---------------------------------------------------------------------------
 section('refusals are words, with the figures, and nothing is decoded');

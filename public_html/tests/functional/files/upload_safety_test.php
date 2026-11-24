@@ -34,6 +34,8 @@
  *
  * Run:  php tests/functional/files/upload_safety_test.php
  *
+ * @version 1.5 - a public upload is typed by its stored name on the fast path; xml is not a kept extension;
+ *   the entity photo upload takes plain images only (reviewer2 B1)
  * @version 1.4 - the admin uploader's reply carries the stored file's own address
  * @version 1.3 - the allowed_upload_extensions setting cannot change a minted name; it is the member tools' list
  *   (File::member_upload_allowed()), and the admin uploader takes any type
@@ -291,6 +293,47 @@ foreach (array('svg' => 'image/svg+xml', 'html' => 'text/html', 'htm' => 'text/h
     check($mime === $expected_mime, "getMimeType maps .$ext to $expected_mime", 'got: ' . $mime);
     check(!File::is_inline_safe_type($mime), ".$ext is not inline-safe under the model's allowlist either");
 }
+
+// ---------------------------------------------------------------------------
+section('A public upload is typed by its stored name, never by its content');
+
+// The fast path serves a public upload before the File model loads. Typing it
+// by content called a file of JavaScript stored as x.bin (or x.md)
+// application/javascript, and served in place from the site's own origin that
+// is a script the site's script policy trusts. The type comes from the name.
+$hdr = function ($name) { return implode("\n", RouteHelper::uploadedFileHeaders('/x/' . $name)); };
+foreach (array('payload_ab12cd34.bin', 'notes_ab12cd34.md', 'data_ab12cd34.json', 'page_ab12cd34.txt', 'sheet_ab12cd34.csv', 'archive.zip', 'noextension') as $name) {
+    $h = $hdr($name);
+    check(strpos($h, 'Content-type: application/octet-stream') !== false && strpos($h, 'Content-Disposition: attachment') !== false,
+        $name . ' is a download of unnamed bytes', $h);
+}
+foreach (array('a.jpg' => 'image/jpeg', 'a.PNG' => 'image/png', 'a.webp' => 'image/webp', 'a.gif' => 'image/gif', 'a.avif' => 'image/avif',
+        'a.mp4' => 'video/mp4', 'a.mp3' => 'audio/mpeg', 'a.pdf' => 'application/pdf') as $name => $type) {
+    $h = $hdr($name);
+    check(strpos($h, 'Content-type: ' . $type) !== false && strpos($h, 'attachment') === false, $name . ' is shown in place as ' . $type, $h);
+}
+$h = $hdr('logo.svg');
+check(strpos($h, 'Content-type: image/svg+xml') !== false && strpos($h, 'Content-Disposition: attachment') !== false && strpos($h, 'Content-Security-Policy: sandbox') !== false,
+    'an SVG is typed for an <img> and handed over as a sandboxed download', $h);
+foreach (array('a.bin', 'a.jpg', 'a.svg') as $name) {
+    check(strpos($hdr($name), 'X-Content-Type-Options: nosniff') !== false, $name . ' is served with sniffing off');
+}
+foreach (RouteHelper::UPLOADED_INLINE_TYPES as $ext => $type) {
+    check(!preg_match('#javascript|ecmascript|html|xml|css|json|text/#i', $type), 'no in-place type is one a browser runs or styles with: ' . $ext, $type);
+}
+check(strpos($hdr("a\"b\r\nX-Evil: 1.zip"), "\r") === false && strpos($hdr("a\"b\r\nX-Evil: 1.zip"), 'filename="ab') !== false, 'a name cannot break out of its header');
+$route_src = (string)file_get_contents(PathHelper::getIncludePath('includes/RouteHelper.php'));
+check(preg_match('/self::serveStaticFile\(\$real_path, 43200, \[\], false, true\);/', $route_src) === 1, 'the /uploads/ fast path asks for the upload rule');
+check(preg_match('/if \(\$uploaded\) \{.*?uploadedFileHeaders\(\$file_path\).*?readfile\(\$file_path\);\s*return true;\s*\}\s*\/\/ Set content type\s*\$content_type = self::getMimeType/s', $route_src) === 1,
+    'and an upload is answered before the content is ever asked for its type');
+// A stored name never ends in xml: an XHTML document in one runs as a page
+// wherever a web server serves it by extension.
+$m = (new ReflectionMethod('File', '_mint_unique_name'))->invoke(null, 'doc.xml');
+check(substr($m, -4) === '.bin', 'an .xml name lands as .bin', $m);
+// A photo upload makes a public file, so it takes pictures only.
+$photos = (string)file_get_contents(PathHelper::getIncludePath('ajax/entity_photos_ajax.php'));
+check(preg_match('/File::is_inline_safe_type\(\(string\)\$photo_type\).*?File::createFromUpload\(/s', $photos) === 1,
+    'the entity photo upload refuses anything that is not a plain image, before the file is kept');
 
 // ---------------------------------------------------------------------------
 section('Uploaded bytes never land inside the document root');

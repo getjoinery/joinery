@@ -62,6 +62,8 @@ interface FileRemote {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.24.1 - xml leaves INERT_EXTENSIONS: an XHTML document in an .xml file runs as a page where a web
+ *                   server serves it by extension
  * @version 1.24.0 - a stored name's extension comes from INERT_EXTENSIONS alone; the allowed_upload_extensions setting
  *                   no longer decides it, so no setting value can put an executable name on disk.
  *                   member_upload_allowed(): that setting is what a member may attach with a member tool
@@ -695,10 +697,16 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * someone remembering to list it, and no setting can widen it: the
 	 * allowed_upload_extensions setting says what a member may attach
 	 * (member_upload_allowed()), never what a file is called on disk.
+	 *
+	 * xml is not here: a browser opens an XML file that declares the XHTML
+	 * namespace as a page, script and all, so a web server that hands the file
+	 * over by its extension would run it. svg is, because a page's <img> draws
+	 * one only when it is served as image/svg+xml; every path that serves one
+	 * sends it as a download (RouteHelper::uploadedFileHeaders(), is_inline_safe_type()).
 	 */
 	const INERT_EXTENSIONS = array('gif', 'jpeg', 'jpg', 'png', 'avif', 'webp', 'pdf', 'xls', 'doc', 'xlsx', 'docx',
 		'mp3', 'mp4', 'm4a',
-		'txt', 'csv', 'tsv', 'md', 'json', 'xml', 'ics', 'vcf', 'eml', 'msg', 'rtf', 'odt', 'ods',
+		'txt', 'csv', 'tsv', 'md', 'json', 'ics', 'vcf', 'eml', 'msg', 'rtf', 'odt', 'ods',
 		'odp', 'ppt', 'pptx', 'pages', 'numbers', 'key', 'epub', 'zip', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'tar',
 		'heic', 'heif', 'tif', 'tiff', 'bmp', 'ico', 'svg', 'mov', 'm4v', 'webm', 'mkv', 'avi', 'wav', 'ogg', 'flac',
 		'aac', 'opus', 'jpe', 'bin');

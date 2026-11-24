@@ -52,6 +52,7 @@
  * and the JPEG shrink program inside the jail too (shrink_jpeg()). open() and
  * the in-process shrink are for the jailed side and the tests.
  *
+ * @version 1.3 - shrink_jpeg() takes the most its BMP may be and refuses past it; the scale is held to 1..8
  * @version 1.2 - works from bytes (open_bytes(), read_header_bytes()): nothing is staged on disk, and
  *                djpeg reads stdin and answers on stdout. shrink 'ask' hands the shrink back to
  *                the caller (ImageShrinkWanted) for a process that cannot start a child;
@@ -545,7 +546,7 @@ class ImageDecoder {
 	 * @return string the BMP's bytes
 	 * @throws ImageDecodeRefused
 	 */
-	public static function shrink_jpeg($bytes, $scale_num, $ceiling_mb) {
+	public static function shrink_jpeg($bytes, $scale_num, $ceiling_mb, $max_bmp_bytes = 0) {
 		$djpeg = self::djpeg_path();
 		if ($djpeg === null) {
 			throw new ImageDecodeRefused('The image decoder could not be started.');
@@ -554,8 +555,16 @@ class ImageDecoder {
 		// A stand-in program a test names is run plainly: it is a script, and
 		// the fence grants the one binary it is given, not an interpreter.
 		$fenced = (self::$djpeg_override === null);
-		$r = DocumentText::runTool(array($djpeg, '-scale', (int)$scale_num . '/8', '-bmp'),
-			(string)$bytes, self::CHILD_TIMEOUT_SEC, $limit_bytes, $fenced);
+		$scale_num = max(1, min(8, (int)$scale_num));
+		$max_bmp_bytes = (int)$max_bmp_bytes > 0 ? (int)$max_bmp_bytes : DocumentText::MAX_ANSWER_BYTES;
+		$r = DocumentText::runTool(array($djpeg, '-scale', $scale_num . '/8', '-bmp'),
+			(string)$bytes, self::CHILD_TIMEOUT_SEC, $limit_bytes, $fenced, $max_bmp_bytes);
+		if (!empty($r['overflow'])) {
+			// The shrunk picture is held in the caller's memory. One larger
+			// than was allowed for is refused in words, not collected.
+			throw new ImageDecodeRefused('This photo is too large to make sizes from (its shrunk copy is over '
+				. (int)floor($max_bmp_bytes / 1048576) . ' MB). It was saved as uploaded.');
+		}
 		$exit = (int)$r['exit'];
 		$why = trim((string)$r['stderr']);
 		if ($exit === 124) {

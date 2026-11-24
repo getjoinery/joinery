@@ -112,7 +112,9 @@ Inside the subprocess `ImageDecoder` reads the header, refuses a decode that wou
 
 **A large JPEG takes three short runs.** The first reads the header and answers how far the JPEG can be shrunk while it is decoded. `ImageDecoder::shrink_jpeg()` then runs `djpeg -scale M/8` through `DocumentText::runTool()`, which fences a program the same way the extractor is fenced: the bytes on stdin, a BMP on stdout, the program's own binary the only thing of the site it can read. The second run cuts the sizes from that small picture. Without `djpeg` on the machine the JPEG is decoded in full, at more memory.
 
-**A GIF's colours are reduced by `ImageCutter` itself.** GD's own reduction goes through a library that starts threads, and the fence has no call that makes one.
+**A GIF's colours are reduced by `ImageCutter` itself.** GD's own reduction goes through a library that starts threads, and the fence has no call that makes one. The picture is mapped to its colours first and the one see-through entry is given afterwards, only to the pixels the source says are see-through, so no colour of the picture can fall through.
+
+**What comes back has a ceiling.** A subprocess's answer is collected in the caller's memory, and a web worker that runs out of memory dies in a way no caller can catch. `DocumentText::MAX_ANSWER_BYTES` (32 MB) stops a parser that answers more, and `runTool()` takes its own ceiling. `ImageCutter` asks for a shrunk JPEG only when the source and its shrunk copy together fit 64 MB (`WORKER_BUDGET_BYTES`); otherwise the JPEG is decoded in full inside the fence, where the ceiling refuses it in words if that does not fit either. The scale the fenced side names is held to a shrink before `djpeg` is given it.
 
 A file over 48 MB (`ImageCutter::MAX_SOURCE_BYTES`) is kept as uploaded with no sizes, as is one the ceiling refuses; `fbb_variant_refused` records why. A run killed for memory records nothing, so the next view tries again.
 
