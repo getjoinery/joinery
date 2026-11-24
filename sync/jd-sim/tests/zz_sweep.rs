@@ -1123,13 +1123,17 @@ impl Custody {
 
     /// Bodies the harness wrote by its own hand mid-pass (the chaos save
     /// hooks) are not in the ledger; attributed here, after the fact, to the
-    /// folder they were written into and to the file the shared path map
-    /// names at the path they were written to, so a body the chaos swapper
-    /// then exchanged with a user's file carries that file's candidates
-    /// across. The folder is the one that counts: the path map names one
-    /// file for every device, and the file it names may stand in another
-    /// device's folder of that name (longhostile-3dev 61066). Adds candidates
-    /// only.
+    /// folder they were written into and to the file written to, so a body
+    /// the chaos swapper then exchanged with a user's file carries that
+    /// file's candidates across. The file is the one this disk's identity
+    /// names when custody knows it (an engine rename may have put another
+    /// record's file at a path the shared map still gives to the file once
+    /// there, ring 75664); otherwise the one the shared path map names at
+    /// the path. The identity replaces the path map's answer, it is not
+    /// added to it: the save went to one file. The folder is the one that
+    /// counts: the path map names one file for every device, and the file it
+    /// names may stand in another device's folder of that name
+    /// (longhostile-3dev 61066).
     fn attribute_harness_writes(&mut self, world: &World) {
         let known: std::collections::HashSet<String> =
             self.intents.iter().map(|(h, _)| h.clone()).collect();
@@ -1153,7 +1157,19 @@ impl Custody {
                 // known and lends nothing to a chaos swap partner (hostile2
                 // 74424).
                 let here = at_write.or_else(|| self.handle_of(di, d, Self::parent_of(&w.path))).unwrap_or((di, u64::MAX));
-                match self.file_of_path.get(&w.path).copied() {
+                // The file written to, by the identity a scan follows it by
+                // where this disk's identity names one file; else the file
+                // the shared path map names at that path. The path map names
+                // one file for every device, and on this disk another file
+                // may stand at that name: a record's own file that the engine
+                // laid there, which the chaos swapper then carried into
+                // another folder, its later versions with it (plat3 75664).
+                let by_identity = w
+                    .identity
+                    .filter(|_| Self::trackable(d))
+                    .map(|(id, birth)| Self::tracked(d, id, birth))
+                    .and_then(|(id, birth)| self.file_of_id.get(&(di, id, birth)).copied());
+                match by_identity.or_else(|| self.file_of_path.get(&w.path).copied()) {
                     Some(k) => {
                         self.intents.push((w.sha256.clone(), k));
                         let own = self.placed.len();
@@ -3368,6 +3384,71 @@ fn a_harness_write_is_credited_to_the_folder_it_was_written_into() {
     let body = jd_sim::sha256_hex(b"a hand writes into the new A");
     let f = world.server.files().into_iter().find(|f| !f.trashed && f.sha256 == body).expect("the hand's body is on the server");
     assert_eq!(f.folder, Some(second), "the engine keeps it in the folder it was written into");
+    assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+}
+
+/// A body the harness wrote by its own hand is credited to the file it was
+/// written to, by the identity this disk follows it by, not to the file the
+/// shared path map names at its path: on this disk another file may stand at
+/// that name. Here `f.txt` is renamed `g.txt` on the server, so on pc f's own
+/// file stands at `A/g.txt`, a name the path map gives `g`, which mac moved to
+/// `B`. A hand on pc saves f and trades it with `B/g.txt`, and mac's edit of f
+/// follows f into `B`. Credited to g, the hand's save lent f's edit nothing,
+/// and the check read it as misplaced (plat3 75664).
+#[test]
+fn a_harness_write_is_credited_to_the_file_it_was_written_to() {
+    let seed = 9_948;
+    let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("A");
+    mac.fs.user_mkdir("B");
+    assert!(world.settle().is_some());
+    let mut custody = Custody::default();
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.adopt_standing(di, d);
+        custody.learn(di, d, false);
+    }
+    let pass = |custody: &mut Custody, di: usize| {
+        world.pass(&world.devices[di]);
+        custody.note_swaps(&world);
+        custody.learn(di, &world.devices[di], false);
+    };
+    mac.fs.user_write("A/f.txt", b"f, which the user put in A");
+    custody.wrote(0, mac, "A/f.txt", b"f, which the user put in A");
+    mac.fs.user_write("A/g.txt", b"g, which the user put in A");
+    custody.wrote(0, mac, "A/g.txt", b"g, which the user put in A");
+    pass(&mut custody, 0);
+    pass(&mut custody, 1);
+    mac.fs.user_rename("A/g.txt", "B/g.txt");
+    custody.moved(0, mac, "A/g.txt", "B/g.txt");
+    pass(&mut custody, 0);
+    pass(&mut custody, 1);
+    assert!(pc.fs.exists("B/g.txt"), "pc took g's move");
+    let f = world.server.files().into_iter().find(|x| x.name == "f.txt").expect("f.txt is on the server");
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": f.id, "name": "g.txt" }))
+        .unwrap();
+    pass(&mut custody, 1);
+    assert!(pc.fs.exists("A/g.txt") && !pc.fs.exists("A/f.txt"), "pc took the rename: f stands at A/g.txt");
+    const EDIT: &[u8] = b"mac's edit of f";
+    mac.fs.user_write("A/f.txt", EDIT);
+    custody.wrote(0, mac, "A/f.txt", EDIT);
+    pc.fs.user_write("A/g.txt", b"a hand on pc saves f");
+    world.swap_names_by_chaos("pc", "A/g.txt", "B/g.txt");
+    pass(&mut custody, 0);
+    pass(&mut custody, 1);
+    assert!(world.settle().is_some());
+    custody.attribute_harness_writes(&world);
+    custody.note_swaps(&world);
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.learn(di, d, true);
+    }
+    let b = world.server.folder_id_at("B").expect("B went up");
+    let edit = world.server.files().into_iter().find(|x| !x.trashed && x.sha256 == jd_sim::sha256_hex(EDIT)).expect("mac's edit is on the server");
+    assert_eq!(edit.id, f.id, "the edit is f's");
+    assert_eq!(edit.folder, Some(b), "f, and its edit with it, went where the trade carried it");
     assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
 }
 
@@ -8577,6 +8658,25 @@ fn frozen_a_download_of_a_replacements_own_upload_adopts_its_file_seed() {
     // Two files: the moved one, once, and the PC's own conflict copy.
     let in_vault: Vec<_> = server.iter().filter(|p| p.starts_with("ring-2/")).collect();
     assert_eq!(in_vault.len(), 2, "the moved file stands once on the server, not uploaded a second time: {in_vault:?}");
+}
+
+/// plat3 75664: on the disk device a hand saved a record's own file where the
+/// shared path map names another file, then traded it into another folder;
+/// the server's next version of the record followed it there. Credited by
+/// the path map, the save lent that version nothing and the check read it as
+/// misplaced. Every oracle, as the arm runs it.
+#[test]
+fn frozen_a_harness_save_is_credited_to_the_file_it_was_written_to_seed() {
+    workload_core_with(
+        75_664,
+        40,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+        true,
+        Vault::FolderRings,
+        false,
+        Names::Ordinary,
+        Swaps::On,
+    );
 }
 
 /// winname 123909: the disk device sends the create for a new folder `Sub 3`,

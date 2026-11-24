@@ -375,6 +375,9 @@ pub struct UserWrite {
     pub order: u64,
     /// The file written to, by its soul (`MemFsState::souls`).
     pub soul: u64,
+    /// The file written to, by the identity this disk gives it (its id and
+    /// birth) as the write leaves it: what a scan knows it by.
+    pub identity: Option<(u64, u64)>,
 }
 
 /// One order for every act of a user's hand on every disk, so a write on one
@@ -1065,6 +1068,7 @@ impl MemFs {
             st.user_superseded.push((before, order));
         }
         let soul = st.souls.get(&key).copied().unwrap_or(0);
+        let identity = st.file_ids.get(&key).copied().zip(st.file_births.get(&key).copied());
         st.user_writes.push(UserWrite {
             path: key.clone(),
             sha256: crate::sha256_hex(bytes),
@@ -1073,6 +1077,7 @@ impl MemFs {
             parent_birth,
             order,
             soul,
+            identity,
         });
         st.nodes.insert(
             key,
