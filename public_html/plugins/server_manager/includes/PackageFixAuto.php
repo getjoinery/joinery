@@ -34,6 +34,15 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.8 - one plain email per run (owner, 2026-11-24): what was found and what came of it, sent after the
+ *                build attempt, never "found" and then "a person is needed" a minute apart; reasons in plain words,
+ *                the raw detail on the Fleet Security page; "Where everything stands" says what is stuck rather than
+ *                calling it handled. A site-down incident on a test machine whose machine never answered the plane
+ *                while its own report says its site answers is the plane's path, not the fix: that machine is
+ *                waited for, not failed (live: dev's IPv4 banned on test_w21 by a fail2ban live check pulled
+ *                PostgreSQL's build, 2026-11-23). A person's Try again (server_manager_package_fix_retry) builds a
+ *                withdrawn fix again at the next revision. RETRY_GENERATION 2: build.sh 1.6 and the advisory
+ *                commits reach every stopped attempt
  * @version 1.7 - the set every machine has is issued again when it, the copy mirrors pass on, predates this
  *                tree's release, read when the check runs: a build can outlast an upgrade (live: joinerydemo on
  *                0.8.647 refused getjoinery's 0.8.645 set while dev had re-issued only the test-first one)
@@ -69,6 +78,8 @@ class PackageFixAuto {
 	/** The runner's record: root's to write, everyone's to read. */
 	const STATE_FILE = '/var/lib/joinery-package-fixes-build/auto-state.json';
 	const WITHDRAW_SETTING = 'server_manager_package_fix_withdraw';
+	/** A person's Try again of a withdrawn build: source => the withdrawn version. */
+	const RETRY_SETTING = 'server_manager_package_fix_retry';
 	const SOAK_SETTING = 'server_manager_package_fix_soak_hours';
 	/** Where automatic recipes live: outside the repository, nothing is committed for them. */
 	const AUTO_DIR = '/var/lib/joinery-package-fixes-build/auto';
@@ -82,7 +93,7 @@ class PackageFixAuto {
 	const SIGNAL_ROLLED_OUT = 'package_fix.rolled_out';
 	const LINK = '/admin/server_manager/fleet_security';
 	/** Raise when a change to the runner itself should retry every stopped attempt. */
-	const RETRY_GENERATION = 1;
+	const RETRY_GENERATION = 2;
 
 	public static function state(): array {
 		return PackageFixChannel::readStateFile(self::STATE_FILE);
@@ -111,11 +122,13 @@ class PackageFixAuto {
 		$state = $opts['state'] ?? self::state();
 		$said = array();
 		$requests = $opts['withdraw_requests'] ?? self::withdrawRequests();
+		$retries = $opts['retry_requests'] ?? self::retryRequests();
+		$handled_retries = array();
 		// step() folds into $state as it goes: a run that stops keeps every
 		// email it sent and every attempt and withdrawal it made.
 		$handled = array();
 		try {
-			self::step($state, $site, $now, $opts, $said, $requests, $handled);
+			self::step($state, $site, $now, $opts, $said, $requests, $handled, $retries, $handled_retries);
 			$status = 'success';
 		} catch (\Throwable $e) {
 			$said[] = 'stopped: ' . $e->getMessage();
@@ -129,6 +142,9 @@ class PackageFixAuto {
 				// Only now that the state holding them is saved.
 				if ($handled && !isset($opts['withdraw_requests'])) {
 					self::clearWithdrawRequests($handled);
+				}
+				if ($handled_retries && !isset($opts['retry_requests'])) {
+					self::clearRequests(self::RETRY_SETTING, $handled_retries);
 				}
 			} catch (\Throwable $e) {
 				$state['last_message'] .= '; the record could not be saved: ' . $e->getMessage();
@@ -147,7 +163,8 @@ class PackageFixAuto {
 	}
 
 	/** The run's steps, folded into $state as they go. */
-	private static function step(array &$state, string $site, int $now, array $opts, array &$said, array $requests, array &$handled): void {
+	private static function step(array &$state, string $site, int $now, array $opts, array &$said, array $requests, array &$handled,
+			array $retries = array(), array &$handled_retries = array()): void {
 		foreach (array('attempts', 'automatic', 'withdrawn', 'notified') as $k) {
 			$state[$k] = is_array($state[$k] ?? null) ? $state[$k] : array();
 		}
@@ -186,6 +203,23 @@ class PackageFixAuto {
 			$state = self::withdraw($state, $source, $version, 'a person withdrew it from the Fleet Security page', $now);
 			$said[] = 'withdrew ' . $source . ' ' . $version . ' (asked from the Fleet Security page)';
 		}
+		// 1b. A person's Try again of a withdrawn build: its fixes are tried
+		// afresh, at the next revision (the withdrawn one stays withdrawn).
+		foreach ($retries as $source => $version) {
+			$handled_retries[$source] = $version;
+			if (!is_string($source) || !is_string($version) || !in_array($version, (array)($state['withdrawn'][$source] ?? array()), true)) {
+				$said[] = 'ignored a Try again of ' . (is_string($source) ? $source : '?') . ': it is not a withdrawn build';
+				continue;
+			}
+			foreach (array_keys($state['attempts']) as $k) {
+				if (strpos($k, $source . ' ') === 0) { unset($state['attempts'][$k]); }
+			}
+			foreach (array_keys($state['notified']) as $k) {
+				if (strpos($k, 'needs_person ' . $source . ' ') === 0) { unset($state['notified'][$k]); }
+			}
+			$state['retried'][$source] = array('version' => $version, 'at' => $now);
+			$said[] = 'trying ' . $source . ' again (asked from the Fleet Security page)';
+		}
 
 		// 2. What the watch says to build: told once, then tried once per CVE.
 		$watch = $opts['watch_state'] ?? UpstreamFixWatch::state();
@@ -195,14 +229,6 @@ class PackageFixAuto {
 			if (!isset($state['notified']['found ' . $u['source'] . ' ' . $u['cve']])) {
 				$new[] = $u;
 			}
-		}
-		if ($new) {
-			$soak = (int)($opts['soak_hours'] ?? self::soakHours());
-			call_user_func($dispatch, self::SIGNAL_NEWS, self::foundMessage($new, $c['build'], $soak));
-			foreach ($new as $u) {
-				$state['notified']['found ' . $u['source'] . ' ' . $u['cve']] = $now;
-			}
-			$said[] = 'told of ' . count($new) . ' new fix(es)';
 		}
 		// Tried once per CVE; one that needed a person is tried again when what
 		// could change its outcome changed: the source's key file, the upstream
@@ -217,8 +243,34 @@ class PackageFixAuto {
 				$by_source[$u['source']][$u['cve']] = $u;
 			}
 		}
+		$news = array();
 		foreach ($by_source as $source => $cves) {
-			$state = self::attempt($state, $site, $source, $cves, $watch, $now, $opts + array('inputs' => $inputs[$source]), $said, $dispatch);
+			$state = self::attempt($state, $site, $source, $cves, $watch, $now, $opts + array('inputs' => $inputs[$source]), $said, $news);
+		}
+		// One email for the run: what is new and what came of each package's
+		// attempt, after the attempt, so it never says "handled" and then
+		// "a person is needed" a minute later.
+		foreach ($news as $source => $n) {
+			if (($n['outcome'] ?? '') === 'needs_person') {
+				$key = 'needs_person ' . $source . ' ' . $n['step'] . ' ' . implode(',', self::sorted($n['cves']));
+				$has_new = (bool)array_filter($new, function ($u) use ($source) { return $u['source'] === $source; });
+				if (isset($state['notified'][$key]) && !$has_new) {
+					unset($news[$source]);
+					continue;
+				}
+				$state['notified'][$key] = $now;
+			}
+			if (!empty($n['left'])) {
+				$state['notified']['needs_person ' . $source . ' finding the fix ' . implode(',', self::sorted(array_keys($n['left'])))] = $now;
+			}
+		}
+		if ($new || $news) {
+			$soak = (int)($opts['soak_hours'] ?? self::soakHours());
+			call_user_func($dispatch, self::SIGNAL_NEWS, self::newsMessage($new, $news, $state, $c['build'], $soak));
+			foreach ($new as $u) {
+				$state['notified']['found ' . $u['source'] . ' ' . $u['cve']] = $now;
+			}
+			$said[] = 'told of ' . count($new) . ' new fix(es) and ' . count($news) . ' package outcome(s)';
 		}
 
 		$channel = $opts['channel_state'] ?? PackageFixChannel::state();
@@ -307,7 +359,7 @@ class PackageFixAuto {
 	}
 
 	/** Try one package: find and write the recipe, then build it. */
-	private static function attempt(array $state, string $site, string $source, array $cves, array $watch, int $now, array $opts, array &$said, callable $dispatch): array {
+	private static function attempt(array $state, string $site, string $source, array $cves, array $watch, int $now, array $opts, array &$said, array &$news): array {
 		$inputs = (string)($opts['inputs'] ?? '');
 		$mark = function (array $state, string $status, string $step, string $reason) use ($source, $cves, $now, $inputs) {
 			foreach (array_keys($cves) as $cve) {
@@ -327,7 +379,8 @@ class PackageFixAuto {
 		try {
 			$want = array();
 			foreach ($cves as $cve => $u) {
-				$want[$cve] = array('fixed_in' => (string)($u['fixed_in'] ?? ''), 'ids' => self::idsFor($watch, $cve));
+				$want[$cve] = array('fixed_in' => (string)($u['fixed_in'] ?? ''), 'ids' => self::idsFor($watch, $cve),
+					'commits' => UpstreamFixWatch::commitsFor($watch, $cve));
 			}
 			$write = $opts['write'] ?? function ($source, $want) use ($state) {
 				return PackageFixRecipeWriter::write($source, $want, array(
@@ -350,6 +403,7 @@ class PackageFixAuto {
 			$dir = (string)($w['dir'] ?? '');
 			if (($w['status'] ?? '') === 'unchanged' && $dir !== '' && !is_file($dir . '/RECIPE')) {
 				$state = $mark($state, 'carried', 'write', 'a person\'s recipe already carries it');
+				$news[$source] = array('outcome' => 'carried', 'cves' => array_keys($cves));
 				$said[] = $source . ': a person\'s recipe already carries it';
 				return $state;
 			}
@@ -388,15 +442,12 @@ class PackageFixAuto {
 					$left[$cve] = $why;
 				}
 			}
-			if ($left) {
-				$state = self::tellNeedsPerson($state, $source, array_keys($left), 'finding the fix',
-					count($left) . ' of its fixes could not go on Ubuntu\'s build with the rest (the rest were built): '
-					. implode('; ', array_map(function ($c, $y) { return $c . ': ' . $y; }, array_keys($left), $left)), $now, $dispatch);
-			}
+			$news[$source] = array('outcome' => 'built', 'cves' => array_values(array_diff(array_keys($cves), array_keys($left))),
+				'version' => (string)$line['version'], 'left' => $left);
 			$said[] = 'built ' . $source . ' ' . $line['version'];
 		} catch (PackageFixAutoStop $e) {
 			$state = $mark($state, 'needs_person', $e->step, $e->getMessage());
-			$state = self::tellNeedsPerson($state, $source, array_keys($cves), $e->step, $e->getMessage(), $now, $dispatch);
+			$news[$source] = array('outcome' => 'needs_person', 'cves' => array_keys($cves), 'step' => $e->step, 'why' => $e->getMessage());
 			$said[] = $source . ': stopped at ' . $e->step;
 		}
 		return $state;
@@ -414,7 +465,11 @@ class PackageFixAuto {
 		$soak['held'] = is_array($soak['held'] ?? null) ? $soak['held'] : array();
 		$soak['refused'] = is_array($soak['refused'] ?? null) ? $soak['refused'] : array();
 		$nodes = $opts['nodes'] ?? UpstreamFixWatch::node_summary();
-		$failing = isset($opts['failures']) ? call_user_func($opts['failures'], (int)$soak['started']) : self::failingNodes((int)$soak['started']);
+		$fail_info = isset($opts['failures']) ? call_user_func($opts['failures'], (int)$soak['started']) : self::soakFailures((int)$soak['started']);
+		// A plain list is every node failing (tests); otherwise failing, and the
+		// nodes the plane could not reach whose own report says the site answers.
+		$failing = array_key_exists('failing', $fail_info) ? (array)$fail_info['failing'] : $fail_info;
+		$unreachable = (array)($fail_info['unreachable'] ?? array());
 		$holding = array();
 		$waiting = array();
 		$bad = array();
@@ -439,6 +494,8 @@ class PackageFixAuto {
 					$soak['held'][$key] = $soak['held'][$key] ?? $now;
 					if (in_array((int)$n['id'], $failing, true)) {
 						$bad[$f['source']][] = $n['name'];
+					} elseif (isset($unreachable[(int)$n['id']])) {
+						$waiting[$f['source']][] = $n['name'] . ' (' . $unreachable[(int)$n['id']] . ')';
 					} elseif (!$fresh) {
 						$waiting[$f['source']][] = $n['name'] . ' (no report in two hours)';
 					} else {
@@ -467,7 +524,10 @@ class PackageFixAuto {
 				$why = 'on the test machines, ' . implode(', ', array_unique($names)) . ' failed after taking it';
 				$state = self::withdraw($state, $source, $version, $why, $now);
 				$state = self::tellNeedsPerson($state, $source, self::cvesOf($set, $source), 'the test machines', $why
-					. '. It was withdrawn from every machine and the test machines went back to the build before it', $now, $dispatch);
+					. ' (a failed service, the site not answering, or its agent going quiet). It was pulled back from every server, and the test servers went back to the build before it',
+					$now, $dispatch, false, 'was pulled back',
+					'look at ' . implode(', ', array_unique($names)) . ' on its node page. If the problem had nothing to do with this build, press Try again for '
+					. IncidentSourceFixAheadOfUbuntu::package_name($source) . ' on the Fleet Security page: it is built again and goes back to the test servers.');
 				$said[] = 'withdrew ' . $source . ' ' . $version . ': ' . $why;
 			}
 			// The withdrawal goes out on the next run, to every machine at once (step 3a).
@@ -497,7 +557,8 @@ class PackageFixAuto {
 					$state = self::tellNeedsPerson($state, $source, self::cvesOf($set, $source), 'the test machines',
 						$version . ' is not held on every test machine after ' . (2 * $hours) . ' hours'
 						. (!empty($waiting[$source]) ? ' (waiting: ' . implode(', ', array_unique($waiting[$source])) . ')' : ' (none of them runs it)'),
-						$now, $dispatch, true);
+						$now, $dispatch, true, 'is stuck on the test servers',
+						'look at the waiting servers on their node pages: a build is promoted only once every test server that takes it reports it installed and healthy.');
 				}
 			}
 			$said[] = 'soaking serial ' . $soak['serial'] . ($since > 0 ? ' (' . round(($now - $since) / 3600, 1) . ' of ' . $hours . ' hours since the last install)' : ' (not installed yet)');
@@ -533,9 +594,12 @@ class PackageFixAuto {
 		return $state;
 	}
 
-	/** Tell a person, once per package, step and set of CVEs. */
-	private static function tellNeedsPerson(array $state, string $source, array $cves, string $step, string $why, int $now, callable $dispatch, bool $force = false): array {
-		sort($cves);
+	/**
+	 * Tell a person about a build already out on the test machines (withdrawn,
+	 * or stuck there), once per package, step and set of CVEs.
+	 */
+	private static function tellNeedsPerson(array $state, string $source, array $cves, string $step, string $why, int $now, callable $dispatch, bool $force = false, string $headline = 'could not be finished automatically', string $todo = ''): array {
+		$cves = self::sorted($cves);
 		$key = 'needs_person ' . $source . ' ' . $step . ' ' . implode(',', $cves);
 		if (isset($state['notified'][$key]) && !$force) {
 			return $state;
@@ -544,55 +608,197 @@ class PackageFixAuto {
 		$name = IncidentSourceFixAheadOfUbuntu::package_name($source);
 		call_user_func($dispatch, self::SIGNAL_NEWS, array(
 			'kind'  => 'needs_person',
-			'title' => 'A person is needed: the ' . $name . ' security fix could not be finished automatically',
-			'body'  => 'Fix: ' . implode(', ', $cves) . ".\n"
-				. 'Stopped at: ' . $step . ".\n"
-				. 'Why: ' . $why . ".\n\n"
-				. 'Until then the servers that do not have it still run ' . $name . ' without this fix, and Ubuntu\'s own update clears it '
-				. 'whenever Ubuntu ships one. To build it by hand, ask a Claude session: "build the package fix for ' . $source . ', '
-				. implode(' ', $cves) . '".',
+			'title' => 'A person is needed: the ' . $name . ' security fix ' . $headline,
+			'body'  => 'What: our own build of ' . $name . ' with ' . self::fixCount(count($cves)) . ' (' . implode(', ', $cves) . ").\n"
+				. 'What happened: ' . $why . ".\n\n"
+				. ($todo !== '' ? 'What to do: ' . $todo . "\n\n" : '')
+				. 'Until then every server runs the build it had before, and Ubuntu\'s own update replaces it whenever Ubuntu ships one.',
 			'link'  => self::LINK,
 		));
 		return $state;
 	}
 
-	/** The "found" email: what is new, and everything still waiting, by package. */
-	public static function foundMessage(array $new, array $all, int $soak_hours): array {
-		$names = array();
+	/**
+	 * The run's one email: each package with something new, what came of its
+	 * attempt, then where every package stands. Pure.
+	 *
+	 * @param array $new   the watch's newly found CVEs (source, cve, rating, fixed_in, upstream_fixed)
+	 * @param array $news  source => outcome of this run's attempt: outcome built|needs_person|carried,
+	 *                     cves, and version + left (built) or step + why (needs_person)
+	 * @param array $state the runner's record (attempts, soak, wide_lines, automatic)
+	 * @param array $all   every CVE the watch says to build
+	 */
+	public static function newsMessage(array $new, array $news, array $state, array $all, int $soak_hours): array {
+		$by = array();
+		foreach ($new as $u) { $by[$u['source']][] = $u; }
+		$sources = array_values(array_unique(array_merge(array_keys($by), array_keys($news))));
+		$blocks = array();
+		$stuck = array();
+		$built = array();
 		$top = '';
-		foreach ($new as $u) {
-			$names[$u['source']] = IncidentSourceFixAheadOfUbuntu::package_name($u['source']);
-			if ($u['rating'] === 'critical') { $top = 'critical'; }
+		foreach ($sources as $source) {
+			$name = IncidentSourceFixAheadOfUbuntu::package_name($source);
+			$lines = array();
+			if (!empty($by[$source])) {
+				$ratings = array();
+				$fixed_in = '';
+				foreach ($by[$source] as $u) {
+					$ratings[(string)$u['rating']] = true;
+					if ($u['rating'] === 'critical') { $top = 'critical'; }
+					if (($u['upstream_fixed'] ?? null) === true && (string)($u['fixed_in'] ?? '') !== '') { $fixed_in = (string)$u['fixed_in']; }
+				}
+				$rating = isset($ratings['critical']) ? 'critical' : 'high';
+				$ids = array_map(function ($u) { return $u['cve']; }, $by[$source]);
+				$lines[] = $name . ': ' . count($ids) . ' new ' . $rating . '-rated security fix' . (count($ids) === 1 ? '' : 'es')
+					. ' (' . implode(', ', $ids) . ')' . ($fixed_in !== '' ? ', fixed upstream in ' . $fixed_in : '') . ', not yet shipped by Ubuntu.';
+			} else {
+				$lines[] = $name . ': tried again (' . implode(', ', self::sorted($news[$source]['cves'] ?? array())) . ').';
+			}
+			$n = $news[$source] ?? null;
+			$outcome = $n['outcome'] ?? self::lastOutcome($state, $source);
+			$hole = count($n['cves'] ?? ($by[$source] ?? array())) === 1 ? 'this hole' : 'these holes';
+			if ($outcome === 'built') {
+				$built[] = $name;
+				$lines[] = 'Done automatically: we built our own ' . $name . ' with the fix' . (isset($n['version']) ? ' (' . $n['version'] . ')' : '')
+					. '. It goes to the test servers now, and to every server once they have stayed healthy for ' . $soak_hours . ' hours. Nothing to do.';
+				if (!empty($n['left'])) {
+					$stuck[] = $name;
+					$left = self::sorted(array_keys($n['left']));
+					$lines[] = 'Not in this build: ' . implode(', ', $left) . '. ' . self::plainReason('finding the fix', implode('; ', $n['left'])) . '.'
+						. ' A person is needed for ' . (count($left) === 1 ? 'that one' : 'those') . ': ask a Claude session "build the package fix for '
+						. $source . ', ' . implode(' ', $left) . '".';
+				}
+			} elseif ($outcome === 'carried') {
+				$lines[] = 'Already covered: a fix built by hand carries it. Nothing to do.';
+			} elseif ($outcome === 'needs_person') {
+				$stuck[] = $name;
+				$why = $n['why'] ?? '';
+				$step = $n['step'] ?? '';
+				if ($n === null) {
+					foreach ((array)($state['attempts'] ?? array()) as $k => $a) {
+						if (strpos($k, $source . ' ') === 0 && ($a['status'] ?? '') === 'needs_person') { $why = (string)$a['reason']; $step = (string)$a['step']; break; }
+					}
+				}
+				$cves = self::sorted($n['cves'] ?? array_map(function ($u) { return $u['cve']; }, $by[$source] ?? array()));
+				$lines[] = 'Not done: ' . self::plainReason($step, $why) . '.';
+				$lines[] = 'Until someone builds it, every server keeps Ubuntu\'s ' . $name . ', which still has ' . $hole
+					. '. Ubuntu\'s own update fixes ' . ($hole === 'this hole' ? 'it' : 'them') . ' whenever Ubuntu ships one.';
+				$lines[] = 'What to do: ask a Claude session "build the package fix for ' . $source . ', ' . implode(' ', $cves) . '".';
+			} else {
+				$lines[] = 'Being built now; the next email says how it went.';
+			}
+			$blocks[] = implode("\n", $lines);
 		}
-		$top = $top ?: 'high';
-		$lines = array();
-		foreach (IncidentSourceFixAheadOfUbuntu::package_lines($new) as $l) {
-			$lines[] = '- ' . $l;
+
+		// Where everything stands, from the record: never "handled" for what is stuck.
+		$stand = array();
+		$name_of = function ($s) { return IncidentSourceFixAheadOfUbuntu::package_name($s); };
+		$everywhere = array();
+		foreach ((array)($state['wide_lines'] ?? array()) as $s => $l) {
+			$everywhere[] = $name_of($s) . ' (' . self::fixCount(count(self::cvesOf($state['wide_lines'], $s))) . ')';
 		}
-		$fixed_in = array();
-		foreach ($new as $u) {
-			if ($u['upstream_fixed'] === true && $u['fixed_in'] !== '') {
-				$fixed_in[$names[$u['source']]] = $u['fixed_in'];
+		$testing = array();
+		foreach (array_keys((array)($state['soak']['sources'] ?? array())) as $s) { $testing[$s] = $name_of($s); }
+		foreach ($news as $s => $n) { if (($n['outcome'] ?? '') === 'built') { $testing[$s] = $name_of($s); } }
+		$waiting = array();
+		$open = array();
+		foreach ($all as $u) { $open[$u['source'] . ' ' . $u['cve']] = $u['source']; }
+		foreach ((array)($state['attempts'] ?? array()) as $k => $a) {
+			if (isset($open[$k]) && ($a['status'] ?? '') === 'needs_person') { $waiting[$open[$k]] = ($waiting[$open[$k]] ?? 0) + 1; }
+		}
+		foreach ($news as $s => $n) {
+			foreach (($n['outcome'] ?? '') === 'needs_person' ? (array)$n['cves'] : array_keys((array)($n['left'] ?? array())) as $c) {
+				if (!isset($state['attempts'][$s . ' ' . $c]) || ($state['attempts'][$s . ' ' . $c]['status'] ?? '') !== 'needs_person') {
+					$waiting[$s] = ($waiting[$s] ?? 0) + 1;
+				}
 			}
 		}
-		$others = array_values(array_filter(IncidentSourceFixAheadOfUbuntu::package_lines(array_values(array_filter($all, function ($u) use ($new) {
-			foreach ($new as $n) { if ($n['source'] === $u['source'] && $n['cve'] === $u['cve']) { return false; } }
-			return true;
-		})))));
-		$body = (count($new) === 1 ? 'A project we run published a security fix that Ubuntu has not shipped yet:' : 'Projects we run published security fixes that Ubuntu has not shipped yet:')
-			. "\n" . implode("\n", $lines)
-			. ($fixed_in ? "\n\nFixed upstream in: " . implode('; ', array_map(function ($n, $v) { return $n . ' ' . $v; }, array_keys($fixed_in), $fixed_in)) . '.' : '')
-			. "\n\nEvery server runs Ubuntu's build, so every server has " . (count($new) === 1 ? 'this hole' : 'these holes') . ' until it is fixed.'
-			. "\n\nWhat happens now: we build our own with the fix, automatically. The test servers get it first, then every server once they "
-			. 'have stayed healthy for ' . $soak_hours . ' hours. Nothing is needed from you unless a second email says a person is needed.'
-			. ($others ? "\n\nAlso still waiting on Ubuntu, already being handled:\n- " . implode("\n- ", $others) : '');
+		if ($everywhere) { $stand[] = '- On every server, our own build: ' . implode(', ', $everywhere); }
+		if ($testing) { $stand[] = '- On the test servers now: ' . implode(', ', array_values($testing)); }
+		if ($waiting) {
+			ksort($waiting);
+			$stand[] = '- Waiting for a person: ' . implode(', ', array_map(function ($s, $c) use ($name_of) { return $name_of($s) . ' (' . self::fixCount($c) . ')'; },
+				array_keys($waiting), $waiting));
+		}
+
+		$names = array_map($name_of, $sources);
+		if ($stuck) {
+			$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: a person is needed for ' . implode(', ', array_values(array_unique($stuck)));
+			$other = array_values(array_diff($built, $stuck));
+			if ($other) { $title .= '; ' . implode(', ', $other) . ' built'; }
+		} elseif ($built) {
+			$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: ' . implode(', ', $built) . ' built, testing now';
+		} else {
+			$title = 'Security fix' . (count($sources) === 1 ? '' : 'es') . ' ahead of Ubuntu: ' . implode(', ', $names);
+		}
+		if ($top === 'critical') { $title .= ' (critical)'; }
 		return array(
-			'kind'  => 'found',
-			'title' => 'Security fix' . (count($names) === 1 && count($new) === 1 ? '' : 'es') . ' ahead of Ubuntu: '
-				. implode(', ', array_values($names)) . ' (' . $top . ')',
-			'body'  => $body,
+			'kind'  => $stuck ? 'needs_person' : 'found',
+			'title' => $title,
+			'body'  => implode("\n\n", $blocks) . ($stand ? "\n\nWhere everything stands:\n" . implode("\n", $stand) : '')
+				. "\n\nThe full detail for each fix is on the Fleet Security page.",
 			'link'  => self::LINK,
 		);
+	}
+
+	/**
+	 * Why an attempt stopped, in plain words: the raw reason (patch rejects,
+	 * build log lines) stays on the Fleet Security page. Pure.
+	 */
+	public static function plainReason(string $step, string $raw): string {
+		if (preg_match('/no signing key (is committed )?for /', $raw)) {
+			return 'upstream\'s signing key is not on file yet, so its release could not be checked';
+		}
+		if (strpos($raw, 'failed after taking it') !== false) {
+			return $raw;
+		}
+		$no_apply = (bool)preg_match('/does not apply|hunks? FAILED/', $raw);
+		$no_commit = (bool)preg_match('/no (upstream )?commit/', $raw);
+		$release_blocked = strpos($raw, 'neither applies to upstream') !== false || strpos($raw, 'would not go on upstream') !== false;
+		$release_tried = strpos($raw, 'so upstream\'s fixed release was tried') !== false;
+		$first = '';
+		if ($no_apply && $no_commit) {
+			$first = 'upstream\'s fix does not fit Ubuntu\'s version of the code for some of them, and for the others we could not find upstream\'s exact fix';
+		} elseif ($no_apply) {
+			$first = 'upstream\'s fix does not fit Ubuntu\'s version of the code';
+		} elseif ($no_commit) {
+			$first = 'we could not find upstream\'s exact fix';
+		}
+		if ($release_blocked) {
+			return ($first !== '' ? $first : 'upstream\'s fix could not be used') . ', and Ubuntu\'s own changes to the package do not fit upstream\'s fixed release';
+		}
+		if ($release_tried) {
+			return ($first !== '' ? $first : 'upstream\'s fix could not be used') . ', and building on upstream\'s fixed release failed';
+		}
+		if ($first !== '') {
+			return $first;
+		}
+		if ($step === 'building and testing it') {
+			return 'the build or the package\'s own tests failed';
+		}
+		$plain = trim((string)preg_replace('/^(CVE-\d{4}-\d+: )+/', '', trim((string)preg_split('/[|\n;]/', $raw)[0])));
+		return $plain !== '' ? rtrim(mb_substr($plain, 0, 200), '.') : 'it stopped at ' . ($step !== '' ? $step : 'an unknown step');
+	}
+
+	private static function lastOutcome(array $state, string $source): string {
+		$out = '';
+		foreach ((array)($state['attempts'] ?? array()) as $k => $a) {
+			if (strpos($k, $source . ' ') === 0) {
+				$out = (string)($a['status'] ?? '');
+				if ($out === 'needs_person') { return $out; }
+			}
+		}
+		return $out;
+	}
+
+	private static function fixCount(int $n): string {
+		return $n . ' fix' . ($n === 1 ? '' : 'es');
+	}
+
+	private static function sorted(array $a): array {
+		$a = array_values(array_map('strval', $a));
+		sort($a);
+		return $a;
 	}
 
 	/** Lines in $now that are new or changed against $before: source => version. Pure. */
@@ -636,18 +842,69 @@ class PackageFixAuto {
 		return isset($set[$source]['cves']) ? preg_split('/\s+/', trim((string)$set[$source]['cves'])) : array();
 	}
 
-	/** Nodes with a soak-failing incident opened since $since. */
-	private static function failingNodes(int $since): array {
-		$ids = array();
+	/**
+	 * The soak's failures since $since: nodes with a failed-service, site-down
+	 * or silent-agent incident opened since then. A site-down incident is not
+	 * counted when the machine never answered the plane (refused, timed out)
+	 * and its own report, read after the incident opened, says its site
+	 * answers: the plane's path to it is broken (a ban, a route), not the
+	 * build. Such a node is waited for instead.
+	 *
+	 * @return array{failing: list<int>, unreachable: array<int, string>}
+	 */
+	private static function soakFailures(int $since): array {
+		$failing = array();
+		$unreachable = array();
 		foreach (self::SOAK_FAILURES as $source) {
 			foreach (new MultiIncidentRecord(array('source' => $source, 'deleted' => false)) as $inc) {
 				$t = strtotime((string)$inc->get('inc_opened_time') . ' UTC');
-				if ($t !== false && $t >= $since) {
-					$ids[] = (int)$inc->get('inc_mgn_managed_node_id');
+				if ($t === false || $t < $since) {
+					continue;
 				}
+				$id = (int)$inc->get('inc_mgn_managed_node_id');
+				if ($source === IncidentSourceSiteDown::NAME) {
+					try {
+						$node = new ManagedNode($id, TRUE);
+						$excuse = self::siteDownExcuse($node->get('mgn_uptime_down_answered'), $node->get('mgn_last_host_report'), $t);
+					} catch (\Throwable $e) {
+						$excuse = null;
+					}
+					if ($excuse !== null) {
+						$unreachable[$id] = $excuse;
+						continue;
+					}
+				}
+				$failing[] = $id;
 			}
 		}
-		return array_values(array_unique($ids));
+		$failing = array_values(array_unique($failing));
+		foreach ($failing as $id) { unset($unreachable[$id]); }
+		return array('failing' => $failing, 'unreachable' => $unreachable);
+	}
+
+	/**
+	 * Why a site-down incident opened at $opened is the plane's path rather
+	 * than the machine, or null when it may be the machine. Pure.
+	 *
+	 * @param mixed $answered the node's mgn_uptime_down_answered: FALSE only when the
+	 *                        failing probe got no answer at all
+	 * @param mixed $report   the node's mgn_last_host_report (JSON or array)
+	 */
+	public static function siteDownExcuse($answered, $report, int $opened): ?string {
+		if ($answered !== false && $answered !== 'f' && $answered !== 0 && $answered !== '0') {
+			return null;
+		}
+		if (is_string($report)) {
+			$report = json_decode($report, true);
+		}
+		if (!is_array($report) || (int)($report['generated_at'] ?? 0) < $opened) {
+			return null;
+		}
+		$answers = is_array($report['answers'] ?? null) ? $report['answers'] : array();
+		if (($answers['apache2'] ?? '') !== 'yes' || !in_array($answers['php-fpm'] ?? '', array('yes', 'quiet'), true)) {
+			return null;
+		}
+		return 'the plane cannot reach its site, but the machine says its site answers: not counted as a failure';
 	}
 
 	private static function withdrawRequests(): array {
@@ -668,14 +925,25 @@ class PackageFixAuto {
 			. "\0" . (string)@file_get_contents($fixes . '/upstream_keys/' . $source . '.asc'));
 	}
 
-	/** Remove the requests this run took; one pressed meanwhile stays. */
+	private static function retryRequests(): array {
+		$r = json_decode((string)Globalvars::get_instance()->get_setting(self::RETRY_SETTING), true);
+		return is_array($r) ? $r : array();
+	}
+
+	/** Remove the Withdraw requests this run took; one pressed meanwhile stays. */
 	private static function clearWithdrawRequests(array $taken): void {
-		Globalvars::get_instance()->forget_setting(self::WITHDRAW_SETTING);
-		$left = self::withdrawRequests();
+		self::clearRequests(self::WITHDRAW_SETTING, $taken);
+	}
+
+	/** Remove the requests (source => version) this run took from $setting; one pressed meanwhile stays. */
+	private static function clearRequests(string $setting, array $taken): void {
+		Globalvars::get_instance()->forget_setting($setting);
+		$left = json_decode((string)Globalvars::get_instance()->get_setting($setting), true);
+		$left = is_array($left) ? $left : array();
 		foreach ($taken as $source => $version) {
 			if (($left[$source] ?? null) === $version) { unset($left[$source]); }
 		}
-		Setting::put(self::WITHDRAW_SETTING, $left ? json_encode($left, JSON_UNESCAPED_SLASHES) : '');
+		Setting::put($setting, $left ? json_encode($left, JSON_UNESCAPED_SLASHES) : '');
 	}
 
 	private static function copyTree(string $from, string $to): void {

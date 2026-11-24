@@ -16,6 +16,8 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.6 - Try again on a withdrawn fix build (server_manager_package_fix_retry) and why it was withdrawn; each
+ *                stopped fix says why in plain words, the raw detail folded under it
  * @version 1.5 - Security fixes ahead of Ubuntu: the package fix channel, its soak, what the automatic runner did,
  *                and a Withdraw per fix (specs/package_fixes_automatic.md WP8, WP9)
  * @version 1.4 - a machine's package fixes ahead of Ubuntu are listed under its name (specs/package_fixes_ahead_of_ubuntu.md WP6)
@@ -62,6 +64,17 @@ if ($_POST) {
 			Setting::put(PackageFixAuto::WITHDRAW_SETTING, json_encode($asked, JSON_UNESCAPED_SLASHES));
 			$flash('Withdrawing ' . $source . ' ' . $version . ': within ten minutes every machine is told, and each one holding it '
 				. 'goes back to the build before it within the hour.', 'ok');
+		}
+	} elseif ($action === 'retry_fix') {
+		$source = (string)($_POST['source'] ?? '');
+		$version = (string)($_POST['version'] ?? '');
+		if (preg_match('/^[a-z0-9][a-z0-9.+-]+$/', $source) && preg_match('/^([0-9]+:)?[0-9][A-Za-z0-9.+~-]*\+joinery[0-9]+$/', $version)) {
+			$asked = json_decode((string)Globalvars::get_instance()->get_setting(PackageFixAuto::RETRY_SETTING), true);
+			$asked = is_array($asked) ? $asked : array();
+			$asked[$source] = $version;
+			Setting::put(PackageFixAuto::RETRY_SETTING, json_encode($asked, JSON_UNESCAPED_SLASHES));
+			$flash('Trying ' . IncidentSourceFixAheadOfUbuntu::package_name($source) . ' again: within ten minutes it is built afresh, '
+				. 'and the new build goes to the test servers first. An email says how it went.', 'ok');
 		}
 	} elseif ($action === 'stop_run') {
 		$running = FleetSecurityRun::running();
@@ -224,18 +237,37 @@ if ($pf_role !== 'none' || $pf_channel !== null) {
 			echo '</tbody></table></div>';
 		}
 		foreach ($pf_channel['withdrawn'] as $source => $versions) {
-			echo '<div class="small text-muted">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions)) . '</div>';
+			$why = '';
+			foreach (array_reverse((array)($pf['withdrawals'] ?? array())) as $w) {
+				if (($w['source'] ?? '') === $source) { $why = (string)($w['why'] ?? ''); break; }
+			}
+			$last = (string)end($versions);
+			$retry_asked = isset($pf['retried'][$source]) && ($pf['retried'][$source]['version'] ?? '') === $last;
+			echo '<div class="small text-muted d-flex gap-2 align-items-center">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions))
+				. ($why !== '' ? ' (' . $h($why) . ')' : '');
+			if ($pf_role === 'issuer' && !$retry_asked) {
+				$fid = 'retry-' . preg_replace('/[^a-z0-9]/', '-', $source);
+				echo '<form id="' . $fid . '" method="post" action="' . $self_url . '" class="m-0">' . SmAdminCsrf::field()
+					. '<input type="hidden" name="action" value="retry_fix"><input type="hidden" name="source" value="' . $h($source) . '">'
+					. '<input type="hidden" name="version" value="' . $h($last) . '">'
+					. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="' . $h('Build '
+						. IncidentSourceFixAheadOfUbuntu::package_name($source) . ' again and send it to the test servers? Use this when the problem that pulled '
+						. $last . ' back had nothing to do with it.') . '" data-jy-submit="' . $fid . '">Try again</button></form>';
+			}
+			echo '</div>';
 		}
 	}
 	$pf_people = array();
 	foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
 		if (($a['status'] ?? '') === 'needs_person') {
-			$pf_people[] = $key . ': stopped at ' . ($a['step'] ?? '?') . ' - ' . ($a['reason'] ?? '');
+			$pf_people[] = array($key . ': ' . PackageFixAuto::plainReason((string)($a['step'] ?? ''), (string)($a['reason'] ?? '')), (string)($a['reason'] ?? ''));
 		}
 	}
 	if ($pf_people) {
 		echo '<div class="small text-danger mt-2"><strong>A person is needed</strong><ul class="mb-0">';
-		foreach (array_slice($pf_people, 0, 20) as $p) { echo '<li>' . $h($p) . '</li>'; }
+		foreach (array_slice($pf_people, 0, 40) as $p) {
+			echo '<li>' . $h($p[0]) . ($p[1] !== '' ? ' <details class="d-inline"><summary>detail</summary><code class="small">' . $h($p[1]) . '</code></details>' : '') . '</li>';
+		}
 		echo '</ul></div>';
 	}
 	if (!empty($pf['last_run'])) {

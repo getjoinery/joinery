@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_recipe_writer_test.php
  *
+ * @version 1.1 - the fix commits upstream's advisory names reach the finder
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -67,8 +68,10 @@ $found = array(
 	),
 );
 $asked = array();
-$finder = function ($source, $cve, $ctx) use (&$found, &$asked) {
+$asked_commits = array();
+$finder = function ($source, $cve, $ctx) use (&$found, &$asked, &$asked_commits) {
 	$asked[] = $cve . ' ' . $ctx['base_upstream'] . ' ' . $ctx['fixed_in'];
+	$asked_commits[$cve] = $ctx['commits'] ?? null;
 	return isset($found[$cve]) ? array('commits' => $found[$cve], 'reason' => '', 'fixed_version' => '8.5.13')
 		: array('commits' => array(), 'reason' => 'no upstream commit names ' . $cve, 'fixed_version' => '8.5.13');
 };
@@ -86,7 +89,7 @@ file_put_contents($fixes . '/UPSTREAMS', "source=php8.5 git=https://github.com/p
 $auto = $scratch . '/auto';
 $opts = function (array $more = array()) use ($auto, $fixes, $provider, $finder, $base, $scratch) {
 	return $more + array('ubuntu_version' => $base, 'auto_dir' => $auto, 'fixes_dir' => $fixes, 'source_dir' => $scratch . '/source',
-		'provider' => $provider, 'finder' => $finder, 'date' => '2026-11-22');
+		'provider' => $provider, 'finder' => $finder, 'date' => '2026-11-22', 'watch_state' => array());
 };
 $recipe_of = function ($source) use ($auto) { return (string)@file_get_contents($auto . '/' . $source . '/RECIPE'); };
 $patch_names = function ($source) use ($auto) { return array_map('basename', glob($auto . '/' . $source . '/patches/*.patch') ?: array()); };
@@ -124,6 +127,21 @@ check(is_file($fixes . '/php8.5/RECIPE') && strpos((string)file_get_contents($fi
 $out = $build_checks($auto . '/php8.5');
 check(strpos($out, "no php8.5_{$base}.dsc was fetched") !== false, 'build.sh accepts the recipe (it stops only at the missing source)', $out);
 check(!glob($auto . '/.work-*') && !glob($auto . '/.php8.5.*'), 'no work folders left behind');
+
+section('The fix commits upstream\'s advisory names reach the finder');
+
+$c1 = str_repeat('e', 40);
+$c2 = str_repeat('f', 40);
+$watch = array('drivers' => array('OpenSSL' => array('error' => '', 'read_at' => 1, 'advisories' => array('CVE-2026-1001' => array('commits' => array($c1, 'junk')), 'CVE-2026-1002' => array('commits' => array($c2)))),
+	'PHP' => array('error' => '', 'read_at' => 1, 'advisories' => array('CVE-2026-1001' => array('ids' => array('GHSA-x'))))));
+check(UpstreamFixWatch::commitsFor($watch, 'CVE-2026-1001') === array($c1) && UpstreamFixWatch::commitsFor($watch, 'CVE-2026-9') === array(), 'the watch\'s stored advisories name them');
+$asked_commits = array();
+$wdir = $scratch . '/auto_commits';
+PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1001' => array('fixed_in' => '8.5.13'), 'CVE-2026-1002' => array('fixed_in' => '8.5.13', 'commits' => array($c1))),
+	$opts(array('auto_dir' => $wdir, 'watch_state' => $watch)));
+check(($asked_commits['CVE-2026-1001'] ?? null) === array($c1), 'a CVE handed none: the watch\'s', json_encode($asked_commits));
+check(($asked_commits['CVE-2026-1002'] ?? null) === array($c1), 'a CVE handed its commits: those', json_encode($asked_commits));
+$asked = array();
 
 section('A rerun, a floor, and fixes that need the patch before them');
 

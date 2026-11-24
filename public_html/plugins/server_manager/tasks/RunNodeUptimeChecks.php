@@ -22,6 +22,8 @@
  * still answers with its placeholder, as the certificate incident's evidence
  * (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.20 - while a site is down, whether the machine answered at all (mgn_uptime_down_answered): a
+ *                refused or timed-out connection is told from an HTTP error (the package fix soak reads it)
  * @version 2.19 - queues never_do_check every NEVER_DO_REFRESH_SECONDS on every machine whose agent offers it
  *                 (NeverDoCheck, node_unexplained_root first slice)
  * @version 2.18 - an origin answering with a self-signed certificate (the placeholder, which names the site and so
@@ -185,7 +187,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				if (!empty($result['locked'])) {
 					$this->apply_locked($node);
 				} else {
-					$this->apply_state($node, $result['ok'], (string)($result['message'] ?? ''));
+					$this->apply_state($node, $result['ok'], (string)($result['message'] ?? ''), $result['answered'] ?? null);
 				}
 				$node->save();
 			}
@@ -418,7 +420,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			if (NodeMonitorHealth::is_name_resolution_failure($result['errno'] ?? 0, $detail)) {
 				return $this->unresolvable(parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST), $detail);
 			}
-			return ['ok' => false, 'message' => $detail, 'status' => 'done'];
+			return ['ok' => false, 'message' => $detail, 'status' => 'done', 'answered' => false];
 		}
 		if ($reason === 'status') {
 			// fetch_status_via_api stores the code in the message as "HTTP NNN"
@@ -427,7 +429,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				$code = (int)$m[1];
 			}
 			if ($code >= 300 && $code < 400) {
-				return ['ok' => false, 'message' => 'unexpected redirect (HTTP ' . $code . ') — possible infrastructure misconfiguration', 'status' => 'done'];
+				return ['ok' => false, 'message' => 'unexpected redirect (HTTP ' . $code . ') — possible infrastructure misconfiguration', 'status' => 'done', 'answered' => true];
 			}
 		}
 		// auth / body / non-3xx status / anything else: server responded, treat as up
@@ -471,7 +473,8 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				NodeHealthProbe::TRANSPORT, $now)));
 			$node->set('mgn_last_status_check', $now);
 		}
-		return ['ok' => $probe['ok'], 'locked' => !empty($probe['locked']), 'message' => $probe['message'], 'status' => 'done'];
+		return ['ok' => $probe['ok'], 'locked' => !empty($probe['locked']), 'message' => $probe['message'], 'status' => 'done',
+			'answered' => !empty($probe['answered'])];
 	}
 
 	/**
@@ -489,6 +492,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$node->set('mgn_uptime_consecutive_failures', 0);
 		$node->set('mgn_uptime_down_since', NULL);
 		$node->set('mgn_uptime_down_reason', NULL);
+		$node->set('mgn_uptime_down_answered', NULL);
 	}
 
 	/**
@@ -518,7 +522,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * While down, the newest failing probe's message is kept as what the
 	 * check saw (mgn_uptime_down_reason), for the incident's evidence.
 	 */
-	private function apply_state($node, bool $ok, string $message = ''): string {
+	private function apply_state($node, bool $ok, string $message = '', ?bool $answered = null): string {
 		$prev_status = $node->get('mgn_uptime_last_status');
 
 		// A probe that did not find it locked ends the locked state: it is
@@ -534,6 +538,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			$node->set('mgn_uptime_consecutive_failures', 0);
 			$node->set('mgn_uptime_down_since', NULL);
 			$node->set('mgn_uptime_down_reason', NULL);
+			$node->set('mgn_uptime_down_answered', NULL);
 			return ($prev_status === 'down') ? 'recovered' : 'no_change';
 		}
 
@@ -542,6 +547,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 
 		if ($failures >= self::FAILURE_THRESHOLD) {
 			$node->set('mgn_uptime_down_reason', $message !== '' ? mb_substr($message, 0, 255) : NULL);
+			$node->set('mgn_uptime_down_answered', $answered);
 		}
 		if ($failures >= self::FAILURE_THRESHOLD && $prev_status !== 'down') {
 			$node->set('mgn_uptime_last_status', 'down');

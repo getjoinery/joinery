@@ -2,6 +2,8 @@
 # releases, for the automatic package fixes (specs/package_fixes_automatic.md WP2, WP4).
 # Read by UpstreamFixFinder and PackageFixRecipeWriter (server_manager includes).
 #
+# Version: 1.2 - ids=GHSA for imagemagick (its fix commits name the advisory's GHSA); OpenSSL's
+#                fix commits come from its CVE records (UpstreamAdvisoryOpenssl), not a message search
 # Version: 1.1 - trust=unsigned for postgresql-18, glibc and imagemagick (owner, 2026-11-22)
 # Version: 1.0
 #
@@ -24,7 +26,9 @@
 #                 Default: the numbers joined by dots
 #   ids=          optional: the kinds of id the project's commits name besides the
 #                 CVE, which a driver supplies (UpstreamAdvisoryDriver::ids()), comma
-#                 separated: GHSA for PHP
+#                 separated: GHSA for PHP and ImageMagick. A project whose commits name
+#                 no id has its driver supply the fix commits themselves
+#                 (UpstreamAdvisoryDriver::commits(): OpenSSL's CVE records)
 #   release_url=  upstream's release tarball, same placeholders; empty when the
 #                 project publishes no signed tarball
 #   sig_url=      that tarball's detached signature; empty when none
@@ -48,4 +52,4 @@ source=openssh       git=https://github.com/openssh/openssh-portable.git tag=V_{
 source=curl          git=https://github.com/curl/curl.git                tag=curl-{major}_{minor}_{patch} line=1 release_url=https://curl.se/download/curl-{v}.tar.xz sig_url=https://curl.se/download/curl-{v}.tar.xz.asc
 source=libxml2       git=https://gitlab.gnome.org/GNOME/libxml2.git      tag=v{v}                        line=2 release_url= sig_url=
 source=glibc         git=https://sourceware.org/git/glibc.git            tag=glibc-{major}.{minor}       line=2 branch=release/{major}.{minor}/master release_url= sig_url= trust=unsigned
-source=imagemagick   git=https://github.com/ImageMagick/ImageMagick.git  tag={major}.{minor}.{patch}-{build} line=2 release_url= sig_url= trust=unsigned
+source=imagemagick   git=https://github.com/ImageMagick/ImageMagick.git  tag={major}.{minor}.{patch}-{build} line=2 ids=GHSA release_url= sig_url= trust=unsigned

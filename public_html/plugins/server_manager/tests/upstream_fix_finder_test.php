@@ -11,11 +11,15 @@
  * WP2), over a small fixture repository made in scratch: a CVE named in a
  * commit message, a project id (GHSA) named instead, none, a commit that only
  * touches the news, the release a range ends at, and a branch searched where
- * a line makes no point releases. Also: the doc-part filter, fixes/UPSTREAMS
- * as committed, and the PHP driver's ids(). Nothing reaches the network.
+ * a line makes no point releases, and the fix commits an advisory names
+ * (OpenSSL's CVE records) used where they are in the range. Also: the
+ * doc-part filter, fixes/UPSTREAMS as committed, the PHP and ImageMagick
+ * drivers' ids(), and OpenSSL's driver over fixture answers from its
+ * release-metadata repository. Nothing reaches the network.
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_finder_test.php
  *
+ * @version 1.1 - commits an advisory names; the OpenSSL and ImageMagick drivers
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -56,6 +60,10 @@ $put('NEWS', "PHP NEWS\n- Fixed GH-1 (CVE-2026-1111)\n- CVE-2026-2222 noted\n");
 $commit('Note CVE-2026-2222 in the news');
 $put('src/c.c', "int c = 1;\n");
 $sha_longer = $commit('Fix CVE-2026-11112, a different hole');
+$put('src/d.c', "int d = 1;\n");
+$sha_quiet = $commit('Reduce CPU usage in d');
+$put('NEWS', "PHP NEWS\n- d is faster\n");
+$sha_quiet_news = $commit('Say d is faster');
 $sh('git tag php-8.5.5');
 $put('src/e.c', "int e = 1;\n");
 $sha_late = $commit('Fix CVE-2026-5555');
@@ -64,6 +72,11 @@ $sh('git tag php-8.5.7RC1');
 $sh('git tag php-8.4.9 php-8.5.4');
 $sh('git tag php-9.0.0');
 $sh('git branch release/2.43/master');
+// The same fix made for another line: not reachable from this line's tags.
+$sh('git checkout -q -b other-line php-8.5.4');
+$put('src/d.c', "int d = 1; /* other line */\n");
+$sha_other_line = $commit('Reduce CPU usage in d (other line)');
+$sh('git checkout -q master');
 $git_dir = $repo . '/.git';
 
 $upstreams = $scratch . '/UPSTREAMS';
@@ -96,6 +109,30 @@ check(count($r['commits']) === 1 && $r['commits'][0]['sha'] === $sha_ghsa, 'the 
 check(strpos($r['commits'][0]['patch'] ?? '', 'docs/b.md') === false && strpos($r['commits'][0]['patch'] ?? '', 'src/b.c') !== false, 'its docs part left out');
 $r = UpstreamFixFinder::find('php8.5', 'CVE-2026-3333', $ctx(array('fixed_in' => '8.5.5')));
 check($r['commits'] === array() && strpos($r['reason'], 'no upstream commit between php-8.5.4 and php-8.5.5 names CVE-2026-3333') !== false, 'without the id, nothing', $r['reason']);
+
+section('The fix commits an advisory names (OpenSSL)');
+
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_quiet))));
+check(array_column($r['commits'], 'sha') === array($sha_quiet) && $r['reason'] === '', 'a named commit whose message names nothing is found', $r['reason']);
+check(strpos($r['commits'][0]['patch'] ?? '', 'diff --git a/src/d.c b/src/d.c') !== false && strpos($r['commits'][0]['patch'] ?? '', 'Subject: [PATCH] Reduce CPU usage in d') !== false,
+	'written as format-patch writes it, as the message search does');
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_other_line, $sha_quiet, str_repeat('ab', 20), $sha_late, 'not-a-sha'))));
+check(array_column($r['commits'], 'sha') === array($sha_quiet), 'only the one in the range: not another line\'s, not one the clone lacks, not one after the fixed release', json_encode(array_column($r['commits'], 'subject')));
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_quiet, $sha_ghsa))));
+check(array_column($r['commits'], 'sha') === array($sha_ghsa, $sha_quiet), 'oldest first, whatever order the advisory lists them in');
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-1111', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_other_line))));
+check(array_column($r['commits'], 'sha') === array($sha_cve), 'none named in the range: the message search still runs', $r['reason']);
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_other_line))));
+check($r['commits'] === array() && strpos($r['reason'], "none of the 1 commits upstream's advisory names for CVE-2026-7777 (" . substr($sha_other_line, 0, 12) . ') is between php-8.5.4 and php-8.5.5') !== false
+	&& strpos($r['reason'], 'no upstream commit between php-8.5.4 and php-8.5.5 names CVE-2026-7777') !== false, 'and finding nothing says both', $r['reason']);
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_quiet_news))));
+check($r['commits'] === array() && strpos($r['reason'], "the only commits upstream's advisory names for CVE-2026-7777") !== false, 'a named commit of news only is no fix', $r['reason']);
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('fixed_in' => '8.5.5', 'commits' => array($sha_quiet), 'tag_verifier' => function () { return 'tag refused'; })));
+check($r['commits'] === array() && $r['reason'] === 'tag refused', 'the release tag must still verify (owner R-Q1 b)', $r['reason']);
+$r = UpstreamFixFinder::find('glibc', 'CVE-2026-7777', $ctx(array('base_upstream' => '2.43', 'commits' => array($sha_quiet))));
+check($r['commits'] === array() && strpos($r['reason'], 'branch head') !== false, 'and a branch head is still not used where the project signs', $r['reason']);
+$r = UpstreamFixFinder::find('php8.5', 'CVE-2026-7777', $ctx(array('commits' => array($sha_late))));
+check(array_column($r['commits'], 'sha') === array($sha_late) && $r['range'] === 'php-8.5.4..php-8.5.6', 'no fixed release named: up to the line\'s newest release', $r['range']);
 
 section('None, and only news');
 
@@ -228,5 +265,76 @@ check($php->ids('CVE-2026-1') === array() && $php->ids('CVE-2026-9') === array()
 check(($php->advisories()['CVE-2026-115560']['ids'] ?? null) === array('GHSA-abcd-efgh-ijkl'), 'advisories() carries it too');
 $down = new UpstreamAdvisoryPhp(function ($url) { return null; });
 check($down->ids('CVE-2026-115560') === array(), 'advisories that cannot be read: none');
+
+section('ImageMagick\'s advisories');
+
+$im = new UpstreamAdvisoryImageMagick(function ($url) {
+	if (strpos($url, '/repos/ImageMagick/ImageMagick/security-advisories') === false) { return null; }
+	return json_encode(array(
+		array('ghsa_id' => 'GHSA-j2rp-5r6m-f7x8', 'cve_id' => 'CVE-2025-55154', 'severity' => 'medium', 'html_url' => 'https://github.com/ImageMagick/ImageMagick/security/advisories/GHSA-j2rp-5r6m-f7x8',
+			'vulnerabilities' => array(array('patched_versions' => '7.1.2-33'), array('patched_versions' => '6.9.13-58'))),
+		array('ghsa_id' => 'GHSA-qw9c-mq27-w844', 'cve_id' => null, 'severity' => 'low', 'vulnerabilities' => array(array('patched_versions' => '7.1.2-36'))),
+	));
+});
+$a = $im->advisories();
+check(array_keys($a) === array('CVE-2025-55154') && $a['CVE-2025-55154']['fixed_in'] === '6.9.13.58, 7.1.2.33' && $a['CVE-2025-55154']['rating'] === 'medium',
+	'its releases as Ubuntu spells them (7.1.2-33 is 7.1.2.33); one with no CVE yet is not read', json_encode($a));
+check($im->ids('CVE-2025-55154') === array('GHSA-j2rp-5r6m-f7x8') && $im->commits('CVE-2025-55154') === array(), 'its GHSA, which its fix commits name; no commit list');
+check($im->covers('imagemagick') && !$im->covers('php8.5') && $im->label() === 'ImageMagick' && !(new UpstreamAdvisoryPhp())->covers('imagemagick'), 'it covers ImageMagick only');
+check(UpstreamFixFinder::line_version('7.1.2.18', $a['CVE-2025-55154']['fixed_in'], 2) === '7.1.2.33'
+	&& UpstreamFixFinder::expand('{major}.{minor}.{patch}-{build}', '7.1.2.33') === '7.1.2-33', 'which names the tag the range ends at');
+
+section('OpenSSL\'s CVE records');
+
+$record = function (string $cve, string $published, string $severity, array $versions, array $refs) {
+	return json_encode(array('dataType' => 'CVE_RECORD', 'dataVersion' => '5.1', 'cveMetadata' => array('cveId' => $cve, 'datePublished' => $published),
+		'containers' => array('cna' => array('datePublic' => $published,
+			'affected' => array(array('product' => 'OpenSSL', 'vendor' => 'OpenSSL', 'defaultStatus' => 'unaffected', 'versions' => $versions)),
+			'metrics' => array(array('format' => 'other', 'other' => array('content' => array('text' => $severity), 'type' => 'https://openssl-library.org/policies/general/security-policy/'))),
+			'references' => $refs))), JSON_UNESCAPED_SLASHES);
+};
+$aff = function ($from, $lt) { return array('version' => $from, 'lessThan' => $lt, 'status' => 'affected', 'versionType' => 'semver'); };
+$c35 = str_repeat('1a', 20);
+$c40 = str_repeat('2b', 20);
+$raw = UpstreamAdvisoryOpenssl::RAW;
+$site = array(
+	UpstreamAdvisoryOpenssl::URL => json_encode(array('truncated' => false, 'tree' => array(
+		array('path' => 'secadv/20160301.txt'), array('path' => 'secadv/20261001.txt'), array('path' => 'secadv/20261124.txt'), array('path' => 'secadv/hack.txt'),
+		array('path' => 'secjson/CVE-2016-2105.json'), array('path' => 'secjson/CVE-2026-84786.json'), array('path' => 'secjson/CVE-2026-9076.json'), array('path' => 'secjson/statements.json')))),
+	$raw . 'secadv/20261124.txt' => "OpenSSL Security Advisory\n\nPossible NULL Dereference (CVE-2026-84786)\nAlso CVE-2026-99999, which has no record.\n",
+	$raw . 'secadv/20261001.txt' => "Something (CVE-2026-9076)\n",
+	$raw . 'secadv/20160301.txt' => "Old (CVE-2016-2105)\n",
+	$raw . 'secjson/CVE-2026-84786.json' => $record('CVE-2026-84786', '2026-11-24T08:14:31+00:00', 'Moderate',
+		array($aff('4.0.0', '4.0.4'), $aff('3.5.0', '3.5.10'), array('version' => '1.1.1', 'lessThan' => '1.1.1zk', 'status' => 'affected', 'versionType' => 'custom')),
+		array(array('name' => 'OpenSSL Advisory', 'tags' => array('vendor-advisory'), 'url' => 'https://openssl-library.org/news/secadv/20261124.txt'),
+			array('name' => '4.0.4 git commit', 'tags' => array('patch'), 'url' => 'https://github.com/openssl/openssl/commit/' . $c40),
+			array('name' => '3.5.10 git commit', 'tags' => array('patch'), 'url' => 'https://github.com/openssl/openssl/commit/' . $c35),
+			array('name' => 'elsewhere', 'tags' => array('patch'), 'url' => 'https://github.com/someone/openssl/commit/' . str_repeat('3c', 20)))),
+	$raw . 'secjson/CVE-2026-9076.json' => $record('CVE-2026-9076', '2026-10-01T00:00:00+00:00', 'High', array($aff('3.5.0', '3.5.9')), array()),
+	$raw . 'secjson/CVE-2016-2105.json' => $record('CVE-2016-2105', '2016-03-01T00:00:00+00:00', 'Low', array($aff('1.0.2', '1.0.2h')), array()),
+);
+$asked = array();
+$at = strtotime('2026-11-24 12:00:00 UTC');
+$fetch = function ($url) use (&$site, &$asked) { $asked[] = $url; return $site[$url] ?? null; };
+$ossl = new UpstreamAdvisoryOpenssl($fetch, $at);
+$a = $ossl->advisories();
+check(is_array($a) && array_keys($a) === array('CVE-2026-84786', 'CVE-2026-9076'), 'the CVEs the recent advisories name that have a record; an old advisory is not read', json_encode(is_array($a) ? array_keys($a) : $a));
+check(count($asked) === 5 && $asked[0] === UpstreamAdvisoryOpenssl::URL && !in_array($raw . 'secadv/20160301.txt', $asked, true) && !in_array($raw . 'secjson/CVE-2026-99999.json', $asked, true),
+	'one listing, the two recent advisories and the two records: nothing else fetched', json_encode($asked));
+$x = $a['CVE-2026-84786'] ?? array();
+check(($x['rating'] ?? '') === 'medium' && ($x['fixed'] ?? null) === true && ($x['fixed_in'] ?? '') === '3.5.10, 4.0.4'
+	&& ($x['url'] ?? '') === 'https://openssl-library.org/news/secadv/20261124.txt', 'Moderate is medium; the fixed releases are each line\'s lessThan, in order', json_encode($x));
+check(($x['commits'] ?? null) === array($c40, $c35) && $ossl->commits('CVE-2026-84786') === array($c40, $c35), 'its fix commit on each branch, from openssl/openssl only', json_encode($x['commits'] ?? null));
+check($ossl->ids('CVE-2026-84786') === array() && $ossl->commits('CVE-2026-1') === array(), 'no ids; no commits for a CVE it has no record of');
+check(($a['CVE-2026-9076']['rating'] ?? '') === 'high' && ($a['CVE-2026-9076']['commits'] ?? null) === array(), 'a record naming no commit');
+check($ossl->covers('openssl') && !$ossl->covers('openssh') && $ossl->label() === 'OpenSSL', 'it covers OpenSSL');
+check((new UpstreamAdvisoryOpenssl(function ($u) { return null; }, $at))->advisories() === null, 'a listing that cannot be fetched: not read');
+check((new UpstreamAdvisoryOpenssl(function ($u) { return '<html>'; }, $at))->advisories() === null, 'a listing that is not one: not read');
+$partial = $site;
+unset($partial[$raw . 'secjson/CVE-2026-9076.json']);
+check((new UpstreamAdvisoryOpenssl(function ($u) use ($partial) { return $partial[$u] ?? null; }, $at))->advisories() === null,
+	'one record that cannot be fetched: not read at all, so the watch keeps its last good answer');
+$labels = array_map(function ($d) { return $d->label(); }, UpstreamFixWatch::drivers());
+check($labels === array('PHP', 'OpenSSL', 'ImageMagick'), 'the watch reads all three', implode(',', $labels));
 
 harness_finish();

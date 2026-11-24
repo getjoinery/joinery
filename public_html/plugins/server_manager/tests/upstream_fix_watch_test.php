@@ -15,6 +15,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_watch_test.php
  *
+ * @version 1.1 - OpenSSL's CVE records: its rating, and the fix commits they name, kept in the state
  * @version 1.0
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -247,6 +248,27 @@ $open['php8.5'] = array($cve('CVE-2026-129289', 'needs-triage', 'medium', $iso($
 $state = $look(array(), array(), $state, $now + 5 * $day);
 check(UpstreamFixWatch::conclusions($state, $now + 5 * $day)['build'] === array(), 'once released (gone from the open list) it is no longer raised; an old one is not raised again');
 $open['php8.5'] = array();
+
+section('OpenSSL\'s CVE records: its rating, and the commits they name');
+
+$ossl_driver = new class extends UpstreamAdvisoryOpenssl {
+	public $answer = null;
+	public function __construct() { parent::__construct(function ($u) { return null; }); }
+	public function advisories(): ?array { return $this->read = $this->answer; }
+};
+$sha35 = str_repeat('1a', 20);
+$ossl_driver->answer = array('CVE-2026-84786' => array('rating' => 'high', 'fixed' => true, 'fixed_in' => '3.5.10, 4.0.4', 'url' => 'https://openssl-library.org/news/secadv/20261124.txt',
+	'ids' => array(), 'commits' => array($sha35)));
+$open['openssl'] = array($cve('CVE-2026-84786', 'needs-triage', 'medium', $iso($now - $day)));
+$state = UpstreamFixWatch::check(array(), $tracker, array($php, $ossl_driver), array(), array(), $now);
+$u = $state['sources']['openssl']['unfixed']['CVE-2026-84786'] ?? array();
+check(($u['rating'] ?? '') === 'high' && ($u['rated_by'] ?? '') === 'OpenSSL' && ($u['fixed_in'] ?? '') === '3.5.10, 4.0.4' && ($state['sources']['openssl']['driver'] ?? '') === 'OpenSSL',
+	'rated by OpenSSL, with its fixed releases', json_encode($u));
+check(UpstreamFixWatch::commitsFor($state, 'CVE-2026-84786') === array($sha35), 'the commits it names are kept in the state, for the recipe writer');
+$ossl_driver->answer = null;
+$state = UpstreamFixWatch::check($state, $tracker, array($php, $ossl_driver), array(), array(), $now + 3600);
+check($state['drivers']['OpenSSL']['error'] !== '' && UpstreamFixWatch::commitsFor($state, 'CVE-2026-84786') === array($sha35), 'records that cannot be read keep the last good answer, commits too');
+$open['openssl'] = array();
 
 section('What is watched, and the task');
 

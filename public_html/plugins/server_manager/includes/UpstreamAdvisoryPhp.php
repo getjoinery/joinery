@@ -7,6 +7,9 @@
  * fix it (vulnerabilities[].patched_versions: "8.5.13"). One unauthenticated
  * call an hour, well inside GitHub's 60 an hour for an address.
  *
+ * @version 1.2 - commits(): PHP's advisories name no commit, so none (its commits name the GHSA); the
+ *                feed's URL and a release's spelling are overridable, for another project's GitHub
+ *                advisories (UpstreamAdvisoryImageMagick)
  * @version 1.1 - each advisory's GHSA id ('ids'), and ids(): PHP's fix commits name the GHSA
  *                (specs/package_fixes_automatic.md WP2)
  * @version 1.0
@@ -35,7 +38,7 @@ class UpstreamAdvisoryPhp implements UpstreamAdvisoryDriver {
 	}
 
 	public function advisories(): ?array {
-		$body = call_user_func($this->fetcher, self::URL);
+		$body = call_user_func($this->fetcher, static::URL);
 		$data = is_string($body) ? json_decode($body, true) : null;
 		if (!is_array($data) || ($data !== array() && !array_is_list($data))) {
 			return null;
@@ -52,8 +55,9 @@ class UpstreamAdvisoryPhp implements UpstreamAdvisoryDriver {
 			$fixed_in = array();
 			foreach (is_array($a['vulnerabilities'] ?? null) ? $a['vulnerabilities'] : array() as $v) {
 				foreach (preg_split('/[\s,]+/', (string)($v['patched_versions'] ?? '')) as $pv) {
-					if (preg_match('/^\d+\.\d+\.\d+$/', $pv)) {
-						$fixed_in[$pv] = true;
+					$rel = $this->release($pv);
+					if ($rel !== null) {
+						$fixed_in[$rel] = true;
 					}
 				}
 			}
@@ -70,9 +74,18 @@ class UpstreamAdvisoryPhp implements UpstreamAdvisoryDriver {
 		return $this->read = $out;
 	}
 
+	/** A patched_versions entry as the release it names ('8.5.13'); null when it is not one. */
+	protected function release(string $pv): ?string {
+		return preg_match('/^\d+\.\d+\.\d+$/', $pv) ? $pv : null;
+	}
+
 	public function ids(string $cve): array {
 		$a = $this->read ?? $this->advisories();
 		return is_array($a) && isset($a[$cve]) ? $a[$cve]['ids'] : array();
+	}
+
+	public function commits(string $cve): array {
+		return array();
 	}
 }
 ?>

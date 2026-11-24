@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.81 - mgn_uptime_down_answered: whether a down site's machine answered at all
  * @version 1.80 - self_node() and is_self() match this site's address on either scheme and in any letter case
  *                (package_fixes_automatic.md B1, reviewer2 B17)
  * @version 1.79 - holds_site_address(): a row with no agent key that was let go or whose agent left holds its site address against nobody (adopt_reported_site_domain, ManagedSiteDraft::serves_already)
@@ -393,6 +394,9 @@ class ManagedNode extends SystemBase {
 		// What the newest failing probe saw while the site is down: the
 		// site-down incident's evidence. Cleared when it answers again.
 		'mgn_uptime_down_reason'          => array('type'=>'varchar(255)'),
+		// Whether the machine answered the newest failing probe at all (an
+		// HTTP status) or not (refused, timed out); null while up or unknown.
+		'mgn_uptime_down_answered'        => array('type'=>'bool'),
 		'mgn_cert_expiry_ts'              => array('type'=>'timestamp(6)'),
 		// The served certificate's current problem, or null: renewal overdue,
 		// expiry near, www uncovered, or an origin presenting another name's

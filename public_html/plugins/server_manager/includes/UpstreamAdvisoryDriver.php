@@ -11,6 +11,8 @@
  * (as Ubuntu's tracker mirrors it) and Ubuntu's priority once it is past
  * triage.
  *
+ * @version 1.2 - commits(): the fix commits a project's own advisory names, for a project whose commit
+ *                messages name no id (OpenSSL)
  * @version 1.1 - ids(): the project's own ids for a CVE, which its fix commits may name instead
  *                (specs/package_fixes_automatic.md WP2)
  * @version 1.0
@@ -28,7 +30,7 @@ interface UpstreamAdvisoryDriver {
 	 * medium, low) and whether it has released a fix, with the releases
 	 * that carry it. Null when the advisories cannot be read.
 	 *
-	 * @return array<string, array{rating:string, fixed:bool, fixed_in:string, url:string, ids?:list<string>}>|null
+	 * @return array<string, array{rating:string, fixed:bool, fixed_in:string, url:string, ids?:list<string>, commits?:list<string>}>|null
 	 */
 	public function advisories(): ?array;
 
@@ -40,5 +42,15 @@ interface UpstreamAdvisoryDriver {
 	 * @return list<string>
 	 */
 	public function ids(string $cve): array;
+
+	/**
+	 * The commits (full SHAs) the project's own advisory names as $cve's fix,
+	 * on any of its release branches: OpenSSL's CVE records list one per
+	 * branch. UpstreamFixFinder uses those reachable in the range it searches.
+	 * Empty when the advisory names none, or cannot be read.
+	 *
+	 * @return list<string>
+	 */
+	public function commits(string $cve): array;
 }
 ?>

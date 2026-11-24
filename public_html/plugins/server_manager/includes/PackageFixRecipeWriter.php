@@ -25,6 +25,8 @@
  *     last automatic one; nothing is written when the recipe would come out
  *     as it already is.
  *
+ * @version 1.3 - each find is handed the fix commits upstream's advisory names (a CVE's 'commits', else
+ *                the watch's stored advisories: UpstreamFixWatch::commitsFor())
  * @version 1.2 - reviewer2's re-review: the automatic recipes' folder is made passable (0755) and the dry-run
  *                checks nobody can reach the work tree before it reads a failure as the patch's (B19)
  * @version 1.1 - reviewer2's review: upstream's patch is test-applied as nobody when the runner is root (B13)
@@ -85,7 +87,9 @@ class PackageFixRecipeWriter {
 	/**
 	 * Write (or leave as it is) the automatic recipe for $source.
 	 *
-	 * @param array $cves  cve => array('fixed_in' => '8.5.13, 8.4.20', 'ids' => array('GHSA-...'))
+	 * @param array $cves  cve => array('fixed_in' => '8.5.13, 8.4.20', 'ids' => array('GHSA-...'),
+	 *                     'commits' => the fix commits upstream's advisory names; when not given, read
+	 *                     from the watch's stored advisories)
 	 * @param array $opts  ubuntu_version  required: the Ubuntu build to patch ('8.5.4-0ubuntu1.6')
 	 *                     min_revision    a revision the new one must be above (a channel's last)
 	 *                     base_upstream   default: read from ubuntu_version
@@ -93,7 +97,7 @@ class PackageFixRecipeWriter {
 	 *                     tests only: auto_dir, fixes_dir, upstreams_file, source_dir, date,
 	 *                     provider fn(source, version, out_dir): array{dsc_sha256, tree}|array{error},
 	 *                     finder fn(source, cve, ctx): UpstreamFixFinder::find()'s answer,
-	 *                     finder_ctx (merged into each find's ctx)
+	 *                     finder_ctx (merged into each find's ctx), watch_state (in place of the stored one)
 	 * @return array{status:string, dir:string, version:string, revision:int, carried:list<string>,
 	 *               failed:array<string,string>, fallback:?string, reason:string}
 	 *         status: written | unchanged | failed. carried: every CVE the recipe carries
@@ -201,12 +205,19 @@ class PackageFixRecipeWriter {
 			// --- Each CVE asked for ---------------------------------------------
 			$carried_new = array();
 			$fixed_versions = array();
+			$watch_state = null;
 			foreach ($new as $cve) {
 				$info = $want[$cve];
 				$ctx = (array)($opts['finder_ctx'] ?? array()) + array('upstreams_file' => $upstreams_file);
 				$ctx['base_upstream'] = $base_upstream;
 				$ctx['fixed_in'] = (string)($info['fixed_in'] ?? '');
 				$ctx['ids'] = array_values(array_filter((array)($info['ids'] ?? array()), 'is_string'));
+				if (isset($info['commits'])) {
+					$ctx['commits'] = array_values(array_filter((array)$info['commits'], 'is_string'));
+				} elseif (!isset($ctx['commits'])) {
+					$watch_state = $watch_state ?? (isset($opts['watch_state']) ? (array)$opts['watch_state'] : UpstreamFixWatch::state());
+					$ctx['commits'] = UpstreamFixWatch::commitsFor($watch_state, (string)$cve);
+				}
 				$found = isset($opts['finder']) ? call_user_func($opts['finder'], $source, $cve, $ctx) : UpstreamFixFinder::find($source, $cve, $ctx);
 				$fv = (string)($found['fixed_version'] ?? '');
 				if ($fv === '' && $up !== null) { $fv = UpstreamFixFinder::line_version($base_upstream, $ctx['fixed_in'], $up['line']); }

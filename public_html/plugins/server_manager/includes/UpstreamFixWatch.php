@@ -10,7 +10,7 @@
  *
  *   - Ubuntu's tracker lists the CVEs not fixed on 26.04;
  *   - each is rated by the highest of the upstream project's own rating (a
- *     driver: UpstreamAdvisoryDriver), NVD's (as the tracker mirrors it), and
+ *     driver: UpstreamAdvisoryDriver, for PHP, OpenSSL and ImageMagick), NVD's (as the tracker mirrors it), and
  *     Ubuntu's priority once the CVE is past triage (the triage default is a
  *     placeholder, not a rating);
  *   - a driver also says whether upstream has released the fix.
@@ -25,6 +25,8 @@
  * A source the tracker could not be read for keeps its last answer, and says
  * since when.
  *
+ * @version 1.4 - OpenSSL's and ImageMagick's own advisories are read too (UpstreamAdvisoryOpenssl,
+ *                UpstreamAdvisoryImageMagick); commitsFor(): the fix commits a stored advisory names
  * @version 1.3 - recipes() counts the package fix channel's fixes, the automatic ones included (package_fixes_automatic WP6)
  * @version 1.2 - curl, libxml2, glibc and imagemagick are watched too (owner Q4); a CVE a machine finds
  *                missing from Ubuntu's newer build is missing whatever the tracker says, so the recipe is
@@ -64,7 +66,24 @@ class UpstreamFixWatch {
 
 	/** The drivers that rate a project's own fixes. */
 	public static function drivers(): array {
-		return array(new UpstreamAdvisoryPhp());
+		return array(new UpstreamAdvisoryPhp(), new UpstreamAdvisoryOpenssl(), new UpstreamAdvisoryImageMagick());
+	}
+
+	/**
+	 * The fix commits the stored advisories name for $cve (OpenSSL's CVE
+	 * records name one per release branch), from every driver's last good
+	 * answer. Empty when none does.
+	 *
+	 * @return list<string>
+	 */
+	public static function commitsFor(array $state, string $cve): array {
+		$out = array();
+		foreach ($state['drivers'] ?? array() as $d) {
+			foreach ((array)($d['advisories'][$cve]['commits'] ?? array()) as $sha) {
+				if (is_string($sha) && preg_match('/^[0-9a-f]{40,64}$/', $sha)) { $out[] = $sha; }
+			}
+		}
+		return array_values(array_unique($out));
 	}
 
 	/**

@@ -19,6 +19,8 @@
  * node. They used to be separate code and could disagree about whether a
  * machine was reachable.
  *
+ * @version 1.7 - every result says whether the machine answered at all ('answered'): an HTTP status, locked
+ *                or up did; a refused, timed-out or unreachable connection did not
  * @version 1.6 - a probe's job keeps its times and its failure in the columns the job has (mjb_started_time,
  *                mjb_completed_time, mjb_error_message): the names it set were none of them, so each was
  *                dropped and a failed probe's job said nothing about why
@@ -228,7 +230,7 @@ class NodeHealthProbe {
 			return self::result(false, $target, 'locked', 'locked: its data root is waiting for its key', [], $elapsed, false, true);
 		}
 		if ($status < 200 || $status >= 400) {
-			return self::result(false, $target, 'HTTP ' . $status, 'HTTP ' . $status, [], $elapsed, false);
+			return self::result(false, $target, 'HTTP ' . $status, 'HTTP ' . $status, [], $elapsed, false, false, true);
 		}
 
 		$measured = ['probe_latency_ms' => $elapsed, 'probe_http_status' => $status];
@@ -348,9 +350,12 @@ class NodeHealthProbe {
 		return implode("\n", $lines) . "\n";
 	}
 
-	private static function result($ok, $host, $detail, $message, array $measured, $elapsed, $unresolvable, $locked = false) {
+	private static function result($ok, $host, $detail, $message, array $measured, $elapsed, $unresolvable, $locked = false, $answered = null) {
 		return [
 			'ok'           => (bool)$ok,
+			// The machine answered at all: up, locked, or an HTTP status. A
+			// connection refused, timed out or never made did not.
+			'answered'     => $answered === null ? ((bool)$ok || (bool)$locked) : (bool)$answered,
 			'unresolvable' => (bool)$unresolvable,
 			'locked'       => (bool)$locked,
 			'host'         => (string)$host,

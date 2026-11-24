@@ -290,6 +290,15 @@ chk "a series option it does not read: refused" "$(walk "$W")" "1"
 chk "says so" "$(grep -c "the option '-R'" "$T/out")" "1"
 W="$T/walk-bad"; sed -i '$d' "$W/debian/patches/series"; echo 'missing.patch' >> "$W/debian/patches/series"
 chk "a series line naming no file: refused" "$(walk "$W")" "1"
+W="$T/walk-sub"; mkdir -p "$W/debian/patches/fips"; printf 'three\n' > "$W/b.txt"
+printf '%s\n' '--- a/b.txt' '+++ b/b.txt' '@@ -1 +1 @@' '-three' '+three, fips' > "$W/debian/patches/fips/sub.patch"
+echo 'fips/sub.patch' > "$W/debian/patches/series"
+chk "a patch in a subfolder of debian/patches/ (openssl's fips/): walks" "$(walk "$W")" "0"
+chk "and is applied" "$(cat "$W/b.txt")" "three, fips"
+for bad in '../escape.patch' 'fips/../../escape.patch' '/etc/escape.patch' 'fips/.hidden.patch'; do
+    echo "$bad" > "$W/debian/patches/series"
+    chk "a series name leaving debian/patches/ ($bad): refused" "$(walk "$W")" "1"
+done
 
 echo "A fix on upstream's release (upstream_release)"
 # A copy of build.sh with the project's key beside it, as in the build root.

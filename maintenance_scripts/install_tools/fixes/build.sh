@@ -4,6 +4,8 @@
 # plus upstream's security patches, as every binary package that source makes
 # (specs/package_fixes_ahead_of_ubuntu.md WP1).
 #
+# Version: 1.6 - Ubuntu's series may name a patch in a subfolder of debian/patches/ (openssl's
+#                fips/...); only an absolute name, a .. part or a dot-name is refused
 # Version: 1.5 - a detached signature may also be named .gpg2 (Postfix's own name for one)
 # Version: 1.4 - made_by= (who wrote the recipe, into FIXINFO) and upstream_release= (a fix built on
 #                upstream's signed point release under Ubuntu's debian/; specs/package_fixes_automatic.md
@@ -159,7 +161,8 @@ series_walk() {  # TREE UPSTREAM_VERSION
             -p[0-9])   strip="${opts#-p}" ;;
             *)         die "Ubuntu's series gives ${name} the option '${opts}', which build.sh does not read" ;;
         esac
-        [[ "$name" != */* && "$name" != .* && -f "$tree/debian/patches/$name" ]] \
+        # A subfolder is quilt's own (openssl keeps fips/*.patch); nothing may leave debian/patches/.
+        [[ "$name" != /* && "/$name/" != */../* && "/$name/" != */.* && -f "$tree/debian/patches/$name" ]] \
             || die "Ubuntu's series names ${name}, which is not a file in debian/patches/"
         if (cd "$tree" && patch -p"$strip" -R -f -F 0 --dry-run -s < "debian/patches/$name") > /dev/null 2>&1; then
             say "left out Ubuntu's ${name}: upstream's ${uver} has it already"

@@ -11,14 +11,21 @@
  *      on, to the fixed release on the same release line (the first of the
  *      advisory's fixed versions on that line; with none, the line's newest
  *      tag; with no newer tag, the line's branch head where UPSTREAMS names one);
- *   2. the commits in that range whose message names the CVE or one of the
- *      project's own ids for it (PHP's GHSA), oldest first;
+ *   2. the commits in that range that the project's own advisory names as the
+ *      fix (a driver's commits: OpenSSL's CVE records name one per release
+ *      branch, and those reachable in the range are this line's); with none
+ *      named, or none of them in the range, the commits whose message names
+ *      the CVE or one of the project's own ids for it (PHP's GHSA); oldest
+ *      first;
  *   3. each as `git format-patch`, with the parts touching NEWS, ChangeLog,
  *      CHANGES, release notes and docs left out.
  *
  * Runs as root under the automatic runner (WP9); nothing here writes outside
  * the clone directory.
  *
+ * @version 1.3 - the fix commits a project's advisory names (ctx commits: OpenSSL's CVE records) are used
+ *                where they are in the range, under the same signed-tag rule; the message search stays
+ *                for the rest
  * @version 1.2 - owner 2026-11-22: a source UPSTREAMS marks trust=unsigned (a project that signs nothing:
  *                PostgreSQL, glibc, ImageMagick) has its commits used from its official git without a
  *                signed tag, a branch head included
@@ -42,6 +49,8 @@ class UpstreamFixFinder {
 	 * @param array $ctx base_upstream  the upstream version Ubuntu's build is based on ('8.5.4')
 	 *                   fixed_in       the advisory's fixed versions, comma separated (may be empty)
 	 *                   ids            the project's own ids for the CVE (GHSA-...)
+	 *                   commits        the fix commits (full SHAs) the project's advisory names, on any
+	 *                                  branch (UpstreamAdvisoryDriver::commits()); those in the range are used
 	 *                   tests only: git_dir (a repository searched as is: no clone, no fetch),
 	 *                   upstreams_file (in place of fixes/UPSTREAMS)
 	 * @return array{commits: list<array{sha:string, url:string, subject:string, patch:string}>, reason:string,
@@ -142,28 +151,60 @@ class UpstreamFixFinder {
 			}
 		}
 
-		$args = array('log', '--reverse', '--no-merges', '--format=%H%x1f%s', '-E', '--regexp-ignore-case', '--grep=' . self::id_pattern($cve));
-		foreach ((array)($ctx['ids'] ?? array()) as $id) {
-			if (is_string($id) && preg_match('/^[A-Za-z][A-Za-z0-9._-]{2,63}$/', $id)) {
-				$args[] = '--grep=' . self::id_pattern($id);
+		$range_ref = 'refs/tags/' . $base_tag . '..' . (strpos($end, 'refs/') === 0 ? $end : 'refs/tags/' . $end);
+		$rows = null;
+		$listed_note = '';
+		// The fix commits the project's own advisory names (OpenSSL's CVE
+		// records, one per release branch): those in this range are the fix.
+		$listed = array();
+		foreach ((array)($ctx['commits'] ?? array()) as $c) {
+			if (is_string($c) && preg_match('/^[0-9a-f]{40,64}$/', $c)) { $listed[$c] = true; }
+		}
+		if ($listed) {
+			$r = self::git($git_dir, array('log', '--reverse', '--no-merges', '--format=%H%x1f%s', $range_ref));
+			if ($r['code'] !== 0) {
+				return $fail("could not read {$source}'s upstream history: " . self::tail($r['err']));
+			}
+			$rows = array();
+			foreach (preg_split('/\n/', trim($r['out']), -1, PREG_SPLIT_NO_EMPTY) as $row) {
+				if (isset($listed[explode("\x1f", $row, 2)[0]])) { $rows[] = $row; }
+			}
+			if (!$rows) {
+				$rows = null;
+				$listed_note = 'none of the ' . count($listed) . " commits upstream's advisory names for {$cve} ("
+					. implode(', ', array_map(function ($c) { return substr($c, 0, 12); }, array_keys($listed))) . ") is between {$base_tag} and {$end}, and ";
 			}
 		}
-		$args[] = 'refs/tags/' . $base_tag . '..' . (strpos($end, 'refs/') === 0 ? $end : 'refs/tags/' . $end);
-		$r = self::git($git_dir, $args);
-		if ($r['code'] !== 0) {
-			return $fail("could not search {$source}'s upstream history: " . self::tail($r['err']));
+		if ($rows === null) {
+			$args = array('log', '--reverse', '--no-merges', '--format=%H%x1f%s', '-E', '--regexp-ignore-case', '--grep=' . self::id_pattern($cve));
+			foreach ((array)($ctx['ids'] ?? array()) as $id) {
+				if (is_string($id) && preg_match('/^[A-Za-z][A-Za-z0-9._-]{2,63}$/', $id)) {
+					$args[] = '--grep=' . self::id_pattern($id);
+				}
+			}
+			$args[] = $range_ref;
+			$r = self::git($git_dir, $args);
+			if ($r['code'] !== 0) {
+				return $fail("could not search {$source}'s upstream history: " . self::tail($r['err']));
+			}
+			$by_message = true;
+			$rows = preg_split('/\n/', trim($r['out']), -1, PREG_SPLIT_NO_EMPTY);
+		} else {
+			$by_message = false;
 		}
-		// One fix picked onto several branches can show up more than once: the
-		// newest copy is kept, the one made for the newest line.
-		$by_subject = array();
-		foreach (preg_split('/\n/', trim($r['out']), -1, PREG_SPLIT_NO_EMPTY) as $row) {
+		// One fix picked onto several branches can show up more than once in a
+		// message search: the newest copy is kept, the one made for the newest
+		// line. The commits an advisory names are each kept.
+		$picked = array();
+		foreach ($rows as $row) {
 			$f = explode("\x1f", $row, 2);
 			if (!preg_match('/^[0-9a-f]{40,64}$/', $f[0])) { continue; }
-			unset($by_subject[$f[1] ?? '']);
-			$by_subject[$f[1] ?? ''] = $f[0];
+			$key = $by_message ? 's:' . ($f[1] ?? '') : 'c:' . $f[0];
+			unset($picked[$key]);
+			$picked[$key] = array($f[0], $f[1] ?? '');
 		}
 		$only_docs = 0;
-		foreach ($by_subject as $subject => $sha) {
+		foreach ($picked as list($sha, $subject)) {
 			$p = self::git($git_dir, array('format-patch', '-1', '--stdout', '--no-signature', '--no-stat', $sha));
 			if ($p['code'] !== 0) {
 				return $fail("could not write upstream commit {$sha} as a patch: " . self::tail($p['err']));
@@ -174,9 +215,13 @@ class UpstreamFixFinder {
 		}
 		if (!$out['commits']) {
 			$named = implode(' or ', array_merge(array($cve), array_values(array_filter((array)($ctx['ids'] ?? array()), 'is_string'))));
-			$out['reason'] = $only_docs
-				? "the only upstream commits naming {$named} between {$base_tag} and {$end} change its news and docs, not its code"
-				: "no upstream commit between {$base_tag} and {$end} names {$named}";
+			if (!$by_message) {
+				$out['reason'] = "the only commits upstream's advisory names for {$cve} between {$base_tag} and {$end} change its news and docs, not its code";
+			} else {
+				$out['reason'] = $listed_note . ($only_docs
+					? "the only upstream commits naming {$named} between {$base_tag} and {$end} change its news and docs, not its code"
+					: "no upstream commit between {$base_tag} and {$end} names {$named}");
+			}
 		}
 		return $out;
 	}
