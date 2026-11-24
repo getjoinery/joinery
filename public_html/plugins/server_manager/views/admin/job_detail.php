@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.46 - site_log host_converger: a host that logs the converger to the journal says so and points at unit_journal
  * @version 1.45 - unban_address: the jail, the address and whether a ban was lifted
  * @version 1.44 - web_workers: the modules Apache loads, and whether HTTP/2 is among them
  * @version 1.43 - log_table_tail: an error read names the kind it was narrowed to
@@ -498,12 +499,14 @@ if ($result) {
 			. htmlspecialchars(JobCommandBuilder::SITE_LOG_FILES[$file] ?? $file)
 			. (!empty($result_data['previous']) ? ' (previous rotation)' : '')
 			. '</strong> <small class="text-muted">— '
-			. (empty($result_data['present'])
+			. (!empty($result_data['journal'])
+				? 'this host logs it to the journal: read it with unit_journal joinery-host-converger'
+				: (empty($result_data['present'])
 				? 'not present on the node'
 				: (int)($result_data['lines_returned'] ?? 0) . ' line(s)'
 					. (!empty($result_data['truncated']) ? ', more in the file' : '')
 					. ', ' . number_format((int)($result_data['size_bytes'] ?? 0)) . ' bytes on disk'
-					. ', modified ' . htmlspecialchars((string)($result_data['modified_time'] ?? '')))
+					. ', modified ' . htmlspecialchars((string)($result_data['modified_time'] ?? ''))))
 			. '</small></div>';
 		echo '<pre class="svm-logbox">' . htmlspecialchars(SmSecretRedactor::redact((string)$result_data['text'])) . '</pre></div>';
 		$result_data = null;
