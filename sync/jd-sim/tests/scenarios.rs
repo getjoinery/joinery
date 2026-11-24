@@ -23228,6 +23228,53 @@ fn a_file_carried_into_a_vault_reaches_its_plain_copy_by_conversion() {
     assert!(v.unreached.is_empty(), "{v:?}");
 }
 
+/// A carry's plain copy is the carry's to trash however long its trash takes
+/// to land. While the conversion is on its way the file is bound to both
+/// records -- the sealed copy that claims it and the plain one waiting for its
+/// trash -- and here the file leaves the disk by the engine's own hand
+/// (`Vfs::trash`, as a park for a name it cannot hold takes it: plat3 75676)
+/// before any look sees it bound to the sealed copy alone. The plain copy's
+/// trash is still the conversion's; the sealed copy's, read as a delete of a
+/// file the engine took itself, is no delete's.
+#[test]
+fn a_carrys_plain_copy_trashed_after_its_file_left_the_disk_is_the_carrys() {
+    let (world, _private, _out) = a_vault_of_two(9_894, &["holder", "peer"]);
+    let holder = world.device("holder");
+    holder.fs.mark_sealed_dir("Private");
+    holder.fs.user_write("Plain/p.txt", b"carried in, its plain copy's trash held up");
+    assert!(world.settle().is_some());
+    let plain = server_file_named(&world, "p.txt");
+    let before: Vec<i64> = world.server.files().iter().map(|f| f.id).collect();
+    holder.fs.user_rename("Plain/p.txt", "Private/p.txt");
+    // The plain copy's trash is refused while the sealed copy goes up.
+    let sealed_up = || world.server.files().iter().filter(|f| f.encrypted && !f.trashed && !before.contains(&f.id)).map(|f| f.id).collect::<Vec<_>>();
+    for _ in 0..4 {
+        holder.net.set_faults(NetFaults { refuse_before: Some("drive_trash".into()), ..NetFaults::none() });
+        world.pass(holder);
+        if !sealed_up().is_empty() {
+            break;
+        }
+    }
+    holder.net.set_faults(NetFaults::none());
+    let [sealed] = sealed_up()[..] else { panic!("the premise: one sealed copy went up: {:?}", world.server.files()) };
+    assert!(world.server.files().iter().any(|f| f.id == plain.id && !f.trashed), "the premise: the plain copy waits for its trash");
+    jd_vfs::Vfs::trash(&holder.fs, std::path::Path::new("/sync/Private/p.txt")).unwrap();
+    assert!(world.settle().is_some());
+    let files = world.server.files();
+    assert!(files.iter().any(|f| f.id == plain.id && f.trashed), "the premise: the plain copy went: {files:?}");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!(v.carried, 1, "the plain copy's trash is the carry's: {v:?}");
+    assert!(
+        v.unreached.iter().all(|u| !u.starts_with(&format!("file {}:", plain.id))),
+        "and never charged as a trash no delete reached: {v:?}"
+    );
+    // The sealed copy's trash, if the engine sent one, is no delete's.
+    if files.iter().any(|f| f.id == sealed && f.trashed) {
+        assert_eq!(v.unreached.len(), 1, "{v:?}");
+        assert!(v.unreached[0].starts_with(&format!("file {sealed}:")), "{v:?}");
+    }
+}
+
 /// On a disk whose ids are positions the engine knows a file by its path
 /// and its bytes. A file the user moves and rewrites before any pass shows
 /// it neither: to the engine one file was deleted and another made, and

@@ -1331,13 +1331,21 @@ impl World {
         // nor a vault's own directory moved with its vault: no edge crossed.
         // Later by the timeline's own order, not its stamps: once the user
         // stops acting every pass point bears one stamp (plat3 75533).
+        // Into a vault, still bound to this one beside its sealed claimant is
+        // enough: that is the conversion on its way, the plain copy held until
+        // its trash lands, and the file may leave the disk in the very pass the
+        // trash does (a park for a name it cannot hold, plat3 75676) before
+        // any look sees it bound to the sealed copy alone.
         let carried = timeline.iter().any(|(soul, line)| {
             let Some(first) = line.iter().position(|(look, _, ids)| *look < made_in && ids.contains(&id)) else {
                 return false;
             };
             moves.iter().filter(|m| m.soul == *soul && m.dir == dir && m.crossed() && m.order < c.order && m.from_vault.is_some() == sealed(id)).any(|m| {
+                let converting = m.from_vault.is_none() && m.to_vault.is_some();
                 line[first + 1..].iter().any(|(_, at, ids)| {
-                    *at > m.order && !ids.contains(&id) && ids.iter().any(|other| *other != id && sealed(*other) == m.to_vault.is_some())
+                    *at > m.order
+                        && (converting || !ids.contains(&id))
+                        && ids.iter().any(|other| *other != id && sealed(*other) == m.to_vault.is_some())
                 })
             })
         });
