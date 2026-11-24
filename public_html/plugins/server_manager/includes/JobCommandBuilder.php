@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.175 - build_unban_address reads the jail name as given: one with a line break or space around it is refused
  * @version 1.174 - SITE_LOG_FILES reads the dev box's follow_main pull log (agent 1.131.0, a per-value floor)
  * @version 1.173 - build_unban_address: lift one fail2ban ban on a node, a jail name and an IPv4 or IPv6 address (agent 1.131.0)
  * @version 1.172 - FILE_HEAD_FILES reads Apache's joinery-http2.conf (apache_http2, agent 1.130.0)
@@ -2900,7 +2901,9 @@ class JobCommandBuilder {
 	}
 
 	public static function build_unban_address_primitive($node, $jail, $address) {
-		$jail = trim((string)$jail);
+		// Read as given, not trimmed: a name with a line break or a space around
+		// it is not a jail name, and is refused rather than tidied.
+		$jail = (string)$jail;
 		if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/D', $jail)) {
 			throw new Exception("'" . substr($jail, 0, 64) . "' is not a jail name.");
 		}

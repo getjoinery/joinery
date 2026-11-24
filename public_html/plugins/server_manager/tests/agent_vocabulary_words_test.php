@@ -190,7 +190,11 @@ $ub = avw_job($node_ub, 'unban_address', json_encode(array('jail' => 'apache-bad
 JobResultProcessor::process($ub);
 $ub->load();
 $r = json_decode((string)$ub->get('mjb_result'), true);
-check($r === array('read' => true, 'jail' => 'apache-badbotsb', 'address' => '2001:db8::9', 'fail2ban' => 'answered', 'unbanned' => 1)
+// Compared without regard to key order: the result column is jsonb, which keeps its own.
+$want = array('read' => true, 'jail' => 'apache-badbotsb', 'address' => '2001:db8::9', 'fail2ban' => 'answered', 'unbanned' => 1);
+if (is_array($r)) ksort($r);
+ksort($want);
+check($r === $want
 	&& $ub->get('mjb_status') === 'completed', 'a lifted ban is recorded: the jail, the address, the count', var_export($r, true));
 $queued = 0;
 foreach (new MultiManagementJob(array('node_id' => (int)$node_ub->key, 'job_type' => 'host_report')) as $j) {
