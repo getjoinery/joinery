@@ -18,6 +18,7 @@
  * nothing went), never throws, and never undoes what it was called about: an
  * email that fails leaves the payment, the cancel or the ending as it is.
  *
+ * @version 1.1 - payment_failed_vars(): a failed-payment email names every line and the invoice amount
  * @version 1.0
  */
 class SubscriptionEmails {
@@ -288,6 +289,29 @@ class SubscriptionEmails {
 	public static function reminder_mode(): string {
 		$v = strtolower(trim((string)Globalvars::get_instance()->get_setting(self::SETTING_REMINDERS)));
 		return in_array($v, array('year', 'all'), true) ? $v : '';
+	}
+
+	/**
+	 * What a failed-payment email says of a subscription: every line the
+	 * unpaid invoice bills, and the invoice's amount (the lines' prices
+	 * when there is no invoice to read).
+	 *
+	 * @return array{tier_name:string, billing_amount:string}
+	 */
+	public static function payment_failed_vars(array $lines, $invoice = null): array {
+		$currency = (string)($invoice->currency ?? '');
+		if ($invoice !== null && isset($invoice->amount_due)) {
+			$amount = self::from_minor((int)$invoice->amount_due, $currency);
+		} else {
+			$amount = 0.0;
+			foreach ($lines as $line) {
+				$amount += (float)$line->get('odi_price');
+			}
+		}
+		return array(
+			'tier_name'      => self::labels($lines),
+			'billing_amount' => number_format($amount, self::has_no_minor_unit($currency) ? 0 : 2),
+		);
 	}
 
 	/** Does this line's product tell its buyer about a cancel and an ending itself? */

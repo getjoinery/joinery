@@ -365,7 +365,7 @@ try {
                     $order_item = $order_items[0];
                     $user_id = $order_item->get('odi_usr_user_id');
                     if ($user_id) {
-                        _stripe_webhook_send_payment_failure_email($user_id, $order_item);
+                        _stripe_webhook_send_payment_failure_email($user_id, $order_item, $order_items, $invoice);
                     }
 
                     error_log("Stripe webhook: payment failed for subscription $subscription_id");
@@ -458,7 +458,7 @@ function _stripe_webhook_subscription_ended($order_item, $subscription_id, $revo
 /**
  * Send payment failure email to user with dedup check
  */
-function _stripe_webhook_send_payment_failure_email($user_id, $order_item) {
+function _stripe_webhook_send_payment_failure_email($user_id, $order_item, array $order_items = array(), $invoice = null) {
     // Check for recent payment failure email
     if (WebhookLog::hasRecentPaymentFailure('stripe', 'invoice.payment_failed', (string)$order_item->get('odi_stripe_subscription_id'))) {
         error_log("Stripe webhook: skipping payment failure email, recent one exists");
@@ -472,28 +472,18 @@ function _stripe_webhook_send_payment_failure_email($user_id, $order_item) {
         $user = new User($user_id, TRUE);
         if (!$user->key) return;
 
-        // The line whose charge failed, by the name its buyer knows it by
-        // ('Managed hosting — example.com'); the buyer's tier only when the
-        // line has no product to name.
-        $tier_name = $order_item->buyer_label();
-        if ($tier_name === '') {
+        // Every line the unpaid invoice bills, by the names their buyer knows
+        // them by, and the invoice's own amount.
+        $vars = SubscriptionEmails::payment_failed_vars($order_items ?: array($order_item), $invoice);
+        if ($order_item->buyer_label() === '' && count($order_items) < 2) {
             $tier = SubscriptionTier::GetUserTier($user_id);
-            $tier_name = $tier ? $tier->get('sbt_display_name') : 'your current plan';
-        }
-
-        $product = null;
-        if ($order_item->get('odi_pro_product_id')) {
-            $product = new Product($order_item->get('odi_pro_product_id'), TRUE);
-        }
-        $billing_amount = $product ? $product->get('pro_price') : '';
-        if ($order_item->get('odi_price')) {
-            $billing_amount = $order_item->get('odi_price');
+            $vars['tier_name'] = $tier ? $tier->get('sbt_display_name') : 'your current plan';
         }
 
         EmailSender::sendTemplate('subscription_payment_failed', $user->get('usr_email'), [
             'recipient' => $user->export_as_array(),
-            'tier_name' => $tier_name,
-            'billing_amount' => number_format((float)$billing_amount, 2),
+            'tier_name' => $vars['tier_name'],
+            'billing_amount' => $vars['billing_amount'],
         ]);
     } catch (Exception $e) {
         error_log("Stripe webhook: failed to send payment failure email: " . $e->getMessage());

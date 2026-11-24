@@ -155,6 +155,13 @@ SubscriptionEmails::$mailer = function ($template, $to, $vars) use (&$sent) {
 $said2 = SubscriptionEmails::renewal_paid(se_invoice('in_se_6_' . $run, 'subscription_cycle', 1500), array($a, $b));
 check($said !== 'sent' && $said2 === 'sent' && count($sent) === 3, 'a receipt that could not be sent is tried again by the invoice\'s other event', $said . ' / ' . $said2);
 
+section('A failed payment names what the invoice bills');
+$vars = SubscriptionEmails::payment_failed_vars(array($a, $b), (object)array('amount_due' => 1298, 'currency' => 'usd'));
+check(strpos($vars['tier_name'], 'SE Hosting') !== false && strpos($vars['tier_name'], 'SE Services') !== false && $vars['billing_amount'] === '12.98',
+	'both lines and the invoice amount', json_encode($vars));
+$vars = SubscriptionEmails::payment_failed_vars(array($a), (object)array('amount_due' => 500, 'currency' => 'jpy'));
+check($vars['billing_amount'] === '500', 'a currency with no cents is not divided', json_encode($vars));
+
 section('Cancel, resume and ended');
 
 $sent = array();
