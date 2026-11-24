@@ -36,6 +36,8 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.7.0 - runTool(): one program on outside bytes, fenced like the extractor (djpeg for ImageDecoder);
+ *   the fenced PHP loads gd and exif for ImageCutter
  * @version 1.6.0 - Word 97-2003 (.doc): a compound file read with byte arithmetic, the piece table's text with
  *   fields shown as their results, tables as tabs and lines; an encrypted one is secured, Word 95 and older fail
  * @version 1.5.2 - jailFenced() caches through ApcuStore
@@ -125,7 +127,7 @@ class DocumentText {
 	 * under `php -n`: the fence grants no ini file. One compiled into PHP needs
 	 * no line and gets none. Never ffi.
 	 */
-	const PARSER_EXTENSIONS = array('ctype', 'dom', 'fileinfo', 'iconv', 'mbstring', 'posix',
+	const PARSER_EXTENSIONS = array('ctype', 'dom', 'exif', 'fileinfo', 'gd', 'iconv', 'mbstring', 'posix',
 		'simplexml', 'tokenizer', 'xml', 'xmlreader', 'xmlwriter', 'zip');
 	/** Where the launcher puts a run's own folder (joinery_jail/main.go scratchPrefix). */
 	const JAIL_RUN_FOLDER_PREFIX = '/dev/shm/joinery-jail-run.';
@@ -591,6 +593,70 @@ class DocumentText {
 		$exit = proc_close($proc);
 
 		return self::interpret($exit, $out['stdout'], $out['stderr'], $label);
+	}
+
+	/**
+	 * Run one program on outside bytes: $stdin down its standard input, its
+	 * standard output back. For a parser that is a program and not PHP (djpeg,
+	 * for ImageDecoder). Fenced, it runs under the launcher exactly as the
+	 * extractor does, granted its own binary and nothing else of the site;
+	 * without the jail, or when the caller says not fenced, under `timeout`
+	 * and an address-space limit as the calling user.
+	 *
+	 * Exit codes are the launcher's and `timeout`'s: 124 timed out, 125 the
+	 * launcher refused, over 128 killed by a signal.
+	 *
+	 * @param string[] $argv        the program (absolute path) and its arguments
+	 * @param string   $stdin       the bytes to hand it
+	 * @param int      $timeout     wall-clock seconds
+	 * @param int      $limit_bytes address-space cap
+	 * @param bool     $fenced      false to skip the launcher (a test's stand-in script)
+	 * @return array{exit:int,stdout:string,stderr:string,fenced:bool}
+	 */
+	public static function runTool(array $argv, string $stdin, int $timeout, int $limit_bytes, bool $fenced = true): array {
+		$argv = array_map('strval', array_values($argv));
+		$timeout = max(1, $timeout);
+		$limit_bytes = max(16777216, $limit_bytes);
+		$in_fence = $fenced && self::jailAvailable() && self::jailFenced();
+		if ($in_fence) {
+			$real = realpath($argv[0]);
+			$cmd = array_merge(array(
+				self::JAIL_LAUNCHER,
+				'--timeout=' . $timeout,
+				'--rlimit-as=' . $limit_bytes,
+				'--scratch=' . (int)self::JAIL_SCRATCH_BYTES,
+				'--read=' . ($real !== false ? $real : $argv[0]),
+				'--',
+			), $argv);
+		} elseif ($fenced && self::jailAvailable()) {
+			$cmd = array_merge(array(self::JAIL_LAUNCHER, '--timeout=' . $timeout, '--rlimit-as=' . $limit_bytes, '--'), $argv);
+		} else {
+			if ($fenced) self::noteUnjailed();
+			$cmd = array_merge(array('timeout', '-k', '5', (string)$timeout, '/bin/sh', '-c',
+				'ulimit -v ' . (int)floor($limit_bytes / 1024) . ' 2>/dev/null; exec "$0" "$@"'), $argv);
+		}
+		$pipes = array();
+		$proc = @proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
+		if (!is_resource($proc)) {
+			return array('exit' => 127, 'stdout' => '', 'stderr' => 'could not start ' . basename($argv[0]), 'fenced' => $in_fence);
+		}
+		$out = self::pump($pipes, $stdin);
+		// Read the end from the status, not proc_close(): a command killed by a
+		// signal must not read as one that exited with that number.
+		$deadline = microtime(true) + $timeout + 10;
+		$status = proc_get_status($proc);
+		while ($status['running'] && microtime(true) < $deadline) {
+			usleep(5000);
+			$status = proc_get_status($proc);
+		}
+		if ($status['running']) {
+			proc_terminate($proc, 9);
+			$exit = 124;
+		} else {
+			$exit = !empty($status['signaled']) ? 128 + (int)$status['termsig'] : (int)$status['exitcode'];
+		}
+		proc_close($proc);
+		return array('exit' => $exit, 'stdout' => $out['stdout'], 'stderr' => $out['stderr'], 'fenced' => $in_fence);
 	}
 
 	/**

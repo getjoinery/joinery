@@ -46,6 +46,18 @@
  * refuses a 24-megapixel progressive JPEG (about 150 MB) rather than risk the
  * kernel killing something; a 512 MB site takes it.
  *
+ * Where it runs: never in a web worker. GD, the EXIF reader and the image
+ * header read are C parsers on a stranger's bytes, so the site's one caller,
+ * ImageCutter, runs open_bytes() inside the parser jail (docs/document_text.md)
+ * and the JPEG shrink program inside the jail too (shrink_jpeg()). open() and
+ * the in-process shrink are for the jailed side and the tests.
+ *
+ * @version 1.2 - works from bytes (open_bytes(), read_header_bytes()): nothing is staged on disk, and
+ *                djpeg reads stdin and answers on stdout. shrink 'ask' hands the shrink back to
+ *                the caller (ImageShrinkWanted) for a process that cannot start a child;
+ *                open_shrunk() finishes from the shrunk picture. shrink_jpeg() runs djpeg
+ *                through DocumentText::runTool(), fenced where the jail is installed. A BMP is read
+ *                only as the shrink's own answer, never as an upload
  * @version 1.1 - the ceiling follows the machine's memory budget (the setting caps it); a decoder
  *                child killed by a signal is reported as out of memory and left retryable, not
  *                recorded as damage
@@ -59,6 +71,18 @@ class ImageDecodeRefused extends RuntimeException {
 	public $ceiling_mb = null;
 	/** @var bool true when the same decode may well succeed later (the site was out of memory just then) */
 	public $transient = false;
+}
+
+/**
+ * Thrown by open_bytes() in shrink mode 'ask': the JPEG should be decoded
+ * already shrunk, and this process cannot start the program that does it.
+ * Carries what the caller needs to shrink it and finish with open_shrunk().
+ */
+class ImageShrinkWanted extends RuntimeException {
+	/** @var int M of the M/8 scale */
+	public $scale_num;
+	/** @var array read_header_bytes()'s answer for the source */
+	public $info;
 }
 
 class ImageDecoded {
@@ -132,6 +156,11 @@ class ImageDecoder {
 		return min(self::setting_mb(), self::decode_room_mb());
 	}
 
+	/** True when the ceiling is what this machine can spare, not the operator's cap (the refusal says which). */
+	public static function ceiling_is_site() {
+		return self::$ceiling_override === null && self::ceiling_mb() < self::setting_mb();
+	}
+
 	/** The operator's cap, image_decode_max_mb. */
 	public static function setting_mb() {
 		$mb = 0;
@@ -192,19 +221,44 @@ class ImageDecoder {
 	}
 
 	/**
-	 * Decode $path upright at no more than is needed to cut $max_w x $max_h
-	 * from it.
+	 * Decode the image file at $path: open_bytes() on its contents.
 	 *
-	 * @param string $path  a readable image file
-	 * @param int $max_w    the largest width any caller will cut from the result
-	 * @param int $max_h    the largest height any caller will cut from the result
-	 * @return ImageDecoded
-	 * @throws ImageDecodeRefused when the file is not a decodable image or would cost more than the ceiling
+	 * @throws ImageDecodeRefused when the file is missing, or as open_bytes()
 	 */
 	public static function open($path, $max_w, $max_h) {
-		$info = self::read_header($path);
+		if (!is_file($path) || !is_readable($path)) {
+			throw new ImageDecodeRefused('The image file is missing or unreadable.');
+		}
+		$bytes = @file_get_contents($path);
+		if ($bytes === false) {
+			throw new ImageDecodeRefused('The image file is missing or unreadable.');
+		}
+		return self::open_bytes($bytes, $max_w, $max_h);
+	}
+
+	/**
+	 * Decode an image upright at no more than is needed to cut $max_w x $max_h
+	 * from it.
+	 *
+	 * @param string $bytes  the image file's bytes
+	 * @param int $max_w     the largest width any caller will cut from the result
+	 * @param int $max_h     the largest height any caller will cut from the result
+	 * @param array $options ceiling_mb: the ceiling to hold the decode to (default
+	 *                       ceiling_mb()); shrink: 'child' starts djpeg from here
+	 *                       (default), 'ask' throws ImageShrinkWanted in its place,
+	 *                       'none' decodes in full
+	 * @return ImageDecoded
+	 * @throws ImageDecodeRefused when the bytes are not a decodable image or would cost more than the ceiling
+	 * @throws ImageShrinkWanted in shrink mode 'ask', when a shrunk decode is the right one
+	 */
+	public static function open_bytes($bytes, $max_w, $max_h, array $options = array()) {
+		$bytes = (string)$bytes;
+		$info = self::read_header_bytes($bytes);
 		$max_w = max(1, (int)$max_w);
 		$max_h = max(1, (int)$max_h);
+		$shrink = isset($options['shrink']) ? (string)$options['shrink'] : 'child';
+		$ceiling = isset($options['ceiling_mb']) ? (int)$options['ceiling_mb'] : self::ceiling_mb();
+		$ceiling_is_site = !isset($options['ceiling_mb']) && self::$ceiling_override === null && $ceiling < self::setting_mb();
 
 		// Dimensions after orientation: 5-8 turn the image on its side.
 		$swap = $info['orientation'] >= 5;
@@ -215,7 +269,7 @@ class ImageDecoder {
 		// at least max_w x max_h upright. Both dimensions, so a portrait source
 		// keeps enough width for a landscape hero crop.
 		$scale_num = 8;
-		if ($info['type'] === IMAGETYPE_JPEG) {
+		if ($info['type'] === IMAGETYPE_JPEG && $shrink !== 'none') {
 			for ($m = 1; $m <= 8; $m++) {
 				if (self::scaled($up_w, $m) >= $max_w && self::scaled($up_h, $m) >= $max_h) {
 					$scale_num = $m;
@@ -223,49 +277,93 @@ class ImageDecoder {
 				}
 			}
 		}
-		$djpeg = ($scale_num < 8) ? self::djpeg_path() : null;
-		if ($scale_num < 8 && $djpeg === null) {
-			$scale_num = 8;
+		$djpeg = null;
+		if ($scale_num < 8 && $shrink === 'child') {
+			$djpeg = self::djpeg_path();
+			if ($djpeg === null) {
+				$scale_num = 8;
+			}
 		}
 
 		// Cost before a byte of pixels exists: 4 bytes per decoded pixel, plus
 		// the whole coefficient set for a progressive JPEG, scaled or not.
 		$out_w = self::scaled($info['width'], $scale_num);
 		$out_h = self::scaled($info['height'], $scale_num);
-		$bytes = 4 * $out_w * $out_h;
+		$cost = 4 * $out_w * $out_h;
 		if ($info['progressive']) {
-			$bytes += 6 * $info['width'] * $info['height'];
+			$cost += 6 * $info['width'] * $info['height'];
 		}
-		$estimate_mb = (int)ceil($bytes / 1048576);
-		$ceiling = self::ceiling_mb();
+		$estimate_mb = (int)ceil($cost / 1048576);
 		if ($estimate_mb > $ceiling) {
-			$bound = (self::$ceiling_override === null && $ceiling < self::setting_mb())
-				? 'this site\'s memory allows ' . $ceiling . ' MB'
-				: 'the limit is ' . $ceiling . ' MB';
-			$e = new ImageDecodeRefused(sprintf(
-				'This photo is too large to make sizes from (about %d MB to decode%s, %s). It was saved as uploaded.',
-				$estimate_mb, $info['progressive'] ? ', progressive JPEG' : '', $bound));
-			$e->estimate_mb = $estimate_mb;
-			$e->ceiling_mb = $ceiling;
+			throw self::over_ceiling($estimate_mb, $ceiling, $info['progressive'], $ceiling_is_site || !empty($options['ceiling_is_site']));
+		}
+
+		if ($scale_num < 8 && $shrink === 'ask') {
+			$e = new ImageShrinkWanted('shrink to ' . $scale_num . '/8');
+			$e->scale_num = $scale_num;
+			$e->info = $info;
 			throw $e;
 		}
 
 		if ($djpeg !== null) {
-			$image = self::decode_jpeg_scaled($path, $djpeg, $scale_num, $ceiling);
+			$image = self::decode_bmp(self::shrink_jpeg($bytes, $scale_num, $ceiling));
 			$method = 'djpeg';
 		} else {
-			$image = self::decode_with_gd($path, $info['type']);
+			$image = self::decode_with_gd($bytes);
 			$method = 'gd';
 		}
+		unset($bytes);
 		self::$decode_count++;
 
-		if ($info['orientation'] >= 2) {
-			$image = self::orient($image, $info['orientation']);
-		}
+		return self::finished($image, $info['type'], $info['orientation'], $up_w, $up_h, $method);
+	}
 
+	/**
+	 * Finish a decode from the picture shrink_jpeg() made: the pixels of the
+	 * shrunk BMP, turned upright, described as the JPEG it came from.
+	 *
+	 * @param string $bmp       shrink_jpeg()'s answer
+	 * @param array  $info      the source's header, as ImageShrinkWanted carried it
+	 * @param int    $ceiling_mb the ceiling the decode is held to
+	 * @return ImageDecoded
+	 */
+	public static function open_shrunk($bmp, array $info, $ceiling_mb) {
+		$head = @getimagesizefromstring((string)$bmp);
+		if ($head === false || (int)$head[2] !== IMAGETYPE_BMP || (int)$head[0] < 1 || (int)$head[1] < 1) {
+			throw new ImageDecodeRefused('The shrunk image could not be read back.');
+		}
+		$estimate_mb = (int)ceil(4 * (int)$head[0] * (int)$head[1] / 1048576);
+		if ($estimate_mb > (int)$ceiling_mb) {
+			throw self::over_ceiling($estimate_mb, (int)$ceiling_mb, false, false);
+		}
+		$image = self::decode_bmp($bmp);
+		self::$decode_count++;
+		$orientation = (int)($info['orientation'] ?? 1);
+		$swap = $orientation >= 5;
+		$up_w = $swap ? (int)$info['height'] : (int)$info['width'];
+		$up_h = $swap ? (int)$info['width'] : (int)$info['height'];
+		return self::finished($image, IMAGETYPE_JPEG, $orientation, $up_w, $up_h, 'djpeg');
+	}
+
+	private static function over_ceiling($estimate_mb, $ceiling, $progressive, $ceiling_is_site) {
+		$bound = $ceiling_is_site
+			? 'this site\'s memory allows ' . $ceiling . ' MB'
+			: 'the limit is ' . $ceiling . ' MB';
+		$e = new ImageDecodeRefused(sprintf(
+			'This photo is too large to make sizes from (about %d MB to decode%s, %s). It was saved as uploaded.',
+			$estimate_mb, $progressive ? ', progressive JPEG' : '', $bound));
+		$e->estimate_mb = $estimate_mb;
+		$e->ceiling_mb = $ceiling;
+		return $e;
+	}
+
+	private static function finished($image, $type, $orientation, $up_w, $up_h, $method) {
+		if ($orientation >= 2) {
+			$image = self::orient($image, $orientation);
+		}
 		$d = new ImageDecoded();
 		$d->image = $image;
-		$d->type = $info['type'];
+		$d->type = $type;
 		$d->width = imagesx($image);
 		$d->height = imagesy($image);
 		$d->source_width = $up_w;
@@ -289,27 +387,40 @@ class ImageDecoder {
 		if (!is_file($path) || !is_readable($path)) {
 			throw new ImageDecodeRefused('The image file is missing or unreadable.');
 		}
-		$info = @getimagesize($path);
+		return self::read_header_bytes((string)@file_get_contents($path));
+	}
+
+	/** read_header(), from the file's bytes. */
+	public static function read_header_bytes($bytes) {
+		$bytes = (string)$bytes;
+		$info = ($bytes === '') ? false : @getimagesizefromstring($bytes);
 		if ($info === false || (int)$info[0] < 1 || (int)$info[1] < 1) {
 			throw new ImageDecodeRefused('The file is not an image the site can read.');
 		}
 		$type = (int)$info[2];
-		if (self::gd_reader($type) === null) {
+		if (!self::gd_reads($type)) {
 			throw new ImageDecodeRefused('The image format (' . image_type_to_mime_type($type) . ') is not one the site decodes.');
 		}
 		$orientation = 1;
 		$progressive = false;
 		if ($type === IMAGETYPE_JPEG) {
 			if (function_exists('exif_read_data')) {
-				$exif = @exif_read_data($path);
-				if (is_array($exif) && isset($exif['Orientation'])) {
-					$o = (int)$exif['Orientation'];
-					if ($o >= 2 && $o <= 8) {
-						$orientation = $o;
+				// The EXIF reader takes a stream: the bytes, never a file.
+				$stream = @fopen('php://memory', 'w+b');
+				if ($stream) {
+					fwrite($stream, $bytes);
+					rewind($stream);
+					$exif = @exif_read_data($stream);
+					fclose($stream);
+					if (is_array($exif) && isset($exif['Orientation'])) {
+						$o = (int)$exif['Orientation'];
+						if ($o >= 2 && $o <= 8) {
+							$orientation = $o;
+						}
 					}
 				}
 			}
-			$progressive = self::jpeg_is_progressive($path);
+			$progressive = self::jpeg_is_progressive_bytes(substr($bytes, 0, self::HEADER_SCAN_BYTES));
 		}
 		return array(
 			'type' => $type,
@@ -327,7 +438,13 @@ class ImageDecoder {
 	 */
 	public static function jpeg_is_progressive($path) {
 		$head = @file_get_contents($path, false, null, 0, self::HEADER_SCAN_BYTES);
-		if ($head === false || strlen($head) < 4 || substr($head, 0, 2) !== "\xFF\xD8") {
+		return self::jpeg_is_progressive_bytes($head === false ? '' : $head);
+	}
+
+	/** jpeg_is_progressive(), from the head of the file. */
+	public static function jpeg_is_progressive_bytes($head) {
+		$head = (string)$head;
+		if (strlen($head) < 4 || substr($head, 0, 2) !== "\xFF\xD8") {
 			return false;
 		}
 		$pos = 2;
@@ -366,23 +483,34 @@ class ImageDecoder {
 		return (int)ceil($px * $m / 8);
 	}
 
-	private static function gd_reader($type) {
+	/**
+	 * Whether an uploaded image of this type is decoded. BMP is not: the site
+	 * cuts no size from one, and the only BMP ever read is the one djpeg made
+	 * (open_shrunk()).
+	 */
+	private static function gd_reads($type) {
 		switch ($type) {
-			case IMAGETYPE_JPEG: return 'imagecreatefromjpeg';
-			case IMAGETYPE_PNG:  return 'imagecreatefrompng';
-			case IMAGETYPE_GIF:  return 'imagecreatefromgif';
-			case IMAGETYPE_WEBP: return function_exists('imagecreatefromwebp') ? 'imagecreatefromwebp' : null;
-			case IMAGETYPE_AVIF: return function_exists('imagecreatefromavif') ? 'imagecreatefromavif' : null;
-			case IMAGETYPE_BMP:  return 'imagecreatefrombmp';
-			default:             return null;
+			case IMAGETYPE_JPEG:
+			case IMAGETYPE_PNG:
+			case IMAGETYPE_GIF:  return true;
+			case IMAGETYPE_WEBP: return function_exists('imagecreatefromwebp');
+			case IMAGETYPE_AVIF: return function_exists('imagecreatefromavif');
+			default:             return false;
 		}
 	}
 
-	private static function decode_with_gd($path, $type) {
-		$reader = self::gd_reader($type);
-		$image = @$reader($path);
+	private static function decode_with_gd($bytes) {
+		$image = @imagecreatefromstring($bytes);
 		if (!$image) {
 			throw new ImageDecodeRefused('The image could not be decoded; the file may be damaged.');
+		}
+		return $image;
+	}
+
+	private static function decode_bmp($bmp) {
+		$image = @imagecreatefromstring((string)$bmp);
+		if (!$image) {
+			throw new ImageDecodeRefused('The shrunk image could not be read back.');
 		}
 		return $image;
 	}
@@ -407,85 +535,55 @@ class ImageDecoder {
 	}
 
 	/**
-	 * Decode a JPEG already shrunk to M/8 through djpeg, into a BMP that GD then
-	 * reads. The child runs under an address-space limit of the ceiling plus
-	 * headroom, so an estimate that was wrong ends in a refusal, not a kill.
+	 * A JPEG decoded already shrunk to M/8, as a BMP: djpeg reads the bytes on
+	 * stdin and answers on stdout, so nothing is staged on disk. It runs
+	 * through DocumentText::runTool(): inside the parser jail where that is
+	 * installed, under `timeout` and an address-space limit where it is not.
+	 * The limit is the ceiling plus headroom, so an estimate that was wrong
+	 * ends in a refusal, not a kill.
+	 *
+	 * @return string the BMP's bytes
+	 * @throws ImageDecodeRefused
 	 */
-	private static function decode_jpeg_scaled($path, $djpeg, $scale_num, $ceiling_mb) {
-		$tmp = self::temp_path();
-		try {
-			$limit_kb = ($ceiling_mb + self::CHILD_HEADROOM_MB) * 1024;
-			$cmd = array('/bin/sh', '-c',
-				'ulimit -v ' . (int)$limit_kb . ' 2>/dev/null; exec "$0" "$@"',
-				$djpeg, '-scale', $scale_num . '/8', '-bmp', '-outfile', $tmp, $path);
-			$spec = array(0 => array('file', '/dev/null', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
-			$proc = @proc_open($cmd, $spec, $pipes);
-			if (!is_resource($proc)) {
-				throw new ImageDecodeRefused('The image decoder could not be started.');
-			}
-			stream_set_blocking($pipes[1], false);
-			stream_set_blocking($pipes[2], false);
-			$stderr = '';
-			$deadline = microtime(true) + self::CHILD_TIMEOUT_SEC;
-			$status = proc_get_status($proc);
-			while ($status['running']) {
-				$stderr .= (string)stream_get_contents($pipes[2]);
-				stream_get_contents($pipes[1]);
-				if (microtime(true) > $deadline) {
-					proc_terminate($proc, 9);
-					throw new ImageDecodeRefused('The image took longer than ' . self::CHILD_TIMEOUT_SEC . ' seconds to decode and was stopped.');
-				}
-				usleep(20000);
-				$status = proc_get_status($proc);
-			}
-			$stderr .= (string)stream_get_contents($pipes[2]);
-			fclose($pipes[1]);
-			fclose($pipes[2]);
-			proc_close($proc);
-			$exit = (int)$status['exitcode'];
-			$why = trim($stderr);
-			if (!empty($status['signaled'])) {
-				// Killed, not failed: the kernel's OOM killer, or the limit above
-				// (which glibc may report as a signal). The photo is fine and the
-				// site may well have the memory next time, so this is not recorded.
-				error_log('ImageDecoder: djpeg killed by signal ' . (int)$status['termsig'] . ' on ' . basename($path) . ($why !== '' ? ': ' . $why : ''));
-				$e = new ImageDecodeRefused('The site ran out of memory while making sizes for this photo; it will be tried again later.');
-				$e->transient = true;
+	public static function shrink_jpeg($bytes, $scale_num, $ceiling_mb) {
+		$djpeg = self::djpeg_path();
+		if ($djpeg === null) {
+			throw new ImageDecodeRefused('The image decoder could not be started.');
+		}
+		$limit_bytes = ((int)$ceiling_mb + self::CHILD_HEADROOM_MB) * 1048576;
+		// A stand-in program a test names is run plainly: it is a script, and
+		// the fence grants the one binary it is given, not an interpreter.
+		$fenced = (self::$djpeg_override === null);
+		$r = DocumentText::runTool(array($djpeg, '-scale', (int)$scale_num . '/8', '-bmp'),
+			(string)$bytes, self::CHILD_TIMEOUT_SEC, $limit_bytes, $fenced);
+		$exit = (int)$r['exit'];
+		$why = trim((string)$r['stderr']);
+		if ($exit === 124) {
+			throw new ImageDecodeRefused('The image took longer than ' . self::CHILD_TIMEOUT_SEC . ' seconds to decode and was stopped.');
+		}
+		if ($exit === 125 || $exit === 126 || $exit === 127) {
+			error_log('ImageDecoder: djpeg could not be started (exit ' . $exit . ')' . ($why !== '' ? ': ' . $why : ''));
+			throw new ImageDecodeRefused('The image decoder could not be started.');
+		}
+		if ($exit < 0 || $exit > 128) {
+			// Killed, not failed: the kernel's OOM killer, or the limit above
+			// (which glibc may report as a signal). The photo is fine and the
+			// site may well have the memory next time, so this is not recorded.
+			error_log('ImageDecoder: djpeg killed (exit ' . $exit . ')' . ($why !== '' ? ': ' . $why : ''));
+			$e = new ImageDecodeRefused('The site ran out of memory while making sizes for this photo; it will be tried again later.');
+			$e->transient = true;
+			throw $e;
+		}
+		if ($exit !== 0 || strlen((string)$r['stdout']) < 54) {
+			error_log('ImageDecoder: djpeg exit ' . $exit . ($why !== '' ? ': ' . $why : ''));
+			if (stripos($why, 'memory') !== false) {
+				$e = new ImageDecodeRefused('This photo needs more than ' . (int)$ceiling_mb . ' MB to decode, more than this site can spare. It was saved as uploaded.');
+				$e->ceiling_mb = (int)$ceiling_mb;
 				throw $e;
 			}
-			if ($exit !== 0 || !is_file($tmp) || filesize($tmp) < 54) {
-				error_log('ImageDecoder: djpeg exit ' . $exit . ' on ' . basename($path) . ($why !== '' ? ': ' . $why : ''));
-				if (stripos($why, 'memory') !== false) {
-					$e = new ImageDecodeRefused('This photo needs more than ' . $ceiling_mb . ' MB to decode, more than this site can spare. It was saved as uploaded.');
-					$e->ceiling_mb = $ceiling_mb;
-					throw $e;
-				}
-				throw new ImageDecodeRefused('The image could not be decoded; the file may be damaged.');
-			}
-			$image = @imagecreatefrombmp($tmp);
-			if (!$image) {
-				throw new ImageDecodeRefused('The shrunk image could not be read back.');
-			}
-			return $image;
-		} finally {
-			if (is_file($tmp)) {
-				@unlink($tmp);
-			}
+			throw new ImageDecodeRefused('The image could not be decoded; the file may be damaged.');
 		}
-	}
-
-	private static function temp_path() {
-		$dir = null;
-		if (class_exists('PathHelper')) {
-			$cache = PathHelper::getSiteRoot() . '/cache';
-			if (is_dir($cache) && is_writable($cache)) {
-				$dir = $cache;
-			}
-		}
-		if ($dir === null) {
-			$dir = sys_get_temp_dir();
-		}
-		return $dir . '/image_decode_' . getmypid() . '_' . bin2hex(random_bytes(6)) . '.bmp';
+		return (string)$r['stdout'];
 	}
 
 	// ------------------------------------------------------------------

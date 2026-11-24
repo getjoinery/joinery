@@ -13,6 +13,7 @@
 /**
  * Joinery changes to the upstream class:
  *
+ * @version 2.4 - opens no image: the width and height limits (a header and EXIF read in the web worker) are gone
  * @version 2.3 - its session starts through SessionGuard::start() (unseal_daemon.md C4)
  * @version 2.2 - get_full_url() asks LibraryFunctions::isSecure(), which believes X-Forwarded-Proto
  *                only from a proxy we know
@@ -44,10 +45,6 @@ class UploadHandler
         'min_file_size' => 'File is too small',
         'accept_file_types' => 'Filetype not allowed',
         'max_number_of_files' => 'Maximum number of files exceeded',
-        'max_width' => 'Image exceeds maximum width',
-        'min_width' => 'Image requires a minimum width',
-        'max_height' => 'Image exceeds maximum height',
-        'min_height' => 'Image requires a minimum height',
         'abort' => 'File upload aborted',
         'image_resize' => 'Failed to resize image'
     );
@@ -139,15 +136,9 @@ class UploadHandler
             'max_number_of_files' => null,
             // Reads first file bytes to identify and correct file extensions:
             'correct_image_extensions' => false,
-            // Image resolution restrictions:
-            'max_width' => null,
-            'max_height' => null,
-            'min_width' => 1,
-            'min_height' => 1,
             // Set the following option to false to enable resumable uploads:
             'discard_aborted_uploads' => true,
-            // Retained for config compatibility; image handling is GD-only
-            // and lives in ImageDecoder, never here (see get_image_size()).
+            // Retained for config compatibility; this class opens no image.
             'image_library' => 0,
             // Named sub-directories of upload_dir the response reports URLs for.
             // This class writes none: the stored original is the uploaded bytes,
@@ -410,44 +401,8 @@ class UploadHandler
             $file->error = $this->get_error_message('max_number_of_files');
             return false;
         }
-        $max_width = @$this->options['max_width'];
-        $max_height = @$this->options['max_height'];
-        $min_width = @$this->options['min_width'];
-        $min_height = @$this->options['min_height'];
-        if (($max_width || $max_height || $min_width || $min_height)
-            && $this->is_valid_image_file($uploaded_file)) {
-            list($img_width, $img_height) = $this->get_image_size($uploaded_file);
-            // Every size is cut upright (ImageDecoder applies the EXIF
-            // orientation), so judge the limits on the upright dimensions.
-            if (
-                function_exists('exif_read_data') &&
-                ($exif = @exif_read_data($uploaded_file)) &&
-                (((int) @$exif['Orientation']) >= 5)
-            ) {
-                $tmp = $img_width;
-                $img_width = $img_height;
-                $img_height = $tmp;
-                unset($tmp);
-            }
-        }
-        if (!empty($img_width) && !empty($img_height)) {
-            if ($max_width && $img_width > $max_width) {
-                $file->error = $this->get_error_message('max_width');
-                return false;
-            }
-            if ($max_height && $img_height > $max_height) {
-                $file->error = $this->get_error_message('max_height');
-                return false;
-            }
-            if ($min_width && $img_width < $min_width) {
-                $file->error = $this->get_error_message('min_width');
-                return false;
-            }
-            if ($min_height && $img_height < $min_height) {
-                $file->error = $this->get_error_message('min_height');
-                return false;
-            }
-        }
+        // No image is opened here, not even its header: a width or height
+        // limit would mean reading a stranger's picture in the web worker.
         return true;
     }
 
@@ -605,18 +560,8 @@ class UploadHandler
         );
     }
 
-    // Image handling is GD-only (never ImageMagick, whose coders and delegates
-    // put a malformed upload on a native-RCE surface). This class decodes
-    // nothing itself: it reads only the header here, and every pixel is
-    // produced by ImageDecoder, once, when File::resize() cuts the sizes.
-    protected function get_image_size($file_path) {
-        if (!function_exists('getimagesize')) {
-            error_log('Function not found: getimagesize');
-            return false;
-        }
-        return @getimagesize($file_path);
-    }
-
+    // This class opens no image. Every pixel, and every header read, is
+    // ImageCutter's, in the parser jail, when File::resize() cuts the sizes.
     protected function imagetype($file_path) {
         $fp = fopen($file_path, 'r');
         $data = fread($fp, 4);

@@ -23,6 +23,7 @@
  *
  * Run: php tests/run.php --only=tests/unit/shell_call_sites_test.php
  *
+ * @version 1.3 - DocumentText::runTool() read; ImageDecoder starts no process itself any more
  * @version 1.2 - ComposerValidator's two prune calls and upgrade.php's three (specs/email_provider_sdk_removal.md WP8)
  * @version 1.1 - SandboxRunner's proc_open read: an argv array, no shell
  * @version 1.0
@@ -43,9 +44,12 @@ $read = array(
 	// The reconcile's two calls left with plugin_own_vendor WP4.
 	'includes/ComposerValidator.php'                                => 3,
 	'includes/DeploymentHelper.php'                                 => 9,
-	'includes/DocumentText.php'                                     => 1,
+	// 2 read 2026-11-24: run()'s proc_open and runTool()'s (specs/image_decode_in_the_jail.md). Both
+	// take an argv array, so no shell reads the command; runTool()'s unfenced form names /bin/sh
+	// with a fixed script whose only inserted value is an integer, the program and its arguments
+	// following as separate arguments.
+	'includes/DocumentText.php'                                     => 2,
 	'includes/GoBinaryPublisher.php'                                => 2,
-	'includes/ImageDecoder.php'                                     => 1,
 	'includes/ReleaseCommit.php'                                    => 2,
 	'includes/ReleaseVerifier.php'                                  => 8,
 	// proc_open of an argv array (no shell): the launcher and PHP by fixed path, the plugin's name checked by NAME_PATTERN.

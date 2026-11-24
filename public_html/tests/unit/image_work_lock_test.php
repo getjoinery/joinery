@@ -98,20 +98,20 @@ ini_set('error_log', $old_log);
 ImageWorkLock::set_path_for_tests($lock);
 
 section('the one decode path takes the lock, once around the whole resize');
-// Every pixel the platform produces comes from ImageDecoder::open() inside
+// Every size the platform cuts comes from one ImageCutter::cut() inside
 // FileBlob::_render_sizes(), which holds the lock from the decode until the
-// decoded image is freed — one hold per resize, not one per size — and
-// UploadHandler decodes nothing at all (specs/image_decode_memory.md).
+// sizes are written — one hold per resize, not one per size — and neither
+// this class nor UploadHandler decodes anything: the decode is in the parser
+// jail (specs/image_decode_memory.md, specs/image_decode_in_the_jail.md).
 $blob_src = file_get_contents(PathHelper::getIncludePath('data/file_blobs_class.php'));
-check(preg_match('/function _render_sizes\(.*?\{\s*return ImageWorkLock::run\(function \(\) use .*?ImageDecoder::open\(/s', $blob_src) === 1,
-	'FileBlob::_render_sizes decodes inside ImageWorkLock::run');
-check(substr_count($blob_src, 'ImageDecoder::open(') === 1 && substr_count($blob_src, 'ImageWorkLock::run(') === 1,
-	'and that is the only decode, under the only lock hold, in the blob class');
-check(preg_match('/\$this->_render_size\(\$decoded, /', $blob_src) === 1
-	&& strpos($blob_src, 'unset($decoded);') !== false,
-	'every size is cut from the one decoded image, which is freed before the lock is');
+check(preg_match('/function _render_sizes\(.*?\{\s*return ImageWorkLock::run\(function \(\) use .*?ImageCutter::cut\(/s', $blob_src) === 1,
+	'FileBlob::_render_sizes cuts inside ImageWorkLock::run');
+check(substr_count($blob_src, 'ImageCutter::cut(') === 1 && substr_count($blob_src, 'ImageWorkLock::run(') === 1,
+	'and that is the only cut, under the only lock hold, in the blob class');
+check(!preg_match('/ImageDecoder::open|imagecreate|imagecopy|getimagesize|exif_read_data/', $blob_src),
+	'the blob class opens no image itself: it writes the finished sizes it is handed');
 $upload_src = file_get_contents(PathHelper::getIncludePath('includes/UploadHandler.php'));
-check(!preg_match('/imagecreatefrom|imagerotate|image_objects|ImageWorkLock/', $upload_src),
-	'UploadHandler decodes nothing: no reader, no rotation, no image cache, nothing to lock');
+check(!preg_match('/imagecreatefrom|imagerotate|image_objects|ImageWorkLock|getimagesize|exif_read_data/', $upload_src),
+	'UploadHandler opens no image: no reader, no header or EXIF read, no rotation, no image cache, nothing to lock');
 
 harness_finish();

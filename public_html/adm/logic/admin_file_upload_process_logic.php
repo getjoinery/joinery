@@ -102,11 +102,6 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 		'max_number_of_files' => null,
 		// Reads first file bytes to identify and correct file extensions:
 		'correct_image_extensions' => false,
-		// Image resolution restrictions:
-		'max_width' => null,
-		'max_height' => null,
-		'min_width' => 1,
-		'min_height' => 1,
 		// Set the following option to false to enable resumable uploads:
 		'discard_aborted_uploads' => true,
 		// Image handling is GD-only; this option no longer selects an engine

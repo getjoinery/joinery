@@ -28,6 +28,8 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.5.0 - sizes are cut in the parser jail (ImageCutter): this class writes finished bytes and
+ *                  never decodes an image
  * @version 1.4.1 - a deferred reclaim runs only on the database that queued it: one queued in
  *                  test mode and flushed at shutdown, after test mode closed, ran against the
  *                  live database with the test database's blob ids
@@ -1106,9 +1108,9 @@ class FileBlob extends SystemBase {
 	/**
 	 * Cut every registered size (or one, $size_key) from this blob's original.
 	 *
-	 * One decode: the original is opened once, through ImageDecoder, no larger
-	 * than the largest registered size needs, upright, and every size is
-	 * resampled from that one image under one ImageWorkLock hold. A decode the
+	 * One decode, in the parser jail (ImageCutter): the original is opened
+	 * once, no larger than the largest registered size needs, upright, and
+	 * every size is resampled from that one image under one ImageWorkLock hold. A decode the
 	 * ceiling refuses (setting image_decode_max_mb) is recorded in
 	 * fbb_variant_refused, so a later ensure_variant() does not try again on
 	 * every view; regenerate_image_sizes.php clears it to retry.
@@ -1328,10 +1330,10 @@ class FileBlob extends SystemBase {
 	}
 
 	/**
-	 * Decode $src_path once and write every size in $wanted to its path in
-	 * $dests, under one ImageWorkLock hold. The decoded image is at most the
-	 * largest registered size's worth of pixels (times what the M/8 shrink
-	 * steps allow), never the full photo, and it is freed before the lock is.
+	 * Cut every size in $wanted from $src_path and write each to its path in
+	 * $dests, under one ImageWorkLock hold. The image is decoded once, in the
+	 * parser jail (ImageCutter): this process never opens its bytes, it writes
+	 * the finished sizes it is handed.
 	 *
 	 * @param bool $record  note a refused decode on this blob (fbb_variant_refused)
 	 * @return bool true when the sizes were written
@@ -1340,7 +1342,7 @@ class FileBlob extends SystemBase {
 		return ImageWorkLock::run(function () use ($src_path, $wanted, $dests, $record) {
 			$max = ImageSizeRegistry::max_dimensions();
 			try {
-				$decoded = ImageDecoder::open($src_path, $max['width'], $max['height']);
+				$cut = ImageCutter::cut($src_path, $wanted, $max['width'], $max['height']);
 			} catch (ImageDecodeRefused $e) {
 				error_log('FileBlob resize refused for ' . basename($src_path) . ': ' . $e->getMessage());
 				// A transient refusal (the site was out of memory just then) is
@@ -1350,13 +1352,12 @@ class FileBlob extends SystemBase {
 				}
 				return false;
 			}
-			try {
-				foreach ($wanted as $key => $config) {
-					$this->_render_size($decoded, $config, $dests[$key]);
+			foreach ($wanted as $key => $config) {
+				if (isset($cut['variants'][$key])) {
+					$this->_place_variant($cut['variants'][$key], $dests[$key]);
 				}
-			} finally {
-				unset($decoded);
 			}
+			unset($cut);
 			if ($record) {
 				$this->clear_variant_refusal();
 			}
@@ -1381,100 +1382,24 @@ class FileBlob extends SystemBase {
 	}
 
 	/**
-	 * Resample one size from a decoded image and write it atomically. Verbatim
-	 * geometry from File's original generate_resized(): a crop takes the centred
-	 * box of the target's aspect, a scale fits inside width x height, and
-	 * neither ever enlarges.
+	 * Write one finished size atomically: to a private temp name in the same
+	 * directory, then renamed into place. Rename is atomic within a
+	 * filesystem, so a reader never sees a half-written variant. On-demand
+	 * generation makes that concurrency real: one listing page fires a thumb
+	 * request per row, and dedup siblings share a stored name, so several
+	 * requests can race to produce the very same variant file.
 	 */
-	private function _render_size(ImageDecoded $decoded, $config, $new_path) {
-		$width = (int)$config['width'];
-		$height = (int)$config['height'];
-		$crop = !empty($config['crop']);
-		$quality = isset($config['quality']) ? (int)$config['quality'] : 85;
-		try {
-			$src = $decoded->image;
-			$type = $decoded->type;
-			$src_w = $decoded->width;
-			$src_h = $decoded->height;
-
-			$sx = 0; $sy = 0; $sw = $src_w; $sh = $src_h;
-			if ($crop && $width > 0 && $height > 0) {
-				if (($src_w / $width) < ($src_h / $height)) {
-					$sw = $src_w;
-					$sh = (int)floor($height * $src_w / $width);
-					$sx = 0;
-					$sy = (int)(($src_h - $sh) / 2);
-				} else {
-					$sw = (int)ceil($width * $src_h / $height);
-					$sh = $src_h;
-					$sx = (int)(($src_w - $sw) / 2);
-					$sy = 0;
-				}
-			}
-
-			$f = 1.0;
-			if ($width > 0 && $height > 0) {
-				$f = min($width / $sw, $height / $sh);
-			} elseif ($width > 0) {
-				$f = $width / $sw;
-			} elseif ($height > 0) {
-				$f = $height / $sh;
-			}
-			if ($f > 1.0) { $f = 1.0; }
-			$dw = max(1, (int)round($sw * $f));
-			$dh = max(1, (int)round($sh * $f));
-
-			$dst = imagecreatetruecolor($dw, $dh);
-			self::gd_preserve_alpha($dst, $type);
-			imagecopyresampled($dst, $src, 0, 0, $sx, $sy, $dw, $dh, $sw, $sh);
-
-			if ($type === IMAGETYPE_GIF) {
-				$src_transparent = imagecolortransparent($src);
-				imagetruecolortopalette($dst, false, 255);
-				if ($src_transparent >= 0) {
-					imagecolortransparent($dst, imagecolorclosestalpha($dst, 0, 0, 0, 127));
-				}
-			}
-
-			// Write to a private temp name in the same directory, then rename
-			// into place — rename is atomic within a filesystem, so a reader
-			// never sees a half-written variant. On-demand generation makes
-			// that concurrency real: one listing page fires a thumb request per
-			// row, and dedup siblings share a stored name, so several requests
-			// can race to produce the very same variant file.
-			$tmp_path = $new_path . '.tmp' . getmypid() . '_' . LibraryFunctions::random_string(6);
-			self::gd_write($dst, $tmp_path, $type, $quality);
-			unset($dst);
-			if (file_exists($tmp_path)) {
-				@chmod($tmp_path, 0666);
-				if (!@rename($tmp_path, $new_path)) {
-					@unlink($tmp_path);
-					error_log('FileBlob resize: could not place variant ' . $new_path);
-				}
-			}
-
-		} catch (\Throwable $e) {
-			error_log('FileBlob resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());
-		}
-	}
-
-	private static function gd_preserve_alpha($dst, $type) {
-		if ($type === IMAGETYPE_JPEG) {
+	private function _place_variant($encoded, $new_path) {
+		$tmp_path = $new_path . '.tmp' . getmypid() . '_' . LibraryFunctions::random_string(6);
+		if (@file_put_contents($tmp_path, $encoded) === false) {
+			@unlink($tmp_path);
+			error_log('FileBlob resize: could not write variant ' . $new_path);
 			return;
 		}
-		imagealphablending($dst, false);
-		imagesavealpha($dst, true);
-		$transparent = imagecolorallocatealpha($dst, 0, 0, 0, 127);
-		imagefill($dst, 0, 0, $transparent);
-	}
-
-	private static function gd_write($img, $path, $type, $quality) {
-		switch ($type) {
-			case IMAGETYPE_JPEG: imagejpeg($img, $path, $quality); break;
-			case IMAGETYPE_PNG:  imagepng($img, $path); break;
-			case IMAGETYPE_GIF:  imagegif($img, $path); break;
-			case IMAGETYPE_WEBP: if (function_exists('imagewebp')) { imagewebp($img, $path, $quality); } break;
-			case IMAGETYPE_AVIF: if (function_exists('imageavif')) { imageavif($img, $path, $quality); } break;
+		@chmod($tmp_path, 0666);
+		if (!@rename($tmp_path, $new_path)) {
+			@unlink($tmp_path);
+			error_log('FileBlob resize: could not place variant ' . $new_path);
 		}
 	}
 

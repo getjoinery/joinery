@@ -95,8 +95,26 @@ The parsers in the tree:
 | `FetchUrlReader` (joinery_ai) | a fetched web page | `{text, note}` — reader-mode Markdown with its fallbacks, or the full flatten | the AI's `fetch_url` tool |
 | `ScanUrlPageResources` (dns_filtering) | a fetched web page | the list of resource URLs it refers to | the URL scan |
 | `FacebookFeedExtractor` (persona_browser) | a captured feed's markup | `{items, stories}` | the persona browser |
+| `ImageCutter` (core) | an uploaded image | `{type, variants}`: every size asked for, encoded, or a refusal in words | every thumbnail and size the site cuts (`FileBlob::resize()`, `ensure_variant()`) |
 
-`tests/security/parser_surfaces_test.php` pins the rule: a file that names `ZipArchive`, `DOMDocument`, `loadHTML`, `simplexml_load_string`, `gzdecode` or `PharData` is a sandbox parser, `DocumentText` itself, or on that test's list with the reason its bytes are not a stranger's (a package we signed, the owner's own import, a provider's API answer under our credentials).
+`tests/security/parser_surfaces_test.php` pins the rule: a file that names `ZipArchive`, `DOMDocument`, `loadHTML`, `simplexml_load_string`, `gzdecode`, `PharData`, one of GD's image readers, `getimagesize` or `exif_read_data` is a sandbox parser, `DocumentText` itself, or on that test's list with the reason its bytes are not a stranger's (a package we signed, the owner's own import, a provider's API answer under our credentials).
+
+## Images
+
+An uploaded picture is outside bytes like any other, and making a thumbnail hands it to libjpeg, libpng, libwebp, libavif, giflib and the EXIF reader. No web worker opens one. `FileBlob::resize()` calls `ImageCutter::cut()`, which sends the file's bytes to the subprocess and gets back each size already encoded; the caller writes those bytes to disk and never reads them as an image.
+
+```php
+$cut = ImageCutter::cut($path, ImageSizeRegistry::get_sizes(), $max['width'], $max['height']);
+// $cut['variants'][$size_key] is that size's bytes; throws ImageDecodeRefused with words a user can read
+```
+
+Inside the subprocess `ImageDecoder` reads the header, refuses a decode that would cost more than the ceiling it was handed (`ImageDecoder::ceiling_mb()`, worked out by the caller, where the setting and the machine's memory can be read), decodes once, turns the picture upright, and cuts every size from that one image.
+
+**A large JPEG takes three short runs.** The first reads the header and answers how far the JPEG can be shrunk while it is decoded. `ImageDecoder::shrink_jpeg()` then runs `djpeg -scale M/8` through `DocumentText::runTool()`, which fences a program the same way the extractor is fenced: the bytes on stdin, a BMP on stdout, the program's own binary the only thing of the site it can read. The second run cuts the sizes from that small picture. Without `djpeg` on the machine the JPEG is decoded in full, at more memory.
+
+**A GIF's colours are reduced by `ImageCutter` itself.** GD's own reduction goes through a library that starts threads, and the fence has no call that makes one.
+
+A file over 48 MB (`ImageCutter::MAX_SOURCE_BYTES`) is kept as uploaded with no sizes, as is one the ceiling refuses; `fbb_variant_refused` records why. A run killed for memory records nothing, so the next view tries again.
 
 ## Formats
 
@@ -119,7 +137,7 @@ The parsers in the tree:
 
 The office formats need no dependency at all: OOXML, OpenDocument and EPUB are ZIP plus XML, and `zip`, `dom` and `libxml` are already loaded. A Word 97-2003 `.doc` is read with byte arithmetic alone: its compound file (a small FAT file system) is walked with every sector chain bounded by the file's sector count and stopped on a revisit, and its piece table may claim no more characters than its text stream has bytes. An encrypted `.doc` is `secured`; Word 95 and older fail. The mailbox's browser reader (`mailbox_doc_text.js`) follows `docText()` function for function, held to it by `plugins/mailbox/tests/doc_text_gate.sh` over real Word files from Apache POI's test data.
 
-**Not read, deliberately:** legacy binary Excel and PowerPoint (`.xls`, `.ppt`), Outlook `.msg`, iWork, `.7z`/`.rar`, and encrypted databases like `.kdbx`. Each of the first four needs a reader the platform does not have; the last is encrypted and correctly unreadable. Images are not read either — there is no OCR anywhere on the platform.
+**Not read, deliberately:** legacy binary Excel and PowerPoint (`.xls`, `.ppt`), Outlook `.msg`, iWork, `.7z`/`.rar`, and encrypted databases like `.kdbx`. Each of the first four needs a reader the platform does not have; the last is encrypted and correctly unreadable. No text is read out of an image — there is no OCR anywhere on the platform.
 
 ## The security properties
 

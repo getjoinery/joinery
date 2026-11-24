@@ -23,6 +23,8 @@
  *
  * Run: php tests/security/parser_surfaces_test.php
  *
+ * @version 1.5 - images: GD's readers, the header read and the EXIF reader are parser tokens; only
+ *   ImageCutter's fenced side opens an image (specs/image_decode_in_the_jail.md)
  * @version 1.4 - Route53DnsDriver reads its own API's XML answers (specs/email_provider_sdk_removal.md WP7)
  * @version 1.3 - SeoPageMetadata parses staff-written bodies only; no view outside the listed ones hands it a body
  * @version 1.2 - ReleaseVerifier: verify_release.php's CLI unzips the agent binaries of the release it checks
@@ -39,12 +41,16 @@ $site = PathHelper::getSiteRoot();
 section('C parsers on outside bytes run only in the extraction subprocess');
 
 $tokens = array('ZipArchive', 'PharData', 'DOMDocument', 'loadHTML', 'loadXML',
-	'simplexml_load_string', 'simplexml_load_file', 'gzdecode', 'inflate_init', 'gzinflate', 'gzuncompress');
+	'simplexml_load_string', 'simplexml_load_file', 'gzdecode', 'inflate_init', 'gzinflate', 'gzuncompress',
+	// An image is a stranger's bytes too: GD's readers, the header read and the EXIF reader.
+	'imagecreatefromstring', 'imagecreatefromjpeg', 'imagecreatefrompng', 'imagecreatefromgif', 'imagecreatefromwebp',
+	'imagecreatefromavif', 'imagecreatefrombmp', 'getimagesize', 'getimagesizefromstring', 'exif_read_data');
 
 // Files that may name a parser in the pool, and why the bytes are not a stranger's.
 $allowed = array(
 	'includes/DocumentText.php'                          => 'the sandbox side lives in the same class as the parent side',
 	'utils/extract_document_text.php'                    => 'the extraction subprocess itself',
+	'includes/ImageDecoder.php'                          => 'ImageCutter\'s engine: called only from ImageCutter::sandboxParse(), inside the subprocess (checked below)',
 	'includes/AbstractExtensionManager.php'              => 'a theme or plugin package the owner installed or we signed (S9)',
 	'utils/upgrade.php'                                  => 'our own signed release archive',
 	'includes/ReleaseVerifier.php'                       => 'utils/verify_release.php only, a CLI never in a request: the agent binaries of a release it is checking against that release\'s statement',
@@ -106,6 +112,31 @@ foreach ($allowed as $rel => $why) {
 	check(isset($seen_allowed[$rel]) || !is_file($root . '/' . $rel),
 		'listed exception still names a parser (or is gone): ' . $rel);
 }
+// The image decoder is on the list because its one caller in the tree is the
+// fenced side of ImageCutter. Nothing else may ask it to open an image.
+$decoder_callers = array();
+foreach ($dirs as $dir) {
+	$base = $root . '/' . $dir;
+	if (!is_dir($base)) continue;
+	$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS));
+	foreach ($it as $f) {
+		if (!$f->isFile() || strtolower($f->getExtension()) !== 'php') continue;
+		$rel = substr($f->getPathname(), strlen($root) + 1);
+		if (preg_match('#(^|/)(tests|fixtures|vendor|node_modules)/#', $rel) || $rel === 'includes/ImageDecoder.php') continue;
+		if (preg_match('/^[^*\n]*ImageDecoder::(open|open_bytes|open_shrunk|read_header|read_header_bytes)\s*\(/m', (string)@file_get_contents($f->getPathname()))) {
+			$decoder_callers[] = $rel;
+		}
+	}
+}
+check($decoder_callers === array('includes/ImageCutter.php'), 'only ImageCutter asks ImageDecoder to open an image', implode(', ', $decoder_callers));
+$cutter_src = (string)file_get_contents($root . '/includes/ImageCutter.php');
+$fenced_at = strpos($cutter_src, 'THE FENCED SIDE');
+check($fenced_at !== false && !preg_match('/ImageDecoder::(open|open_bytes|open_shrunk|read_header)/', substr($cutter_src, 0, $fenced_at)),
+	'and ImageCutter asks only on its fenced side: the caller\'s side hands the bytes to the subprocess');
+check(in_array('includes/ImageCutter.php', $sandbox_parsers, true), 'includes/ImageCutter.php is a sandbox parser');
+check(in_array('gd', DocumentText::PARSER_EXTENSIONS, true) && in_array('exif', DocumentText::PARSER_EXTENSIONS, true),
+	'the fenced PHP loads gd and exif');
+
 foreach (array('plugins/mailbox/includes/DeliverabilityReportParser.php', 'plugins/mailbox/includes/MailboxHtmlSanitizer.php',
 		'plugins/mailbox/includes/GmailFilterExportParser.php', 'plugins/joinery_ai/includes/FetchUrlReader.php',
 		'plugins/dns_filtering/includes/ScanUrlPageResources.php', 'plugins/persona_browser/includes/FacebookFeedExtractor.php') as $rel) {
