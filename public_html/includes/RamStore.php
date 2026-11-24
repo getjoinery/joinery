@@ -36,6 +36,9 @@
  *
  * Specified in strategy/object_free_window_store.md.
  *
+ * @version 1.5 - the mount table is read from /proc/self/mounts: under ProcSubset=pid (the Postfix pipe) /proc/mounts
+ *                does not exist, every type read as unknown and the store was refused. A process that
+ *                cannot read the boot id judges no generation by its boot, so it sweeps no live window
  * @version 1.4 - a missing entry, or a directory already there, leaves no suppressed warning behind as the process's last error
  * @version 1.3 - sweep() removes this user's old /dev/shm/vault_window_* markers (strategy/object_free_window_store.md WP4)
  * @version 1.2 - INCLUDE_EXPIRED for keys(), so a wipe by name reaches an expired entry; info(): a live entry's identity and expiry, so a reader can keep what it read
@@ -66,6 +69,12 @@ final class RamStore {
 
 	/** Tests only: the generation name used for LIFETIME entries, null for the real one. */
 	public static $generation_override = null;
+
+	/** The boot id of a process that could not read one (/proc/sys is hidden under ProcSubset=pid). */
+	const BOOT_UNKNOWN = '000000000000';
+
+	/** Test hook: the boot id generationEnded() judges by, in place of this process's. */
+	public static $boot_override = null;
 
 	private static $dir_override = null;
 	private static $checked = array();
@@ -338,7 +347,13 @@ final class RamStore {
 			return false; // not ours to judge
 		}
 		$parts = explode('-', $mine);
-		if ($m[1] !== self::bootId()) {
+		// A past boot's generation is over. Only a boot both sides could read
+		// says so: a process that cannot read the boot id (BOOT_UNKNOWN, the
+		// mail pipe under ProcSubset=pid) must not take every web generation
+		// for a past boot's and sweep the open vault windows away, and its own
+		// generation is judged by its pid like any other.
+		$boot = self::$boot_override ?? self::bootId();
+		if ($boot !== self::BOOT_UNKNOWN && $m[1] !== self::BOOT_UNKNOWN && $m[1] !== $boot) {
 			return true;
 		}
 		$start = self::procStartTime((int)$m[2]);
@@ -420,7 +435,7 @@ final class RamStore {
 		static $boot = null;
 		if ($boot === null) {
 			$raw = strtolower(str_replace('-', '', trim((string)@file_get_contents('/proc/sys/kernel/random/boot_id'))));
-			$boot = preg_match('/^[0-9a-f]{12}/', $raw) ? substr($raw, 0, 12) : '000000000000';
+			$boot = preg_match('/^[0-9a-f]{12}/', $raw) ? substr($raw, 0, 12) : self::BOOT_UNKNOWN;
 		}
 		return $boot;
 	}
@@ -480,7 +495,7 @@ final class RamStore {
 	 * a real directory (not a link), owned by $euid, and mode 0700: /dev/shm is
 	 * world-writable, so another account could have made it first.
 	 */
-	public static function checkDirectory(string $dir, ?int $euid = null, string $mounts = '/proc/mounts'): ?string {
+	public static function checkDirectory(string $dir, ?int $euid = null, string $mounts = self::MOUNTS): ?string {
 		$euid = $euid ?? (function_exists('posix_geteuid') ? posix_geteuid() : getmyuid());
 		$type = self::mountType($dir, $mounts);
 		if ($type !== 'tmpfs') {
@@ -506,8 +521,16 @@ final class RamStore {
 		return null;
 	}
 
-	/** The filesystem type of the mount holding $path, from /proc/mounts. */
-	public static function mountType(string $path, string $mounts = '/proc/mounts'): ?string {
+	/**
+	 * The mount table this process reads. The process's own, not /proc/mounts:
+	 * a service started with ProcSubset=pid (Ubuntu's Postfix, so the inbound
+	 * mail pipe) has a /proc that holds only process entries, and /proc/mounts
+	 * is not one. /proc/self/mounts is the same table and is there either way.
+	 */
+	const MOUNTS = '/proc/self/mounts';
+
+	/** The filesystem type of the mount holding $path, from the process's mount table. */
+	public static function mountType(string $path, string $mounts = self::MOUNTS): ?string {
 		$best = null;
 		$type = null;
 		foreach (@file($mounts, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: array() as $line) {

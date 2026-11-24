@@ -28,6 +28,7 @@
  *
  * Run: php tests/unit/ram_store_test.php
  *
+ * @version 1.3 - the mount table is the process's own; a process with no boot id judges generations by pid alone
  * @version 1.2 - the sweep removes this user's old /dev/shm/vault_window_* markers
  * @version 1.1 - reviewer2 B1-B8: a set() zeroes the value it replaces, a half-zeroed read is a quiet
  *                miss, a value too deep is refused, a generation whose start reads 0 is judged by its
@@ -52,6 +53,9 @@ $st = RamStore::status();
 check($st['ok'] === true, 'the run\'s directory passes the store\'s checks', (string)$st['reason']);
 check(sprintf('%04o', fileperms($dir) & 0777) === '0700' && fileowner($dir) === $euid, 'it was made 0700 and is ours');
 check(RamStore::mountType($dir) === 'tmpfs', '/dev/shm is tmpfs here');
+// A service with ProcSubset=pid (Postfix, so the mail pipe) has no /proc/mounts:
+// the table is read from the process's own entry, which is there either way.
+check(RamStore::MOUNTS === '/proc/self/mounts' && is_readable(RamStore::MOUNTS), 'the mount table read is the process\'s own (/proc/self/mounts)');
 
 section('Round trip');
 $values = array(
@@ -278,6 +282,33 @@ check(file_get_contents($dir . '/.probe') === str_repeat("\0", 11), 'and zeroes 
 unlink($dir . '/.probe');
 check(is_dir($dir . '/' . $mine) && RamStore::get('life', $ok, RamStore::LIFETIME) === 'L', 'this process\'s generation stays');
 check(is_dir($dir . '/' . $web) && RamStore::get('plain') === 'P', 'a live master\'s generation stays, seen from the CLI, and plain entries stay');
+
+// A process that cannot read the boot id (the mail pipe: Postfix runs with
+// ProcSubset=pid, which hides /proc/sys) must not take a live web generation
+// for a past boot's and sweep its vault windows. It judges by the pid alone.
+$my_start = RamStore::procStartTime(getmypid());
+$other_boot_live = 'gen-ffffffffffff-' . getmypid() . '-' . $my_start . '-c';
+$other_boot_dead = 'gen-ffffffffffff-' . $dead_pid . '-12345-c';
+$unknown_live = 'gen-' . RamStore::BOOT_UNKNOWN . '-' . getmypid() . '-' . $my_start . '-c';
+foreach (array($other_boot_live, $other_boot_dead, $unknown_live) as $g) {
+	@mkdir($dir . '/' . $g, 0700);
+	file_put_contents($dir . '/' . $g . '/vault:s:1:user', '"key-bytes"');
+	touch($dir . '/' . $g . '/vault:s:1:user', time() + 600);
+}
+RamStore::$boot_override = RamStore::BOOT_UNKNOWN;
+touch($dir . '/.sweep', time() - 3600);
+RamStore::sweep();
+RamStore::$boot_override = null;
+check(is_dir($dir . '/' . $other_boot_live), 'with no boot id to read, a live generation of another boot id is left alone');
+check(!is_dir($dir . '/' . $other_boot_dead), 'and one whose process is gone is still swept');
+touch($dir . '/.sweep', time() - 3600);
+RamStore::sweep();
+check(is_dir($dir . '/' . $unknown_live), 'a live generation named with no boot id is judged by its pid, not swept as a past boot');
+check(!is_dir($dir . '/' . $other_boot_live), 'and a process that can read the boot id still sweeps a past boot\'s');
+foreach (array($other_boot_live, $unknown_live) as $g) {
+	foreach ((array)glob($dir . '/' . $g . '/*') as $f) @unlink($f);
+	@rmdir($dir . '/' . $g);
+}
 
 // Seen from a web worker: its own master after a reload has a new OPcache segment.
 $me = getmypid();
