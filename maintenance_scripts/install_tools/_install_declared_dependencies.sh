@@ -5,6 +5,8 @@
 # extra.joinery-system-packages plus plugin requires.packages), resolved by
 # utils/list_dependencies.php.
 #
+# VERSION: 1.5 - runs _remove_refused_packages.sh first: what the deployed code refuses comes off at the
+#                same root moments what it declares goes on (specs/imagemagick_package_removal.md WP2)
 # VERSION: 1.4 - a declared package a package run is upgrading (dpkg reads it "unpacked" for a moment),
 #                or one held, is present: reading it as missing ran apt-get update mid-upgrade
 #                (fleet_security_patching WP3, the lost .deb); the downloads are cleared after installing
@@ -62,6 +64,10 @@ fi
 
 command -v php >/dev/null 2>&1 || { say "php-cli not available - skipping"; exit 0; }
 command -v apt-get >/dev/null 2>&1 || { say "apt-get not available - skipping"; exit 0; }
+
+# First take off what the deployed code refuses (ImageMagick): an extension an
+# earlier install left, or one put back by hand. Its own script, never fatal.
+bash "$(dirname "${BASH_SOURCE[0]}")/_remove_refused_packages.sh" "$PUBLIC_HTML" || true
 
 # The resolver emits one "primary|fallback" apt package pair per line.
 SPECS="$(php "$RESOLVER" --apt 2>/dev/null || true)"

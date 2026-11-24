@@ -20,6 +20,8 @@
  *   - --extensions lists extension names only; a system package is not one
  *   - a package name that is not a plain apt name is dropped, not emitted
  *
+ * @version 1.3 - software on RefusedDependencies' list (ImageMagick) is dropped with its reason, and a tree
+ *   without the list resolves nothing
  * @version 1.2 - a name ending in a dash is dropped (reviewer1 B2)
  * @version 1.1 - an extension name that is not a plain apt name is dropped (specs/shell_command_audit.md U3)
  * @version 1.0
@@ -54,6 +56,14 @@ $dir = harness_scratch_dir('list_dependencies');
 @mkdir($dir . '/plugins/goodplug', 0777, true);
 @mkdir($dir . '/plugins/badplug', 0777, true);
 copy($resolver, $dir . '/utils/list_dependencies.php');
+@mkdir($dir . '/includes', 0777, true);
+copy(dirname(dirname($resolver)) . '/includes/RefusedDependencies.php', $dir . '/includes/RefusedDependencies.php');
+@mkdir($dir . '/plugins/magickplug', 0777, true);
+// A plugin that asks for software the platform does not run (specs/imagemagick_package_removal.md WP1).
+file_put_contents($dir . '/plugins/magickplug/plugin.json', json_encode(array('requires' => array(
+	'extensions' => array('Imagick', 'gmagick', 'bcmath'),
+	'packages' => array('imagemagick', 'imagemagick-7-common', 'libmagickwand-7.q16-10', 'graphicsmagick', 'tree'),
+))));
 file_put_contents($dir . '/composer.json', json_encode(array('require' => array('ext-gd' => '*'), 'extra' => array('joinery-system-packages' => array('Zip')))));
 file_put_contents($dir . '/plugins/goodplug/plugin.json', json_encode(array('requires' => array('packages' => array('jq')))));
 file_put_contents($dir . '/plugins/badplug/plugin.json', json_encode(array('requires' => array(
@@ -73,5 +83,30 @@ check(count(preg_grep('/\||-o|\s/', array_map(function ($l) { return substr_coun
 	'an extension name that is not a plain apt name is dropped, so no line can start apt on an option', implode(', ', $scratch));
 check(count(preg_grep('/^-|\|-/', $scratch)) === 0, 'no emitted package name begins with a dash');
 check(count(preg_grep('/-$|-\|/', $scratch)) === 0, 'and none ends in one: NAME- is a remove to apt-get (reviewer1 B2)', implode(', ', $scratch));
+
+section('software the platform does not run is refused, whoever declares it');
+check(count(preg_grep('/magick/i', $scratch)) === 0, 'no ImageMagick or GraphicsMagick extension or package is emitted', implode(', ', preg_grep('/magick/i', $scratch)));
+check(in_array($php . '-bcmath|php-bcmath', $scratch, true) && in_array('tree|tree', $scratch, true), 'what the same plugin declared beside them still is');
+exec('php ' . escapeshellarg($dir . '/utils/list_dependencies.php') . ' --apt 2>&1 >/dev/null', $said, $rc4);
+$said = implode("\n", $said);
+check(strpos($said, 'refused extension imagick') !== false && strpos($said, 'refused package imagemagick') !== false && strpos($said, 'refused package libmagickwand-7.q16-10') !== false,
+	'and each refusal is said, with the reason', substr($said, 0, 300));
+exec('php ' . escapeshellarg($dir . '/utils/list_dependencies.php') . ' 2>/dev/null', $bare, $rc5);
+check(!in_array('imagick', $bare, true) && in_array('bcmath', $bare, true), 'the plain extension list refuses it too');
+@unlink($dir . '/includes/RefusedDependencies.php');
+exec('php ' . escapeshellarg($dir . '/utils/list_dependencies.php') . ' --apt 2>/dev/null', $none, $rc6);
+check($rc6 === 1 && count($none) === 0, 'a tree without the refused list resolves nothing, so the installer installs nothing', 'rc ' . $rc6);
+
+require_once(PathHelper::getIncludePath('includes/RefusedDependencies.php'));
+check(RefusedDependencies::extension('IMAGICK') !== null && RefusedDependencies::extension('gd') === null && RefusedDependencies::extension('intl') === null,
+	'the list names imagick and leaves gd and intl alone');
+check(RefusedDependencies::package('php8.5-imagick') !== null && RefusedDependencies::package('imagemagick-7-common') !== null
+	&& RefusedDependencies::package('libjpeg-turbo-progs') === null && RefusedDependencies::package('imagemagickx') === null,
+	'the package pattern takes ImageMagick\'s names and nothing that merely starts like one');
+foreach (array('includes/PluginManager.php', 'includes/ComponentBase.php') as $gate) {
+	$src = (string)file_get_contents(PathHelper::getIncludePath($gate));
+	check(strpos($src, 'RefusedDependencies::extension(') !== false && strpos($src, 'RefusedDependencies::package(') !== false,
+		$gate . ' refuses them at activation');
+}
 
 harness_finish();

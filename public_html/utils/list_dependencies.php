@@ -26,10 +26,13 @@
  *   php utils/list_dependencies.php --apt              # mapped to apt package names
  *   php utils/list_dependencies.php --active-only ...  # restrict plugin scan to active plugins (needs DB)
  *   php utils/list_dependencies.php --json ...         # JSON object output instead of lines
+ *   php utils/list_dependencies.php --refused          # 'refuse-extension NAME' per extension the platform does not run
  *
  * Exit codes: 0 success, 1 usage/parse error, 2 --active-only without a
  * reachable database.
  *
+ * @version 1.6 - an extension or package on RefusedDependencies' list (ImageMagick) is dropped, with the reason on stderr;
+ *                --refused lists those extension names
  * @version 1.5 - no --composer or --orphans: plugins ship their libraries in their own vendor/ (specs/plugin_own_vendor.md)
  * @version 1.4 - a name ending in a dash is dropped too: to apt-get install, NAME- means remove NAME (reviewer1 B2)
  * @version 1.3 - an extension name that is not a plain apt-safe name is dropped, as a system package already
@@ -47,6 +50,15 @@ if (php_sapi_name() !== 'cli') {
 
 $public_html = dirname(__DIR__);
 
+// What the platform does not install, whoever declares it. Required by path:
+// there is no class loader here. Without the list nothing is resolved, so a
+// tree missing the file installs nothing rather than everything.
+if (!is_file($public_html . '/includes/RefusedDependencies.php')) {
+	fwrite(STDERR, "list_dependencies: includes/RefusedDependencies.php is missing; nothing resolved\n");
+	exit(1);
+}
+require_once($public_html . '/includes/RefusedDependencies.php');
+
 $args = array_slice($argv ?? ($_SERVER['argv'] ?? array()), 1);
 $mode = 'extensions';
 $as_apt = false;
@@ -56,6 +68,7 @@ foreach ($args as $arg) {
 	switch ($arg) {
 		case '--extensions': $mode = 'extensions'; break;
 		case '--apt':        $mode = 'extensions'; $as_apt = true; break;
+		case '--refused':    $mode = 'refused'; break;
 		case '--json':       $as_json = true; break;
 		case '--active-only': $active_only = true; break;
 		case '--help': case '-h':
@@ -143,7 +156,15 @@ function ld_extensions($public_html, $manifests) {
 	// exactly as ld_system_packages drops a package (specs/shell_command_audit.md U3).
 	// A trailing dash is apt's remove, so a name ends in a letter, digit or +.
 	$extensions = array_values(array_unique(array_filter($extensions, function ($e) {
-		return $e !== '' && preg_match('/^[a-z0-9][a-z0-9+._-]*[a-z0-9+]$/', $e);
+		if ($e === '' || !preg_match('/^[a-z0-9][a-z0-9+._-]*[a-z0-9+]$/', $e)) {
+			return false;
+		}
+		$why = RefusedDependencies::extension($e);
+		if ($why !== null) {
+			fwrite(STDERR, "list_dependencies: refused extension {$e}: {$why}\n");
+			return false;
+		}
+		return true;
 	})));
 	sort($extensions);
 	return $extensions;
@@ -196,7 +217,15 @@ function ld_system_packages($public_html, $manifests) {
 		}
 	}
 	$packages = array_values(array_unique(array_filter($packages, function ($p) {
-		return $p !== '' && preg_match('/^[a-z0-9][a-z0-9+.-]*[a-z0-9+]$/', $p);
+		if ($p === '' || !preg_match('/^[a-z0-9][a-z0-9+.-]*[a-z0-9+]$/', $p)) {
+			return false;
+		}
+		$why = RefusedDependencies::package($p);
+		if ($why !== null) {
+			fwrite(STDERR, "list_dependencies: refused package {$p}: {$why}\n");
+			return false;
+		}
+		return true;
 	})));
 	sort($packages);
 	return $packages;
@@ -224,6 +253,21 @@ switch ($mode) {
 		} else {
 			foreach ($output as $line) {
 				echo $line . "\n";
+			}
+		}
+		break;
+	case 'refused':
+		// The extension names the platform does not run, for the root step
+		// that removes one an earlier install left (_remove_refused_packages.sh).
+		$names = array_keys(RefusedDependencies::EXTENSIONS);
+		sort($names);
+		if ($as_json) {
+			echo json_encode($names, JSON_PRETTY_PRINT) . "\n";
+		} else {
+			// One recognisable line each: the reader acts on these as root,
+			// and takes no other line of this output for a name.
+			foreach ($names as $name) {
+				echo 'refuse-extension ' . $name . "\n";
 			}
 		}
 		break;

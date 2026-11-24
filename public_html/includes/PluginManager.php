@@ -13,6 +13,8 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.27 - activation refuses a plugin that requires an extension or package the platform does not run
+ *                 (RefusedDependencies: ImageMagick)
  * @version 1.26 - activation refuses a plugin whose own vendor/ is not built as required, needs what this PHP
  *   lacks, or clashes with core's or another active plugin's libraries (specs/plugin_own_vendor.md WP3)
  * @version 1.25 - requires.composer is refused: a plugin ships its libraries in its own vendor/, so activation
@@ -777,6 +779,14 @@ class PluginManager extends AbstractExtensionManager {
         // Check required PHP extensions
         if (isset($manifest['requires']['extensions']) && is_array($manifest['requires']['extensions'])) {
             foreach ($manifest['requires']['extensions'] as $ext) {
+                // An extension the platform does not run is refused whether or
+                // not this machine happens to have it (RefusedDependencies).
+                $refused = is_string($ext) ? RefusedDependencies::extension($ext) : null;
+                if ($refused !== null) {
+                    $results['valid'] = false;
+                    $results['errors'][] = "PHP extension '{$ext}' cannot be required: " . $refused;
+                    continue;
+                }
                 if (!extension_loaded($ext)) {
                     $results['valid'] = false;
                     $results['errors'][] = "Required PHP extension not loaded: " . $ext;
@@ -784,6 +794,15 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
         
+        // A system package the platform does not run is refused too.
+        foreach ((array)($manifest['requires']['packages'] ?? array()) as $pkg) {
+            $refused = is_string($pkg) ? RefusedDependencies::package($pkg) : null;
+            if ($refused !== null) {
+                $results['valid'] = false;
+                $results['errors'][] = "System package '{$pkg}' cannot be required: " . $refused;
+            }
+        }
+
         // Check plugin dependencies
         if (isset($manifest['depends']) && is_array($manifest['depends'])) {
             foreach ($manifest['depends'] as $dep_name => $dep_version) {

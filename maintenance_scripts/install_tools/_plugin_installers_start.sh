@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.62 - every tick runs _remove_refused_packages.sh before the declared packages: an extension the
+#                 deployed code refuses (ImageMagick) comes off the machine (specs/imagemagick_package_removal.md WP2)
 # Version: 2.61 - reconcile_composer leaves the root request kinds: a plugin ships its libraries in its own
 #                 vendor/ (specs/plugin_own_vendor.md)
 # Version: 2.60 - A tick puts vendor/ back when a composer prune stopped between its two renames:
@@ -1864,6 +1866,12 @@ pkg_installed() {
 
 RESOLVER="${PUBLIC_HTML}/utils/list_dependencies.php"
 if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/null 2>&1; then
+    # What the deployed code refuses comes off first (ImageMagick): this tick is
+    # how a node that already had it loses it, within a minute of the new code
+    # (specs/imagemagick_package_removal.md WP2).
+    if [[ -f "${TOOLS_DIR}/_remove_refused_packages.sh" ]]; then
+        bash "${TOOLS_DIR}/_remove_refused_packages.sh" "${PUBLIC_HTML}" 2>&1 | sed 's/^/plugin installers: /' || true
+    fi
     APT_UPDATED=0
     while read -r SPEC; do
         [[ -n "${SPEC}" ]] || continue

@@ -104,9 +104,24 @@ abstract class ComponentBase {
         // the same activation gate plugins have via PluginManager::validatePlugin.
         if (isset($requirements['extensions']) && is_array($requirements['extensions'])) {
             foreach ($requirements['extensions'] as $extension) {
-                if (is_string($extension) && $extension !== '' && !extension_loaded($extension)) {
+                if (!is_string($extension) || $extension === '') {
+                    continue;
+                }
+                // An extension the platform does not run is refused whether or
+                // not this machine happens to have it (RefusedDependencies).
+                $refused = RefusedDependencies::extension($extension);
+                if ($refused !== null) {
+                    $errors[] = "PHP extension '{$extension}' cannot be required: {$refused}";
+                } elseif (!extension_loaded($extension)) {
                     $errors[] = "PHP extension '{$extension}' is required but not loaded";
                 }
+            }
+        }
+
+        foreach ((array)($requirements['packages'] ?? array()) as $package) {
+            $refused = is_string($package) ? RefusedDependencies::package($package) : null;
+            if ($refused !== null) {
+                $errors[] = "System package '{$package}' cannot be required: {$refused}";
             }
         }
 
