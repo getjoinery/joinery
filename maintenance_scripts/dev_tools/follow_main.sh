@@ -18,11 +18,14 @@
 #   3b. Installs the libraries the lock file names (composer install --no-dev) whenever
 #      public_html/composer.lock differs from the one last installed, the way a release's
 #      upgrade does. Checked on every run, so a failed install is tried again next minute.
-#   4. Runs update_database --upgrade when the commits touched what it applies: a data class,
-#      a migration, or a declaration it seeds (settings.json, admin_menus.json,
-#      permissions.json, a plugin.json). One that failed is run again after the next pull
-#      or library install, whatever that touched: it refuses while the libraries do not
-#      match the lock file, and nothing else would ever run it again.
+#   4. Runs update_database --upgrade when the checkout has moved, since the commit it last
+#      ran at, over what it applies: a data class, a migration, a scheduled task's
+#      declaration, or a declaration it seeds (settings.json, admin_menus.json,
+#      permissions.json, a plugin.json). It asks that of the checkout, not of its own pull,
+#      on every run: a publish that catches up with a commit pushed while it ran pulls for
+#      itself, and this script then finds nothing to pull. One that failed is run again
+#      after the next pull or library install, whatever that touched: it refuses while the
+#      libraries do not match the lock file, and nothing else would ever run it again.
 #
 # First, the agent source (joinery-agent) is brought to its own origin/main the
 # same way, steps 1 to 3: a publish builds the agent it bundles from that
@@ -34,6 +37,10 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.7 - update_database is owed by where the checkout is, not by what this run pulled: the commit
+#               it last ran at is kept, and every run compares. A publish caught up with a commit pushed
+#               mid-publish (c5d95d22d, 11-23) by pulling it itself, so no run here ever saw it arrive
+#               and dev ran 20 hours without its new columns. Plugin migrations and task declarations count.
 # @version 1.6 - installs the lock file's libraries when it changes, and runs a failed update_database
 #               again after the next pull or install. dev's vendor/ had not moved since 10-14, and once the
 #               lock moved past it (guzzle 7.17.0) every update_database refused (11-22).
@@ -71,6 +78,9 @@ COMPOSER="${FOLLOW_MAIN_COMPOSER:-composer}"   # override only in the scratch-cl
 UPDATE_DB_LOG="${HOME}/.cache/follow_main.update_database.log"
 UPDATE_DB_PENDING="${HOME}/.cache/follow_main.update_database.pending"   # the last one failed
 VENDOR_STAMP="${HOME}/.cache/follow_main.composer_lock"   # the lock file last installed (its hash)
+DB_STAMP="${HOME}/.cache/follow_main.update_database.commit"   # the commit update_database last answered for
+# What update_database applies: a commit touching none of these owes no run.
+DB_PATHS='^public_html/((plugins/[^/]+/)?data/.*_class\.php|(plugins/[^/]+/)?migrations/|(plugins/[^/]+/)?tasks/[^/]+\.json$|settings\.json$|admin_menus\.json$|permissions\.json$|plugins/[^/]+/plugin\.json$)'
 
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) follow_main: $*"; }
 
@@ -142,6 +152,9 @@ sync_vendor() {
 # declared indexes are never created and column type changes are only warned
 # about. It reports a failed step as '#Failed: N' and may still exit 0.
 run_update_database() {
+    # Answered for this commit either way: a failure is retried through
+    # UPDATE_DB_PENDING, not by every minute's run.
+    git -C "$REPO" rev-parse HEAD > "$DB_STAMP" 2>/dev/null
     if ${FOLLOW_MAIN_UPDATE_DB:-php "$REPO/public_html/utils/update_database.php"} --upgrade > "$UPDATE_DB_LOG" 2>&1 \
        && ! grep -q -E '#Failed: [1-9]' "$UPDATE_DB_LOG"; then
         rm -f "$UPDATE_DB_PENDING"
@@ -155,6 +168,41 @@ run_update_database() {
 
 cd "$REPO" || { say "no checkout at $REPO"; exit 1; }
 
+# Does the checkout owe an update_database run? It does when a file update_database
+# applies differs between the commit it last answered for and HEAD, however HEAD
+# got there. A move that touched none of them is recorded and owes nothing.
+[ -s "$DB_STAMP" ] || git rev-parse HEAD > "$DB_STAMP"   # first run here: start counting from now
+schema_owed() {
+    local head stamp
+    head="$(git rev-parse HEAD)"
+    stamp="$(cat "$DB_STAMP" 2>/dev/null)"
+    [ "$stamp" = "$head" ] && return 1
+    # A commit this checkout does not hold cannot be compared: run it.
+    git cat-file -e "${stamp}^{commit}" 2>/dev/null || return 0
+    git diff --name-only "$stamp" "$head" | grep -q -E "$DB_PATHS" && return 0
+    printf '%s\n' "$head" > "$DB_STAMP"
+    return 1
+}
+
+# Hold scheduled-task passes until the schema matches the code. A psql session
+# beside this script takes the hold lock a test takes, then waits (at most 90 s)
+# for a pass already under way to finish; the hold ends when this script exits
+# and the session's input closes. Not getting it only means running unheld.
+hold_task_passes() {
+    coproc TASK_HOLD { psql -w -h localhost -U postgres -d "${FOLLOW_MAIN_DB:-joinerytest}" -Atq 2>/dev/null; }
+    printf '%s\n' "SELECT pg_advisory_lock_shared(hashtext('scheduled_tasks'), hashtext('test_hold'));" \
+        "SET lock_timeout = '90s';" \
+        "SELECT pg_advisory_lock(hashtext('scheduled_tasks'), hashtext('pass'));" \
+        "SELECT pg_advisory_unlock(hashtext('scheduled_tasks'), hashtext('pass'));" \
+        "SELECT 'held';" >&"${TASK_HOLD[1]}"
+    local line
+    while read -r -t 100 -u "${TASK_HOLD[0]}" line; do
+        [ "$line" = "held" ] && return 0
+    done
+    say "scheduled-task passes NOT held for this run"
+    return 1
+}
+
 if ! git fetch -q origin "$BRANCH" 2>/tmp/follow_main.fetch.$$; then
     say "fetch failed: $(tail -1 /tmp/follow_main.fetch.$$)"
     rm -f /tmp/follow_main.fetch.$$
@@ -165,8 +213,24 @@ rm -f /tmp/follow_main.fetch.$$
 old="$(git rev-parse HEAD)"
 new="$(git rev-parse "origin/${BRANCH}")"
 if [ "$old" = "$new" ]; then
-    # Nothing to pull, but a failed install is tried again, and an update_database
-    # it held back runs once it succeeds.
+    # Nothing to pull. The checkout may still have moved without this script (a
+    # publish catching up with main pulls for itself), and then owes the run a
+    # pull here would have made. It does not wait for a publish: update_database
+    # moves no file a publish reads, and the site is already serving the new code.
+    if schema_owed; then
+        say "the checkout is at $(git log -1 --format='%h %s') and update_database has not run for it"
+        vendor=1
+        if ! publish_building; then
+            sync_vendor
+            vendor=$?
+        fi
+        [ "$vendor" -eq 2 ] && exit 1   # said; the next run installs, then runs it
+        hold_task_passes || true
+        run_update_database || exit 1
+        exit 0
+    fi
+    # A failed install is tried again, and an update_database it held back runs
+    # once it succeeds.
     publish_building && exit 0
     sync_vendor
     if [ $? -eq 0 ] && [ -e "$UPDATE_DB_PENDING" ]; then
@@ -188,24 +252,6 @@ if publish_building; then
     exit 0   # a publish is reading this tree; the next minute tries again
 fi
 
-# Hold scheduled-task passes until the schema matches the code. A psql session
-# beside this script takes the hold lock a test takes, then waits (at most 90 s)
-# for a pass already under way to finish; the hold ends when this script exits
-# and the session's input closes. Not getting it only means pulling unheld.
-hold_task_passes() {
-    coproc TASK_HOLD { psql -w -h localhost -U postgres -d "${FOLLOW_MAIN_DB:-joinerytest}" -Atq 2>/dev/null; }
-    printf '%s\n' "SELECT pg_advisory_lock_shared(hashtext('scheduled_tasks'), hashtext('test_hold'));" \
-        "SET lock_timeout = '90s';" \
-        "SELECT pg_advisory_lock(hashtext('scheduled_tasks'), hashtext('pass'));" \
-        "SELECT pg_advisory_unlock(hashtext('scheduled_tasks'), hashtext('pass'));" \
-        "SELECT 'held';" >&"${TASK_HOLD[1]}"
-    local line
-    while read -r -t 100 -u "${TASK_HOLD[0]}" line; do
-        [ "$line" = "held" ] && return 0
-    done
-    say "scheduled-task passes NOT held for this pull"
-    return 1
-}
 hold_task_passes || true
 
 if ! git -c core.fileMode=false merge -q --ff-only "$new" 2>&1; then
@@ -218,8 +264,7 @@ sync_vendor
 vendor=$?
 [ "$vendor" -eq 2 ] && touch "$UPDATE_DB_PENDING"   # it would refuse the mismatch; run it after the install
 
-if git diff --name-only "$old" "$new" | grep -q -E '^public_html/((plugins/[^/]+/)?data/.*_class\.php|migrations/|settings\.json$|admin_menus\.json$|permissions\.json$|plugins/[^/]+/plugin\.json$)' \
-        || [ -e "$UPDATE_DB_PENDING" ]; then
+if schema_owed || [ -e "$UPDATE_DB_PENDING" ]; then
     [ "$vendor" -eq 2 ] && exit 1   # said above; the next run installs, then runs it
     run_update_database || exit 1
 fi

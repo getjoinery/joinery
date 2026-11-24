@@ -12,7 +12,10 @@
 # host converger's doing and does not stop the pull; an edited file or an
 # untracked one does, and says so. A changed composer.lock installs its
 # libraries, and an update_database that failed runs again once they are in.
+# A checkout something else moved (a publish catching up) gets the update_database
+# its commits owe.
 #
+# @version 1.2 - a checkout something else moved, plugin migrations and task declarations
 # @version 1.1 - the library install and the update_database retry
 
 set -u
@@ -141,6 +144,30 @@ chk "the next pull runs it again though it touched no data class" "$(calls updat
 ahead six
 out="$(run)"
 chk "after a success a plain pull leaves it alone" "$(calls update_db)" "4"
+
+echo "== A checkout moved by something else still gets its update_database =="
+# A publish that catches up with main pulls for itself; this script then has
+# nothing to pull and must still see what arrived.
+echo '<?php // 2' > "$T/work/public_html/data/x_class.php"
+g -C "$T/work" add -A && g -C "$T/work" commit -q -m dataclass2 && g -C "$T/work" push -q origin main
+g -C "$T/dev" pull -q --ff-only origin main
+out="$(run)"
+chk "a data class that arrived without a pull from here runs it, saying so" "$(calls update_db)/$(grep -c 'update_database has not run for it' <<<"$out")/$(grep -c 'update_database ran' <<<"$out")" "5/1/1"
+out="$(run)"
+chk "and once only" "$(calls update_db)/${out:-quiet}" "5/quiet"
+ahead seven
+g -C "$T/dev" pull -q --ff-only origin main
+out="$(run)"
+chk "a move that touched nothing it applies owes no run" "$(calls update_db)/${out:-quiet}" "5/quiet"
+mkdir -p "$T/work/public_html/plugins/p/migrations" "$T/work/public_html/plugins/p/tasks"
+echo '<?php' > "$T/work/public_html/plugins/p/migrations/migrations.php"
+g -C "$T/work" add -A && g -C "$T/work" commit -q -m pluginmigration && g -C "$T/work" push -q origin main
+out="$(run)"
+chk "a plugin's migration file runs it" "$(calls update_db)" "6"
+echo '{}' > "$T/work/public_html/plugins/p/tasks/T.json"
+g -C "$T/work" add -A && g -C "$T/work" commit -q -m plugintask && g -C "$T/work" push -q origin main
+out="$(run)"
+chk "a scheduled task's declaration runs it" "$(calls update_db)" "7"
 
 echo
 echo "follow_main gate: $passed passed, $failed failed"
