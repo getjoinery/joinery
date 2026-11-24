@@ -21,6 +21,9 @@
  *  - a core model (Page) and a native plugin's (Location) it was approved to
  *    read load by id; one it was not approved for throws, saying so;
  *  - a collection with no limit is read a page at a time;
+ *  - a filter takes a list of values (any of them), as natively: ids or
+ *    texts, an empty list matching no row; a keyed list, a list in a list and
+ *    one past 200 values are refused;
  *  - refused, each saying why: "IS NULL" as a value, a split-parenthesis OR,
  *    a NULL filter, an OR collection, two sort columns, an offset off the
  *    page, restoring or removing a row, a collection of its own that writes
@@ -29,6 +32,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_fence_models
  *
+ * @version 1.2 - a filter's list of values (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.1 - reviewer2 G1-G3, G5, G6: a clashing model name, the plugin's prepare(), a class in plugin.php,
  *                the code line on the approval screen, fence-only declarations
  * @version 1.0
@@ -77,6 +81,18 @@ function on_ui(array $input) {
 		$o['list_class'] = get_class($row);
 	}
 	$o['count_all'] = (new MultiNote(array('text' => 'alpha')))->count_all();
+	// Several rows by a list of values, one ask (spec sandboxed_plugin_ask_speed WP2).
+	$pk = Note::$pkey_column;
+	$o['by_ids'] = array();
+	foreach (new MultiNote(array($pk => array($n->key, $n2->key, 999999999)), array('qty' => 'ASC')) as $row) {
+		$o['by_ids'][] = (int)$row->key;
+	}
+	$o['want_ids'] = array((int)$n->key, (int)$n2->key);
+	$o['by_texts'] = count(new MultiNote(array('text' => array('alpha', 'nothing like it'))));
+	$o['by_empty'] = count(new MultiNote(array($pk => array())));
+	$o['by_keyed'] = sbx_try(function () use ($pk) { return count(new MultiNote(array($pk => array('a' => 1)))); });
+	$o['by_nested'] = sbx_try(function () use ($pk) { return count(new MultiNote(array($pk => array(array(1))))); });
+	$o['by_too_many'] = sbx_try(function () use ($pk) { return count(new MultiNote(array($pk => range(1, 201)))); });
 	$o['missing'] = (new Note(999999999, TRUE))->key;
 	$o['trash'] = sbx_try(function () use ($n2) { return $n2->soft_delete(); });
 	$o['trashed_time'] = (new Note($n2->key, TRUE))->get('delete_time') !== null;
@@ -142,6 +158,13 @@ function sbx_fm_checks(array $result, string $label, string $name, array $values
 	check(($o['location'] ?? null) === $values['location_name'], $label . ': a native plugin\'s model it may read (Location) loads by id', json_encode($o['location'] ?? null));
 	check(($o['user']['threw'] ?? '') === 'SandboxPipeException' && strpos((string)($o['user']['message'] ?? ''), 'not approved') !== false,
 		$label . ': a model it was not approved for is refused, saying so', json_encode($o['user'] ?? null));
+	check(($o['by_ids'] ?? null) === ($o['want_ids'] ?? false), $label . ': a list of ids reads those rows in one list, a missing id adding none',
+		json_encode(array($o['by_ids'] ?? null, $o['want_ids'] ?? null)));
+	check(($o['by_texts'] ?? null) === 2 && ($o['by_empty'] ?? null) === 0,
+		$label . ': a list of texts matches any of them; an empty list matches no row', json_encode(array($o['by_texts'] ?? null, $o['by_empty'] ?? null)));
+	foreach (array('by_keyed' => 'keyed entries', 'by_nested' => 'list of numbers', 'by_too_many' => 'at most 200') as $key => $words) {
+		check(strpos((string)($o[$key]['message'] ?? ''), $words) !== false, $label . ': refused, saying why: ' . $key, json_encode($o[$key] ?? null));
+	}
 	check(($o['unlimited'] ?? null) === 2, $label . ': a list with no limit is read whole', json_encode($o['unlimited'] ?? null));
 	check(strpos((string)($o['rule']['message'] ?? ''), 'no bad notes') !== false && ($o['bad_rows'] ?? null) === 0,
 		$label . ': its own prepare() runs and refuses the save, which never reaches core', json_encode(array($o['rule'] ?? null, $o['bad_rows'] ?? null)));

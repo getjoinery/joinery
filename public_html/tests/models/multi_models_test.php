@@ -52,6 +52,10 @@ foreach ($classes as $class) { class_exists($class); }
 
 $with_multi = array();
 foreach ($classes as $class) {
+	// A sandboxed plugin's model belongs to a fixture plugin another suite
+	// installed for its run: its table is in the site's database only while
+	// that suite runs, never in the test database. The sandbox suites test it.
+	if (is_subclass_of($class, 'SandboxRecord')) { continue; }
 	if (class_exists('Multi' . $class)) { $with_multi[] = $class; }
 }
 
@@ -155,6 +159,37 @@ try {
 	check($got === $expected, 'MultiPlugin filters a bool column on false', "$got rows, SQL says $expected");
 } catch (Throwable $e) {
 	check(false, 'MultiPlugin filters a bool column on false', $e->getMessage());
+}
+
+// A list of values on a declared column means any of them (IN), each bound
+// as the column's kind, as a request sends it (spec sandboxed_plugin_ask_speed WP2).
+section('A column filter takes a list of values');
+try {
+	$db = DbConnector::get_instance()->get_db_link();
+	$some = $db->query('SELECT plg_name FROM plg_plugins ORDER BY plg_name LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
+	check(count(new MultiPlugin(array('plg_name' => $some))) === count($some), 'a list of texts finds exactly its members', count($some) . ' asked');
+	check(count(new MultiPlugin(array('name' => array_merge($some, array('no such plugin here'))))) === count($some),
+		'by the name without its prefix, a value no row has adding none');
+	$ids = $db->query('SELECT plg_plugin_id FROM plg_plugins ORDER BY plg_plugin_id LIMIT 2')->fetchAll(PDO::FETCH_COLUMN);
+	check(count(new MultiPlugin(array('plg_plugin_id' => array_map('strval', $ids)))) === count($ids), 'ids sent as text bind as numbers');
+	check(count(new MultiPlugin(array('plg_receives_upgrades' => array('false')))) === $expected, 'the word false in a list is false for a boolean column');
+	check(count(new MultiPlugin(array('plg_name' => array()))) === 0, 'an empty list matches no row');
+} catch (Throwable $e) {
+	check(false, 'a list of values runs', get_class($e) . ': ' . $e->getMessage());
+}
+foreach (array('a keyed list' => array('plg_name' => array('a' => 'x')), 'a list in a list' => array('plg_name' => array(array('x')))) as $label => $options) {
+	try {
+		count(new MultiPlugin($options));
+		check(false, 'refused: ' . $label);
+	} catch (InvalidArgumentException $e) {
+		check(true, 'refused: ' . $label);
+	}
+}
+try {
+	count(new MultiUser(array('user_id' => array(1, 2))));
+	check(false, 'a collection\'s own option given a list is refused, not sent as the text Array');
+} catch (InvalidArgumentException $e) {
+	check(true, 'a collection\'s own option given a list is refused, not sent as the text Array');
 }
 
 // A column name and a string condition go into the query as they are, so the

@@ -733,6 +733,13 @@ The **option keys are whatever `getMultiResults()` reads** (here `user_id`, `act
 — they are deliberately *not* the raw column names. Always read a Multi class's
 `getMultiResults()` to learn its accepted keys.
 
+Beyond those keys, any column the model declares is a filter too, by its full name or without
+the prefix (`mdt_status` or `status`), and `deleted` (true or false) works on every model with a
+delete time. A column filter takes one value, or a list of values meaning any of them:
+`new MultiMyData(array('mdt_my_data_id' => array(4, 9, 12)))` is one query for those three rows,
+each value bound as the column's kind, and an empty list matches no row. An option the class
+implements itself takes what its code reads, so a list there is refused unless its code takes one.
+
 **AI Auto-Discovery**: To make a plugin model queryable by joinery_ai recipes, declare the three `$ai_*` static properties (`$ai_readable`, `$ai_description`, `$ai_excluded_fields`) on the class. Default-deny: omit them and the model stays invisible to AI tools. See the [Joinery AI Plugin Documentation](/plugins/joinery_ai/docs/overview.md) for the property contract and the auto-block regex.
 
 ### Business Logic Files

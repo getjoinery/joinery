@@ -9,6 +9,7 @@
  *   $event = new Event(12, TRUE);                                     record.get
  *   $log = new SentLog(); $log->set('message', 'hi'); $log->save();   record.create
  *   foreach (new MultiSentLog(['signal' => 'x'], ['create_time' => 'DESC'], 50) as $row) { ... }   record.list
+ *   foreach (new MultiSentLog(['id' => [4, 9, 12]]) as $row) { ... }                              record.list, any of them
  *
  * SystemBase::$remote_store is set to SandboxRemoteStore, so a model's
  * load(), save(), soft_delete() and a collection's load() and count_all()
@@ -38,9 +39,15 @@
  * not a whole number of pages, restoring or removing a row, and a
  * collection of the plugin's that writes its own getMultiResults().
  *
+ * A filter's value is one value or a list of up to 200 (any of them), as a
+ * column filter takes natively (SystemBase::column_option_filters()); the
+ * whole list is one ask.
+ *
  * A collection with no limit is read a page (200 rows) at a time, each page
  * one ask, within the call's 200 asks.
  *
+ * @version 1.2 - a filter takes a list of values, as natively; the [value, PDO::PARAM_*] form, which a column
+ *                filter does not take natively, is a list too (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.1 - reviewer2 G1-G4: no short name a core class has; the plugin's prepare() runs; coreName() walks to
  *                a known model class; a 400 on a read throws
  * @version 1.0
@@ -158,7 +165,8 @@ final class SandboxRemoteStore implements SystemBaseRemoteStore {
 	}
 
 	/**
-	 * A collection's options as column filters: one value each, or deleted.
+	 * A collection's options as column filters: one value or a list of them
+	 * each, or deleted.
 	 * The class's own defaults it did not change are left out (they are the
 	 * class's own option keys, which only its SQL knows).
 	 */
@@ -174,19 +182,25 @@ final class SandboxRemoteStore implements SystemBaseRemoteStore {
 			if ($key !== '' && $key[0] === '(') {
 				throw new SystemBaseException($collection . ': a split-parenthesis OR is SQL text; ask for each list and join them.');
 			}
-			if (is_array($value)) {
-				// The parameterized form [value, PDO::PARAM_*].
-				if (count($value) !== 2 || !array_key_exists(0, $value) || !is_int($value[1] ?? null)) {
-					throw new SystemBaseException($collection . ': the filter on ' . $key . ' takes one value.');
-				}
-				$value = $value[0];
-			}
 			if ($key === 'deleted') {
 				$out['deleted'] = (bool)$value;
 				continue;
 			}
 			if ($value === null) {
 				throw new SystemBaseException($collection . ': a filter for an empty ' . $key . ' is not carried to core; filter on another column.');
+			}
+			if (is_array($value)) {
+				// Any of these values, as natively; core holds the list to 200.
+				if (!array_is_list($value)) {
+					throw new SystemBaseException($collection . ': the filter on ' . $key . ' is one value or a list of values, not keyed entries.');
+				}
+				foreach ($value as $member) {
+					if (!is_scalar($member)) {
+						throw new SystemBaseException($collection . ': the filter on ' . $key . ' takes a list of numbers, text or true/false.');
+					}
+				}
+				$out[$key] = $value;
+				continue;
 			}
 			if (is_string($value) && preg_match('~^\s*IS\s+(NOT\s+)?NULL\s*$~i', $value)) {
 				throw new SystemBaseException($collection . ': "' . trim($value) . '" is SQL text, not a value; for the trash use the deleted filter.');

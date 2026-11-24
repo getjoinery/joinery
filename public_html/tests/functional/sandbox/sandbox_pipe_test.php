@@ -21,7 +21,7 @@
  *    its table and can be restored;
  *  - a filter or sort that is not a readable declared column of the model is
  *    refused before the API is asked: a credential column, a collection's own
- *    option key, an undeclared key, a value that is not one scalar;
+ *    option key, an undeclared key, a value that is neither one scalar nor a list of them;
  *  - a model or action the plugin was not approved for is refused;
  *  - its API requests are logged as the plugin's and metered on its own
  *    budget, not the loopback address's (reviewer2 E4);
@@ -42,6 +42,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_pipe
  *
+ * @version 1.1 - a filter's list of values, an empty list (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.0
  */
 
@@ -103,7 +104,7 @@ function on_ui(array $input) {
 	$answers['delete'] = sbx_try('record.delete', array('model' => 'Note', 'id' => $id));
 	$answers['option_key'] = sbx_try('record.list', array('model' => 'Note', 'filters' => array('product_id_is_not' => '0) OR (1=1')));
 	$answers['undeclared'] = sbx_try('record.list', array('model' => 'Note', 'filters' => array('nope' => 1)));
-	$answers['array_value'] = sbx_try('record.list', array('model' => 'Note', 'filters' => array('text' => array('a', 'b'))));
+	$answers['array_value'] = sbx_try('record.list', array('model' => 'Note', 'filters' => array('text' => array('a' => 'x'))));
 	$answers['bad_sort'] = sbx_try('record.list', array('model' => 'Note', 'sort' => 'text; DROP TABLE x'));
 	$answers['not_approved'] = sbx_try('record.list', array('model' => 'User'));
 	$answers['action'] = sbx_try('action', array('name' => 'no_such_action_here'));
@@ -200,7 +201,7 @@ try {
 	check(isset($a['option_key']['refused']) && strpos($a['option_key']['refused'], 'only on a column') !== false,
 		'A collection\'s own option key, with SQL in its value', json_encode($a['option_key'] ?? null));
 	check(isset($a['undeclared']['refused']), 'A key that is no column', json_encode($a['undeclared'] ?? null));
-	check(isset($a['array_value']['refused']), 'A filter value that is not one scalar', json_encode($a['array_value'] ?? null));
+	check(isset($a['array_value']['refused']), 'A filter value that is neither one value nor a list of them', json_encode($a['array_value'] ?? null));
 	check(isset($a['bad_sort']['refused']), 'A sort that is no column', json_encode($a['bad_sort'] ?? null));
 	check(isset($a['not_approved']['refused']) && strpos($a['not_approved']['refused'], 'not approved') !== false,
 		'A model it was not approved for', json_encode($a['not_approved'] ?? null));
@@ -220,6 +221,15 @@ try {
 	$q = SandboxRelay::listQuery($class, array('filters' => array('qty' => true, 'deleted' => true), 'sort' => 'text', 'limit' => 20, 'offset' => 40));
 	check($q === array($prefix . '_qty' => '1', 'deleted' => '1', 'sort' => $prefix . '_text', 'sdirection' => 'ASC', 'numperpage' => '20', 'page' => '2'),
 		'An allowed list goes by full column names, true as 1, the page from the offset', json_encode($q));
+	$q = SandboxRelay::listQuery($class, array('filters' => array('qty' => array(1, '2', true))));
+	check(($q[$prefix . '_qty'] ?? null) === array('1', '2', '1') && !SandboxRelay::matchesNothing($q),
+		'A list of values goes as a list of texts', json_encode($q));
+	$q = SandboxRelay::listQuery($class, array('filters' => array('qty' => array())));
+	check(is_array($q) && SandboxRelay::matchesNothing($q), 'An empty list matches no row (answered without asking)', json_encode($q));
+	check(is_string(SandboxRelay::listQuery($class, array('filters' => array('qty' => range(1, 201)))))
+		&& is_string(SandboxRelay::listQuery($class, array('filters' => array('qty' => array('a' => 1)))))
+		&& is_string(SandboxRelay::listQuery($class, array('filters' => array('qty' => array(array(1)))))),
+		'A list past 200 values, a keyed list and a list in a list are refused');
 
 	section('The secret never travels toward the plugin');
 	$seen = is_file($capture) ? json_decode((string)file_get_contents($capture), true) : null;

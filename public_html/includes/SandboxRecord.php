@@ -17,6 +17,8 @@
  * {prefix}_delete_time (soft delete) beside its declared fields, each stored
  * as {prefix}_{field}.
  *
+ * @version 1.3 - a filter takes a list of values (any of them), each held to its column's type, as a declared
+ *                column takes one natively (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.2 - columnFor(): a field by its manifest name or its column (the fenced runtime's set/get)
  * @version 1.1 - every sandboxed model is content (permissions.json)
  * @version 1.0
@@ -93,7 +95,9 @@ abstract class SandboxRecordCollection extends SystemMultiBase {
 	/**
 	 * Every option must name one of the model's columns, with or without its
 	 * prefix, or be 'deleted'. An unknown key is refused, not dropped: a
-	 * filter that is silently ignored returns every row as if filtered.
+	 * filter that is silently ignored returns every row as if filtered. A
+	 * value is one value or a list of them (any of them; an empty list
+	 * matches no row), each held to the column's type.
 	 */
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$model = static::$model_class;
@@ -115,10 +119,22 @@ abstract class SandboxRecordCollection extends SystemMultiBase {
 				$filters[$column] = 'IS NULL';
 				continue;
 			}
-			if (!is_scalar($value)) {
-				throw new UnknownMultiOptionException(get_class($this) . ": a filter on '" . $key . "' takes one value.");
+			$type = strtolower($specs[$column]['type']);
+			if (is_array($value) && array_is_list($value)) {
+				$members = array();
+				foreach ($value as $member) {
+					if (!is_scalar($member)) {
+						throw new UnknownMultiOptionException(get_class($this) . ": a filter on '" . $key . "' takes one value or a list of values.");
+					}
+					$members[] = self::filterValue(get_class($this), $key, $type, (string)$member)[0];
+				}
+				$filters[$column] = SqlCondition::bind('IN (?)', $members);
+				continue;
 			}
-			$filters[$column] = self::filterValue(get_class($this), $key, strtolower($specs[$column]['type']), (string)$value);
+			if (!is_scalar($value)) {
+				throw new UnknownMultiOptionException(get_class($this) . ": a filter on '" . $key . "' takes one value or a list of values.");
+			}
+			$filters[$column] = self::filterValue(get_class($this), $key, $type, (string)$value);
 		}
 		return $this->_get_resultsv2($model::$tablename, $filters, $this->order_by, $only_count, $debug);
 	}

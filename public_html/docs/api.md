@@ -685,7 +685,11 @@ Add a trailing **s** to the class name for collections.
 
 Any additional query parameters are passed as filter options to the Multi class. Check the specific Multi class to see which filter keys it accepts. Each value is bound as a parameter, never written into the SQL (the collection layer refuses any condition text that is not written in the class's source; see [Plugin Developer Guide](plugin_developer_guide.md#writing-a-multi-collection-class)). A yes/no filter takes `true`/`false` or `1`/`0`. A filter on an unreadable column is a `400`, and so is a value the database refuses for its column: text where a number belongs, something that is not a date.
 
+A filter on a declared column also takes a list of values, and matches a row whose column is any of them: `?pro_product_id[]=4&pro_product_id[]=9`. At most 200 values (the page cap); a keyed list (`pro_product_id[a]=4`), a list inside a list, or a list on an option the Multi class implements itself (which takes one value) is a `400`.
+
 **Example:** `GET /api/v1/Users?page=0&numperpage=20&sort=usr_id&sdirection=DESC`
+
+**Example:** `GET /api/v1/Products?numperpage=50&pro_product_id[]=4&pro_product_id[]=9&pro_product_id[]=12`
 
 **Response:**
 ```json

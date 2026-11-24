@@ -234,7 +234,7 @@ cannot see. The plugin reaches its own models through its credential, which
 carries every verb on them.
 
 **Filters.** A list request filters on any declared field, with or without
-its prefix. A filter on a field the model does not declare, a value that is
+its prefix, on one value or a list of them (any of them). A filter on a field the model does not declare, a value that is
 not the field's kind (a word for an integer, `maybe` for a boolean, a
 non-date for a date), or any filter on a JSON field is refused with a 400,
 never ignored or turned into something else.
@@ -715,6 +715,7 @@ reads like native code and each load, save, trash and list is an ask:
 $event = new Location(12, TRUE);                                   // record.get
 $note = new Note(); $note->set('text', 'hi'); $note->save();       // record.create
 foreach (new MultiNote(['text' => 'hi'], ['qty' => 'DESC'], 50) as $row) { … }   // record.list
+foreach (new MultiNote(['id' => [4, 9, 12]]) as $row) { … }                   // record.list, any of them
 ```
 
 The plugin's own models go by their short names (`Note`, `MultiNote`,
@@ -730,7 +731,9 @@ plugin's program code under "Read this program code". A model name that a
 core or native class already has (`Post`, `Page`) is refused at install
 (`SandboxPluginManager::modelCollisions()`): in the plugin's code it would
 mean the site's model. A collection takes column filters (one
-value each, as `[value, PDO::PARAM_*]` too), `deleted`, one sort column, a
+value each, or a list of up to 200 meaning any of them, as a column filter
+takes natively: the whole list is one ask, and an empty list matches no row
+without asking), `deleted`, one sort column, a
 limit up to 200 and an offset that is a whole number of pages; with no limit
 it is read 200 rows at a time. `count()` and `count_all()` work. Refused,
 each saying why: raw SQL, a string condition (`"IS NULL"`), a
@@ -890,7 +893,8 @@ locked answer for sealed rows. The address is built from names checked
 against the key's scope and an integer id. A filter, a sort and a written
 field must each be a declared column of the model that the API shows (by its
 full name or without the model's prefix), or the `deleted` filter (true or
-false); a filter value is one string, number or true/false. Anything else is
+false); a filter value is one string, number or true/false, or a list of up
+to 200 of them, sent as `column[]=a&column[]=b`. Anything else is
 refused before the API is called.
 
 An `http` ask is `https` on 443 only, to a host the plugin declared and an

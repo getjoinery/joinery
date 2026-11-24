@@ -4875,7 +4875,8 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	 * model — either in full (`usr_email`) or without the table prefix
 	 * (`email`). The value binds as a parameter typed from the field spec; a
 	 * NULL value means "this column is empty", since `column = NULL` matches
-	 * nothing in SQL and is never what a caller meant.
+	 * nothing in SQL and is never what a caller meant. A list of values means
+	 * "any of these" (`IN`), each member bound; an empty list matches no row.
 	 *
 	 * Only keys the collection does not implement itself are considered, so a
 	 * hand-written filter always wins over the inferred one. Collections that
@@ -4892,6 +4893,8 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			$value = $this->options[$key];
 			if ($value === NULL) {
 				$out[$column] = 'IS NULL';
+			} elseif (is_array($value)) {
+				$out[$column] = SqlCondition::bind('IN (?)', self::list_option_values($column, $value, $specs[$column]));
 			} else {
 				$out[$column] = array($value, self::pdo_type_for_spec($specs[$column]));
 			}
@@ -4935,6 +4938,36 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 			}
 		}
 
+		return $out;
+	}
+
+	/**
+	 * The members of a list filter on a declared column, each bound as that
+	 * column's kind: a whole number for an integer column, true or false for
+	 * a boolean one (a request sends them as text), anything else as text.
+	 * A member that is not of the column's kind stays text, for the database
+	 * to refuse.
+	 *
+	 * @throws InvalidArgumentException for a value that is not a plain list of numbers, text and true/false
+	 */
+	private static function list_option_values($column, array $values, $spec) {
+		if (!array_is_list($values)) {
+			throw new InvalidArgumentException('The filter on ' . $column . ' is a list of values, not keyed entries.');
+		}
+		$type = self::pdo_type_for_spec($spec);
+		$out = array();
+		foreach ($values as $member) {
+			if (!is_scalar($member)) {
+				throw new InvalidArgumentException('The filter on ' . $column . ' takes a list of numbers, text or true/false.');
+			}
+			if ($type === PDO::PARAM_INT && is_string($member) && preg_match('~^-?[0-9]{1,18}$~D', $member)) {
+				$member = (int)$member;
+			} elseif ($type === PDO::PARAM_BOOL && !is_bool($member)) {
+				$word = strtolower((string)$member);
+				$member = in_array($word, array('1', 'true'), true) ? true : (in_array($word, array('0', 'false'), true) ? false : (string)$member);
+			}
+			$out[] = $member;
+		}
 		return $out;
 	}
 
@@ -5146,7 +5179,12 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
 		foreach ($filters as $column => $condition) {
 			if (is_array($condition)) {
-				// [value, PDO type]: the column equals that value
+				// [value, PDO type]: the column equals that value. A list there
+				// is a collection's own option given several values, which the
+				// option does not take (a list of values works on a column).
+				if (is_array($condition[0] ?? null)) {
+					throw new InvalidArgumentException(get_class($this) . ': the filter on ' . mb_substr((string)$column, 0, 80) . ' takes one value (a list of values works on a column the collection does not filter itself, by its full name).');
+				}
 				$where_clauses[] = "$column = ?";
 				$bind_params[] = [$condition[0], $condition[1]];
 			} elseif ($condition instanceof SqlCondition) {

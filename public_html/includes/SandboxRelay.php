@@ -33,7 +33,7 @@
  *
  * A filter or sort reaches the API only when it is a declared column of the
  * model that the API would show (or `deleted`), sent by its full column name
- * with a scalar value: many collections join their own option values into
+ * with a scalar value or a list of them (any of them): many collections join their own option values into
  * SQL, and the relay does not depend on every one of them being right.
  *
  * A delete is the API's delete, which is soft_delete(): the row stays in its
@@ -75,6 +75,8 @@
  * most MAX_ANON_RECIPIENTS people, each counted against the visitor's
  * network (ANON_MAIL_FEATURE), and never send a batch.
  *
+ * @version 1.9 - a list filter carries a list of values (any of them, at most MAX_LIST_ROWS); an empty list
+ *               matches no row without asking (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.8 - a call for a visitor not signed in reads only outside a checked form POST, and within one writes
  *               and mails a little (anonymousGate()); page.refresh drops its own public pages' cached copies
  *               (spec sandboxed_plugin_public_pages)
@@ -103,6 +105,9 @@ class SandboxRelay {
 
 	/** A list is read at most this many rows at a time (the API's page cap). */
 	const MAX_LIST_ROWS = 200;
+
+	/** The longest list address the relay sends (Apache's request line stops at 8190 bytes). */
+	const MAX_LIST_PATH = 8000;
 
 	/** Headers a plugin may not set on an outside request: they steer the connection. */
 	const FORBIDDEN_HEADERS = array('host', 'connection', 'content-length', 'transfer-encoding', 'te', 'upgrade',
@@ -401,8 +406,25 @@ class SandboxRelay {
 			if (is_string($query)) {
 				return $this->refuse('api', 'GET ' . $class . ' list', $query);
 			}
-			$path = '/api/v1/' . $class . 's?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+			if (self::matchesNothing($query)) {
+				// The checks the API call would make first (reviewer2 B2): no key, no time.
+				if ($this->credential() === null) {
+					return $this->refuse('api', 'GET ' . $class . ' list', 'This plugin has no API credential (it has not been approved, or its key is off).');
+				}
+				if ($this->secondsLeft() <= 0) {
+					$this->note('api', 'GET ' . $class . ' list', 'timeout', 'no time left');
+					return array('ok' => false, 'error' => 'The call ran out of time.');
+				}
+				$this->note('api', 'GET ' . $class . ' list', 'ok', 'an empty list matches no row');
+				return array('ok' => true, 'status' => 200, 'records' => array(), 'total' => 0);
+			}
+			// A list as name[]=a&name[]=b, without the indexes http_build_query() writes.
+			$path = '/api/v1/' . $class . 's?' . preg_replace('~%5B[0-9]+%5D=~', '%5B%5D=', http_build_query($query, '', '&', PHP_QUERY_RFC3986));
 			$target = 'GET ' . $class . ' list';
+			if (strlen($path) > self::MAX_LIST_PATH) {
+				// Apache refuses a request line past about 8 KB (a list of long texts).
+				return $this->refuse('api', $target, 'The filters are too long for one ask; ask for the values in smaller lists.');
+			}
 			$method = 'GET';
 		} else {
 			$path = '/api/v1/' . $class . ($id !== null ? '/' . $id : '');
@@ -471,7 +493,9 @@ class SandboxRelay {
 
 	/**
 	 * The query string of a list: each filter a readable declared column with
-	 * one scalar value, or deleted; one sort column; a page.
+	 * one scalar value or a list of up to MAX_LIST_ROWS of them (any of them;
+	 * an empty list stays empty, see matchesNothing()), or deleted; one sort
+	 * column; a page.
 	 *
 	 * @return array|string the query, or why it is refused
 	 */
@@ -493,9 +517,24 @@ class SandboxRelay {
 			if ($column === null) {
 				return 'A list can be filtered only on a column of the model it may read; ' . mb_substr((string)$key, 0, 60) . ' is not one.';
 			}
+			if (is_array($value)) {
+				if (!array_is_list($value) || count($value) > self::MAX_LIST_ROWS) {
+					return 'The filter on ' . $key . ' takes one value or a list of at most ' . self::MAX_LIST_ROWS . '.';
+				}
+				$texts = array();
+				foreach ($value as $member) {
+					$text = self::scalarText($member);
+					if ($text === null) {
+						return 'Each value in the filter on ' . $key . ' must be text, a number or true/false.';
+					}
+					$texts[] = $text;
+				}
+				$query[$column] = $texts;
+				continue;
+			}
 			$text = self::scalarText($value);
 			if ($text === null) {
-				return 'The filter on ' . $key . ' must be one value (text, a number or true/false).';
+				return 'The filter on ' . $key . ' must be one value (text, a number or true/false) or a list of them.';
 			}
 			$query[$column] = $text;
 		}
@@ -522,6 +561,15 @@ class SandboxRelay {
 		$query['numperpage'] = (string)$limit;
 		$query['page'] = (string)intdiv($offset, $limit);
 		return $query;
+	}
+
+	/**
+	 * Whether a list query has a filter on an empty list, which matches no
+	 * row, as natively: answered without asking, since the query string
+	 * cannot carry an empty list and would drop the filter.
+	 */
+	public static function matchesNothing(array $query): bool {
+		return in_array(array(), $query, true);
 	}
 
 	/** @return array|string the fields to send, or why they are refused */
@@ -1154,7 +1202,12 @@ class SandboxRelay {
 					$where[] = $value === '1' ? 'fil_delete_time IS NOT NULL' : 'fil_delete_time IS NULL';
 					continue;
 				}
-				// A readable declared column (listQuery()), so a plain name; the value is bound.
+				// A readable declared column (listQuery()), so a plain name; the values are bound.
+				if (is_array($value)) {
+					$where[] = $value === array() ? 'FALSE' : $key . ' IN (' . implode(', ', array_fill(0, count($value), '?')) . ')';
+					array_push($params, ...$value);
+					continue;
+				}
 				$where[] = $key . ' = ?';
 				$params[] = $value;
 			}

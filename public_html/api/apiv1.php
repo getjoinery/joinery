@@ -2,6 +2,7 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.44 - a collection filter on a column takes a list of values (any of them), at most API_MAX_PAGE
  * @version 2.43 - a sandboxed plugin's key has no budget of its own; its rows are stamped sandbox:{install id}
  *   and stay out of the loopback address's count (spec sandboxed_plugin_public_pages D3)
  * @version 2.42 - a collection filter value the database refuses for its column (a bad date, text for a
@@ -1058,6 +1059,21 @@ if ($record_class !== null) {
 			if (isset($class_name::$field_specifications[$column]) && $class_name::is_unreadable_field($column)) {
 				api_error('Fetch objects: ' . $class_name . ' cannot be filtered or sorted by ' . $asked, 'TransactionError', 400);
 			}
+		}
+	}
+
+	// A list of values (?pro_product_id[]=4&pro_product_id[]=9) means any of
+	// them, on a column filter (SystemBase::column_option_filters()). At most
+	// API_MAX_PAGE values: a list asks for a page of rows, not the table.
+	foreach ($url_parts as $key => $value) {
+		if (!is_array($value)) {
+			continue;
+		}
+		if (!array_is_list($value) || array_filter($value, 'is_array') !== array()) {
+			api_error('Fetch objects: the filter on ' . mb_substr((string)$key, 0, 60) . ' is a list of values (' . $key . '[]=a&' . $key . '[]=b)', 'TransactionError', 400);
+		}
+		if (count($value) > API_MAX_PAGE) {
+			api_error('Fetch objects: a filter takes at most ' . API_MAX_PAGE . ' values', 'TransactionError', 400);
 		}
 	}
 
