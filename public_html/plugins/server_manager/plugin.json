@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.234",
+  "version": "1.30.237",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "PolyForm-Noncommercial-1.0.0",
@@ -655,6 +655,12 @@
       "helptext": "Fix builds a person asked to pull back from every machine, from the Fleet Security page, as JSON (source => version). The automatic runner issues the withdrawal on its next run, within ten minutes."
     },
     {
+      "name": "server_manager_package_fix_retry",
+      "default": "",
+      "managed": true,
+      "helptext": "Withdrawn fix builds a person asked to try again, from the Fleet Security page, as JSON (source => the withdrawn version). The automatic runner builds the package afresh at the next revision on its next run and sends it to the test machines first."
+    },
+    {
       "name": "server_manager_package_fix_soak_hours",
       "default": "6",
       "group": "publishing",
@@ -982,10 +988,10 @@
     },
     "package_fix.news": {
       "label": "Security fix news: built ahead of Ubuntu, or a person is needed",
-      "description": "A critical or high security fix a project shipped and Ubuntu has not: told once when it is found and our own build starts, and once more only if the automatic build or rollout stops and needs a person. Never repeated for the same fix.",
+      "description": "A critical or high security fix a project shipped and Ubuntu has not: one email per run, after the automatic build was tried, saying what was found, whether it was built (and goes to the test servers) or needs a person and why, and where every package stands. Separately, once, if a build on the test servers was pulled back or is stuck there. Never repeated for the same fix.",
       "category": "Server Manager",
       "payload": {
-        "kind": "found or needs_person",
+        "kind": "found (everything built) or needs_person (something needs a person)",
         "title": "The subject, in plain words",
         "body": "What was found, what happens now, and what (if anything) a person must do",
         "link": "The Fleet Security page"

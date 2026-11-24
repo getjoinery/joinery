@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.174 - SITE_LOG_FILES reads the dev box's follow_main pull log (agent 1.131.0, a per-value floor)
+ * @version 1.173 - build_unban_address: lift one fail2ban ban on a node, a jail name and an IPv4 or IPv6 address (agent 1.131.0)
  * @version 1.172 - FILE_HEAD_FILES reads Apache's joinery-http2.conf (apache_http2, agent 1.130.0)
  * @version 1.171 - build_log_table_tail reads the site's error table (table errors, agent 1.127.0) and narrows it to one
  *                kind of error: script policy refusals, database errors, exceptions
@@ -504,6 +506,7 @@ class JobCommandBuilder {
 		'joinery_ai_worker'    => 'AI worker log',
 		'install_executor'     => 'Install executor log',
 		'host_converger'       => 'Host converger log',
+		'follow_main'          => 'Follow-main pull log (a box that follows git main)',
 		'postgresql'           => 'PostgreSQL cluster log',
 	];
 
@@ -514,8 +517,10 @@ class JobCommandBuilder {
 	public static function site_log_files_for($node) {
 		$files = self::SITE_LOG_FILES;
 		$agent = (string)AgentVocabulary::version($node);
-		if ($agent === '' || version_compare($agent, self::SITE_LOG_ACCESS_MIN_AGENT_VERSION, '<')) {
-			unset($files['access']);
+		foreach (self::SITE_LOG_VALUE_MIN_AGENT_VERSION as $value => $floor) {
+			if ($agent === '' || version_compare($agent, $floor, '<')) {
+				unset($files[$value]);
+			}
 		}
 		return $files;
 	}
@@ -526,6 +531,16 @@ class JobCommandBuilder {
 	 * compiled shape of each line, never the line.
 	 */
 	const SITE_LOG_ACCESS_MIN_AGENT_VERSION = '1.93.0';
+
+	/**
+	 * Values an older agent refuses, each with the first agent that accepts it.
+	 * follow_main is the pull log dev_tools/follow_main.sh writes on a box that
+	 * follows git main; anywhere else the node answers present: false.
+	 */
+	const SITE_LOG_VALUE_MIN_AGENT_VERSION = [
+		'access'      => self::SITE_LOG_ACCESS_MIN_AGENT_VERSION,
+		'follow_main' => '1.131.0',
+	];
 
 	/** The log tables log_table_tail may name; same mirror discipline. */
 	const LOG_TABLES = [
@@ -2128,10 +2143,11 @@ class JobCommandBuilder {
 
 	public static function build_site_log_primitive($node, $file, $previous = false, $lines = 100) {
 		$file = (string)$file;
-		if ($file === 'access' && !array_key_exists('access', self::site_log_files_for($node))) {
-			throw new Exception("Node '{$node->get('mgn_slug')}' cannot read its access log: its agent is "
+		if (isset(self::SITE_LOG_VALUE_MIN_AGENT_VERSION[$file]) && !array_key_exists($file, self::site_log_files_for($node))) {
+			$what = $file === 'access' ? 'its access log' : "its {$file} log";
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot read {$what}: its agent is "
 				. ((string)AgentVocabulary::version($node) ?: 'of an unknown version') . ', and this needs '
-				. self::SITE_LOG_ACCESS_MIN_AGENT_VERSION . ' or newer.');
+				. self::SITE_LOG_VALUE_MIN_AGENT_VERSION[$file] . ' or newer.');
 		}
 		if (!array_key_exists($file, self::SITE_LOG_FILES)) {
 			throw new Exception("'" . $file . "' is not a log file the node offers. Choose one of: "
@@ -2868,6 +2884,32 @@ class JobCommandBuilder {
 		'host_swap.sh'              => 'Swap (compressed memory)',
 		'site_housekeeping.sh'      => 'Site housekeeping (log rotation, scheduled tasks)',
 	];
+
+	/**
+	 * Lift one fail2ban ban on the node: one address, in one of the machine's
+	 * own jails. PRIMITIVE ONLY. The address is sent in its canonical
+	 * spelling; the node takes the jail only if its fail2ban lists it.
+	 */
+	public static function build_unban_address($node, $jail, $address) {
+		if (!self::has_primitive($node, 'unban_address')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot lift a ban. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['unban_address']));
+		}
+		return self::build_unban_address_primitive($node, $jail, $address);
+	}
+
+	public static function build_unban_address_primitive($node, $jail, $address) {
+		$jail = trim((string)$jail);
+		if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/D', $jail)) {
+			throw new Exception("'" . substr($jail, 0, 64) . "' is not a jail name.");
+		}
+		$packed = @inet_pton(trim((string)$address));
+		if ($packed === false) {
+			throw new Exception("'" . substr((string)$address, 0, 64) . "' is not an IPv4 or IPv6 address.");
+		}
+		return ['primitive' => 'unban_address', 'params' => ['jail' => $jail, 'address' => inet_ntop($packed)]];
+	}
 
 	/**
 	 * The files reclaim_managed_file may put back, each with the installer

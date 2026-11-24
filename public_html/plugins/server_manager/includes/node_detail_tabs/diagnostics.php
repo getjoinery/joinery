@@ -327,7 +327,19 @@ $has_schema_probe = JobCommandBuilder::has_primitive($node, 'schema_probe');
 $has_run_installer = $may_change && JobCommandBuilder::has_primitive($node, 'run_installer');
 $has_page_probe = JobCommandBuilder::has_primitive($node, 'page_probe');
 $has_reclaim = $may_change && JobCommandBuilder::has_primitive($node, 'reclaim_managed_file');
-if ($has_schema_probe || $has_run_installer || $has_page_probe || $has_reclaim) {
+// Lifting a ban: offered with the jails the node's last host report named.
+$unban_jails = [];
+if ($may_change && JobCommandBuilder::has_primitive($node, 'unban_address')) {
+	$unban_report = json_decode((string)$node->get('mgn_last_host_report'), true);
+	foreach ((is_array($unban_report) && is_array($unban_report['fail2ban_jails'] ?? null)) ? $unban_report['fail2ban_jails'] : [] as $unban_jail) {
+		$unban_name = is_array($unban_jail) ? (string)($unban_jail['name'] ?? '') : '';
+		if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]{0,39}$/D', $unban_name)) {
+			$unban_jails[$unban_name] = $unban_name . (is_int($unban_jail['banned'] ?? null) ? ' (' . $unban_jail['banned'] . ' banned)' : '');
+		}
+	}
+}
+$has_unban = (bool)$unban_jails;
+if ($has_schema_probe || $has_run_installer || $has_page_probe || $has_reclaim || $has_unban) {
 	$page->begin_box(['title' => 'Diagnose and repair']);
 	echo '<div class="d-flex flex-wrap gap-4">';
 	if ($has_schema_probe) {
@@ -370,6 +382,19 @@ if ($has_schema_probe || $has_run_installer || $has_page_probe || $has_reclaim) 
 			'helptext' => 'Moves the file aside to a dated copy on the node and runs the installer that owns it. Read it first (Logs, Configuration file): a hand edit may be deliberate.']);
 		$fw_rc->submitbutton('btn_reclaim', 'Reset to the platform\'s version', ['class' => 'btn btn-sm btn-outline-secondary']);
 		$fw_rc->end_form();
+		echo '</div>';
+	}
+	if ($has_unban) {
+		echo '<div>';
+		$fw_ub = $page->getFormWriter('unban_form', ['action' => $base_url . '&tab=diagnostics']);
+		$fw_ub->begin_form();
+		$fw_ub->hiddeninput('action', '', ['id' => 'unban_action', 'value' => 'unban_address']);
+		$fw_ub->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'unban_csrf', 'value' => SmAdminCsrf::token()]);
+		$fw_ub->dropinput('jail', 'Lift a ban in', ['options' => $unban_jails]);
+		$fw_ub->textinput('address', 'Address', ['placeholder' => '203.0.113.9 or 2001:db8::9', 'maxlength' => 45,
+			'helptext' => 'One IPv4 or IPv6 address that fail2ban is holding off on this machine. Nothing else changes: the jail keeps watching, and bans the address again if it earns it.']);
+		$fw_ub->submitbutton('btn_unban', 'Lift the ban', ['class' => 'btn btn-sm btn-outline-secondary']);
+		$fw_ub->end_form();
 		echo '</div>';
 	}
 	if ($has_run_installer) {

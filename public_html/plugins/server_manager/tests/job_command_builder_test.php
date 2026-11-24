@@ -2594,8 +2594,8 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 		check($threw, 'log_table_tail\'s event and hours refuse on the plane: ' . var_export($bad, true));
 	}
 	check(array_key_exists('access', JobCommandBuilder::SITE_LOG_FILES), 'the access log is on the list, as the node\'s compiled shape of each line');
-	check(count(JobCommandBuilder::SITE_LOG_FILES) === 7 && count(JobCommandBuilder::LOG_TABLES) === 6,
-		'the mirrored lists are the seven files and six tables the specs name');
+	check(count(JobCommandBuilder::SITE_LOG_FILES) === 8 && count(JobCommandBuilder::LOG_TABLES) === 6,
+		'the mirrored lists are the eight files and six tables the specs name');
 
 	// The error table and its kinds (agent 1.127.0): offered and sent only to
 	// an agent that has them, the kind on the error table only.
@@ -2681,7 +2681,7 @@ section('site_log / log_table_tail: closed choices, bounded counts, the owner\'s
 	check($built === array('primitive' => 'site_log', 'params' => array('file' => 'postgresql', 'previous' => false, 'lines' => 100)),
 		'an agent at the floor reads the database log', var_export($built, true));
 	check(count(JobCommandBuilder::site_log_files_for($pg_node)) === 6,
-		'and the picker offers all six files');
+		'and the picker offers the six files with no per-value floor');
 	check(!defined('JobCommandBuilder::SITE_LOG_POSTGRES_MIN_AGENT_VERSION'),
 		'the per-value floor the version floor passed is deleted');
 
@@ -3328,6 +3328,21 @@ section('net_health, web_workers and the access log (specs/slow_request_diagnosi
 	check(!array_key_exists('access', JobCommandBuilder::site_log_files_for($sr_old)),
 		'an agent before 1.93.0 is not offered the access log: it would refuse the value');
 	check(array_key_exists('access', JobCommandBuilder::site_log_files_for($sr_node)), 'an agent at 1.93.0 is');
+	check(!array_key_exists('follow_main', JobCommandBuilder::site_log_files_for($sr_node)),
+		'an agent before 1.131.0 is not offered the follow_main pull log');
+	$fm_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+		'mgn_agent_primitives' => 'check_status,site_log',
+		'mgn_agent_log_access' => 'on',
+		'mgn_agent_version'    => '1.131.0',
+	));
+	check(array_key_exists('follow_main', JobCommandBuilder::site_log_files_for($fm_node)), 'an agent at 1.131.0 is');
+	$built = JobCommandBuilder::build_site_log($fm_node, 'follow_main', false, 200);
+	check($built === array('primitive' => 'site_log', 'params' => array('file' => 'follow_main', 'previous' => false, 'lines' => 200)),
+		'and the plane builds the read', var_export($built, true));
+	$said = '';
+	try { JobCommandBuilder::build_site_log($sr_node, 'follow_main'); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, '1.131.0') !== false, 'an older agent is told the version the pull log needs', $said);
 	$said = '';
 	try { JobCommandBuilder::build_site_log($sr_old, 'access'); } catch (Exception $e) { $said = $e->getMessage(); }
 	check(strpos($said, '1.93.0') !== false, 'asking an older agent for the access log names the version it needs', $said);

@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.45 - unban_address: the jail, the address and whether a ban was lifted
  * @version 1.44 - web_workers: the modules Apache loads, and whether HTTP/2 is among them
  * @version 1.43 - log_table_tail: an error read names the kind it was narrowed to
  * @version 1.42 - container_inventory: a Packages column, what each site runs of the sources a package fix can cover
@@ -1218,6 +1219,18 @@ if ($result) {
 			. '<div>Before: ' . $state($result_data['before'] ?? null) . '</div>'
 			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
 			. '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'unban_address' && !empty($result_data['read'])) {
+		$ub_count = $result_data['unbanned'] ?? 'unknown';
+		$ub_f2b = (string)($result_data['fail2ban'] ?? '');
+		if (is_int($ub_count)) {
+			$ub_line = $ub_count > 0 ? 'The ban is lifted.' : 'That address was not banned in this jail; nothing changed.';
+		} else {
+			$ub_line = $ub_f2b === 'absent' ? 'fail2ban is not installed on this machine.' : 'fail2ban did not say whether it lifted the ban.';
+		}
+		echo '<div class="card mb-3"><div class="card-header"><strong>Lift a ban</strong> <small class="text-muted">— '
+			. htmlspecialchars((string)($result_data['address'] ?? '')) . ' in ' . htmlspecialchars((string)($result_data['jail'] ?? '')) . '</small></div>'
+			. '<div class="card-body">' . htmlspecialchars($ub_line) . '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && in_array($job_type, array('run_installer', 'reclaim_managed_file'), true) && isset($result_data['ran'])) {
 		echo '<div class="card mb-3"><div class="card-header"><strong>'

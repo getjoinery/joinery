@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.42 - carries unban_address.sh, the machine word of agent 1.131.0 that lifts one fail2ban ban
  * @version 1.41 - carries install_package_fixes.sh and fixes/ACTIVE, so a container host fetches the package
  *                fixes its base installs (specs/package_fixes_ahead_of_ubuntu.md WP3)
  * @version 1.40 - staged in a private temporary folder: in the site tree the converger changed a copy's mode
@@ -254,6 +255,9 @@ class SupportBundlePublisher {
 		// and container_health. A Docker host runs its site containers and its
 		// own fail2ban and cron; both scripts source nothing.
 		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
+		// unban_address: one fail2ban ban lifted. A Docker host runs fail2ban
+		// too; the script sources nothing.
+		'maintenance_scripts/sysadmin_tools/unban_address.sh',
 		'maintenance_scripts/sysadmin_tools/restart_container.sh',
 		'maintenance_scripts/sysadmin_tools/hold_container.sh',
 		// site_converger (agent 1.98.0): whether a site container's converger is

@@ -115,6 +115,19 @@ foreach (array('apache2_conf', 'apache_site_ssl', 'postfix_main', 'sysctl_securi
 	check(avw_refused(function () use ($node, $bad) { JobCommandBuilder::build_reclaim_managed_file($node, $bad); }) !== '',
 		"reclaim_managed_file refuses '{$bad}' here: it is never resettable");
 }
+$node_ub = avw_node(array('mgn_agent_primitives' => 'host_report,unban_address'));
+check(JobCommandBuilder::build_unban_address($node_ub, 'apache-badbots', ' 203.0.113.9 ') === array('primitive' => 'unban_address', 'params' => array('jail' => 'apache-badbots', 'address' => '203.0.113.9')),
+	'unban_address sends the jail and the IPv4 address');
+check(JobCommandBuilder::build_unban_address($node_ub, 'sshd', '2001:0DB8:0000:0000:0000:0000:0000:0009')['params']['address'] === '2001:db8::9',
+	'an IPv6 address is sent in its canonical spelling');
+foreach (array(array('sshd', '203.0.113.999'), array('sshd', 'example.com'), array('sshd', '203.0.113.0/24'), array('sshd', ''), array('--all', '203.0.113.9'),
+	array('sshd; reboot', '203.0.113.9'), array('', '203.0.113.9'), array("sshd\n", '203.0.113.9')) as $bad) {
+	check(avw_refused(function () use ($node_ub, $bad) { JobCommandBuilder::build_unban_address($node_ub, $bad[0], $bad[1]); }) !== '',
+		"unban_address refuses jail '" . trim($bad[0]) . "' with address '{$bad[1]}'");
+}
+check(strpos(avw_refused(function () use ($node) { JobCommandBuilder::build_unban_address($node, 'sshd', '203.0.113.9'); }), 'cannot lift a ban') !== false,
+	'a node whose agent lacks the word says so');
+
 foreach (array_keys(JobCommandBuilder::RECLAIM_FILES) as $f) {
 	check(array_key_exists($f, JobCommandBuilder::FILE_HEAD_FILES), "resettable {$f} is also readable");
 }
@@ -172,6 +185,30 @@ foreach (new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' =
 	$queued++;
 }
 check($queued === 1, 'and a host report is queued so the Host card re-measures');
+
+$ub = avw_job($node_ub, 'unban_address', json_encode(array('jail' => 'apache-badbots<b>', 'address' => '2001:DB8::9', 'fail2ban' => 'answered', 'unbanned' => 1)));
+JobResultProcessor::process($ub);
+$ub->load();
+$r = json_decode((string)$ub->get('mjb_result'), true);
+check($r === array('read' => true, 'jail' => 'apache-badbotsb', 'address' => '2001:db8::9', 'fail2ban' => 'answered', 'unbanned' => 1)
+	&& $ub->get('mjb_status') === 'completed', 'a lifted ban is recorded: the jail, the address, the count', var_export($r, true));
+$queued = 0;
+foreach (new MultiManagementJob(array('node_id' => (int)$node_ub->key, 'job_type' => 'host_report')) as $j) {
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+	$queued++;
+}
+check($queued === 1, 'and a host report is queued so the jail counts are re-measured');
+$ub0 = avw_job($node_ub, 'unban_address', json_encode(array('jail' => 'sshd', 'address' => '203.0.113.9', 'fail2ban' => 'answered', 'unbanned' => 0)));
+JobResultProcessor::process($ub0);
+$ub0->load();
+check(json_decode((string)$ub0->get('mjb_result'), true)['unbanned'] === 0 && $ub0->get('mjb_status') === 'completed',
+	'an address that was not banned is an answer, not a failure');
+$ubx = avw_job($node_ub, 'unban_address', json_encode(array('jail' => 'sshd', 'address' => 'not an address', 'fail2ban' => 'absent', 'unbanned' => 'unknown')));
+JobResultProcessor::process($ubx);
+$ubx->load();
+$r = json_decode((string)$ubx->get('mjb_result'), true);
+check($r['address'] === '' && $r['unbanned'] === 'unknown' && $ubx->get('mjb_status') === 'failed'
+	&& strpos((string)$ubx->get('mjb_error_message'), 'not installed') !== false, 'a machine without fail2ban lifted nothing, and the job says so', var_export($r, true));
 
 $no = avw_job($node, 'restart_container', json_encode(array('container' => 'site1', 'before' => array('state' => 'exited', 'health' => 'none'),
 	'restarted' => false, 'after' => array('state' => 'exited', 'health' => 'none'))));

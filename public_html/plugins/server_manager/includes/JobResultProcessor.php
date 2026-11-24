@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.147 - process_unban_address: the jail, the address and how many bans the node lifted
  * @version 1.146 - web_workers keeps apache_modules, the names of the modules Apache loads (web_workers.sh 1.3)
  * @version 1.145 - process_managed_domain_prepare keeps the site's reason (mailbox_inactive) beside its error
  * @version 1.144 - host_report_package_fixes keeps fetch_failed (host_report 1.44)
@@ -3396,6 +3397,52 @@ HTML;
 	 */
 	private static function process_restart_unit($job) {
 		self::process_restart($job, 'unit');
+	}
+
+	/**
+	 * An unban_address job's result: the jail, the address, whether fail2ban
+	 * answered, and how many bans it lifted (0 when the address was not
+	 * banned there, which is an answer and not a failure). A node whose
+	 * fail2ban is absent or did not answer lifted nothing, and the job fails.
+	 * A lifted ban queues a host_report, so the jail counts are re-measured.
+	 */
+	private static function process_unban_address($job) {
+		$d = self::script_json($job);
+		if (!is_array($d) || !isset($d['jail'], $d['fail2ban'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$packed = is_string($d['address'] ?? null) ? @inet_pton($d['address']) : false;
+		$count = $d['unbanned'] ?? null;
+		$result = [
+			'read'     => true,
+			'jail'     => self::host_report_name($d['jail']),
+			'address'  => $packed !== false ? inet_ntop($packed) : '',
+			'fail2ban' => in_array($d['fail2ban'], ['answered', 'absent', 'no_answer'], true) ? $d['fail2ban'] : 'no_answer',
+			'unbanned' => is_int($count) && $count >= 0 ? $count : 'unknown',
+		];
+		$job->set('mjb_result', json_encode($result));
+		if ($result['unbanned'] === 'unknown' && $job->get('mjb_status') === 'completed') {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message', $result['fail2ban'] === 'absent'
+				? 'fail2ban is not installed on this machine'
+				: 'fail2ban did not say whether it lifted the ban');
+		}
+		$job->save();
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if (is_int($result['unbanned']) && $result['unbanned'] > 0 && $node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				if (JobCommandBuilder::has_primitive($node, 'host_report')
+						&& !ManagementJob::activeOrRecentForNode($node_id, 'host_report', 60)) {
+					ManagementJob::createFromBuild($node_id, 'host_report',
+						JobCommandBuilder::build_host_report($node), null, $job->get('mjb_created_by'));
+				}
+			} catch (Exception $e) {
+				// The ban is lifted; not being able to re-measure changes nothing.
+			}
+		}
 	}
 
 	/**

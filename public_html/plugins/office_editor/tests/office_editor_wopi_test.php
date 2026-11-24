@@ -45,6 +45,10 @@ section('Setup');
 $made_files = array();
 harness_defer(function () use (&$made_files) {
 	foreach ($made_files as $fid) {
+		// Where the plugin is not active a file's delete does not reach its
+		// editing sessions (an inactive plugin's classes do not resolve), so
+		// the sessions this test made are removed here first.
+		DbConnector::get_instance()->get_db_link()->prepare('DELETE FROM oes_office_editor_sessions WHERE oes_fil_file_id = ?')->execute(array((int)$fid));
 		$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT 1 FROM fil_files WHERE fil_file_id = ?');
 		$q->execute(array((int)$fid));
 		if ($q->fetchColumn()) { (new File((int)$fid, true))->permanent_delete(); }

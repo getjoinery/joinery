@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.16 - fleet_security retry_fix (Try again on a withdrawn package fix build) is level 8, as Withdraw
  * @version 1.15 - retry_hosted_mail (node page) and retry_provision (board) are level 10 (hosting_after_purchase E2, O1)
  * @version 1.14 - bring_back_hosted is level 10 (hosting_paid_launch O3)
  * @version 1.13 - suspend_site and unsuspend_site on the node page (10): an abuse call that stops a customer's site
@@ -41,7 +42,7 @@ final class SmActionLevels {
 			'schema_probe' => 7, 'page_probe' => 7, 'net_health' => 7, 'web_workers' => 7, 'edge_vs_origin' => 7,
 			// Changes (8)
 			'host_converge' => 8, 'install_security_updates' => 8, 'refresh_site_containers' => 8,
-			'reset_failed_unit' => 8, 'restart_unit' => 8, 'mail_test_send' => 8, 'restart_container' => 8, 'hold_container' => 8,
+			'reset_failed_unit' => 8, 'restart_unit' => 8, 'unban_address' => 8, 'mail_test_send' => 8, 'restart_container' => 8, 'hold_container' => 8,
 			'site_limits' => 8, 'outbound_limits' => 8, 'run_installer' => 8, 'reclaim_managed_file' => 8,
 			'restore_release_file' => 8, 'repair_release_files' => 8, 'backup_run' => 8, 'save_backup_policy' => 8,
 			'apply_update' => 8, 'apply_update_all_on_host' => 8, 'publish_upgrade' => 8, 'retry_install' => 8,
@@ -87,7 +88,7 @@ final class SmActionLevels {
 		'incident' => array('triage' => 8, 'analyze' => 8, 'note' => 8),
 		'incidents' => array('triage' => 8),
 		'rollouts' => array('start_rollout' => 8, 'stop_rollout' => 8),
-		'fleet_security' => array('start_run' => 8, 'stop_run' => 8, 'withdraw_fix' => 8),
+		'fleet_security' => array('start_run' => 8, 'stop_run' => 8, 'withdraw_fix' => 8, 'retry_fix' => 8),
 	);
 
 	/** The level a page's action needs; one not named for the page needs 10. */

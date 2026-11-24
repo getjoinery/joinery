@@ -8,6 +8,7 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.20 - the log list names the follow_main pull log (a box that follows git main)
  * @version 1.19 - the log list names Apache's joinery-http2.conf among the configuration files
  * @version 1.18 - a management node that answers it no longer knows this machine (the agent's disowned_time, agent 1.128.0)
  *                is said so, with Disconnect as the way to connect again; Disconnect keeps ?connect_to=
@@ -271,6 +272,7 @@ echo '<ul style="' . $bullets . '">'
    . '<li>AI worker log: <code>logs/joinery_ai_worker.log</code></li>'
    . '<li>Install executor log: <code>logs/install_executor.log</code></li>'
    . '<li>Host converger log: <code>/var/log/joinery/host_converger.' . htmlspecialchars(basename(PathHelper::getSiteRoot())) . '.log</code> (the journal on a host with a data root)</li>'
+   . '<li>Pull log, on a box that follows git main: <code>logs/follow_main.log</code></li>'
    . '<li>PostgreSQL cluster log</li>'
    . '</ul>';
 

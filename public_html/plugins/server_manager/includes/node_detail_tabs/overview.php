@@ -684,7 +684,7 @@
 	// lacks, where the buttons and forms for them would be - never a blank.
 	if ($node->get('mgn_agent_public_key')) {
 		$tab_words = ['host_report', 'site_log', 'site_log_count', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
-			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
+			'disk_usage', 'restart_unit', 'unban_address', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
 			'listening_sockets', 'container_inventory', 'reboot_machine', 'mailbox_status', 'site_state_report',
 			'install_security_updates', 'net_health', 'web_workers', 'disable_root_login', 'never_do_check'];
 		// (restore_release_file and upgrade_preflight are not listed: a node

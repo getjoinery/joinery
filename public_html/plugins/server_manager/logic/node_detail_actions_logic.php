@@ -259,6 +259,7 @@ class NodeDetailActions {
 		'file_head'                => 'diagnostics',
 		'schema_probe'             => 'diagnostics',
 		'reclaim_managed_file'     => 'diagnostics',
+		'unban_address'            => 'diagnostics',
 		'restore_release_file'     => 'overview',
 		'repair_release_files'     => 'overview',
 		'page_probe'               => 'diagnostics',
@@ -581,6 +582,12 @@ class NodeDetailActions {
 			case 'repair_release_files': {
 				$built = JobCommandBuilder::build_repair_release_files($node);
 				$job = ManagementJob::createFromBuild($node->key, 'repair_release_files', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'unban_address': {
+				$built = JobCommandBuilder::build_unban_address($node, (string)($_POST['jail'] ?? ''), (string)($_POST['address'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'unban_address', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 
