@@ -44,6 +44,14 @@
  * parts {data, error, validation_errors, redirect} are the call's output, and
  * core rebuilds the LogicResult from them.
  *
+ * A webhook is an action call with no user: the request's headers are in
+ * $_SERVER['HTTP_*'] (core left out every credential) and its raw body, which
+ * a signature is checked over, is SandboxRequest::rawBody(): php://input here
+ * is the runner's own pipe.
+ *
+ * @version 1.8 - CONTENT_TYPE and CONTENT_LENGTH where native code reads them (reviewer2 N2)
+ * @version 1.7 - a webhook's headers in $_SERVER and its body in SandboxRequest::rawBody() (spec
+ *                sandboxed_plugin_api_actions phase 2)
  * @version 1.6 - action: one of the plugin's own API actions (spec sandboxed_plugin_api_actions)
  * @version 1.5 - a page call's uploads are $_FILES, and SandboxPage::file() (spec sandboxed_plugin_uploads)
  * @version 1.4 - on_page: the plugin's view draws a page (SandboxPage)
@@ -153,6 +161,18 @@ final class SandboxPage {
 	}
 }
 
+/** The request a webhook answers: its raw body, as the outside service sent and signed it. */
+final class SandboxRequest {
+
+	/** @var string */
+	public static $body = '';
+
+	/** The request's body, byte for byte (php://input in native code). */
+	public static function rawBody(): string {
+		return self::$body;
+	}
+}
+
 /** A line in the call's log, which the admin reads (level debug, info, warn or error). */
 function sandbox_log(string $message, string $level = 'info'): void {
 	SandboxPipe::ask('log', array('level' => $level, 'message' => $message));
@@ -233,6 +253,20 @@ try {
 			sandbox_runner_finish(false, null, 'src/logic/' . $action . '_logic.php defines no ' . $function . '().');
 		}
 		$values = is_array($envelope['input']['values'] ?? null) ? $envelope['input']['values'] : array();
+		// A webhook's request: its headers where native code reads them, and its body.
+		foreach ((array)($envelope['input']['headers'] ?? array()) as $name => $value) {
+			if (is_string($name) && preg_match('~^HTTP_[A-Z0-9_]{1,100}$~D', $name) && is_string($value)) {
+				$_SERVER[$name] = $value;
+				// Where native code reads these two, as PHP's web server puts them (reviewer2 N2).
+				if ($name === 'HTTP_CONTENT_TYPE' || $name === 'HTTP_CONTENT_LENGTH') {
+					$_SERVER[substr($name, 5)] = $value;
+				}
+			}
+		}
+		if (isset($envelope['input']['body_b64']) && is_string($envelope['input']['body_b64'])) {
+			SandboxRequest::$body = (string)base64_decode($envelope['input']['body_b64'], true);
+			$_SERVER['REQUEST_METHOD'] = 'POST';
+		}
 		// Where native logic looks to see it was submitted (ApiLogicEndpoint sets it the same way).
 		$_POST = $values;
 		$result = $function($values);

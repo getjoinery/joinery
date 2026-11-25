@@ -31,6 +31,7 @@
  * `input` per export: on_ui {handler, values, user: {id, permission, timezone}};
  * on_ui also carries source ('form', or 'frame' with kind and page);
  * on_page {page, kind: admin|member|public, method, query, fields, user};
+ * a webhook is the same export with user null, headers (the request's, credentials left out) and body_b64;
  * action {action, values, user} (one of its own API actions, src/logic/{action}_logic.php; user carries the level the
  * request acts at); on_signal {signal, message_id, timestamp, data}; on_schedule {schedule, time}.
  *
@@ -46,6 +47,11 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.17 - a webhook's changed-file refusal comes after the counts; its refusals speak of an address, not a page
+ *                (reviewer2 R2, R3)
+ * @version 1.16 - webhook(): a sandboxed plugin's webhook, anyone's POST, in the anonymous pool, at most
+ *                WEBHOOK_CALLS_PER_MINUTE a plugin site-wide; the envelope marks it {webhook: true}, which the relay
+ *                holds to its own caps (spec sandboxed_plugin_api_actions phase 2)
  * @version 1.15 - an action call is refused, unavailable, while its logic file differs from what the site read; an
  *                action call that cannot be made at all is unavailable, not an error: its code never ran (reviewer2 R2, R4)
  * @version 1.14 - action(): one of the plugin's own API actions, with the UI call's bounds (spec sandboxed_plugin_api_actions)
@@ -98,6 +104,12 @@ class SandboxHost {
 
 	/** The attempt-limit feature an anonymous call is counted under (RequestLogger). */
 	const PUBLIC_LIMIT_FEATURE = 'sandbox_public_page';
+
+	/** Webhook calls one plugin may take a minute, from every network together (phase 2). */
+	const WEBHOOK_CALLS_PER_MINUTE = 300;
+
+	/** The count those calls are logged and counted under, keyed on the plugin's install. */
+	const WEBHOOK_LIMIT_FEATURE = 'sandbox_webhook';
 
 	/** What a call is answered with when its runner gives no reason. */
 	const NO_RUNNER_MESSAGE = 'Nothing on this server can run the plugin.';
@@ -233,6 +245,58 @@ class SandboxHost {
 		}
 	}
 
+	/**
+	 * Run one of the plugin's webhooks for anyone's POST (SandboxActions::
+	 * webhook()). A call from someone unknown, whoever it claims to be: the
+	 * anonymous pool (one call per network at a time, PUBLIC_CALLS_PER_MINUTE
+	 * a network, ANON_SLOTS a site), then WEBHOOK_CALLS_PER_MINUTE for the
+	 * plugin from every network together. A refusal before the call writes no
+	 * call-log row, as a public page's does not.
+	 *
+	 * @param array<string,string> $headers the request's, as $_SERVER names them, credentials left out
+	 */
+	public static function webhook(string $plugin, string $action, array $values, array $headers, string $body): array {
+		$slot = self::takeAnonSlot();
+		if (!is_array($slot)) {
+			return self::anonRefusal($slot, true);
+		}
+		try {
+			// Counted while the slot is held: at most ANON_SLOTS calls can
+			// pass the last place at once.
+			$key = self::webhookKey($plugin);
+			$state = RequestLogger::rate_limit_state(self::WEBHOOK_LIMIT_FEATURE, self::WEBHOOK_CALLS_PER_MINUTE, 60, null, null, $key);
+			if (!$state['allowed']) {
+				return array('status' => SandboxLog::STATUS_BUSY, 'output' => null, 'calls' => array(), 'duration_ms' => null,
+					'refused' => 'site_limited', 'message' => 'This address has been called too often in the last minute. Try again in a minute.');
+			}
+			RequestLogger::log(self::WEBHOOK_LIMIT_FEATURE, 'call', true, array('key' => $key));
+			// After the counts, so the row this refusal writes is held to
+			// them like any call's (reviewer2 R2).
+			if (SandboxActions::fileChanged($plugin, $action)) {
+				return self::record($plugin, SandboxLog::KIND_ACTION, $action, array('status' => SandboxLog::STATUS_UNAVAILABLE,
+					'message' => 'The plugin cannot be called: ' . SandboxActions::FILE_CHANGED . '.'), null, IpAddress::network((string)($_SERVER['REMOTE_ADDR'] ?? '')));
+			}
+			return self::call($plugin, SandboxLog::KIND_ACTION, $action, 'action', array(
+				'action'   => $action,
+				'values'   => $values ?: new stdClass(),
+				'user'     => null,
+				'headers'  => $headers ?: new stdClass(),
+				// Bytes, whatever they are: JSON carries text only.
+				'body_b64' => base64_encode($body),
+			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'anonymous' => array('checked_post' => false, 'webhook' => true)));
+		} finally {
+			foreach ($slot as $fh) {
+				flock($fh, LOCK_UN);
+				fclose($fh);
+			}
+		}
+	}
+
+	/** The key a plugin's webhook counts are kept under: its install, never its name. */
+	public static function webhookKey(string $plugin): string {
+		return 'webhook:' . (PluginInstallIdentity::idOf($plugin) ?? $plugin);
+	}
+
 	/** Deliver one signal to the plugin. */
 	public static function signal(string $plugin, string $signal, array $payload, string $message_id, string $timestamp): array {
 		return self::background($plugin, SandboxLog::KIND_SIGNAL, $signal, 'on_signal', array(
@@ -297,6 +361,11 @@ class SandboxHost {
 			// never the plugin: this call is for a visitor not signed in, and
 			// only a checked form POST may write or send (design 3).
 			$envelope['anonymous'] = array('checked_post' => !empty($anonymous['checked_post']));
+			// A webhook has passed none of a form's checks: the relay holds it
+			// to caps of its own (spec sandboxed_plugin_api_actions phase 2).
+			if (!empty($anonymous['webhook'])) {
+				$envelope['anonymous']['webhook'] = true;
+			}
 		}
 		$result = self::run($envelope);
 		return self::record($plugin, $kind, $name, $result, $opts['user_id'] ?? null, $network);
@@ -318,9 +387,11 @@ class SandboxHost {
 	}
 
 	/** An anonymous call refused before it ran: nothing is written for it (design 4, P7). */
-	private static function anonRefusal(string $why): array {
+	private static function anonRefusal(string $why, bool $webhook = false): array {
 		$messages = array(
-			'limited' => 'This page has been opened too often from your network. Try again in a minute.',
+			// A service reading its delivery log sees an address, not a page (reviewer2 R3).
+			'limited' => $webhook ? 'This address has been called too often from your network. Try again in a minute.'
+				: 'This page has been opened too often from your network. Try again in a minute.',
 			'network_busy' => 'The plugin is still answering your last request. Try again in a moment.',
 			'busy'    => 'The plugin is busy with other requests. Try again in a moment.',
 			'error'   => 'The plugin cannot be called on this site right now.',

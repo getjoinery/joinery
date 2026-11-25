@@ -37,6 +37,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_actions
  *
+ * @version 1.2 - a sessionless action is a webhook (phase 2, its own suite sandbox_webhooks); one with auth is refused
  * @version 1.1 - reviewer2 R1-R4: the caller held to the descriptor's level and setting by call() itself, key-only
  *                actions never offered to the assistant, a changed logic file refused until a sync, a use function line
  *                and a namespace, a call refused before it started marked as never run
@@ -124,7 +125,7 @@ try {
 		'allow_guest'                       => array($logic_file('a', "array('auth' => array('min_user_permission' => 0, 'allow_guest' => true))"), 'allow_guest is not available'),
 		'session_write'                     => array($logic_file('a', "array('auth' => array('min_user_permission' => 0, 'session_write' => true))"), 'session_write is not available'),
 		'app_purpose'                       => array($logic_file('a', "array('app_purpose' => 'mail', 'auth' => array('min_user_permission' => 0))"), "'app_purpose' is not available"),
-		'A sessionless action (phase 2)'    => array($logic_file('a', "array('requires_session' => false, 'auth' => array('min_user_permission' => 0))"), 'not available to a sandboxed plugin yet'),
+		'A webhook with an auth block'      => array($logic_file('a', "array('requires_session' => false, 'auth' => array('min_user_permission' => 0))"), 'has no auth'),
 		'An unknown key'                    => array($logic_file('a', "array('mood' => 'x', 'auth' => array('min_user_permission' => 0))"), "'mood' is not a key"),
 		'No min_user_permission'            => array($logic_file('a', "array('auth' => array('capability' => 'write'))"), 'min_user_permission is required'),
 		'A level out of range'              => array($logic_file('a', "array('auth' => array('min_user_permission' => 11))"), 'a level from 0 to 10'),

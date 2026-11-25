@@ -23,6 +23,8 @@
  * disabled or deleted. Once they cannot, the plugin's credential is switched
  * off (User::save()) and the plugin waits on another admin's approval.
  *
+ * @version 1.16 - webhooks (spec sandboxed_plugin_api_actions phase 2): each action anyone may call is a grant,
+ *                described with its address and what it can do when called
  * @version 1.15 - its own API actions (spec sandboxed_plugin_api_actions): an action the AI assistant may run without
  *                 asking is a grant, assistant_auto (D5); the actions join the digest
  * @version 1.14 - blockEntries(): a prevent between the plugin's own models is a block when a site record's delete
@@ -72,12 +74,19 @@ class SandboxConsent {
 		// An action the AI assistant may run without asking (D5): asking
 		// first needs no approval, since a person agrees to each call.
 		$assistant_auto = array();
+		// An action anyone on the internet may call (a webhook): a grant of its own.
+		$webhooks = array();
 		foreach ($actions_declared as $action => $descriptor) {
+			if (is_array($descriptor) && SandboxActions::isWebhook($descriptor)) {
+				// By its full name, which is its address.
+				$webhooks[] = $m->name() . '/' . $action;
+			}
 			if (($descriptor['ai_agent'] ?? null) === 'auto') {
 				$assistant_auto[] = (string)$action;
 			}
 		}
 		sort($assistant_auto);
+		sort($webhooks);
 		$actions = $m->permittedActions();
 		sort($actions);
 		$records = array();
@@ -138,11 +147,12 @@ class SandboxConsent {
 			'public_pages'   => $public_pages,
 			'framed_admin_pages' => $framed_admin_pages,
 			'assistant_auto' => $assistant_auto,
+			'webhooks'       => $webhooks,
 		) + self::modelGrants($m->name(), $models);
 	}
 
 	/** The list kinds every approval is compared in, a value each. */
-	const LIST_KINDS = array('actions', 'signals', 'outbound_hosts', 'email', 'uploads', 'model_reach', 'blocks', 'assistant_auto');
+	const LIST_KINDS = array('actions', 'signals', 'outbound_hosts', 'email', 'uploads', 'model_reach', 'blocks', 'assistant_auto', 'webhooks');
 
 	/**
 	 * What a plugin's models open beyond the plugin, from their checked
@@ -448,7 +458,7 @@ class SandboxConsent {
 	 * approval covers. Nothing at all with no approval.
 	 */
 	public static function effective(string $plugin): array {
-		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array(), 'model_reach' => array(), 'blocks' => array(), 'assistant_auto' => array());
+		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array(), 'model_reach' => array(), 'blocks' => array(), 'assistant_auto' => array(), 'webhooks' => array());
 		try {
 			$asked = self::grantsOf(SandboxPlugins::manifest($plugin));
 		} catch (SandboxManifestException $e) {
@@ -678,6 +688,14 @@ class SandboxConsent {
 		}
 		if (!empty($grants['blocks'])) {
 			$out["Stop the site's records being deleted while it holds rows for them (an admin can see and remove those rows)"] = $grants['blocks'];
+		}
+		if (!empty($grants['webhooks'])) {
+			$lines = array();
+			foreach ($grants['webhooks'] as $action) {
+				$lines[] = 'Accepts calls from anyone on the internet at /api/v1/action/' . $action
+					. ', and can change its records, call its approved websites and send mail when called';
+			}
+			$out['Webhooks: addresses anyone on the internet can call, with no sign-in (its own code checks who sent each call)'] = $lines;
 		}
 		if (!empty($grants['assistant_auto'])) {
 			$out["Let the site's AI assistant run these of its actions without asking first"] = $grants['assistant_auto'];

@@ -27,6 +27,19 @@
  * carried as the setting's real name (sbx_{plugin}__{name}), and
  * '_plugin' => the plugin, which the catalog and the AI assistant read.
  *
+ * Phase 2, webhooks: an action whose descriptor says requires_session false
+ * is called by anyone, as a first-party sessionless action is: an outside
+ * service POSTs to it, and the plugin's own code checks the signature
+ * (SandboxRequest::rawBody() in the fence). Core treats each call as from
+ * someone unknown: the anonymous pool, the webhook caps in the relay, and
+ * two site-wide counts per plugin (SandboxHost::webhook()). It runs only
+ * once approved (a grant of its own, webhooks), and is never offered to
+ * the AI assistant.
+ *
+ * @version 1.3 - a webhook not approved is left out of the catalog too; the approved webhooks are read once a request
+ *                (reviewer2 R1, N3)
+ * @version 1.2 - webhooks: requires_session false, with no auth and no ai_agent; webhook() hands the fence the
+ *                request's headers (credentials left out) and its raw body (spec sandboxed_plugin_api_actions phase 2)
  * @version 1.1 - call() holds the caller to the descriptor's level and requires_setting, for every caller (the API,
  *                the AI assistant, first-party code); a logic file changed since the site read it is refused until a sync
  *                (fileChanged()); keyOnly() (reviewer2 R1, R2)
@@ -316,10 +329,18 @@ class SandboxActions {
 				$out['ai_agent'] = $d['ai_agent'];
 			}
 		}
+		$webhook = false;
 		if (array_key_exists('requires_session', $d)) {
 			if ($d['requires_session'] === false) {
-				// Phase 2 of the spec: a call from anyone, with its own limits.
-				$problems[] = "$label: requires_session false (an action for callers with no credential, such as a webhook) is not available to a sandboxed plugin yet.";
+				// A webhook: anyone may call it, and its own code checks who did.
+				$webhook = true;
+				$out['requires_session'] = false;
+				if (array_key_exists('auth', $d)) {
+					$problems[] = "$label: a webhook (requires_session false) has no auth: anyone may call it, and its own code checks the signature.";
+				}
+				if (array_key_exists('ai_agent', $d)) {
+					$problems[] = "$label: a webhook (requires_session false) is not offered to the AI assistant; leave out ai_agent.";
+				}
 			} elseif ($d['requires_session'] !== true) {
 				$problems[] = "$label: requires_session is true or false.";
 			}
@@ -334,7 +355,9 @@ class SandboxActions {
 			}
 		}
 		$auth = $d['auth'] ?? null;
-		if (!is_array($auth) || !array_key_exists('min_user_permission', $auth)) {
+		if ($webhook) {
+			// Checked above: a webhook declares none.
+		} elseif (!is_array($auth) || !array_key_exists('min_user_permission', $auth)) {
 			$problems[] = "$label: auth.min_user_permission is required: the level a caller needs (0 for any signed-in member).";
 		} else {
 			$out['auth'] = self::auth($label, $auth, $problems);
@@ -540,6 +563,7 @@ class SandboxActions {
 	 */
 	public static function reset(): void {
 		self::$stored = array();
+		self::$approved_webhooks = array();
 	}
 
 	// ------------------------------------------------------------------
@@ -561,7 +585,30 @@ class SandboxActions {
 			return null;
 		}
 		$descriptor = self::stored($plugin)['actions'][$action] ?? null;
-		return is_array($descriptor) ? $descriptor : null;
+		if (!is_array($descriptor)) {
+			return null;
+		}
+		// A webhook is there only once an admin approved anyone calling it.
+		if (self::isWebhook($descriptor) && !in_array($plugin . '/' . $action, self::approvedWebhooks($plugin), true)) {
+			return null;
+		}
+		return $descriptor;
+	}
+
+	/** @var array<string,string[]> plugin => its approved webhooks, read once a request (reviewer2 N3) */
+	private static $approved_webhooks = array();
+
+	/** The plugin's webhooks an admin approved, by '{plugin}/{action}'. */
+	public static function approvedWebhooks(string $plugin): array {
+		if (!isset(self::$approved_webhooks[$plugin])) {
+			self::$approved_webhooks[$plugin] = SandboxConsent::effective($plugin)['webhooks'] ?? array();
+		}
+		return self::$approved_webhooks[$plugin];
+	}
+
+	/** Whether a descriptor is a webhook's: called by anyone, with no credential. */
+	public static function isWebhook(array $descriptor): bool {
+		return ($descriptor['requires_session'] ?? true) === false;
 	}
 
 	/** Whether a '{plugin}/{action}' name is a sandboxed plugin's action (active or not, by its stored descriptors). */
@@ -582,7 +629,15 @@ class SandboxActions {
 	public static function catalog(): array {
 		$out = array();
 		foreach (array_keys(SandboxPlugins::active()) as $plugin) {
+			$approved = null;
 			foreach ((array)(self::stored((string)$plugin)['actions'] ?? array()) as $action => $descriptor) {
+				// A webhook no admin approved is not there, here as in lookup() (reviewer2 R1).
+				if (is_array($descriptor) && self::isWebhook($descriptor)) {
+					$approved = $approved ?? self::approvedWebhooks((string)$plugin);
+					if (!in_array($plugin . '/' . $action, $approved, true)) {
+						continue;
+					}
+				}
 				if (is_array($descriptor)) {
 					$out[$plugin . '/' . $action] = array('meta' => $descriptor, 'has_form' => false, 'sandboxed' => (string)$plugin);
 				}
@@ -598,6 +653,10 @@ class SandboxActions {
 	 */
 	public static function callable(string $plugin, string $action): Closure {
 		return function ($input) use ($plugin, $action) {
+			$descriptor = self::lookup($plugin, $action);
+			if ($descriptor !== null && self::isWebhook($descriptor)) {
+				return self::webhook($plugin, $action, is_array($input) ? $input : array());
+			}
 			$session = SessionControl::get_instance();
 			$user_id = $session->get_user_id();
 			$user = $user_id ? new User((int)$user_id, TRUE) : null;
@@ -616,6 +675,10 @@ class SandboxActions {
 		$descriptor = self::lookup($plugin, $action);
 		if ($descriptor === null) {
 			return LogicResult::error('Unknown action: ' . $plugin . '/' . $action, array('http_status' => 404));
+		}
+		if (self::isWebhook($descriptor)) {
+			// Anyone's call, held to the webhook limits: only its address runs it.
+			return LogicResult::error($plugin . '/' . $action . ' is a webhook: it runs when its address is called.', array('http_status' => 400));
 		}
 		if ($user === null || !$user->key) {
 			// A sandboxed action is for a signed-in caller (no allow_guest, no sessionless action yet).
@@ -675,6 +738,70 @@ class SandboxActions {
 		return !hash_equals((string)($stat['sha256'] ?? ''), (string)hash_file('sha256', $path));
 	}
 
+	/** The longest raw body a webhook hands the fence. */
+	const MAX_BODY_BYTES = 1048576;
+
+	/** At most this many request headers cross, each value at most MAX_HEADER_BYTES. */
+	const MAX_HEADERS = 100;
+	const MAX_HEADER_BYTES = 8192;
+
+	/**
+	 * Run a webhook for the request being answered (anyone's POST): its
+	 * declared fields, its headers with every credential left out, and its
+	 * raw body, which the plugin's code signs over. Refused before it runs
+	 * with its setting off or a body over 1 MB.
+	 */
+	public static function webhook(string $plugin, string $action, array $input): LogicResult {
+		$descriptor = self::lookup($plugin, $action);
+		if ($descriptor === null || !self::isWebhook($descriptor)) {
+			return LogicResult::error('Unknown action: ' . $plugin . '/' . $action, array('http_status' => 404));
+		}
+		$setting = $descriptor['requires_setting'] ?? null;
+		if ($setting && !Globalvars::get_instance()->get_setting($setting)) {
+			return LogicResult::error($plugin . '/' . $action . ' is unavailable: the ' . $setting . ' setting is off on this instance.',
+				array('http_status' => 403));
+		}
+		$body = self::$raw_body ?? (string)file_get_contents('php://input');
+		if (strlen($body) > self::MAX_BODY_BYTES) {
+			return LogicResult::error('The body is larger than 1 MB.', array('http_status' => 413));
+		}
+		$values = array_intersect_key($input, (array)($descriptor['input'] ?? array()));
+		$json = json_encode((object)$values, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+		if ($json === false || strlen($json) > self::MAX_INPUT_BYTES) {
+			return LogicResult::error('The input is larger than 1 MB.', array('http_status' => 413));
+		}
+		$headers = self::webhookHeaders(self::$raw_headers ?? (function_exists('getallheaders') ? (getallheaders() ?: array()) : array()));
+		return self::result(SandboxHost::webhook($plugin, $action, $values, $headers, $body));
+	}
+
+	/** Tests only: the request's raw body and headers, in place of php://input and getallheaders(). */
+	public static $raw_body = null;
+	public static $raw_headers = null;
+
+	/**
+	 * The request's headers as $_SERVER names them (HTTP_X_SIGNATURE), with
+	 * every credential left out: Cookie, Authorization, Proxy-Authorization,
+	 * the key headers, and core's own X-Joinery-*.
+	 *
+	 * @return array<string,string>
+	 */
+	public static function webhookHeaders(array $headers): array {
+		$out = array();
+		foreach ($headers as $name => $value) {
+			$norm = str_replace('-', '_', strtolower((string)$name));
+			if (!preg_match('~^[a-z0-9_]{1,100}$~D', $norm)
+					|| in_array($norm, array('cookie', 'authorization', 'proxy_authorization', 'public_key', 'secret_key'), true)
+					|| strpos($norm, 'x_joinery_') === 0) {
+				continue;
+			}
+			if (count($out) >= self::MAX_HEADERS) {
+				break;
+			}
+			$out['HTTP_' . strtoupper($norm)] = substr((string)$value, 0, self::MAX_HEADER_BYTES);
+		}
+		return $out;
+	}
+
 	/** Whether $result is of a call whose code never ran (busy, unavailable): an Idempotency-Key is not held to it. */
 	public static function neverRan($result): bool {
 		return $result instanceof LogicResult && self::$never_ran !== null && isset(self::$never_ran[$result]);
@@ -684,6 +811,15 @@ class SandboxActions {
 	public static function result(array $call): LogicResult {
 		$status = (string)($call['status'] ?? SandboxLog::STATUS_ERROR);
 		if ($status !== SandboxLog::STATUS_OK) {
+			// A webhook refused by a count (the network's, or the plugin's
+			// site-wide) is told when to try again, as any limit is.
+			if (in_array($call['refused'] ?? null, array('limited', 'site_limited'), true)) {
+				$result = LogicResult::error(mb_substr(trim((string)($call['message'] ?? '')), 0, self::MAX_ERROR),
+					array('http_status' => 429, 'reason' => 'rate_limited', 'retry_after_seconds' => 60));
+				self::$never_ran = self::$never_ran ?? new WeakMap();
+				self::$never_ran[$result] = true;
+				return $result;
+			}
 			$codes = array(
 				SandboxLog::STATUS_BUSY        => 503,
 				SandboxLog::STATUS_UNAVAILABLE => 503,
@@ -765,7 +901,7 @@ class SandboxActions {
 		$lines = array();
 		foreach ($actions as $action => $d) {
 			$description = trim((string)($d['description'] ?? ''));
-			$line = $action . ($description !== '' ? ' (' . rtrim($description, '.') . ')' : '') . ': ' . self::whoWords($d['auth'] ?? array());
+			$line = $action . ($description !== '' ? ' (' . rtrim($description, '.') . ')' : '') . ': ' . self::whoWords($d['auth'] ?? array(), self::isWebhook($d));
 			if (($d['ai_agent'] ?? null) === 'auto') {
 				$line .= '. The assistant may run this without asking';
 			} elseif (($d['ai_agent'] ?? null) === 'confirm') {
@@ -776,7 +912,10 @@ class SandboxActions {
 		return $lines;
 	}
 
-	private static function whoWords(array $auth): string {
+	private static function whoWords(array $auth, bool $webhook = false): string {
+		if ($webhook) {
+			return 'anyone on the internet, with no sign-in (a webhook: its own code checks who sent it)';
+		}
 		$level = $auth['min_user_permission'] ?? 0;
 		$who = (is_int($level) && $level === 0) ? 'any signed-in member' : 'staff at level ' . (is_int($level) ? $level : Access::level((string)$level)) . ' and above';
 		if (!empty($auth['requires_scoped_key'])) {

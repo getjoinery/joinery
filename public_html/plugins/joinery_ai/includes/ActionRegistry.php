@@ -106,6 +106,8 @@ class ActionRegistry {
             // feature is off is not there (SandboxActions::call() refuses both
             // a level and a setting too).
             if (SandboxActions::keyOnly($descriptor)) continue;
+            // A webhook is anyone's call to its address, never the assistant's.
+            if (SandboxActions::isWebhook($descriptor)) continue;
             $setting = $descriptor['requires_setting'] ?? null;
             if ($setting && !Globalvars::get_instance()->get_setting($setting)) continue;
             $tier = SandboxActions::assistantTier($plugin, $action, $descriptor);

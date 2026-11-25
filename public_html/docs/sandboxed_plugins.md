@@ -1055,8 +1055,7 @@ is a single `return` of a plain array, and holds only:
 | `auth` | `min_user_permission` (required: a level from 0 to 10, or a class and verb such as `content:write`), `capability`, `requires_machine_key`, `requires_scoped_key`, `requires_person_credential`, `requires_browser_session` |
 
 Refused, each naming the file: `allow_guest` (its public pages serve
-visitors), `session_write`, `app_purpose`, `requires_session => false` (an
-action for callers with no credential), a `{action}_logic_form()` companion,
+visitors), `session_write`, `app_purpose`, a `{action}_logic_form()` companion,
 a top-level function the site's own code declares (`process_logic()`), and
 anything else. A logic file with no descriptor is not an action and is not
 read. The checked descriptors are kept on the plugin's row
@@ -1082,6 +1081,76 @@ failure answers 500. Each call is a row in the call log, kind `action`.
 A sandboxed plugin cannot ask for a sandboxed plugin's action (its own or
 another's) in `permissions.actions`: from inside its own fenced call it would
 wait for a second slot. Install refuses it, and the relay refuses the ask.
+
+### Webhooks
+
+An outside service (a payment processor, a mail service) POSTs to the site
+when something happens. It is not signed in; it proves itself by signing the
+bytes it sent with a secret both sides hold. A webhook is an action whose
+descriptor says `requires_session => false`, with no `auth` and no
+`ai_agent`, as a first-party sessionless action is written:
+
+```php
+function inbound_logic_descriptor(): array {
+	return array(
+		'description'      => 'Receives delivery events from the mail service.',
+		'requires_session' => false,
+		'mutates'          => true,
+	);
+}
+
+function inbound_logic($input) {
+	$secret = Globalvars::get_instance()->get_setting('webhook_secret');
+	$sent = (string)($_SERVER['HTTP_X_SIGNATURE'] ?? '');
+	if (!hash_equals(hash_hmac('sha256', SandboxRequest::rawBody(), (string)$secret), $sent)) {
+		return LogicResult::error('Bad signature.', array('http_status' => 401));
+	}
+	// ... save what it says
+	return LogicResult::render(array());
+}
+```
+
+The service is given the address `https://{site}/api/v1/action/{plugin}/inbound`.
+The call carries the request's headers in `$_SERVER['HTTP_*']`, without
+`Cookie`, `Authorization`, `Proxy-Authorization`, the key headers and core's
+own `X-Joinery-*`, and its raw body, at most 1 MB, through
+`SandboxRequest::rawBody()` (in the fence `php://input` is the runner's own
+pipe). `Content-Type` and `Content-Length` are also `CONTENT_TYPE` and
+`CONTENT_LENGTH`, where native code reads them. The fields the descriptor
+declares are its input as for any action. A 1 MB body with full headers
+takes about 14 MB of the call's memory before the plugin decodes it: a plugin
+that takes large bodies raises `limits.memory_mb` in its manifest.
+
+Each webhook is its own approval entry, "Accepts calls from anyone on the
+internet at /api/v1/action/{plugin}/{action}, and can change its records,
+call its approved websites and send mail when called"; until approved it is
+the same 404 as an action not there, so an update that adds one waits on an
+approval. It is never offered to the AI assistant or for scoping a key, and
+`SandboxActions::call()` refuses one: only its address runs it.
+
+**Core treats every call as from someone unknown**, since it cannot tell a
+real service from anyone else who found the address; the plugin's own check
+runs after core has let the call in.
+
+| Limit | Value |
+|---|---|
+| Calls at once | the anonymous pool public pages use: two a site, one per network |
+| Calls a minute | 60 per network (counted with public pages), and 300 per plugin from every network (`SandboxHost::WEBHOOK_CALLS_PER_MINUTE`) |
+| Changes a call | 10: record create, update and delete, actions, page.refresh |
+| Outside requests a call | 5 |
+| Mail | at most 3 people a call, never a batch; 10 people an hour per network; 10 people an hour per plugin from webhooks |
+| Files | none read or stored |
+
+A refusal by a count answers 429 with `retry_after_seconds`, before the
+plugin runs; one that finds the pool busy answers 503. Neither writes a call
+log row; a call that runs is a row of kind `action` carrying the caller's
+network.
+
+What a webhook cannot receive: an action answers POST only and a success is
+200 in the API's envelope, so a service that first checks an address with a
+GET, or wants a bare text echoed back, cannot be set up; and a service that
+signs with the `Authorization` header cannot be checked, since it is not
+passed on.
 
 ### The asks
 

@@ -75,6 +75,10 @@
  * most MAX_ANON_RECIPIENTS people, each counted against the visitor's
  * network (ANON_MAIL_FEATURE), and never send a batch.
  *
+ * @version 1.13 - a webhook's network mail refusal names webhooks; the plugin's key is read only for one (reviewer2 R3, N5)
+ * @version 1.12 - a webhook's call (envelope anonymous.webhook, spec sandboxed_plugin_api_actions phase 2): it reads,
+ *                makes at most 10 changes and 5 outside requests, mails at most 3 people (never a batch, the network's
+ *                10 an hour and the plugin's 10 an hour from webhooks), and reads or stores no files
  * @version 1.11 - an action ask for a sandboxed plugin's action is refused (spec sandboxed_plugin_api_actions)
  * @version 1.10 - its own models by their class names in its model files (SandboxModels::declarations())
  * @version 1.9 - a list filter carries a list of values (any of them, at most MAX_LIST_ROWS); an empty list
@@ -215,6 +219,16 @@ class SandboxRelay {
 	const ANON_MAIL_FEATURE = 'sandbox_public_mail';
 	const ANON_MAIL_PER_HOUR = 10;
 
+	/** Outside requests one webhook call may make (a checked form's are not counted). */
+	const MAX_WEBHOOK_HTTP = 5;
+
+	/** People webhook calls of one plugin may have mailed in an hour, from every network together. */
+	const WEBHOOK_MAIL_FEATURE = 'sandbox_webhook_mail';
+	const WEBHOOK_MAIL_PER_HOUR = 10;
+
+	/** @var int outside requests this webhook call made */
+	private $webhook_http = 0;
+
 	/** The asks a call for a visitor not signed in may make outside a checked POST: it reads. */
 	const ANON_READ_ASKS = array('record.get', 'record.list', 'log', 'email.render', 'file.read');
 
@@ -313,20 +327,38 @@ class SandboxRelay {
 			return null;
 		}
 		$short = mb_substr($kind, 0, 40);
-		if (empty($this->anonymous['checked_post'])) {
+		// A webhook has passed none of a form's checks (anyone can call its
+		// address): its own caps, and no files at all.
+		$webhook = !empty($this->anonymous['webhook']);
+		if ($webhook) {
+			if (in_array($kind, array('file.upload', 'file.bytes', 'file.read'), true)
+					|| (isset(self::RECORD_VERBS[$kind]) && ($ask['model'] ?? null) === 'File')) {
+				return $this->refuse('webhook', $short, 'A webhook call reads and stores no files.');
+			}
+			if ($kind === 'http') {
+				if ($this->webhook_http >= self::MAX_WEBHOOK_HTTP) {
+					return $this->refuse('webhook', $short, 'A webhook call may make at most ' . self::MAX_WEBHOOK_HTTP . ' outside requests.');
+				}
+				$this->webhook_http++;
+				return null;
+			}
+		}
+		if (empty($this->anonymous['checked_post']) && !$webhook) {
 			if (in_array($kind, self::ANON_READ_ASKS, true)) {
 				return null;
 			}
 			return $this->refuse('visitor', $short, 'This call is for a visitor who is not signed in, and is not a form they sent, so it may only read.');
 		}
 		if ($kind === 'email.batch') {
-			return $this->refuse('visitor', $short, 'A visitor who is not signed in cannot have a batch of mail sent.');
+			return $this->refuse($webhook ? 'webhook' : 'visitor', $short, $webhook ? 'A webhook call cannot have a batch of mail sent.'
+				: 'A visitor who is not signed in cannot have a batch of mail sent.');
 		}
 		// An action may store or send what a visitor typed as a write does, so
 		// it counts in the same cap (P18, reviewer2 R2).
 		if (in_array($kind, array('record.create', 'record.update', 'record.delete', 'action', 'page.refresh'), true)) {
 			if ($this->anon_writes >= self::MAX_ANON_WRITES) {
-				return $this->refuse('visitor', $short, 'A form a visitor who is not signed in sent may make at most ' . self::MAX_ANON_WRITES . ' changes.');
+				return $this->refuse($webhook ? 'webhook' : 'visitor', $short, ($webhook ? 'A webhook call' : 'A form a visitor who is not signed in sent')
+					. ' may make at most ' . self::MAX_ANON_WRITES . ' changes.');
 			}
 			$this->anon_writes++;
 			return null;
@@ -338,18 +370,31 @@ class SandboxRelay {
 				return null;
 			}
 			$people = count($message->getRecipients() ?: array()) + count($message->getCc() ?: array()) + count($message->getBcc() ?: array());
+			$who = $webhook ? 'webhook' : 'visitor';
 			if ($this->anon_recipients + $people > self::MAX_ANON_RECIPIENTS) {
-				return $this->refuse('visitor', $short, 'A form a visitor who is not signed in sent may have mail sent to at most '
-					. self::MAX_ANON_RECIPIENTS . ' people.');
+				return $this->refuse($who, $short, ($webhook ? 'A webhook call' : 'A form a visitor who is not signed in sent')
+					. ' may have mail sent to at most ' . self::MAX_ANON_RECIPIENTS . ' people.');
 			}
 			$state = RequestLogger::attempt_limit_state(self::ANON_MAIL_FEATURE, self::ANON_MAIL_PER_HOUR, 3600);
 			if ($state['count'] + $people > self::ANON_MAIL_PER_HOUR) {
-				return $this->refuse('visitor', $short, RequestLogger::attempt_unit_label() . ' has had mail sent to '
-					. self::ANON_MAIL_PER_HOUR . ' people in the last hour from forms anyone can send.');
+				return $this->refuse($who, $short, RequestLogger::attempt_unit_label() . ' has had mail sent to '
+					. self::ANON_MAIL_PER_HOUR . ' people in the last hour from ' . ($webhook ? 'webhooks and forms anyone can call or send.' : 'forms anyone can send.'));
+			}
+			// Per network is weak against many networks: a plugin's webhooks
+			// mail at most WEBHOOK_MAIL_PER_HOUR people an hour in all.
+			$key = $webhook ? SandboxHost::webhookKey($this->plugin) : null;
+			if ($webhook) {
+				$site = RequestLogger::rate_limit_state(self::WEBHOOK_MAIL_FEATURE, self::WEBHOOK_MAIL_PER_HOUR, 3600, null, null, $key);
+				if ($site['count'] + $people > self::WEBHOOK_MAIL_PER_HOUR) {
+					return $this->refuse($who, $short, 'This plugin\'s webhooks have had mail sent to ' . self::WEBHOOK_MAIL_PER_HOUR . ' people in the last hour.');
+				}
 			}
 			$this->anon_recipients += $people;
 			for ($i = 0; $i < $people; $i++) {
 				RequestLogger::log(self::ANON_MAIL_FEATURE, 'recipient', true);
+				if ($webhook) {
+					RequestLogger::log(self::WEBHOOK_MAIL_FEATURE, 'recipient', true, array('key' => $key));
+				}
 			}
 		}
 		return null;
