@@ -25,6 +25,8 @@
  * A source the tracker could not be read for keeps its last answer, and says
  * since when.
  *
+ * @version 1.6 - a package no longer watched leaves the stored state on the next check, so its last answer
+ *                is not built or raised (ImageMagick's stayed on dev after 1.5)
  * @version 1.5 - ImageMagick is not watched: the platform does not run it (RefusedDependencies,
  *                specs/imagemagick_package_removal.md WP4)
  * @version 1.4 - OpenSSL's and ImageMagick's own advisories are read too (UpstreamAdvisoryOpenssl,
@@ -139,6 +141,9 @@ class UpstreamFixWatch {
 		}
 		$sources = array_values(array_unique(array_merge(self::WATCHED_SOURCES, array_keys($recipes))));
 		sort($sources);
+		// A package no longer watched (and with no recipe) leaves the state, with
+		// its last answer: nothing is built or raised for what we do not run.
+		$state['sources'] = array_intersect_key($state['sources'], array_flip($sources));
 		foreach ($sources as $source) {
 			$open = $tracker->cvesForPackage($source, UbuntuCveTracker::CODENAME, true);
 			$prev = $state['sources'][$source] ?? array('checked_at' => 0, 'unfixed' => array());

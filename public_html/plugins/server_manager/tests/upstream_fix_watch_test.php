@@ -15,6 +15,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_watch_test.php
  *
+ * @version 1.3 - a package no longer watched leaves the stored state
  * @version 1.2 - ImageMagick is not watched
  * @version 1.1 - OpenSSL's CVE records: its rating, and the fix commits they name, kept in the state
  * @version 1.0
@@ -276,6 +277,12 @@ section('What is watched, and the task');
 $state = $look(array('libpng1.6' => array('source' => 'libpng1.6', 'version' => '1.6.50-1ubuntu1+joinery1', 'ubuntu_base' => '1.6.50-1ubuntu1', 'cves' => 'CVE-2026-9000')));
 check(array_keys($state['sources']) === array('apache2', 'curl', 'glibc', 'libpng1.6', 'libxml2', 'openssh', 'openssl', 'php8.5', 'postfix', 'postgresql-18'),
 	'every source the nodes run, and any with an active recipe', implode(',', array_keys($state['sources'])));
+$gone = array('checked_at' => $now - $day, 'error' => '', 'unfixed' => array('CVE-2026-116149' => array('status' => 'needs-triage', 'rating' => 'high',
+	'rated_by' => 'NVD', 'upstream_fixed' => true, 'fixed_in' => '', 'advisory' => '', 'published' => $iso($now - $day))));
+$stale = $look(array(), array(), array('sources' => array('imagemagick' => $gone)));
+check(!isset($stale['sources']['imagemagick']) && isset($stale['sources']['php8.5']),
+	'a package no longer watched, with no recipe, leaves the stored state', implode(',', array_keys($stale['sources'])));
+check(!in_array('imagemagick', array_column(UpstreamFixWatch::conclusions($stale, $now)['build'], 'source'), true), 'and nothing is built for it');
 $r = UpstreamFixWatch::run(array('tracker' => $tracker, 'drivers' => array($php), 'recipes' => array(), 'nodes' => array(), 'now' => $now, 'save' => false));
 check($r['status'] === 'success' && strpos($r['message'], 'CVEs to build ahead of Ubuntu') !== false, 'the task\'s run reports what it found', $r['message']);
 check(class_exists('WatchUpstreamSecurityFixes') || is_file(__DIR__ . '/../tasks/WatchUpstreamSecurityFixes.php'), 'the task is shipped');
