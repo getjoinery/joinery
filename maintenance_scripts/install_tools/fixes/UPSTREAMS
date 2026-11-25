@@ -2,6 +2,7 @@
 # releases, for the automatic package fixes (specs/package_fixes_automatic.md WP2, WP4).
 # Read by UpstreamFixFinder and PackageFixRecipeWriter (server_manager includes).
 #
+# Version: 1.3 - imagemagick goes: the platform does not run it (specs/imagemagick_package_removal.md WP4)
 # Version: 1.2 - ids=GHSA for imagemagick (its fix commits name the advisory's GHSA); OpenSSL's
 #                fix commits come from its CVE records (UpstreamAdvisoryOpenssl), not a message search
 # Version: 1.1 - trust=unsigned for postgresql-18, glibc and imagemagick (owner, 2026-11-22)
@@ -26,7 +27,7 @@
 #                 Default: the numbers joined by dots
 #   ids=          optional: the kinds of id the project's commits name besides the
 #                 CVE, which a driver supplies (UpstreamAdvisoryDriver::ids()), comma
-#                 separated: GHSA for PHP and ImageMagick. A project whose commits name
+#                 separated: GHSA for PHP. A project whose commits name
 #                 no id has its driver supply the fix commits themselves
 #                 (UpstreamAdvisoryDriver::commits(): OpenSSL's CVE records)
 #   release_url=  upstream's release tarball, same placeholders; empty when the
@@ -41,8 +42,8 @@
 # Every git URL here answered `git ls-remote` on 2026-11-22, and every release and
 # signature URL answered for the version Ubuntu runs. Postfix has no official git:
 # its line is the mirror a Postfix maintainer keeps, tagged per release. PostgreSQL
-# and libxml2 sign no tarball (a checksum only). ImageMagick's and Postfix's signed
-# tarballs did not answer from here on that day, so neither is listed yet.
+# and libxml2 sign no tarball (a checksum only). Postfix's signed tarball
+# did not answer from here on that day, so it is not listed yet.
 source=php8.5        git=https://github.com/php/php-src.git              tag=php-{v}                     line=2 ids=GHSA release_url=https://www.php.net/distributions/php-{v}.tar.xz sig_url=https://www.php.net/distributions/php-{v}.tar.xz.asc
 source=postgresql-18 git=https://git.postgresql.org/git/postgresql.git  tag=REL_{major}_{minor}         line=1 release_url= sig_url= trust=unsigned
 source=openssl       git=https://github.com/openssl/openssl.git          tag=openssl-{v}                 line=2 release_url=https://github.com/openssl/openssl/releases/download/openssl-{v}/openssl-{v}.tar.gz sig_url=https://github.com/openssl/openssl/releases/download/openssl-{v}/openssl-{v}.tar.gz.asc
@@ -52,4 +53,3 @@ source=openssh       git=https://github.com/openssh/openssh-portable.git tag=V_{
 source=curl          git=https://github.com/curl/curl.git                tag=curl-{major}_{minor}_{patch} line=1 release_url=https://curl.se/download/curl-{v}.tar.xz sig_url=https://curl.se/download/curl-{v}.tar.xz.asc
 source=libxml2       git=https://gitlab.gnome.org/GNOME/libxml2.git      tag=v{v}                        line=2 release_url= sig_url=
 source=glibc         git=https://sourceware.org/git/glibc.git            tag=glibc-{major}.{minor}       line=2 branch=release/{major}.{minor}/master release_url= sig_url= trust=unsigned
-source=imagemagick   git=https://github.com/ImageMagick/ImageMagick.git  tag={major}.{minor}.{patch}-{build} line=2 ids=GHSA release_url= sig_url= trust=unsigned

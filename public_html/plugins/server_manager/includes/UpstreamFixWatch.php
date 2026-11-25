@@ -10,7 +10,7 @@
  *
  *   - Ubuntu's tracker lists the CVEs not fixed on 26.04;
  *   - each is rated by the highest of the upstream project's own rating (a
- *     driver: UpstreamAdvisoryDriver, for PHP, OpenSSL and ImageMagick), NVD's (as the tracker mirrors it), and
+ *     driver: UpstreamAdvisoryDriver, for PHP and OpenSSL), NVD's (as the tracker mirrors it), and
  *     Ubuntu's priority once the CVE is past triage (the triage default is a
  *     placeholder, not a rating);
  *   - a driver also says whether upstream has released the fix.
@@ -25,6 +25,8 @@
  * A source the tracker could not be read for keeps its last answer, and says
  * since when.
  *
+ * @version 1.5 - ImageMagick is not watched: the platform does not run it (RefusedDependencies,
+ *                specs/imagemagick_package_removal.md WP4)
  * @version 1.4 - OpenSSL's and ImageMagick's own advisories are read too (UpstreamAdvisoryOpenssl,
  *                UpstreamAdvisoryImageMagick); commitsFor(): the fix commits a stored advisory names
  * @version 1.3 - recipes() counts the package fix channel's fixes, the automatic ones included (package_fixes_automatic WP6)
@@ -46,7 +48,7 @@ class UpstreamFixWatch {
 	 * database, 2026-11-20): what a site serves with, and what a container
 	 * host's site containers' base holds.
 	 */
-	const WATCHED_SOURCES = array('php8.5', 'postgresql-18', 'apache2', 'postfix', 'openssl', 'openssh', 'curl', 'libxml2', 'glibc', 'imagemagick');
+	const WATCHED_SOURCES = array('php8.5', 'postgresql-18', 'apache2', 'postfix', 'openssl', 'openssh', 'curl', 'libxml2', 'glibc');
 
 	/** Q1: the ratings that get a recipe. Lower ones wait for Ubuntu. */
 	const BUILD_RATINGS = array('critical', 'high');
@@ -66,7 +68,7 @@ class UpstreamFixWatch {
 
 	/** The drivers that rate a project's own fixes. */
 	public static function drivers(): array {
-		return array(new UpstreamAdvisoryPhp(), new UpstreamAdvisoryOpenssl(), new UpstreamAdvisoryImageMagick());
+		return array(new UpstreamAdvisoryPhp(), new UpstreamAdvisoryOpenssl());
 	}
 
 	/**

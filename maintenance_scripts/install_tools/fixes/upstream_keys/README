@@ -52,11 +52,6 @@ libxml2.asc      Daniel Garcia Moreno BB3FD16B22C34193BCFC66EA60B33F85ECD8D532: 
                  signer of every libxml2 v2.15 release tag on gitlab.gnome.org, as
                  keyserver.ubuntu.com lists it. libxml2 publishes no signed tarball:
                  only the tag route applies.
-imagemagick.asc  ImageMagick code signing key D8272EF51DA223E4D05B466989AB63D48277377A.
-                 keyserver.ubuntu.com; tarballs 7.1.2-35 and 7.1.2-36 verify. Its
-                 tags are unsigned and fixes/UPSTREAMS names no release URL for it
-                 (its versions carry a dash build.sh refuses), so the key is not
-                 used yet: ImageMagick is trust=unsigned (below).
 
 Signing nothing, so taken without a key (trust=unsigned in fixes/UPSTREAMS, the
 owner's choice, 2026-11-22): their commits are used from their official git as
@@ -65,4 +60,3 @@ postgresql-18    git.postgresql.org: its tags are unsigned and it publishes no
                  tarball signatures.
 glibc            sourceware.org: it makes no point releases, so its fixes are on
                  release branches, which no one signs.
-imagemagick      github.com/ImageMagick: its tags are unsigned.

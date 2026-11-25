@@ -13,12 +13,12 @@
  * touches the news, the release a range ends at, and a branch searched where
  * a line makes no point releases, and the fix commits an advisory names
  * (OpenSSL's CVE records) used where they are in the range. Also: the
- * doc-part filter, fixes/UPSTREAMS as committed, the PHP and ImageMagick
- * drivers' ids(), and OpenSSL's driver over fixture answers from its
+ * doc-part filter, fixes/UPSTREAMS as committed, the PHP driver's ids(), and OpenSSL's driver over fixture answers from its
  * release-metadata repository. Nothing reaches the network.
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_finder_test.php
  *
+ * @version 1.2 - ImageMagick's driver and line go: the platform does not run it
  * @version 1.1 - commits an advisory names; the OpenSSL and ImageMagick drivers
  * @version 1.0
  */
@@ -230,9 +230,9 @@ check(count($r['commits']) === 1, 'and its unsigned release tag is used too', $r
 $r = UpstreamFixFinder::find('php8.5', 'CVE-2026-1111', array('base_upstream' => '8.5.4', 'fixed_in' => '8.5.5', 'git_dir' => $git_dir, 'upstreams_file' => $upstreams, 'tag_verifier' => $never));
 check($r['commits'] === array() && $r['reason'] === 'the verifier must not be asked', 'a project not marked still needs its tag to verify', $r['reason']);
 $committed = UpstreamFixFinder::upstreams();
-check(($committed['postgresql-18']['trust'] ?? '') === 'unsigned' && ($committed['glibc']['trust'] ?? '') === 'unsigned' && ($committed['imagemagick']['trust'] ?? '') === 'unsigned'
+check(($committed['postgresql-18']['trust'] ?? '') === 'unsigned' && ($committed['glibc']['trust'] ?? '') === 'unsigned' && !isset($committed['imagemagick'])
 	&& ($committed['postfix']['trust'] ?? '') === 'signed' && ($committed['openssh']['trust'] ?? '') === 'signed' && ($committed['php8.5']['trust'] ?? '') === 'signed',
-	'as committed: unsigned only for PostgreSQL, glibc and ImageMagick (owner, 2026-11-22)');
+	'as committed: unsigned only for PostgreSQL and glibc (owner, 2026-11-22); ImageMagick is not listed');
 
 section('fixes/UPSTREAMS as committed');
 
@@ -265,24 +265,6 @@ check($php->ids('CVE-2026-1') === array() && $php->ids('CVE-2026-9') === array()
 check(($php->advisories()['CVE-2026-115560']['ids'] ?? null) === array('GHSA-abcd-efgh-ijkl'), 'advisories() carries it too');
 $down = new UpstreamAdvisoryPhp(function ($url) { return null; });
 check($down->ids('CVE-2026-115560') === array(), 'advisories that cannot be read: none');
-
-section('ImageMagick\'s advisories');
-
-$im = new UpstreamAdvisoryImageMagick(function ($url) {
-	if (strpos($url, '/repos/ImageMagick/ImageMagick/security-advisories') === false) { return null; }
-	return json_encode(array(
-		array('ghsa_id' => 'GHSA-j2rp-5r6m-f7x8', 'cve_id' => 'CVE-2025-55154', 'severity' => 'medium', 'html_url' => 'https://github.com/ImageMagick/ImageMagick/security/advisories/GHSA-j2rp-5r6m-f7x8',
-			'vulnerabilities' => array(array('patched_versions' => '7.1.2-33'), array('patched_versions' => '6.9.13-58'))),
-		array('ghsa_id' => 'GHSA-qw9c-mq27-w844', 'cve_id' => null, 'severity' => 'low', 'vulnerabilities' => array(array('patched_versions' => '7.1.2-36'))),
-	));
-});
-$a = $im->advisories();
-check(array_keys($a) === array('CVE-2025-55154') && $a['CVE-2025-55154']['fixed_in'] === '6.9.13.58, 7.1.2.33' && $a['CVE-2025-55154']['rating'] === 'medium',
-	'its releases as Ubuntu spells them (7.1.2-33 is 7.1.2.33); one with no CVE yet is not read', json_encode($a));
-check($im->ids('CVE-2025-55154') === array('GHSA-j2rp-5r6m-f7x8') && $im->commits('CVE-2025-55154') === array(), 'its GHSA, which its fix commits name; no commit list');
-check($im->covers('imagemagick') && !$im->covers('php8.5') && $im->label() === 'ImageMagick' && !(new UpstreamAdvisoryPhp())->covers('imagemagick'), 'it covers ImageMagick only');
-check(UpstreamFixFinder::line_version('7.1.2.18', $a['CVE-2025-55154']['fixed_in'], 2) === '7.1.2.33'
-	&& UpstreamFixFinder::expand('{major}.{minor}.{patch}-{build}', '7.1.2.33') === '7.1.2-33', 'which names the tag the range ends at');
 
 section('OpenSSL\'s CVE records');
 
@@ -335,6 +317,6 @@ unset($partial[$raw . 'secjson/CVE-2026-9076.json']);
 check((new UpstreamAdvisoryOpenssl(function ($u) use ($partial) { return $partial[$u] ?? null; }, $at))->advisories() === null,
 	'one record that cannot be fetched: not read at all, so the watch keeps its last good answer');
 $labels = array_map(function ($d) { return $d->label(); }, UpstreamFixWatch::drivers());
-check($labels === array('PHP', 'OpenSSL', 'ImageMagick'), 'the watch reads all three', implode(',', $labels));
+check($labels === array('PHP', 'OpenSSL'), 'the watch reads both', implode(',', $labels));
 
 harness_finish();

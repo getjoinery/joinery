@@ -9,7 +9,7 @@
  *
  * @version 1.2 - commits(): PHP's advisories name no commit, so none (its commits name the GHSA); the
  *                feed's URL and a release's spelling are overridable, for another project's GitHub
- *                advisories (UpstreamAdvisoryImageMagick)
+ *                advisories
  * @version 1.1 - each advisory's GHSA id ('ids'), and ids(): PHP's fix commits name the GHSA
  *                (specs/package_fixes_automatic.md WP2)
  * @version 1.0

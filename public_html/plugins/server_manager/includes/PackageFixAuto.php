@@ -34,6 +34,7 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.12 - a stuck CVE the watch no longer asks for is dropped from the record, so the page lists only what waits
  * @version 1.11 - the email lists five CVE ids and a count of the rest, and its subject names each package's outcome
  *                (built and testing, built with some left for a person, or a person needed)
  * @version 1.10 - a Try again never ends on the withdrawn build: the writer is told the highest withdrawn revision,
@@ -231,6 +232,18 @@ class PackageFixAuto {
 		// 2. What the watch says to build: told once, then tried once per CVE.
 		$watch = $opts['watch_state'] ?? UpstreamFixWatch::state();
 		$c = $watch ? UpstreamFixWatch::conclusions($watch, $now) : array('build' => array());
+		// A stuck CVE the watch no longer asks for (Ubuntu released it, it is no
+		// longer high, or its package is not watched) is not waiting for anyone.
+		if ($watch) {
+			$asked = array();
+			foreach ($c['build'] as $u) { $asked[$u['source'] . ' ' . $u['cve']] = true; }
+			foreach ($state['attempts'] as $k => $a) {
+				if (($a['status'] ?? '') === 'needs_person' && !isset($asked[$k])) {
+					unset($state['attempts'][$k]);
+					$said[] = 'dropped ' . $k . ': the watch no longer asks for it';
+				}
+			}
+		}
 		$new = array();
 		foreach ($c['build'] as $u) {
 			if (!isset($state['notified']['found ' . $u['source'] . ' ' . $u['cve']])) {

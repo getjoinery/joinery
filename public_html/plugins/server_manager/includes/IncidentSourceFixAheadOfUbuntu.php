@@ -18,6 +18,7 @@
  * Clears when Ubuntu's tracker shows every CVE it named released on 26.04,
  * or an active recipe carries it.
  *
+ * @version 1.3 - ImageMagick's name goes: it is not watched
  * @version 1.2 - quiet (IncidentSourceQuiet): it waits in the inbox, and the automatic runner emails what is new
  *                (specs/package_fixes_automatic.md WP5)
  * @version 1.1 - a driver's advisories unread for six hours is said in the blind warning (reviewer2 G4)
@@ -34,8 +35,7 @@ class IncidentSourceFixAheadOfUbuntu implements IncidentSourceQuiet {
 
 	/** The names people know the source packages by. */
 	const NAMES = array('php' => 'PHP', 'postgresql' => 'PostgreSQL', 'openssl' => 'OpenSSL', 'apache2' => 'Apache',
-		'postfix' => 'Postfix', 'openssh' => 'OpenSSH', 'curl' => 'curl', 'libxml2' => 'libxml2', 'glibc' => 'the C library (glibc)',
-		'imagemagick' => 'ImageMagick');
+		'postfix' => 'Postfix', 'openssh' => 'OpenSSH', 'curl' => 'curl', 'libxml2' => 'libxml2', 'glibc' => 'the C library (glibc)');
 
 	/** "php8.5" -> "PHP 8.5", "postgresql-18" -> "PostgreSQL 18"; an unknown source is its own name. */
 	public static function package_name(string $source): string {

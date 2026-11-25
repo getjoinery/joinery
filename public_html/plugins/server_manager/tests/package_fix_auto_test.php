@@ -14,6 +14,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_auto_test.php
  *
+ * @version 1.4 - a stuck CVE the watch no longer asks for leaves the record
  * @version 1.3 - a Try again never ends on the withdrawn build
  * @version 1.2 - a stopped attempt is tried again when the advisory's commits change, and daily
  * @version 1.1 - one plain email per run, after the attempt; the soak waits for a machine the plane cannot reach
@@ -421,5 +422,22 @@ check(!isset($r3['state']['automatic']['php8.5']) && ($r3['state']['attempts']['
 check(PackageFixAuto::withdrawnRevision($st, 'php8.5') === 2 && PackageFixAuto::withdrawnRevision($st, 'openssl') === 0, 'the highest withdrawn revision');
 $r2 = PackageFixAuto::run($opts(array('now' => $now + 1200, 'state' => $r['state'], 'retry_requests' => array('php8.5' => '8.5.4-0ubuntu1.6+joinery9')) + $o3));
 check($builds === 1 && strpos($r2['message'], 'ignored a Try again') !== false, 'a Try again of a build that was never withdrawn is ignored', $r2['message']);
+
+
+section('A stuck CVE the watch no longer asks for leaves the record');
+
+$sent = array(); $issued = array(); $channel = array(); $nodes = array();
+$st = array('attempts' => array(
+	'imagemagick CVE-2026-116149' => array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => 'no commit names it', 'at' => $now - 3600),
+	'php8.5 CVE-2026-115560' => array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => 'did not fit', 'at' => $now - 3600, 'inputs' => 'x'),
+	'openssl CVE-2026-1' => array('status' => 'built', 'step' => 'build', 'reason' => 'built', 'at' => $now - 3600)),
+	'notified' => array('found php8.5 CVE-2026-115560' => $now - 3600));
+$r = PackageFixAuto::run($opts(array('now' => $now, 'state' => $st, 'build' => function () { throw new PackageFixAutoStop('building and testing it', 'still does not fit'); })));
+check(!isset($r['state']['attempts']['imagemagick CVE-2026-116149']) && strpos($r['message'], 'dropped imagemagick CVE-2026-116149') !== false,
+	'a needs-a-person CVE the watch does not list is dropped, and the run says so', $r['message']);
+check(isset($r['state']['attempts']['php8.5 CVE-2026-115560']) && isset($r['state']['attempts']['openssl CVE-2026-1']),
+	'one the watch still lists stays, and a built one is never dropped', json_encode(array_keys($r['state']['attempts'])));
+$r = PackageFixAuto::run($opts(array('now' => $now, 'state' => $st, 'watch_state' => array())));
+check(isset($r['state']['attempts']['imagemagick CVE-2026-116149']), 'with no watch state read, nothing is dropped');
 
 harness_finish();

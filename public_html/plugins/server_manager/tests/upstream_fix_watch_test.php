@@ -15,6 +15,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_watch_test.php
  *
+ * @version 1.2 - ImageMagick is not watched
  * @version 1.1 - OpenSSL's CVE records: its rating, and the fix commits they name, kept in the state
  * @version 1.0
  */
@@ -112,7 +113,7 @@ check(strpos($inc['detail']['Each fix'], 'CVE-2026-129289: PHP 8.5, critical (PH
 	'it names each CVE, its rating and who gave it, upstream\'s fix and Ubuntu\'s status', $inc['detail']['Each fix']);
 check(strpos($inc['detail']['Packages'], 'PHP 8.5: 2 critical (CVE-2026-115560, CVE-2026-129289)') !== false, 'one plain line per package', $inc['detail']['Packages']);
 check(strpos($inc['detail']['What happens'], 'automatically') !== false, 'and says what happens next');
-check(IncidentSourceFixAheadOfUbuntu::package_name('postgresql-18') === 'PostgreSQL 18' && IncidentSourceFixAheadOfUbuntu::package_name('imagemagick') === 'ImageMagick'
+check(IncidentSourceFixAheadOfUbuntu::package_name('postgresql-18') === 'PostgreSQL 18' && IncidentSourceFixAheadOfUbuntu::package_name('glibc') === 'the C library (glibc)'
 	&& IncidentSourceFixAheadOfUbuntu::package_name('apache2') === 'Apache' && IncidentSourceFixAheadOfUbuntu::package_name('weird') === 'weird',
 	'packages go by the names people know them by');
 check(new IncidentSourceFixAheadOfUbuntu() instanceof IncidentSourceQuiet, 'the incident is quiet: the runner tells what is new, once');
@@ -273,7 +274,7 @@ $open['openssl'] = array();
 section('What is watched, and the task');
 
 $state = $look(array('libpng1.6' => array('source' => 'libpng1.6', 'version' => '1.6.50-1ubuntu1+joinery1', 'ubuntu_base' => '1.6.50-1ubuntu1', 'cves' => 'CVE-2026-9000')));
-check(array_keys($state['sources']) === array('apache2', 'curl', 'glibc', 'imagemagick', 'libpng1.6', 'libxml2', 'openssh', 'openssl', 'php8.5', 'postfix', 'postgresql-18'),
+check(array_keys($state['sources']) === array('apache2', 'curl', 'glibc', 'libpng1.6', 'libxml2', 'openssh', 'openssl', 'php8.5', 'postfix', 'postgresql-18'),
 	'every source the nodes run, and any with an active recipe', implode(',', array_keys($state['sources'])));
 $r = UpstreamFixWatch::run(array('tracker' => $tracker, 'drivers' => array($php), 'recipes' => array(), 'nodes' => array(), 'now' => $now, 'save' => false));
 check($r['status'] === 'success' && strpos($r['message'], 'CVEs to build ahead of Ubuntu') !== false, 'the task\'s run reports what it found', $r['message']);
