@@ -34,6 +34,8 @@
  *
  * Run:  php tests/functional/files/upload_safety_test.php
  *
+ * @version 1.6 - the static route answers an upload by the upload rule; a photo is named for its detected type;
+ *   ico and bmp show in place (reviewer2 B7, B8, N1)
  * @version 1.5 - a public upload is typed by its stored name on the fast path; xml is not a kept extension;
  *   the entity photo upload takes plain images only (reviewer2 B1)
  * @version 1.4 - the admin uploader's reply carries the stored file's own address
@@ -308,7 +310,7 @@ foreach (array('payload_ab12cd34.bin', 'notes_ab12cd34.md', 'data_ab12cd34.json'
         $name . ' is a download of unnamed bytes', $h);
 }
 foreach (array('a.jpg' => 'image/jpeg', 'a.PNG' => 'image/png', 'a.webp' => 'image/webp', 'a.gif' => 'image/gif', 'a.avif' => 'image/avif',
-        'a.mp4' => 'video/mp4', 'a.mp3' => 'audio/mpeg', 'a.pdf' => 'application/pdf') as $name => $type) {
+        'a.mp4' => 'video/mp4', 'a.mp3' => 'audio/mpeg', 'a.pdf' => 'application/pdf', 'favicon.ico' => 'image/x-icon', 'a.bmp' => 'image/bmp') as $name => $type) {
     $h = $hdr($name);
     check(strpos($h, 'Content-type: ' . $type) !== false && strpos($h, 'attachment') === false, $name . ' is shown in place as ' . $type, $h);
 }
@@ -330,10 +332,20 @@ check(preg_match('/if \(\$uploaded\) \{.*?uploadedFileHeaders\(\$file_path\).*?r
 // wherever a web server serves it by extension.
 $m = (new ReflectionMethod('File', '_mint_unique_name'))->invoke(null, 'doc.xml');
 check(substr($m, -4) === '.bin', 'an .xml name lands as .bin', $m);
+// The other door to the same files: the static route, on a host whose web
+// server hands /static_files to PHP, answers an upload by the same rule.
+check(strpos($route_src, "strpos(\$clean_path, 'static_files/uploads/') === 0") !== false
+    && strpos($route_src, 'self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache, $versioned, $uploaded);') !== false,
+    'the static route treats a path under uploads/ as an upload');
 // A photo upload makes a public file, so it takes pictures only.
 $photos = (string)file_get_contents(PathHelper::getIncludePath('ajax/entity_photos_ajax.php'));
 check(preg_match('/File::is_inline_safe_type\(\(string\)\$photo_type\).*?File::createFromUpload\(/s', $photos) === 1,
     'the entity photo upload refuses anything that is not a plain image, before the file is kept');
+// And it is stored under a name made from what it is: a picture the browser
+// called x.pdf was kept public as a .pdf, and shown as a document.
+check(strpos($photos, "'photo.' . \$photo_extensions[strtolower((string)\$photo_type)]") !== false
+    && preg_match('/File::createFromUpload\(\s*\$uploaded_file\[.tmp_name.\],\s*(?:\/\/[^\n]*\s*)*\$uploaded_file\[.name.\]/', $photos) !== 1,
+    'and names the stored file from the detected type, never from the name the browser sent');
 
 // ---------------------------------------------------------------------------
 section('Uploaded bytes never land inside the document root');

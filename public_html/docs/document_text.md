@@ -97,7 +97,7 @@ The parsers in the tree:
 | `FacebookFeedExtractor` (persona_browser) | a captured feed's markup | `{items, stories}` | the persona browser |
 | `ImageCutter` (core) | an uploaded image | `{type, variants}`: every size asked for, encoded, or a refusal in words | every thumbnail and size the site cuts (`FileBlob::resize()`, `ensure_variant()`) |
 
-`tests/security/parser_surfaces_test.php` pins the rule: a file that names `ZipArchive`, `DOMDocument`, `loadHTML`, `simplexml_load_string`, `gzdecode`, `PharData`, one of GD's image readers, `getimagesize` or `exif_read_data` is a sandbox parser, `DocumentText` itself, or on that test's list with the reason its bytes are not a stranger's (a package we signed, the owner's own import, a provider's API answer under our credentials).
+`tests/security/parser_surfaces_test.php` pins the rule: a file that names `ZipArchive`, `DOMDocument`, `loadHTML`, `simplexml_load_string`, `gzdecode`, `PharData`, one of GD's image readers, `getimagesize`, `exif_read_data`, or a libmagic function (`finfo_*`, `mime_content_type`) is a sandbox parser, `DocumentText` itself, or on that test's list with the reason its bytes are not a stranger's (a package we signed, the owner's own import, a provider's API answer under our credentials).
 
 ## Images
 
@@ -114,9 +114,18 @@ Inside the subprocess `ImageDecoder` reads the header, refuses a decode that wou
 
 **A GIF's colours are reduced by `ImageCutter` itself.** GD's own reduction goes through a library that starts threads, and the fence has no call that makes one. The picture is mapped to its colours first and the one see-through entry is given afterwards, only to the pixels the source says are see-through, so no colour of the picture can fall through.
 
-**What comes back has a ceiling.** A subprocess's answer is collected in the caller's memory, and a web worker that runs out of memory dies in a way no caller can catch. `DocumentText::MAX_ANSWER_BYTES` (32 MB) stops a parser that answers more, and `runTool()` takes its own ceiling. `ImageCutter` asks for a shrunk JPEG only when the source and its shrunk copy together fit 64 MB (`WORKER_BUDGET_BYTES`); otherwise the JPEG is decoded in full inside the fence, where the ceiling refuses it in words if that does not fit either. The scale the fenced side names is held to a shrink before `djpeg` is given it.
+**What comes back has a ceiling.** A subprocess's answer is collected in the caller's memory, and a web worker that runs out of memory dies in a way no caller can catch. `DocumentText::MAX_ANSWER_BYTES` (32 MB) stops a parser that answers more, and `runTool()` takes its own ceiling. `ImageCutter` asks for a shrunk JPEG only when the source and its shrunk copy together fit 48 MB (`WORKER_BUDGET_BYTES`), and holds the cut's own answer to what that budget leaves (never under 16 MB); otherwise the JPEG is decoded in full inside the fence, where the ceiling refuses it in words if that does not fit either. The scale the fenced side names is held to a shrink before `djpeg` is given it.
 
 A file over 48 MB (`ImageCutter::MAX_SOURCE_BYTES`) is kept as uploaded with no sizes, as is one the ceiling refuses; `fbb_variant_refused` records why. A run killed for memory records nothing, so the next view tries again.
+
+## What kind of file is this
+
+Asking a file's type from its content is a job for libmagic, a C library that reads dozens of formats' headers, and every stored file is asked: an upload, a Drive file, an attachment on mail from anyone. No web worker, cron task or mail pipe runs it. `File::detect_mime_file()` and `File::detect_mime_bytes()` answer in two steps:
+
+1. **The first bytes, in plain PHP** (`File::leading_signature()`): PNG, JPEG, GIF, WebP, AVIF and a PDF that starts with its marker. String compares, no parser, no cost. These are most uploads.
+2. **Everything else is asked outside the worker** (`MimeSniffer::sniff()`): the `file` program, the same libmagic as PHP's own, run through `DocumentText::runTool()` with the bytes on stdin and its magic database the one other thing it may read. About 8 ms. `file` is a declared system package (`composer.json` `extra.joinery-system-packages`); where it is missing, PHP's `fileinfo` answers in the extraction subprocess instead, slower by the cost of starting PHP.
+
+An answer that is not a plain `type/subtype` is `application/octet-stream`: unknown bytes, the least trusted kind. A question that could not be asked at all (the launcher refused, the run timed out or was killed) is asked once more, and then also stored as unknown bytes, with `File::$mime_was_unasked` set and a line in the log. That is a different fact from "libmagic does not know", so it does not stand for good: `FileBlob::createFromPath()` asks again when the same bytes next arrive, and corrects the blob and the files that took their type from it. A launcher that refuses to start, which is never something the bytes did, is answered by `file` without the fence, the privilege libmagic had in the worker; a run that timed out or died is not, since the bytes may be why. The answer is `null` only for a path that cannot be read.
 
 ## Formats
 
@@ -143,7 +152,7 @@ The office formats need no dependency at all: OOXML, OpenDocument and EPUB are Z
 
 ## The security properties
 
-1. **Everything that touches the bytes runs in the subprocess, as the jail user.** Including type detection: `libmagic`, `libzip` and `libxml` are C, which is exactly why they run nowhere else. A parser bug corrupts a process that can read the bytes it was given and nothing else.
+1. **Everything that touches the bytes runs in the subprocess, as the jail user.** Including type detection, for a document and for every stored file alike: `libmagic`, `libzip` and `libxml` are C, which is exactly why they run nowhere else. A parser bug corrupts a process that can read the bytes it was given and nothing else.
 
 2. **Detected type, never declared.** The sandbox sniffs the bytes with `finfo_buffer` and parses only what it found. The MIME the caller passes is a hint, consulted when detection is inconclusive. This matters because senders lie: most real PDFs arrive declared `application/octet-stream`.
 

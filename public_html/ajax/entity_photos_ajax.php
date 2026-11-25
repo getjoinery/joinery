@@ -5,6 +5,8 @@
  * Manages entity photo associations (upload, delete, reorder, update_caption).
  * Does not load or know about entity models — only manages eph_entity_photos rows.
  *
+ * @version 1.2.1 - the photo is named for its detected type (photo.jpg), never the browser's name: a picture named
+ *                  x.pdf was kept public as a PDF
  * @version 1.2.0 - an upload that is not a plain image is refused: it makes a public file
  * @version 1.1.0 - the response carries `warning` when the photo was saved but its sizes refused
  * @version 1.0.0
@@ -86,7 +88,8 @@ switch ($action) {
 		// that is not one of the plain image types is refused before it is kept:
 		// judged by its bytes, never by the name or type the browser sent.
 		$photo_type = File::detect_mime_file($uploaded_file['tmp_name']);
-		if (!File::is_inline_safe_type((string)$photo_type)) {
+		$photo_extensions = array('image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp', 'image/avif' => 'avif');
+		if (!File::is_inline_safe_type((string)$photo_type) || !isset($photo_extensions[strtolower((string)$photo_type)])) {
 			http_response_code(400);
 			echo json_encode(['error' => 'Please upload a JPEG, PNG, GIF, WebP or AVIF image.']);
 			exit;
@@ -98,10 +101,16 @@ switch ($action) {
 		try {
 			$file = File::createFromUpload(
 				$uploaded_file['tmp_name'],
-				$uploaded_file['name'],
-				$uploaded_file['type'],
+				// Named for what it is, not for what the browser called it: the
+				// stored name's extension decides how a public file is served, and
+				// a picture that calls itself x.pdf would be shown as a document.
+				'photo.' . $photo_extensions[strtolower((string)$photo_type)],
+				(string)$photo_type,
 				$session->get_user_id(),
-				['fil_source' => File::SOURCE_ENTITY_PHOTO]
+				// The title keeps the name the person gave it: a title names a
+				// file to a reader and never decides how it is served.
+				['fil_source' => File::SOURCE_ENTITY_PHOTO,
+				 'fil_title' => substr(trim(str_replace(array("\r", "\n", "\0"), '', basename((string)$uploaded_file['name']))), 0, 255) ?: 'photo']
 			);
 		} catch (Exception $e) {
 			http_response_code(500);

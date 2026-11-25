@@ -28,6 +28,8 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.5.1 - a blob kept as unknown bytes is asked its type again when the same bytes next arrive: a type
+ *                  question that could not be asked no longer stands for good (reviewer2 B9)
  * @version 1.5.0 - sizes are cut in the parser jail (ImageCutter): this class writes finished bytes and
  *                  never decodes an image
  * @version 1.4.1 - a deferred reclaim runs only on the database that queued it: one queued in
@@ -304,6 +306,7 @@ class FileBlob extends SystemBase {
 		// blob and discard the bytes).
 		$existing = self::_find_dedup($sha, $size, $is_private);
 		if ($existing && self::retain($existing->key)) {
+			self::_ask_type_again($existing, $src_path);
 			@unlink($src_path);
 			return new self($existing->key, true); // reload for the fresh refcount
 		}
@@ -313,6 +316,9 @@ class FileBlob extends SystemBase {
 		require_once(PathHelper::getIncludePath('data/files_class.php'));
 		$detected    = File::detect_mime_file($src_path);
 		$stored_mime = ($detected !== null) ? $detected : (string)$mime;
+		if (File::$mime_was_unasked) {
+			error_log('FileBlob: the type of ' . basename($src_path) . ' could not be asked; stored as unknown bytes and asked again when the same bytes next arrive');
+		}
 
 		$candidate = self::_sanitize_name(basename($src_path));
 		$stored_name = (!self::stored_name_exists($candidate) && !self::_on_disk($candidate))
@@ -1158,6 +1164,39 @@ class FileBlob extends SystemBase {
 			$dests[$key] = $dir_path . '/' . $name;
 		}
 		return $this->_render_sizes($old_path, $wanted, $dests, true);
+	}
+
+	/**
+	 * A blob kept as "unknown bytes" is asked its type again when the same
+	 * bytes arrive again. The type is asked outside this process
+	 * (MimeSniffer), and a question that could not be asked (a launcher that
+	 * refused, a loaded node's timeout) is stored as unknown for want of an
+	 * answer; without this the first failure would stand for good, since a
+	 * later upload of the same bytes reuses the blob and its type. A blob
+	 * whose bytes really are unknown (a sealed container) answers unknown
+	 * again and nothing changes.
+	 */
+	private static function _ask_type_again($blob, $src_path) {
+		if ((string)$blob->get('fbb_mime_type') !== 'application/octet-stream') {
+			return;
+		}
+		require_once(PathHelper::getIncludePath('data/files_class.php'));
+		$again = File::detect_mime_file($src_path);
+		if ($again === null || $again === 'application/octet-stream' || File::$mime_was_unasked) {
+			return;
+		}
+		$again = substr($again, 0, 128);
+		self::updateColumns((int)$blob->key, array('fbb_mime_type' => $again));
+		// The files that took their type from this blob while it was unknown.
+		// A correction of a fact about the bytes, whoever owns each file: one
+		// column, and a file that cannot be corrected is left as it was.
+		try {
+			foreach (new MultiFile(array('fil_fbb_file_blob_id' => (int)$blob->key, 'fil_type' => 'application/octet-stream')) as $file) {
+				File::updateColumns((int)$file->key, array('fil_type' => $again));
+			}
+		} catch (Throwable $e) {
+			error_log('FileBlob: could not correct the type of the files on blob ' . (int)$blob->key . ': ' . $e->getMessage());
+		}
 	}
 
 	/** The reason this blob's last resize was refused, or null. */

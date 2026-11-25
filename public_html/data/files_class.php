@@ -62,6 +62,8 @@ interface FileRemote {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.25.0 - detect_mime_file() and detect_mime_bytes() never run libmagic in this process: the commonest types
+ *                   are told from their leading bytes, the rest are asked outside the worker (MimeSniffer)
  * @version 1.24.1 - xml leaves INERT_EXTENSIONS: an XHTML document in an .xml file runs as a page where a web
  *                   server serves it by extension
  * @version 1.24.0 - a stored name's extension comes from INERT_EXTENSIONS alone; the allowed_upload_extensions setting
@@ -1454,73 +1456,113 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
-	 * Detect a file's real MIME type from its magic bytes, never from the
+	 * Detect a file's real MIME type from its bytes, never from the
 	 * client-supplied extension or Content-Type (both spoofable).
 	 *
+	 * Nothing here hands a stranger's bytes to a C library in this process.
+	 * The commonest types are told from their leading bytes in plain PHP
+	 * (leading_signature()); everything else is asked of libmagic outside the
+	 * worker, fenced where the parser jail is installed (MimeSniffer).
+	 *
 	 * Return contract:
-	 *   - A concrete type string when finfo or the signature table recognizes it.
-	 *   - `application/octet-stream` when the bytes are recognized by NEITHER —
-	 *     the fail-closed "unrecognized binary" answer callers should reject on.
-	 *     This is a real return value, not a stand-in for null.
-	 *   - `null` ONLY when finfo itself is unavailable or the path is unreadable
-	 *     (a broken-server condition, not a property of the file), so callers may
-	 *     fall back to a client-supplied value as a last resort.
+	 *   - A concrete type string when a signature or libmagic recognizes it.
+	 *   - `application/octet-stream` when the bytes are recognized by NEITHER,
+	 *     or the question could not be asked: the fail-closed "unrecognized
+	 *     binary" answer callers should reject on. A real return value, not a
+	 *     stand-in for null.
+	 *   - `null` ONLY when the path is unreadable (a broken-server condition,
+	 *     not a property of the file), so callers may fall back to a
+	 *     client-supplied value as a last resort.
 	 *
 	 * libmagic only matches a signature within a limited window from the start of
-	 * the file, so a valid PDF/image whose header sits past that window comes back
-	 * as `application/octet-stream`. When finfo yields that sentinel, a magic-byte
-	 * signature sniff (exactly as trustworthy as finfo — same bytes) covers the
-	 * gap before the fail-closed answer is returned.
+	 * the file, so a valid PDF whose header sits past that window comes back as
+	 * `application/octet-stream`. When it yields that sentinel, the looser
+	 * signature sniff covers the gap before the fail-closed answer is returned.
 	 *
 	 * @param string $path filesystem path to the stored bytes
-	 * @return string|null detected MIME type, or null if finfo is unavailable
+	 * @return string|null detected MIME type, or null if the file cannot be read
 	 */
 	public static function detect_mime_file($path) {
-		if (!function_exists('finfo_open') || !is_readable($path)) {
+		if (!is_file($path) || !is_readable($path)) {
 			return null;
 		}
-		$finfo = finfo_open(FILEINFO_MIME_TYPE);
-		if ($finfo === false) {
+		$head = @file_get_contents($path, false, null, 0, 4096);
+		if ($head === false) {
 			return null;
 		}
-		$mime = finfo_file($finfo, $path);
-		if ($mime === false || $mime === '') {
-			return null;   // finfo failed on readable bytes — treat as unavailable
+		self::$mime_was_unasked = false;
+		$known = self::leading_signature($head);
+		if ($known !== null) {
+			return $known;
 		}
-		if ($mime === 'application/octet-stream') {
-			$head = @file_get_contents($path, false, null, 0, 4096);
-			$sniff = ($head === false) ? null : self::sniff_signature($head);
+		$bytes = @file_get_contents($path, false, null, 0, MimeSniffer::READ_BYTES);
+		if ($bytes === false) {
+			return null;
+		}
+		return self::_asked_mime($bytes, $head);
+	}
+
+	/**
+	 * MIME detection from an in-memory byte string. Same contract as
+	 * detect_mime_file(), and never null.
+	 *
+	 * @param string $bytes
+	 * @return string detected MIME type
+	 */
+	public static function detect_mime_bytes($bytes) {
+		$bytes = (string)$bytes;
+		$head = substr($bytes, 0, 4096);
+		self::$mime_was_unasked = false;
+		$known = self::leading_signature($head);
+		if ($known !== null) {
+			return $known;
+		}
+		return self::_asked_mime($bytes, $head);
+	}
+
+	/**
+	 * True when the last detect_mime_file() or detect_mime_bytes() could not
+	 * ask anybody (MimeSniffer answered null) and said "unknown bytes" for
+	 * want of an answer. A caller that keeps the type reads this to know the
+	 * type was never established (FileBlob::createFromPath()).
+	 */
+	public static $mime_was_unasked = false;
+
+	/** libmagic's answer, asked outside this process, with the looser sniff behind its "unknown". */
+	private static function _asked_mime($bytes, $head) {
+		$mime = MimeSniffer::sniff($bytes);
+		self::$mime_was_unasked = ($mime === null);
+		if ($mime === null || $mime === 'application/octet-stream') {
+			$sniff = self::sniff_signature($head);
 			return $sniff !== null ? $sniff : 'application/octet-stream';
 		}
 		return $mime;
 	}
 
 	/**
-	 * Magic-byte MIME detection from an in-memory byte string. Same contract as
-	 * detect_mime_file() — including the signature-sniff fallback for finfo's
-	 * `application/octet-stream` sentinel and the null-only-when-finfo-unavailable
-	 * rule.
+	 * The type of a file that begins, at its first byte, with one of the
+	 * signatures libmagic itself answers these types for: the five image types
+	 * the site shows in place, and PDF. Plain string compares, so the commonest
+	 * uploads cost nothing and reach no parser. Stricter than
+	 * sniff_signature(): a PDF marker further in is libmagic's to judge.
+	 * tests/unit/mime_sniffer_test.php holds the two to the same answers.
 	 *
-	 * @param string $bytes
-	 * @return string|null detected MIME type, or null if finfo is unavailable
+	 * @return string|null the MIME type, or null when no signature leads the file
 	 */
-	public static function detect_mime_bytes($bytes) {
-		if (!function_exists('finfo_open')) {
-			return null;
+	public static function leading_signature($head) {
+		$head = (string)$head;
+		if (strncmp($head, "\x89PNG\r\n\x1a\n", 8) === 0)        return 'image/png';
+		if (strncmp($head, "\xFF\xD8\xFF", 3) === 0)             return 'image/jpeg';
+		if (strncmp($head, 'GIF87a', 6) === 0
+				|| strncmp($head, 'GIF89a', 6) === 0)            return 'image/gif';
+		if (strncmp($head, 'RIFF', 4) === 0
+				&& substr($head, 8, 4) === 'WEBP')               return 'image/webp';
+		if (substr($head, 4, 4) === 'ftyp') {
+			$brand = substr($head, 8, 4);
+			if ($brand === 'avif' || $brand === 'avis')          return 'image/avif';
 		}
-		$finfo = finfo_open(FILEINFO_MIME_TYPE);
-		if ($finfo === false) {
-			return null;
-		}
-		$mime = finfo_buffer($finfo, (string)$bytes);
-		if ($mime === false || $mime === '') {
-			return null;
-		}
-		if ($mime === 'application/octet-stream') {
-			$sniff = self::sniff_signature(substr((string)$bytes, 0, 4096));
-			return $sniff !== null ? $sniff : 'application/octet-stream';
-		}
-		return $mime;
+		if (strncmp($head, '%PDF-', 5) === 0)                    return 'application/pdf';
+		return null;
 	}
 
 	/**

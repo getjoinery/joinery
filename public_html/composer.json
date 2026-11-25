@@ -25,7 +25,8 @@
     },
     "extra": {
         "joinery-system-packages": [
-            "libjpeg-turbo-progs"
+            "libjpeg-turbo-progs",
+            "file"
         ]
     }
 }

@@ -36,6 +36,7 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
+ * @version 1.7.3 - runTool() takes the data files a program may read besides its binary (MimeSniffer's magic database)
  * @version 1.7.2 - a subprocess's answer has a ceiling (MAX_ANSWER_BYTES, runTool()'s $max_out): one that ran past
  *   what the caller's memory holds was a fatal no caller could catch
  * @version 1.7.1 - the subprocess starts with enable_dl=0: it could load any extension on the machine by name
@@ -361,13 +362,13 @@ class DocumentText {
 	 * @return array{status:string, category:?string, text:string, detail:?string}
 	 *         Never throws. `category` is the class name.
 	 */
-	public static function parseWith(string $class, string $bytes, array $options = array()): array {
+	public static function parseWith(string $class, string $bytes, array $options = array(), int $max_answer = self::MAX_ANSWER_BYTES): array {
 		$file = self::handlerFile($class);
 		if ($file === null) {
 			return self::result(self::FAILED, null, '', $class . ' is not a SandboxParserInterface class');
 		}
 		return self::run($bytes, array('parser', $file, $class, self::encodeOptions($options)),
-			$class . ', ' . strlen($bytes) . ' bytes');
+			$class . ', ' . strlen($bytes) . ' bytes', $max_answer);
 	}
 
 	/**
@@ -578,7 +579,8 @@ class DocumentText {
 	 * opposite a child blocked the same way — a deadlock `timeout` converts into
 	 * a guaranteed 20-second stall on every bad file.
 	 */
-	private static function run(string $stdin, array $args, string $label): array {
+	private static function run(string $stdin, array $args, string $label, int $max_answer = self::MAX_ANSWER_BYTES): array {
+		$max_answer = max(4096, min(self::MAX_ANSWER_BYTES, $max_answer));
 		$script = PathHelper::getIncludePath('utils/extract_document_text.php');
 		if (!is_file($script)) {
 			error_log('DocumentText: extractor script missing at ' . $script);
@@ -600,11 +602,11 @@ class DocumentText {
 			return self::result(self::FAILED, null, '', 'could not spawn extractor');
 		}
 
-		$out = self::pump($pipes, $stdin, self::MAX_ANSWER_BYTES);
+		$out = self::pump($pipes, $stdin, $max_answer);
 		if ($out['overflow']) {
 			@proc_terminate($proc, 9);
 			proc_close($proc);
-			error_log('DocumentText: the subprocess answered more than ' . self::MAX_ANSWER_BYTES . ' bytes and was stopped (' . $label . ')');
+			error_log('DocumentText: the subprocess answered more than ' . $max_answer . ' bytes and was stopped (' . $label . ')');
 			return self::result(self::FAILED, null, '', 'answer too large');
 		}
 		$exit = proc_close($proc);
@@ -629,23 +631,28 @@ class DocumentText {
 	 * @param int      $limit_bytes address-space cap
 	 * @param bool     $fenced      false to skip the launcher (a test's stand-in script)
 	 * @param int      $max_out     the most it may answer; past it the program is killed and `overflow` is true
+	 * @param string[] $reads       files the program may read besides its own binary (its data: a magic database)
 	 * @return array{exit:int,stdout:string,stderr:string,fenced:bool,overflow:bool}
 	 */
-	public static function runTool(array $argv, string $stdin, int $timeout, int $limit_bytes, bool $fenced = true, int $max_out = self::MAX_ANSWER_BYTES): array {
+	public static function runTool(array $argv, string $stdin, int $timeout, int $limit_bytes, bool $fenced = true, int $max_out = self::MAX_ANSWER_BYTES, array $reads = array()): array {
 		$argv = array_map('strval', array_values($argv));
 		$timeout = max(1, $timeout);
 		$limit_bytes = max(16777216, $limit_bytes);
 		$in_fence = $fenced && self::jailAvailable() && self::jailFenced();
 		if ($in_fence) {
 			$real = realpath($argv[0]);
+			$grants = array('--read=' . ($real !== false ? $real : $argv[0]));
+			// Real paths only: the launcher refuses a grant through a link.
+			foreach ($reads as $read) {
+				$real_read = realpath((string)$read);
+				if ($real_read !== false) $grants[] = '--read=' . $real_read;
+			}
 			$cmd = array_merge(array(
 				self::JAIL_LAUNCHER,
 				'--timeout=' . $timeout,
 				'--rlimit-as=' . $limit_bytes,
 				'--scratch=' . (int)self::JAIL_SCRATCH_BYTES,
-				'--read=' . ($real !== false ? $real : $argv[0]),
-				'--',
-			), $argv);
+			), $grants, array('--'), $argv);
 		} elseif ($fenced && self::jailAvailable()) {
 			$cmd = array_merge(array(self::JAIL_LAUNCHER, '--timeout=' . $timeout, '--rlimit-as=' . $limit_bytes, '--'), $argv);
 		} else {

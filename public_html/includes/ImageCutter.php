@@ -61,7 +61,10 @@ class ImageCutter implements SandboxParserInterface {
 	 * shrink that would not fit is not attempted (the image is decoded in
 	 * full inside the fence, or refused there in words).
 	 */
-	const WORKER_BUDGET_BYTES = 67108864;   // 64 MB
+	const WORKER_BUDGET_BYTES = 50331648;   // 48 MB
+
+	/** The least a cut's answer may be, however large the source: the registered sizes of one image. */
+	const MIN_ANSWER_BYTES = 16777216;      // 16 MB
 
 	/**
 	 * Cut $sizes from the image at $src_path.
@@ -146,7 +149,11 @@ class ImageCutter implements SandboxParserInterface {
 
 	/** One fenced run: the answer as an array, or the refusal it stands for. */
 	private static function ask($bytes, array $options) {
-		$r = DocumentText::parseWith('ImageCutter', $bytes, $options);
+		// The answer is collected beside the bytes sent, and copied once on its
+		// way back: it may be what the budget leaves, and never less than the
+		// registered sizes of one image need.
+		$ceiling = max(self::MIN_ANSWER_BYTES, self::WORKER_BUDGET_BYTES - strlen($bytes));
+		$r = DocumentText::parseWith('ImageCutter', $bytes, $options, $ceiling);
 		if ($r['status'] !== DocumentText::OK) {
 			$detail = (string)($r['detail'] ?? '');
 			error_log('ImageCutter: the fenced decode failed (' . $r['status'] . ')' . ($detail !== '' ? ': ' . $detail : ''));
@@ -158,7 +165,7 @@ class ImageCutter implements SandboxParserInterface {
 			}
 			if (stripos($detail, 'answer too large') !== false) {
 				throw new ImageDecodeRefused('This image is too large to make sizes from (its sizes together are over '
-					. (int)(DocumentText::MAX_ANSWER_BYTES / 1048576) . ' MB). It was saved as uploaded.');
+					. (int)(min(DocumentText::MAX_ANSWER_BYTES, $ceiling) / 1048576) . ' MB). It was saved as uploaded.');
 			}
 			if (stripos($detail, 'timed out') !== false) {
 				throw new ImageDecodeRefused('The image took longer than ' . DocumentText::TIMEOUT_SECONDS . ' seconds to decode and was stopped.');

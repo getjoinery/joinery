@@ -514,7 +514,11 @@ class RouteHelper {
             $versioned = $cache_seconds > 0
                 && isset($_GET['v']) && is_string($_GET['v']) && $_GET['v'] !== ''
                 && preg_match('#^/(?:assets|plugins/[^/]+/assets|theme/[^/]+/assets)/#', $path) === 1;
-            return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache, $versioned);
+            // An upload reached through this route (a host whose web server
+            // hands /static_files to PHP) is an upload all the same: typed by
+            // its stored name, never by its content.
+            $uploaded = (strpos($clean_path, 'static_files/uploads/') === 0 || strpos($clean_path, 'uploads/') === 0);
+            return self::serveStaticFile($file_path, $cache_seconds, $exclude_from_cache, $versioned, $uploaded);
         }
         
         return false;
@@ -727,6 +731,7 @@ class RouteHelper {
     const UPLOADED_INLINE_TYPES = [
         'gif' => 'image/gif', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'jpe' => 'image/jpeg',
         'png' => 'image/png', 'webp' => 'image/webp', 'avif' => 'image/avif',
+        'ico' => 'image/x-icon', 'bmp' => 'image/bmp',
         'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'wav' => 'audio/wav', 'ogg' => 'audio/ogg',
         'flac' => 'audio/flac', 'aac' => 'audio/aac', 'opus' => 'audio/ogg',
         'mp4' => 'video/mp4', 'm4v' => 'video/mp4', 'mov' => 'video/quicktime', 'webm' => 'video/webm',
@@ -1268,6 +1273,9 @@ class RouteHelper {
         // STATIC PAGE CACHE CHECK - For non-authenticated users only
         $cache_status = null;
         $cache_buffer_started = false;
+        // Read further down beside $cache_buffer_started; set here so it has a
+        // value on a request the cache is never asked about (signed in, or not a GET).
+        $cache_result = null;
 
         // Filter out the '__route' parameter from $_GET as it's just routing metadata
         $cache_params = $_GET;

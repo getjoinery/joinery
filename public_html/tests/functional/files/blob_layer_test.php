@@ -446,6 +446,25 @@ try {
 	check($ft->resize() === true, 'killed: the next attempt (here, without djpeg) succeeds');
 	ImageDecoder::set_djpeg_for_tests(null);
 
+	section('a type that could not be asked is asked again when the bytes next arrive');
+	// The type is asked outside this process. When nobody answers, the blob is
+	// kept as unknown bytes; the same bytes arriving later must not inherit
+	// that for good (reviewer2 B9).
+	$down = $scratch . '/file_down.sh';
+	file_put_contents($down, "#!/bin/sh\nexit 3\n");
+	chmod($down, 0755);
+	$words = "notes that were stored while nobody could be asked\n" . bin2hex(random_bytes(12)) . "\n";
+	MimeSniffer::$file_override = $down;
+	$fu = $track(File::createFromBytes($words, 'unasked_' . bin2hex(random_bytes(4)) . '.txt', 'text/plain', 1, array('fil_private' => true)));
+	MimeSniffer::$file_override = null;
+	check($fu->get('fil_type') === 'application/octet-stream' && $fu->_blob()->get('fbb_mime_type') === 'application/octet-stream',
+		'unasked: the file and its blob are kept as unknown bytes, not as what the browser claimed', (string)$fu->get('fil_type'));
+	$fv = $track(File::createFromBytes($words, 'asked_' . bin2hex(random_bytes(4)) . '.txt', 'text/plain', 1, array('fil_private' => true)));
+	check((int)$fv->_blob()->key === (int)$fu->_blob()->key, 'unasked: the same bytes reuse the blob');
+	check($fv->get('fil_type') === 'text/plain' && (new FileBlob((int)$fu->_blob()->key, true))->get('fbb_mime_type') === 'text/plain',
+		'unasked: and this time the type is asked, answered and kept', (string)$fv->get('fil_type'));
+	check((new File((int)$fu->key, true))->get('fil_type') === 'text/plain', 'unasked: the earlier file is corrected too');
+
 	section('a record whose bytes are gone says so');
 	$fm = $track(File::createFromBytes(make_png(9101), 'gone_' . bin2hex(random_bytes(4)) . '.png', 'image/png', 1, array()));
 	$owner = new User(NULL);

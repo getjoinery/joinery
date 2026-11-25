@@ -23,6 +23,8 @@
  *
  * Run: php tests/security/parser_surfaces_test.php
  *
+ * @version 1.6 - libmagic (finfo, mime_content_type) is a parser token: a file's type is asked outside the worker
+ *   (MimeSniffer, specs/mime_sniff_outside_the_worker.md)
  * @version 1.5 - images: GD's readers, the header read and the EXIF reader are parser tokens; only
  *   ImageCutter's fenced side opens an image (specs/image_decode_in_the_jail.md)
  * @version 1.4 - Route53DnsDriver reads its own API's XML answers (specs/email_provider_sdk_removal.md WP7)
@@ -44,12 +46,15 @@ $tokens = array('ZipArchive', 'PharData', 'DOMDocument', 'loadHTML', 'loadXML',
 	'simplexml_load_string', 'simplexml_load_file', 'gzdecode', 'inflate_init', 'gzinflate', 'gzuncompress',
 	// An image is a stranger's bytes too: GD's readers, the header read and the EXIF reader.
 	'imagecreatefromstring', 'imagecreatefromjpeg', 'imagecreatefrompng', 'imagecreatefromgif', 'imagecreatefromwebp',
-	'imagecreatefromavif', 'imagecreatefrombmp', 'getimagesize', 'getimagesizefromstring', 'exif_read_data');
+	'imagecreatefromavif', 'imagecreatefrombmp', 'getimagesize', 'getimagesizefromstring', 'exif_read_data',
+	// And so is asking what kind of file some bytes are: libmagic.
+	'finfo_open', 'finfo_file', 'finfo_buffer', 'mime_content_type');
 
 // Files that may name a parser in the pool, and why the bytes are not a stranger's.
 $allowed = array(
 	'includes/DocumentText.php'                          => 'the sandbox side lives in the same class as the parent side',
 	'utils/extract_document_text.php'                    => 'the extraction subprocess itself',
+	'includes/RouteHelper.php'                           => 'getMimeType() on the site\'s own theme and plugin assets only: a public upload is typed by its stored name (uploadedFileHeaders(), checked below)',
 	'includes/ImageDecoder.php'                          => 'ImageCutter\'s engine: called only from ImageCutter::sandboxParse(), inside the subprocess (checked below)',
 	'includes/AbstractExtensionManager.php'              => 'a theme or plugin package the owner installed or we signed (S9)',
 	'utils/upgrade.php'                                  => 'our own signed release archive',
@@ -134,6 +139,11 @@ $fenced_at = strpos($cutter_src, 'THE FENCED SIDE');
 check($fenced_at !== false && !preg_match('/ImageDecoder::(open|open_bytes|open_shrunk|read_header)/', substr($cutter_src, 0, $fenced_at)),
 	'and ImageCutter asks only on its fenced side: the caller\'s side hands the bytes to the subprocess');
 check(in_array('includes/ImageCutter.php', $sandbox_parsers, true), 'includes/ImageCutter.php is a sandbox parser');
+check(in_array('includes/MimeSniffer.php', $sandbox_parsers, true), 'includes/MimeSniffer.php is a sandbox parser');
+$route_src = (string)file_get_contents($root . '/includes/RouteHelper.php');
+check(preg_match('/if \(\$uploaded\) \{.*?return true;\s*\}\s*\/\/ Set content type\s*\$content_type = self::getMimeType/s', $route_src) === 1
+	&& substr_count($route_src, 'self::getMimeType(') === 1,
+	'RouteHelper asks a file\'s content for its type in one place, after an upload has already been answered');
 check(in_array('gd', DocumentText::PARSER_EXTENSIONS, true) && in_array('exif', DocumentText::PARSER_EXTENSIONS, true),
 	'the fenced PHP loads gd and exif');
 
