@@ -9,6 +9,7 @@
  * each one refused with the reason. It is the per-plugin log an author reads
  * (plugin_tiers.md WP8) and an admin checks when a plugin misbehaves.
  *
+ * @version 1.4 - KIND_ACTION: one of the plugin's own API actions (spec sandboxed_plugin_api_actions)
  * @version 1.3 - sbl_ip_network: the network of a visitor not signed in; those rows have their own, shorter retention
  * @version 1.2 - sbl_install_id: the install of the plugin the call ran under; the log reads by it
  * @version 1.1 - KIND_PAGE: a page drawn by the plugin's own view
@@ -27,6 +28,7 @@ class SandboxLog extends SystemBase {
 	const KIND_PAGE     = 'page';
 	const KIND_SIGNAL   = 'signal';
 	const KIND_SCHEDULE = 'schedule';
+	const KIND_ACTION   = 'action';
 	const KIND_TEST     = 'test';
 
 	const STATUS_OK          = 'ok';
@@ -69,7 +71,7 @@ class SandboxLog extends SystemBase {
 		// an earlier install of the same name is not this one's.
 		'sbl_install_id'     => array('type' => 'varchar(32)'),
 		'sbl_kind'           => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
-			'allowed_values' => array(self::KIND_UI, self::KIND_PAGE, self::KIND_SIGNAL, self::KIND_SCHEDULE, self::KIND_TEST)),
+			'allowed_values' => array(self::KIND_UI, self::KIND_PAGE, self::KIND_SIGNAL, self::KIND_SCHEDULE, self::KIND_ACTION, self::KIND_TEST)),
 		'sbl_name'           => array('type' => 'varchar(100)'),
 		'sbl_status'         => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
 			'allowed_values' => array(self::STATUS_OK, self::STATUS_ERROR, self::STATUS_TIMEOUT, self::STATUS_UNAVAILABLE, self::STATUS_BUSY)),

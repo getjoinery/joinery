@@ -9,7 +9,7 @@
  *   {
  *     "call_id":  "c_…",
  *     "plugin":   "notifier",
- *     "export":   "on_ui" | "on_signal" | "on_schedule",
+ *     "export":   "on_ui" | "on_page" | "action" | "on_signal" | "on_schedule",
  *     "input":    { … what this call is about … },
  *     "limits":   {"memory_mb": 16, "timeout_ms": 5000},
  *     "settings": {"webhook_url": "…"},          secrets opened
@@ -31,7 +31,8 @@
  * `input` per export: on_ui {handler, values, user: {id, permission, timezone}};
  * on_ui also carries source ('form', or 'frame' with kind and page);
  * on_page {page, kind: admin|member|public, method, query, fields, user};
- * on_signal {signal, message_id, timestamp, data}; on_schedule {schedule, time}.
+ * action {action, values, user} (one of its own API actions, src/logic/{action}_logic.php; user carries the level the
+ * request acts at); on_signal {signal, message_id, timestamp, data}; on_schedule {schedule, time}.
  *
  * The runner is SandboxRunner: one fenced process per call
  * (specs/sandboxed_php_plugins.md). Where it cannot run the plugin (no fence,
@@ -45,6 +46,9 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.15 - an action call is refused, unavailable, while its logic file differs from what the site read; an
+ *                action call that cannot be made at all is unavailable, not an error: its code never ran (reviewer2 R2, R4)
+ * @version 1.14 - action(): one of the plugin's own API actions, with the UI call's bounds (spec sandboxed_plugin_api_actions)
  * @version 1.13 - the envelope's models map each model class to the site's name; a call is refused while the model
  *                files differ from what the site read (spec sandboxed_plugin_model_files)
  * @version 1.12 - a ui() or page() call with no user is always a visitor's (reviewer2 R5); the network's count is read
@@ -189,6 +193,46 @@ class SandboxHost {
 		}
 	}
 
+	/**
+	 * Run one of the plugin's own API actions for $user (SandboxActions).
+	 * The same bounds as a UI call: one per person, UI_SLOTS a site,
+	 * UI_TIMEOUT_MS. The output is the LogicResult's parts {data, error,
+	 * validation_errors, redirect}; SandboxActions holds each to a size.
+	 *
+	 * @param int $permission the level the request acts at (a browser session's, or the key's user's)
+	 */
+	public static function action(string $plugin, string $action, array $values, User $user, int $permission): array {
+		$user_id = (int)$user->key;
+		// The descriptor the site checked the caller against is the file's.
+		if (SandboxActions::fileChanged($plugin, $action)) {
+			return self::record($plugin, SandboxLog::KIND_ACTION, $action, array('status' => SandboxLog::STATUS_UNAVAILABLE,
+				'message' => 'The plugin cannot be called: ' . SandboxActions::FILE_CHANGED . '.'), $user_id);
+		}
+		$slot = self::takeUiSlot($user_id);
+		if (!is_array($slot)) {
+			$refusals = array(
+				'busy'      => array(SandboxLog::STATUS_BUSY, 'The plugin is busy with other requests. Try again in a moment.'),
+				'user_busy' => array(SandboxLog::STATUS_BUSY, 'The plugin is still answering your last request. Try again in a moment.'),
+				'error'     => array(SandboxLog::STATUS_UNAVAILABLE, 'The plugin cannot be called on this site right now.'),
+			);
+			list($status, $message) = $refusals[$slot];
+			return self::record($plugin, SandboxLog::KIND_ACTION, $action, array('status' => $status, 'message' => $message), $user_id);
+		}
+		try {
+			return self::call($plugin, SandboxLog::KIND_ACTION, $action, 'action', array(
+				'action' => $action,
+				'values' => $values ?: new stdClass(),
+				'user'   => array('id' => $user_id, 'permission' => $permission,
+					'timezone' => (string)($user->get('usr_timezone') ?: '')),
+			), array('max_timeout_ms' => self::UI_TIMEOUT_MS, 'user_id' => $user_id));
+		} finally {
+			foreach ($slot as $fh) {
+				flock($fh, LOCK_UN);
+				fclose($fh);
+			}
+		}
+	}
+
 	/** Deliver one signal to the plugin. */
 	public static function signal(string $plugin, string $signal, array $payload, string $message_id, string $timestamp): array {
 		return self::background($plugin, SandboxLog::KIND_SIGNAL, $signal, 'on_signal', array(
@@ -238,8 +282,10 @@ class SandboxHost {
 		try {
 			$envelope = self::envelope($plugin, $export, $input);
 		} catch (Throwable $e) {
+			// An action call refused here never ran: unavailable, so the
+			// API releases its Idempotency-Key (reviewer2 R4).
 			return self::record($plugin, $kind, $name, array(
-				'status' => SandboxLog::STATUS_ERROR,
+				'status' => $kind === SandboxLog::KIND_ACTION ? SandboxLog::STATUS_UNAVAILABLE : SandboxLog::STATUS_ERROR,
 				'message' => 'The plugin cannot be called: ' . $e->getMessage(),
 			), $opts['user_id'] ?? null, $network);
 		}

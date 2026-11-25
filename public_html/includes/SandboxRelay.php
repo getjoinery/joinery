@@ -75,6 +75,7 @@
  * most MAX_ANON_RECIPIENTS people, each counted against the visitor's
  * network (ANON_MAIL_FEATURE), and never send a batch.
  *
+ * @version 1.11 - an action ask for a sandboxed plugin's action is refused (spec sandboxed_plugin_api_actions)
  * @version 1.10 - its own models by their class names in its model files (SandboxModels::declarations())
  * @version 1.9 - a list filter carries a list of values (any of them, at most MAX_LIST_ROWS); an empty list
  *               matches no row without asking (spec sandboxed_plugin_ask_speed WP2)
@@ -603,6 +604,11 @@ class SandboxRelay {
 		$target = 'POST action ' . $name;
 		if (!in_array($name, $this->scope(), true)) {
 			return $this->refuse('api', $target, 'This plugin may not call the action ' . $name . ' (not approved).');
+		}
+		// From inside this fenced call, a sandboxed action would wait for a
+		// second slot (SandboxCompatibility refuses it at install too).
+		if (SandboxActions::isSandboxedAction($name)) {
+			return $this->refuse('api', $target, 'A sandboxed plugin cannot call a sandboxed plugin\'s action (' . $name . ').');
 		}
 		$input = $ask['input'] ?? array();
 		if (!is_array($input)) {

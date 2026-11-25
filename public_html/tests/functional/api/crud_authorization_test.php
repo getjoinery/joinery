@@ -196,6 +196,12 @@ try {
 	$r = api_request('GET', '/api/v1/User/' . $user_a->key, $ha);
 	check($r['status'] === 200, 'GET exposed model (own User) → 200', $r['raw']);
 
+	// An unknown public key finds no row (null): the 400, with no PHP warning
+	// on the way (ApiAuth 1.13.1; php_warnings catches one if it returns).
+	$r = api_request('GET', '/api/v1/User/' . $user_a->key, key_headers('public_nosuchkey', 'nosuchsecret'));
+	check($r['status'] === 400 && strpos((string)$r['raw'], 'Unable to find the api key') !== false,
+		'GET with an unknown public key → 400 Unable to find the api key', $r['raw']);
+
 	// Read-only resource branch (in-process — no production model has this combo).
 	check(ApiReadOnlyProbe::$api_readable === true && ApiReadOnlyProbe::$api_writable === false,
 		'read-only resource is representable (readable, not writable)');

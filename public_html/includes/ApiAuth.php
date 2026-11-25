@@ -62,6 +62,7 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
+ * @version 1.13.1 - an unknown public key (no row, null) is the 400 it always meant, not a PHP warning
  * @version 1.13.0 - requestCredentialClass(): browser, device or app, so a consumer (the mail read budget) meters by
  *   credential class without naming the kinds
  * @version 1.12.0
@@ -233,7 +234,8 @@ class ApiAuth {
 			self::auth_failure(400, 'Unable to find the api key', 'Unable to find the api key');
 		}
 
-		if (!$api_entry->key) {
+		// An unknown public key finds no row at all (null), not an empty one.
+		if (!$api_entry || !$api_entry->key) {
 			self::auth_failure(400, 'Unable to find the api key', 'Unable to find the api key');
 		}
 

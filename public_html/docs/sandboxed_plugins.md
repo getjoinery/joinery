@@ -53,8 +53,8 @@ Start from the sample, `docs/examples/notes_sample/`: a model of its own
 rule of its own), a plain admin page that lists and adds notes (`src/admin/notes.php`), a
 member page using a setting and an own-rows grant (`src/views/mine.php`), a
 framed board with its own script calling one handler (`src/views/board.php`),
-and `src/plugin.php` answering the signal, the schedule and the board's
-call. `tests/functional/sandbox/sandbox_sample_plugin_test.php` runs it.
+an API action that adds a note (`src/logic/add_logic.php`), and
+`src/plugin.php` answering the signal, the schedule and the board's call. `tests/functional/sandbox/sandbox_sample_plugin_test.php` runs it.
 
 ```
 plugins/notes_sample/
@@ -63,6 +63,7 @@ plugins/notes_sample/
   src/admin/{slug}.php   an admin page it draws
   src/views/{slug}.php   a member page it draws (or a framed page's document)
   src/data/{table}_class.php its models, one file each (see Data)
+  src/logic/{action}_logic.php its API actions, one file each (see Its own API actions)
   src/includes/          its other classes, found by name
   src/assets/            images its pages show (assets/NAME)
 ```
@@ -85,6 +86,7 @@ php utils/sandbox_plugin.php call notes_sample ui pin '{"id":1}' --from=frame --
                                                                       a framed page's handler, as its script calls it
 php utils/sandbox_plugin.php call notes_sample signal account.signup '{"user_id":1}'
 php utils/sandbox_plugin.php call notes_sample schedule tidy
+php utils/sandbox_plugin.php call notes_sample action add '{"text":"hi"}' --as=USER_ID   one of its API actions, as that user
 php utils/sandbox_plugin.php log notes_sample                         its last calls, with each ask
 ```
 
@@ -481,10 +483,13 @@ Activate, and `PluginManager::activate()` refuses it
 | Pages anyone can open, signed in or not. What they show and do runs with the access approved here | `public_pages`, saying the same of each |
 | Open its own records beyond the plugin | its model files: each model read through the API, a read or delete level below its class's, each member reading their own rows |
 | Stop the site's records being deleted while it holds rows for them | its model files: each `prevent` on a site table |
+| Let the site's AI assistant run these of its actions without asking first | its action files: each with `ai_agent` set to `auto` |
 | Warning | personal records (all rows or own), or the files people upload to it, beside outside websites or email: it could send them off the site |
 
 and, as its own, its models (one line each: who may read it and what it is
-linked to, from its files as they are now), its admin pages and its settings.
+linked to, from its files as they are now), its admin pages, its API actions
+(one line each: who may call it, and whether the AI assistant may run it after
+asking or without asking) and its settings.
 A record grant
 reaches every record of the model ("All users: read only"), since the
 plugin's credential acts as an admin; each signal says what personal data it
@@ -766,7 +771,7 @@ hands it to the runner, and records the answer:
 ```json
 {
   "call_id": "c_…", "plugin": "notifier",
-  "export": "on_ui | on_signal | on_schedule",
+  "export": "on_ui | on_page | action | on_signal | on_schedule",
   "input": {},
   "limits": {"memory_mb": 16, "timeout_ms": 5000},
   "settings": {"webhook_url": "…"},
@@ -776,7 +781,8 @@ hands it to the runner, and records the answer:
 
 `outbound_hosts` are the approved ones. The plugin's API key is never in it:
 core's relay opens the key when it carries out an ask. `input` per export: `on_ui` `{handler, values, user: {id,
-permission}}`; `on_signal` `{signal, message_id, timestamp, data}`;
+permission}}`; `action` `{action, values, user: {id, permission, timezone}}`, the permission being the level the
+request acts at; `on_signal` `{signal, message_id, timestamp, data}`;
 `on_schedule` `{schedule, time}`.
 
 **The runner.** `SandboxHost::$runner` is a callable that takes the envelope
@@ -994,6 +1000,88 @@ by tag and install id together. The files stay when the plugin is
 uninstalled: they are the uploaders'. A later plugin of the same name has
 another install id and reaches none of them. On the site `File::$remote` is
 null.
+
+### Its own API actions
+
+A sandboxed plugin's action is written as a first-party plugin's is
+([API](api.md), "Making a Logic Function Available via API"): a logic file
+per action, `src/logic/{action}_logic.php`, holding
+`{action}_logic_descriptor()` and `{action}_logic($input)`, which returns a
+`LogicResult`. The sample's `src/logic/add_logic.php`:
+
+```php
+function add_logic_descriptor(): array {
+	return array(
+		'description' => 'Add a note, written by the caller.',
+		'mutates'     => true,
+		'ai_agent'    => 'confirm',
+		'auth'        => array('capability' => 'write', 'min_user_permission' => 5),
+		'input'       => array('text' => array('type' => 'string', 'required' => true, 'max_length' => 200)),
+	);
+}
+
+function add_logic($input) {
+	$note = new Note();
+	$note->set('nte_text', $input['text']);
+	$note->set('nte_usr_user_id', SessionControl::get_instance()->get_user_id());
+	$note->save();
+	return LogicResult::render(array('note_id' => (int)$note->key));
+}
+```
+
+It is called the way any plugin action is, `POST /api/v1/action/notes_sample/add`,
+with any credential its descriptor admits (a member's app session, a browser
+session, a machine key, a key scoped to this one action), and
+`ApiLogicEndpoint` runs it through the same steps: the `auth` block, the
+`input` schema (a 422 before anything runs), `Idempotency-Key`, the request
+log, the answer built from the `LogicResult`, the discovery listing
+(`GET /api/v1/actions`) and the admin page that scopes a key to named
+actions. First-party code calls one with
+`SandboxActions::call($plugin, $action, $input, $user)`, which returns the
+`LogicResult`; the site's AI assistant offers one marked `ai_agent`, keyed
+`{plugin}/{action}`, at the tier approved.
+
+**The descriptor is read, never run** (`SandboxModelFile::readLogic()`, in
+the parser jail, with the model files and at the same moments). The function
+is a single `return` of a plain array, and holds only:
+
+| Key | What it may be |
+|---|---|
+| `description` | a string of at most 300 characters (the AI assistant reads it as the plugin's words) |
+| `mutates` | true or false |
+| `ai_agent` | `confirm` (the assistant asks first) or `auto` (it runs without asking; an approval entry of its own) |
+| `input` | the fields the API checks, in `DescriptorValidator`'s words: `type`, `required`, `label`, `description`, `default`, `enum`, `min`, `max`, `max_length`, `items`, `max_items` |
+| `requires_setting` | one of the plugin's own settings, by its manifest name: the action is listed and callable only while it is on |
+| `auth` | `min_user_permission` (required: a level from 0 to 10, or a class and verb such as `content:write`), `capability`, `requires_machine_key`, `requires_scoped_key`, `requires_person_credential`, `requires_browser_session` |
+
+Refused, each naming the file: `allow_guest` (its public pages serve
+visitors), `session_write`, `app_purpose`, `requires_session => false` (an
+action for callers with no credential), a `{action}_logic_form()` companion,
+a top-level function the site's own code declares (`process_logic()`), and
+anything else. A logic file with no descriptor is not an action and is not
+read. The checked descriptors are kept on the plugin's row
+(`plg_metadata._sandbox_actions`), and the site answers from that copy alone.
+An action that becomes `auto` in an update installs, and the assistant asks
+first until an admin approves it again.
+
+**The call runs in the fence** (`SandboxHost::action()`, export `action`), in
+the page slots: one call per person, two a site, five seconds at most. The
+runner loads `src/plugin.php` when there is one, then the logic file, and
+calls `{action}_logic($input)` with `$_POST` holding the input. Only the
+fields the descriptor declares cross, at most 1 MB in all.
+`SessionControl` answers who is calling and the level the request acts at;
+the plugin's asks carry its own approved reach. Core rebuilds the
+`LogicResult` from the parts the runner sends back: `data` as JSON of at
+most 1 MB, `redirect` a path on this site (anything else is refused), the
+error at most 500 characters, and at most 50 validation errors of at most
+300 characters each. A call that is busy or unavailable answers 503 and was
+never run, so its `Idempotency-Key` is released and a retry runs it; a
+timeout answers 504 and keeps the key, since the code may have run; a
+failure answers 500. Each call is a row in the call log, kind `action`.
+
+A sandboxed plugin cannot ask for a sandboxed plugin's action (its own or
+another's) in `permissions.actions`: from inside its own fenced call it would
+wait for a second slot. Install refuses it, and the relay refuses the ask.
 
 ### The asks
 

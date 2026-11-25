@@ -30,6 +30,7 @@
  * Nothing here is idempotency-specific: the hot-turn rule refuses the plaintext
  * write, and sealing is that refusal's ordinary resolution.
  *
+ * @version 1.3 - release(): a claim given up when the action never ran (a sandboxed plugin that was busy)
  * @version 1.2
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -125,6 +126,15 @@ class ApiIdempotencyKey extends SystemBase {
 	 * number of rows removed. Kept for callers wanting an explicit purge; the
 	 * scheduled sweep works from $retention_policy instead.
 	 */
+	/**
+	 * Release one claim: the row of a request whose action never ran (a
+	 * sandboxed plugin that was busy), so a retry with the same key runs it.
+	 */
+	public static function release(int $id): void {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare('DELETE FROM ' . static::$tablename . ' WHERE aik_api_idempotency_key_id = ?')->execute(array($id));
+	}
+
 	public static function purge_older_than($hours) {
 		$hours = max(1, (int) $hours);
 		$cutoff = LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-' . $hours . ' hours', 'Y-m-d H:i:s');

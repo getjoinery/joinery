@@ -23,6 +23,8 @@
  * disabled or deleted. Once they cannot, the plugin's credential is switched
  * off (User::save()) and the plugin waits on another admin's approval.
  *
+ * @version 1.15 - its own API actions (spec sandboxed_plugin_api_actions): an action the AI assistant may run without
+ *                 asking is a grant, assistant_auto (D5); the actions join the digest
  * @version 1.14 - blockEntries(): a prevent between the plugin's own models is a block when a site record's delete
  *                 reaches it through permanent_delete rules (reviewer1 R6)
  * @version 1.13 - a model's reach says the levels that result (read through the API, delete, permanent delete), so a
@@ -64,8 +66,18 @@ class SandboxConsent {
 	 * @return array{actions:string[], records:array<string,string[]>, signals:string[],
 	 *               schedules:array<string,string>, outbound_hosts:string[], email:string[], uploads:string[]}
 	 */
-	public static function grantsOf(SandboxManifest $m, ?array $models = null): array {
+	public static function grantsOf(SandboxManifest $m, ?array $models = null, ?array $actions = null): array {
 		$models = $models ?? SandboxModels::declarations($m->name());
+		$actions_declared = $actions ?? SandboxActions::descriptors($m->name());
+		// An action the AI assistant may run without asking (D5): asking
+		// first needs no approval, since a person agrees to each call.
+		$assistant_auto = array();
+		foreach ($actions_declared as $action => $descriptor) {
+			if (($descriptor['ai_agent'] ?? null) === 'auto') {
+				$assistant_auto[] = (string)$action;
+			}
+		}
+		sort($assistant_auto);
 		$actions = $m->permittedActions();
 		sort($actions);
 		$records = array();
@@ -125,11 +137,12 @@ class SandboxConsent {
 			'member_pages'   => $member_pages,
 			'public_pages'   => $public_pages,
 			'framed_admin_pages' => $framed_admin_pages,
+			'assistant_auto' => $assistant_auto,
 		) + self::modelGrants($m->name(), $models);
 	}
 
 	/** The list kinds every approval is compared in, a value each. */
-	const LIST_KINDS = array('actions', 'signals', 'outbound_hosts', 'email', 'uploads', 'model_reach', 'blocks');
+	const LIST_KINDS = array('actions', 'signals', 'outbound_hosts', 'email', 'uploads', 'model_reach', 'blocks', 'assistant_auto');
 
 	/**
 	 * What a plugin's models open beyond the plugin, from their checked
@@ -386,9 +399,10 @@ class SandboxConsent {
 	 * the page posts back: an approval is of what the admin saw, so a
 	 * plugin replaced between showing and approving is not approved unseen.
 	 */
-	public static function reviewDigest(SandboxManifest $m, ?array $models = null): string {
+	public static function reviewDigest(SandboxManifest $m, ?array $models = null, ?array $actions = null): string {
 		$models = $models ?? SandboxModels::declarations($m->name());
-		return hash('sha256', json_encode(array($m->version(), self::grantsOf($m, $models), $m->adminPages(), $m->settings(), $models)));
+		$actions = $actions ?? SandboxActions::descriptors($m->name());
+		return hash('sha256', json_encode(array($m->version(), self::grantsOf($m, $models, $actions), $m->adminPages(), $m->settings(), $models, $actions)));
 	}
 
 	/**
@@ -434,7 +448,7 @@ class SandboxConsent {
 	 * approval covers. Nothing at all with no approval.
 	 */
 	public static function effective(string $plugin): array {
-		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array(), 'model_reach' => array(), 'blocks' => array());
+		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array(), 'model_reach' => array(), 'blocks' => array(), 'assistant_auto' => array());
 		try {
 			$asked = self::grantsOf(SandboxPlugins::manifest($plugin));
 		} catch (SandboxManifestException $e) {
@@ -664,6 +678,9 @@ class SandboxConsent {
 		}
 		if (!empty($grants['blocks'])) {
 			$out["Stop the site's records being deleted while it holds rows for them (an admin can see and remove those rows)"] = $grants['blocks'];
+		}
+		if (!empty($grants['assistant_auto'])) {
+			$out["Let the site's AI assistant run these of its actions without asking first"] = $grants['assistant_auto'];
 		}
 		if (!empty($grants['framed_admin_pages'])) {
 			$out["Run its own script in admins' browsers, on these framed admin pages"] = array_values($grants['framed_admin_pages']);

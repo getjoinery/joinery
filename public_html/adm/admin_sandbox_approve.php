@@ -4,6 +4,7 @@
  * Admin: review what a sandboxed plugin asks for, and approve it.
  * See adm/logic/admin_sandbox_approve_logic.php.
  *
+ * @version 1.2 - lists its own API actions: who may call each, and what the AI assistant may do with it
  * @version 1.1 - lists its admin pages; the button carries the digest of what was shown
  * @version 1.0
  */
@@ -75,6 +76,10 @@ if ($page_vars['own_models']) {
 }
 if ($page_vars['admin_pages']) {
 	$own['Pages for admins, under its menu'] = $page_vars['admin_pages'];
+}
+if ($page_vars['own_actions']) {
+	// Each runs its own code within what is approved here.
+	$own["Actions apps and programs can call through the site's API (each runs its code with what is approved here)"] = $page_vars['own_actions'];
 }
 if ($page_vars['settings']) {
 	$names = array();

@@ -2,6 +2,8 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.46 - {plugin}/{action} of an active sandboxed plugin resolves to its stored descriptor, with no file
+ *                included (api_resolve_logic_path()'s third value names the plugin; spec sandboxed_plugin_api_actions)
  * @version 2.45 - a sandboxed plugin's own key on its own models (SandboxRecord::isOwnRequest()) reads and writes them
  *                whatever their API flags and levels, and may set their owner column; for anyone else such a model
  *                is readable only when its file says so and is never written, and DELETE is a soft delete at the
@@ -292,9 +294,16 @@ function api_translate_logic_result($result, $action_name) {
  * @param array $url_segments ['api', 'v1', '{action|form}', '{name}'] or
  *                            ['api', 'v1', '{action|form}', '{plugin}', '{action}']
  * @param string $noun 'action' or 'form' - used in error messages
- * @return array [$action_label, $action_name]
+ * A sandboxed plugin's action ({plugin}/{action} of an active sandboxed
+ * plugin with that stored descriptor, SandboxActions::lookup()) resolves
+ * with no file: the site never includes a sandboxed plugin's code. The
+ * third value names the plugin, and the caller takes the descriptor and the
+ * call from SandboxActions.
+ *
+ * @return array [$action_label, $action_name, $sandboxed_plugin]
  *   $action_label - full name for logs/messages ('{plugin}/{action}' or '{action}')
  *   $action_name  - bare action name; logic functions are named from it
+ *   $sandboxed_plugin - the sandboxed plugin whose action it is, else null
  */
 function api_resolve_logic_path($url_segments, $noun) {
 	if (empty($url_segments[3])) {
@@ -319,6 +328,11 @@ function api_resolve_logic_path($url_segments, $noun) {
 
 	if ($plugin_name !== NULL) {
 		if (!PluginHelper::isPluginActive($plugin_name)) {
+			// Never a native plugin's (isPluginActive() knows no sandboxed one),
+			// and the same 404 for a sandboxed plugin or action not here.
+			if (SandboxActions::lookup($plugin_name, $action_name) !== null) {
+				return array($action_label, $action_name, $plugin_name);
+			}
 			api_error('Unknown ' . $noun . ': ' . $action_label, 'ActionError', 404);
 		}
 		$logic_filepath = PathHelper::getIncludePath(
@@ -337,7 +351,7 @@ function api_resolve_logic_path($url_segments, $noun) {
 
 	require_once($logic_filepath);
 
-	return array($action_label, $action_name);
+	return array($action_label, $action_name, NULL);
 }
 
 /**

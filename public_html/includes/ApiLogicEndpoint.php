@@ -30,7 +30,16 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.7
+ * A sandboxed plugin's action (spec sandboxed_plugin_api_actions) runs
+ * through the same steps. Its descriptor is the stored one (SandboxActions,
+ * read from its file and never run) and its "logic function" is a callable
+ * that makes one fenced call. A call the plugin's code never ran (busy,
+ * unavailable) releases its Idempotency-Key claim, so the retry the key
+ * exists for runs it.
+ *
+ * @version 1.9.0
+ * @changelog 1.9.0 - sandboxed plugins' actions: resolved from their stored descriptors, listed in the
+ *   catalog, run in the fence; a call that never ran releases its Idempotency-Key (spec sandboxed_plugin_api_actions)
  * @changelog 1.8.7 - a 429 refusal that names retry_after_seconds sends it as Retry-After (mail_access_hardening WP2)
  * @changelog 1.8.6 - the idempotency claim and outcome are written as the server's own (server_initiated_write)
  * @changelog 1.8.5 - executeAction() takes the acting level: the action face simulated its session with an
@@ -153,6 +162,14 @@ class ApiLogicEndpoint {
 		foreach (array_keys(PluginHelper::getActivePlugins()) as $plugin_name) {
 			$actions += $discover(PathHelper::getIncludePath('plugins/' . $plugin_name . '/logic'), $plugin_name . '/');
 		}
+		// An active sandboxed plugin's, from its stored descriptors (its files are never included).
+		foreach (SandboxActions::catalog() as $name => $entry) {
+			$required_setting = $entry['meta']['requires_setting'] ?? null;
+			if ($required_setting && !$settings->get_setting($required_setting)) {
+				continue;
+			}
+			$actions += array($name => $entry);
+		}
 		ksort($actions);
 		self::$catalog_cache = $actions;
 		return $actions;
@@ -225,7 +242,11 @@ class ApiLogicEndpoint {
 	 * {action}_logic_descriptor(). Returns null when the action has none — that
 	 * is what "not exposed to the API" means. Shared by both faces.
 	 */
-	protected static function resolveMeta($action_name) {
+	protected static function resolveMeta($action_name, $sandboxed_plugin = null) {
+		// A sandboxed plugin's: its stored descriptor, read from its file and never run.
+		if ($sandboxed_plugin !== null) {
+			return SandboxActions::lookup((string)$sandboxed_plugin, (string)$action_name);
+		}
 		if (function_exists($action_name . '_logic_descriptor')) {
 			return call_user_func($action_name . '_logic_descriptor');
 		}
@@ -249,7 +270,18 @@ class ApiLogicEndpoint {
 			api_error('Actions must use POST method', 'ActionError', 405);
 		}
 
-		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'action');
+		list($action_label, $action_name, $sandboxed_plugin) = api_resolve_logic_path($url_segments, 'action') + array(2 => null);
+
+		// A sandboxed plugin's action: its stored descriptor, and a callable
+		// that runs it in the fence in place of a function core included.
+		if ($sandboxed_plugin !== null) {
+			$meta = self::resolveMeta($action_name, $sandboxed_plugin);
+			if ($meta === null) {
+				api_error('Unknown action: ' . $action_label, 'ActionError', 404);
+			}
+			self::assertSettingEnabled($meta, $action_label);
+			return array($action_label, $meta, SandboxActions::callable($sandboxed_plugin, $action_name));
+		}
 
 		// Check for opt-in: the logic file must define a metadata companion,
 		// {action_name}_logic_descriptor().
@@ -535,6 +567,18 @@ class ApiLogicEndpoint {
 		}
 
 		$response_json = json_encode($translated['response']);
+
+		// A sandboxed action's call the plugin's code never ran (busy,
+		// unavailable): the claim is released, so the retry the key exists
+		// for runs it instead of replaying the refusal for ever.
+		if ($idem_record !== null && SandboxActions::neverRan($result)) {
+			try {
+				ApiIdempotencyKey::release((int)$idem_record->key);
+			} catch (Exception $e) {
+				error_log('ApiLogicEndpoint: failed to release an idempotency claim: ' . $e->getMessage());
+			}
+			$idem_record = null;
+		}
 
 		// Store the outcome (success or 422 alike) so a retry with the same
 		// Idempotency-Key replays instead of re-executing.
@@ -842,7 +886,11 @@ class ApiLogicEndpoint {
 			api_error('Form definitions must use GET method', 'ActionError', 405);
 		}
 
-		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'form');
+		list($action_label, $action_name, $sandboxed_plugin) = api_resolve_logic_path($url_segments, 'form') + array(2 => null);
+		// A sandboxed plugin serves no form definitions.
+		if ($sandboxed_plugin !== null) {
+			api_error('Unknown form: ' . $action_label, 'ActionError', 404);
+		}
 
 		$form_function = $action_name . '_logic_form';
 		$meta = self::resolveMeta($action_name);

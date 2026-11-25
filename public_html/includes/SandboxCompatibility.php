@@ -17,12 +17,19 @@
  * meaning their PHP is here, and one arriving from the catalog later would
  * find its name held.
  *
+ * @version 1.2 - it may not ask for a sandboxed plugin's action, its own or another's: called through the relay
+ *                from inside a fenced call, it waits for a second slot (spec sandboxed_plugin_api_actions)
  * @version 1.1 - a records grant may name File (read, update, delete), which the relay serves, not the API
  *                (spec sandboxed_plugin_uploads)
  * @version 1.0
  */
 
 class SandboxCompatibility {
+
+	/** Whether $action is the plugin's own ({plugin}/...), which it may not ask for: its descriptors may not be stored yet. */
+	private static function ownAction(SandboxManifest $m, string $action): bool {
+		return strpos($action, $m->name() . '/') === 0;
+	}
 
 	/** @return string[] every reason this site cannot run the plugin, in words; empty when it can */
 	public static function problems(SandboxManifest $m): array {
@@ -38,7 +45,11 @@ class SandboxCompatibility {
 
 		$catalog = ApiLogicEndpoint::actionCatalog();
 		foreach ($m->permittedActions() as $action) {
-			if (!isset($catalog[$action])) {
+			if (isset($catalog[$action]['sandboxed']) || SandboxActions::isSandboxedAction($action) || self::ownAction($m, $action)) {
+				// Called through the relay from inside its own fenced call, it
+				// would hold a slot while it waits for a second one.
+				$problems[] = "It asks for the action $action, a sandboxed plugin's own action; a sandboxed plugin cannot call one (its own or another's) yet.";
+			} elseif (!isset($catalog[$action])) {
 				$problems[] = "It needs the action $action, which this site does not have (or whose feature is off).";
 			} elseif (!ApiLogicEndpoint::machineKeyCanCall($catalog[$action]['meta'])) {
 				$problems[] = "It asks for the action $action, which only a signed-in person can use.";

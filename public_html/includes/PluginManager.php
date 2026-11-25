@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.29 - a sandboxed plugin's action descriptors are stored with its row at install (spec sandboxed_plugin_api_actions)
  * @version 1.28 - a sandboxed plugin's model files are read at sync and stored with its row at install (spec
  *                 sandboxed_plugin_model_files); install() refuses one while sandboxed plugins are switched off, and drops the
  *                 public pages an earlier install of its name left in the cache
@@ -293,6 +294,12 @@ class PluginManager extends AbstractExtensionManager {
             $read = SandboxModels::pending((string)$name);
             if ($read !== null) {
                 $metadata[SandboxModels::METADATA_KEY] = $read;
+            }
+            // And its action descriptors, read with them.
+            $actions = SandboxActions::pending((string)$name);
+            if ($actions !== null) {
+                $metadata[SandboxActions::METADATA_KEY] = $actions;
+                SandboxActions::markStored((string)$name);
             }
             $model->set('plg_install_error', null);
         } else {

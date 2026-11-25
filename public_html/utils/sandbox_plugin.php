@@ -18,6 +18,7 @@
  *   php utils/sandbox_plugin.php call PLUGIN page SLUG [QUERY_JSON] [--kind=admin|member|public] [--as=USER_ID]
  *   php utils/sandbox_plugin.php call PLUGIN ui HANDLER [VALUES_JSON] --from=frame --page=SLUG   as a framed page's script
  *   php utils/sandbox_plugin.php call PLUGIN schedule NAME
+ *   php utils/sandbox_plugin.php call PLUGIN action NAME [INPUT_JSON] --as=USER_ID   one of its own API actions, as that user
  *       Makes one call as core would (SandboxHost, which runs the plugin in
  *       the fence), and prints what came back and what the plugin asked of
  *       each door. Where the fence cannot run it yet, the call comes back
@@ -29,6 +30,8 @@
  * "A dev site" is one with the debug setting on: load writes into plugins/,
  * which the installer does everywhere else, and call fires real calls.
  *
+ * @version 1.9 - validate reads the folder's action descriptors and shows each action's line; call ... action NAME
+ *               --as=USER_ID runs one of its own API actions (spec sandboxed_plugin_api_actions)
  * @version 1.8 - validate reads the folder's model files in the parser jail and shows each model's line (spec sandboxed_plugin_model_files)
  * @version 1.7 - public pages: listed on load; call ... page --kind=public with no --as is a visitor's call, read only
  * @version 1.6 - log PLUGIN shows this install's calls only
@@ -157,6 +160,14 @@ switch ($command) {
 		} catch (SandboxModelException $e) {
 			$problems = array_merge($problems, $e->problems);
 		}
+		// Its action descriptors, read the same way.
+		$actions = array();
+		try {
+			$actions = SandboxActions::readDir($manifest->name(), $manifest,
+				$dir . '/' . SandboxPlugins::SOURCE_DIR . '/' . SandboxActions::LOGIC_DIR)['actions'];
+		} catch (SandboxModelException $e) {
+			$problems = array_merge($problems, $e->problems);
+		}
 		$cleanup();
 		if ($problems) {
 			foreach ($problems as $p) {
@@ -168,7 +179,10 @@ switch ($command) {
 		foreach (SandboxConsent::modelLines($manifest->name(), $models) as $line) {
 			sbx_out('Its own: ' . $line);
 		}
-		foreach (SandboxConsent::describe(SandboxConsent::grantsOf($manifest, $models)) as $heading => $lines) {
+		foreach (SandboxActions::lines($actions) as $line) {
+			sbx_out('Its action: ' . $line);
+		}
+		foreach (SandboxConsent::describe(SandboxConsent::grantsOf($manifest, $models, $actions)) as $heading => $lines) {
 			sbx_out($heading . ':');
 			foreach ($lines as $line) {
 				sbx_out('  ' . $line);
@@ -298,12 +312,24 @@ switch ($command) {
 			$from = array('source' => 'frame', 'kind' => $page_kind, 'page' => $framed['slug']);
 		}
 		$from['access'] = $access;
+		if ($kind === 'action') {
+			// As the API runs it: the stored descriptor, its declared fields, as --as.
+			$descriptor = SandboxActions::lookup($plugin, $what);
+			if ($descriptor === null) {
+				sbx_fail("$plugin has no action $what (src/logic/{$what}_logic.php with a descriptor, read at load).", 2);
+			}
+			if ($as === null) {
+				sbx_fail('An action is called by a signed-in user: give --as=USER_ID.', 2);
+			}
+			$json = array_intersect_key($json, (array)($descriptor['input'] ?? array()));
+		}
 		$result = match ($kind) {
+			'action'   => SandboxHost::action($plugin, $what, $json, $as, (int)$as->get('usr_permission')),
 			'ui'       => SandboxHost::ui($plugin, $what, $json, $as, $from),
 			'page'     => SandboxHost::page($plugin, $page_kind, $what, 'GET', $json, array(), $as, array(), $access),
 			'signal'   => SandboxHost::signal($plugin, $what, $json, 'msg_dev_' . bin2hex(random_bytes(6)), gmdate('Y-m-d\TH:i:s\Z')),
 			'schedule' => SandboxHost::schedule($plugin, $what),
-			default    => sbx_fail('Usage: sandbox_plugin.php call PLUGIN ui|page|signal|schedule NAME [JSON] [--as=USER_ID] [--kind=admin|member|public]', 2),
+			default    => sbx_fail('Usage: sandbox_plugin.php call PLUGIN ui|page|action|signal|schedule NAME [JSON] [--as=USER_ID] [--kind=admin|member|public]', 2),
 		};
 		if ($kind === 'page' && is_array($result['output']) && is_string($result['output']['body'] ?? null)) {
 			// What core would show of a plain page: the body, cleaned.

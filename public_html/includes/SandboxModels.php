@@ -44,6 +44,12 @@
  * through classesFor() (install and uninstall); and, for model discovery over
  * many plugins, those installed here.
  *
+ * The plugin's action descriptors (SandboxActions) are its other files the
+ * site reads and never runs: refresh() reads them with the model files, and
+ * storePending() keeps them on the row in the same write.
+ *
+ * @version 2.1 - refresh() and storePending() read and keep the plugin's action descriptors too
+ *                (SandboxActions, spec sandboxed_plugin_api_actions)
  * @version 2.0 - models from the plugin's own model files, read never run, and stored on its row; classes built from
  *                the stored copy alone; reach and blocks within the approval; the hash check before a call
  *                (spec sandboxed_plugin_model_files)
@@ -107,6 +113,8 @@ class SandboxModels {
 	public static function refresh(string $plugin): array {
 		$manifest = SandboxPlugins::manifest($plugin);
 		$read = SandboxModelDeclarations::read($plugin, $manifest->title());
+		// Its actions' descriptors, read at the same moments.
+		SandboxActions::refresh($plugin, $manifest);
 		self::$pending[$plugin] = $read;
 		self::forgetClasses();
 		return $read['models'];
@@ -135,8 +143,13 @@ class SandboxModels {
 		if (!is_array($metadata)) {
 			$metadata = array();
 		}
-		if (($metadata[self::METADATA_KEY] ?? null) !== $read) {
+		$actions = SandboxActions::pending($plugin);
+		if (($metadata[self::METADATA_KEY] ?? null) !== $read
+				|| ($actions !== null && ($metadata[SandboxActions::METADATA_KEY] ?? null) !== $actions)) {
 			$metadata[self::METADATA_KEY] = $read;
+			if ($actions !== null) {
+				$metadata[SandboxActions::METADATA_KEY] = $actions;
+			}
 			// Never a row's metadata replaced by nothing: what cannot be
 			// written as JSON is not stored.
 			$json = json_encode($metadata);
@@ -147,6 +160,7 @@ class SandboxModels {
 		}
 		unset(self::$pending[$plugin]);
 		self::$stored[$plugin] = $read;
+		SandboxActions::markStored($plugin);
 	}
 
 	/** The entry kept on the plugin's row: array(models, files), or null. */
@@ -367,6 +381,7 @@ class SandboxModels {
 		self::$active_map = null;
 		self::$stored = array();
 		self::forgetClasses();
+		SandboxActions::reset();
 	}
 
 	/** Refill every declared class's statics when next asked for. */

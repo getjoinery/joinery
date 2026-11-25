@@ -38,6 +38,21 @@
  * call, a joined or interpolated string, a heredoc, a spread); a file over
  * 256 KB, or one the tokenizer cannot read.
  *
+ * A logic file (src/logic/{action}_logic.php, spec sandboxed_plugin_api_actions)
+ * is read in a second shape, with the option shape => logic (readLogic()):
+ * the file is the plugin's code and is never judged as a whole, so only its
+ * top-level functions are named, and each one called *_logic_descriptor is
+ * read as a model's static is: a function with no parameters whose body is a
+ * single return of a plain literal array.
+ *
+ *   {"ok": true, "functions": {"process_logic": 9, …},
+ *    "descriptors": {"process_logic_descriptor": {"line": 3, "value": <value>}}}
+ *   {"ok": false, "error": "line 4: …"}
+ *
+ * @version 1.3 - readLogic(): a use function line declares nothing, and a logic file with a namespace is refused
+ *                (its functions would not be the global names the runner calls; reviewer2 R3)
+ * @version 1.2 - readLogic(): a logic file's top-level functions and its descriptors, read never run
+ *                (spec sandboxed_plugin_api_actions)
  * @version 1.1 - punctuation is matched by its token id, so a brace inside an interpolated string hides nothing;
  *                a float has at most 15 digits (reviewer1 R4, R5)
  * @version 1.0
@@ -57,7 +72,119 @@ class SandboxModelFile implements SandboxParserInterface {
 	private $at = 0;
 
 	public static function sandboxParse(string $bytes, array $options): string {
-		return json_encode(self::read($bytes), JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+		$answer = ($options['shape'] ?? '') === 'logic' ? self::readLogic($bytes) : self::read($bytes);
+		return json_encode($answer, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+	}
+
+	/**
+	 * A logic file's top-level functions and the value each descriptor
+	 * function returns, or why a descriptor cannot be read. Runs where it is
+	 * called: the site calls it through DocumentText::parseWith() only.
+	 *
+	 * @return array{ok:bool, functions?:array<string,int>, descriptors?:array, error?:string}
+	 */
+	public static function readLogic(string $code): array {
+		if (strlen($code) > self::MAX_BYTES) {
+			return array('ok' => false, 'error' => 'the file is larger than 256 KB');
+		}
+		try {
+			$tokens = PhpToken::tokenize($code, TOKEN_PARSE);
+		} catch (Throwable $e) {
+			return array('ok' => false, 'error' => 'line ' . (int)$e->getLine() . ': PHP cannot read this file (' . self::clip($e->getMessage()) . ')');
+		}
+		$reader = new self();
+		foreach ($tokens as $token) {
+			if (!in_array($token->id, array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT, T_OPEN_TAG, T_CLOSE_TAG, T_INLINE_HTML), true)) {
+				$reader->tokens[] = $token;
+			}
+		}
+		try {
+			return array('ok' => true) + $reader->logicFunctions();
+		} catch (SandboxModelFileRefusal $e) {
+			return array('ok' => false, 'error' => $e->getMessage());
+		}
+	}
+
+	/** The functions declared at the top of a logic file, and its descriptors' values. */
+	private function logicFunctions(): array {
+		$functions = array();
+		$descriptors = array();
+		$depth = 0;
+		$previous = null;
+		while (($token = $this->take()) !== null) {
+			$before = $previous;
+			$previous = $token;
+			if ($token->id === T_NAMESPACE) {
+				throw new SandboxModelFileRefusal('line ' . $token->line . ': a logic file has no namespace (the runner calls the action\'s function by its global name)');
+			}
+			if (self::is($token, '{') || $token->id === T_CURLY_OPEN || $token->id === T_DOLLAR_OPEN_CURLY_BRACES) {
+				$depth++;
+				continue;
+			}
+			if (self::is($token, '}')) {
+				$depth--;
+				continue;
+			}
+			// "use function a_logic;" imports a name; it declares nothing.
+			if ($depth !== 0 || $token->id !== T_FUNCTION || ($before !== null && $before->id === T_USE)) {
+				continue;
+			}
+			$name = $this->peek();
+			if ($name !== null && self::is($name, '&')) {
+				$this->at++;
+				$name = $this->peek();
+			}
+			if ($name === null || $name->id !== T_STRING) {
+				continue;   // a closure: not a declaration
+			}
+			$this->at++;
+			$functions[$name->text] = $name->line;
+			if (substr(strtolower($name->text), -strlen('_logic_descriptor')) === '_logic_descriptor') {
+				$descriptors[$name->text] = array('line' => $name->line, 'value' => $this->descriptorBody($name));
+			}
+		}
+		return array('functions' => $functions ?: new stdClass(), 'descriptors' => $descriptors ?: new stdClass());
+	}
+
+	/** A descriptor function's one return of a plain literal array, read past its closing brace. */
+	private function descriptorBody(PhpToken $name): array {
+		$what = $name->text . '()';
+		$refuse = function (?PhpToken $at, string $why) use ($name, $what) {
+			throw new SandboxModelFileRefusal('line ' . ($at ?? $name)->line . ': ' . $what . ' ' . $why);
+		};
+		$open = $this->take();
+		$close = $this->take();
+		if ($open === null || !self::is($open, '(') || $close === null || !self::is($close, ')')) {
+			$refuse($open, 'takes no parameters');
+		}
+		$next = $this->take();
+		if ($next !== null && self::is($next, ':')) {
+			$type = $this->take();
+			if ($type === null || ($type->id !== T_ARRAY && strtolower($type->text) !== 'array')) {
+				$refuse($type, 'returns an array (": array" or nothing)');
+			}
+			$next = $this->take();
+		}
+		if ($next === null || !self::is($next, '{')) {
+			$refuse($next, 'needs a body');
+		}
+		$return = $this->take();
+		if ($return === null || $return->id !== T_RETURN) {
+			$refuse($return, 'is one return of a plain array, with nothing before it');
+		}
+		$value = $this->literal($what);
+		if (($value['t'] ?? '') !== 'a') {
+			$refuse($return, 'returns an array');
+		}
+		$semi = $this->take();
+		if ($semi === null || !self::is($semi, ';')) {
+			$refuse($semi, 'returns a plain array: write it out whole, with nothing joined or worked out');
+		}
+		$end = $this->take();
+		if ($end === null || !self::is($end, '}')) {
+			$refuse($end, 'is one return of a plain array, with nothing after it');
+		}
+		return $value;
 	}
 
 	/**

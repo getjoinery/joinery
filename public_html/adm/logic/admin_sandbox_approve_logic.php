@@ -10,6 +10,7 @@
  * activates the plugin, or, when it is already active, brings what it owns up
  * to the new approval (SandboxPluginManager::reconcile).
  *
+ * @version 1.5 - its own API actions, one line each from the descriptors as they are now (spec sandboxed_plugin_api_actions)
  * @version 1.4 - its models from its model files as they are now, one line each, read and never stored on a view
  *                (spec sandboxed_plugin_model_files section 7)
  * @version 1.3 - on a shared host the refusal says so (SandboxPlugins::offMessage())
@@ -78,9 +79,11 @@ function admin_sandbox_approve_logic(array $input): LogicResult {
 	// The model files as they are now (validate() above read them; nothing
 	// is stored on a page view), else the copy the site keeps.
 	$models = SandboxModels::declarations($plugin);
-	$asked = SandboxConsent::grantsOf($manifest, $models);
+	$asked = SandboxConsent::grantsOf($manifest, $models, SandboxActions::descriptors($plugin));
 	$new = $approved ? SandboxConsent::additions($asked, $install->consent()) : array();
 	$own = SandboxConsent::modelLines($plugin, $models);
+	// Its actions' descriptors, read with the model files.
+	$actions = SandboxActions::descriptors($plugin);
 	$admin_pages = array();
 	foreach ($manifest->adminPages() as $page) {
 		$admin_pages[] = $page['title'];
@@ -100,8 +103,9 @@ function admin_sandbox_approve_logic(array $input): LogicResult {
 		'approved_time'  => $approved ? $install->get('sbi_consent_time') : null,
 		'needs_approval' => SandboxConsent::needsApproval($plugin),
 		'own_models'     => $own,
+		'own_actions'    => SandboxActions::lines($actions),
 		'admin_pages'    => $admin_pages,
 		'settings'       => $manifest->settings(),
-		'reviewed'       => SandboxConsent::reviewDigest($manifest, $models),
+		'reviewed'       => SandboxConsent::reviewDigest($manifest, $models, $actions),
 	));
 }

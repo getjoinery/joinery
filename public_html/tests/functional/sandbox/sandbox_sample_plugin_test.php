@@ -16,11 +16,13 @@
  * redirect to itself); its member page shows the greeting setting and the
  * member's own unread notifications; its framed board draws its document
  * and the board's pin call pins a note; its signal adds a note and its
- * schedule unpins. Unfenced through the same PHP command line, and in the
+ * schedule unpins; its API action adds a note as the caller, and its own rule
+ * comes back as a validation error. Unfenced through the same PHP command line, and in the
  * fence where this box has jpx-notes_sample.
  *
  * Run: php tests/run.php db --filter=sandbox_sample_plugin
  *
+ * @version 1.3 - its API action, src/logic/add_logic.php (spec sandboxed_plugin_api_actions)
  * @version 1.2 - its model is a model file, src/data/notes_class.php (spec sandboxed_plugin_model_files)
  * @version 1.1 - reviewer2 M5: only a note's author may pin it
  * @version 1.0
@@ -104,6 +106,14 @@ $checks = function (string $label, User $admin, User $member) use ($sign_in) {
 	$r = $pin();
 	$pinned = $row ? (new $class((int)$row->key, TRUE))->get($prefix . '_pinned') : null;
 	check(($r->data['ok'] ?? false) && $pinned, $label . ': its author pins it from the board', json_encode($r->data ?: $r->error));
+
+	$r = SandboxActions::call($name, 'add', array('text' => 'From an app'), $admin, 10);
+	$added = isset($r->data['note_id']) ? new $class((int)$r->data['note_id'], TRUE) : null;
+	check(!$r->error && $added && $added->get($prefix . '_text') === 'From an app' && (int)$added->get($prefix . '_usr_user_id') === (int)$admin->key,
+		$label . ': its API action adds a note, written by the caller', json_encode(array($r->error, $r->data)));
+	$r = SandboxActions::call($name, 'add', array('text' => '   '), $admin, 10);
+	check($r->error === 'A note needs some text.' && ($r->validation_errors['text'] ?? '') === 'A note needs some text.',
+		$label . ': its own rule comes back as a validation error', json_encode(array($r->error, $r->validation_errors)));
 
 	$sign_in($admin);
 	$result = SandboxHost::signal($name, 'account.signup', array('user_id' => 1), 'msg_' . bin2hex(random_bytes(4)), gmdate('Y-m-d\TH:i:s\Z'));

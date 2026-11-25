@@ -5,7 +5,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunCo
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 /**
- * Security boundary for invoke_action. All AI-driven action calls flow
+ * Security boundary for invoke_action.
+ *
+ * A sandboxed plugin's action ('{plugin}/{action}', ActionRegistry) is run by
+ * SandboxActions::call(), one fenced call, in place of a logic function. All AI-driven action calls flow
  * through here; there is no path that calls _logic() directly from a tool.
  *
  * Enforcement order:
@@ -47,7 +50,16 @@ class ActionInvoker {
         $coerced = DescriptorValidator::coerce($descriptor, $input);
 
         try {
-            $result = call_user_func($logic_fn, $coerced);
+            if (isset($info['sandboxed'])) {
+                // A sandboxed plugin's action runs in its fence, as the person
+                // the assistant acts for.
+                list($plugin, $action) = $info['sandboxed'];
+                $session = SessionControl::get_instance();
+                $user = $session->get_user_id() ? new User((int)$session->get_user_id(), TRUE) : null;
+                $result = SandboxActions::call($plugin, $action, $coerced, $user, $user ? (int)$session->get_permission() : null);
+            } else {
+                $result = call_user_func($logic_fn, $coerced);
+            }
         } catch (SystemAuthenticationError $e) {
             throw $e;
         } catch (Throwable $e) {

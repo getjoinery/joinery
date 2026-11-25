@@ -37,6 +37,14 @@
  * Nothing here is a wall: the fence is. A plugin may write to its stdout
  * itself; it can only send asks it could send through SandboxPipe anyway.
  *
+ * An action call (action) runs one of the plugin's own API actions: after
+ * src/plugin.php when there is one, src/logic/{action}_logic.php, then
+ * {action}_logic($values) with $_POST holding the values, as the API sets it
+ * for a first-party action. It returns a LogicResult (the real class); its
+ * parts {data, error, validation_errors, redirect} are the call's output, and
+ * core rebuilds the LogicResult from them.
+ *
+ * @version 1.6 - action: one of the plugin's own API actions (spec sandboxed_plugin_api_actions)
  * @version 1.5 - a page call's uploads are $_FILES, and SandboxPage::file() (spec sandboxed_plugin_uploads)
  * @version 1.4 - on_page: the plugin's view draws a page (SandboxPage)
  * @version 1.3 - a refused ask throws with the API's status as its code
@@ -173,7 +181,7 @@ if (!is_array($envelope)) {
 }
 SandboxPipe::$envelope = $envelope;
 
-$exports = array('on_ui', 'on_page', 'on_signal', 'on_schedule');
+$exports = array('on_ui', 'on_page', 'action', 'on_signal', 'on_schedule');
 $export = (string)($envelope['export'] ?? '');
 if (!in_array($export, $exports, true)) {
 	sandbox_runner_finish(false, null, 'The runner does not know the call ' . $export . '.');
@@ -193,6 +201,13 @@ if ($export === 'on_page') {
 	if ($view === false || strpos($view, $src_real . '/' . $folder . '/') !== 0 || !is_file($view)) {
 		sandbox_runner_finish(false, null, 'The plugin has no src/' . $folder . '/' . $slug . '.php for this page.');
 	}
+} elseif ($export === 'action') {
+	// An action is its logic file: src/logic/{action}_logic.php.
+	$action = (string)($envelope['input']['action'] ?? '');
+	$view = ($src_real !== false && preg_match('~^[a-z][a-z0-9_]{0,59}$~D', $action)) ? realpath($src_real . '/logic/' . $action . '_logic.php') : false;
+	if ($view === false || strpos($view, $src_real . '/logic/') !== 0 || !is_file($view)) {
+		sandbox_runner_finish(false, null, 'The plugin has no src/logic/' . $action . '_logic.php for this action.');
+	}
 } elseif ($src_real === false || $entry === false) {
 	sandbox_runner_finish(false, null, 'The plugin has no src/plugin.php.');
 }
@@ -208,6 +223,28 @@ try {
 		(static function (string $entry): void {
 			require $entry;
 		})($entry);
+	}
+	if ($export === 'action') {
+		(static function (string $file): void {
+			require_once $file;
+		})($view);
+		$function = $action . '_logic';
+		if (!function_exists($function)) {
+			sandbox_runner_finish(false, null, 'src/logic/' . $action . '_logic.php defines no ' . $function . '().');
+		}
+		$values = is_array($envelope['input']['values'] ?? null) ? $envelope['input']['values'] : array();
+		// Where native logic looks to see it was submitted (ApiLogicEndpoint sets it the same way).
+		$_POST = $values;
+		$result = $function($values);
+		if (!($result instanceof LogicResult)) {
+			sandbox_runner_finish(false, null, $function . '() returned no LogicResult.');
+		}
+		sandbox_runner_finish(true, array(
+			'data'              => $result->data,
+			'error'             => $result->error,
+			'validation_errors' => $result->validation_errors ?: new stdClass(),
+			'redirect'          => $result->redirect,
+		));
 	}
 	if ($view !== false) {
 		// What the view echoes is the page's body; it may set a title or ask

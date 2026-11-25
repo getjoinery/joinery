@@ -8,6 +8,13 @@
  * plugin's logic/ directory. Files are required up front because the
  * descriptor function only exists once the file is loaded.
  *
+ * A sandboxed plugin's actions come from their stored descriptors
+ * (SandboxActions): the site never includes their files. Each is keyed
+ * '{plugin}/{action}', so it never stands in for a core action of the same
+ * name, carries 'sandboxed' => [plugin, action] in place of a logic
+ * function, and its ai_agent is the tier an admin approved
+ * (SandboxActions::assistantTier(), spec sandboxed_plugin_api_actions D5).
+ *
  * Used by:
  *   - DescribeActionsTool — emits descriptors for actions in the recipe's
  *     rcp_allowed_actions allow-list.
@@ -85,12 +92,33 @@ class ActionRegistry {
 
         self::scanDir(PathHelper::getIncludePath('logic'));
 
-        $plugins_dir = PathHelper::getIncludePath('plugins');
-        if (is_dir($plugins_dir)) {
-            foreach (scandir($plugins_dir) as $plugin) {
-                if ($plugin === '.' || $plugin === '..') continue;
-                self::scanDir($plugins_dir . '/' . $plugin . '/logic');
+        // Active plugins only, as the API's catalog: an inactive plugin's
+        // actions are not offered, and its files are not loaded.
+        foreach (array_keys(PluginHelper::getActivePlugins()) as $plugin) {
+            self::scanDir(PathHelper::getIncludePath('plugins/' . $plugin . '/logic'));
+        }
+
+        // Active sandboxed plugins' actions, from their stored descriptors.
+        foreach (SandboxActions::catalog() as $name => $entry) {
+            list($plugin, $action) = explode('/', $name, 2);
+            $descriptor = $entry['meta'];
+            // One for a key alone is not the assistant's to run; one whose
+            // feature is off is not there (SandboxActions::call() refuses both
+            // a level and a setting too).
+            if (SandboxActions::keyOnly($descriptor)) continue;
+            $setting = $descriptor['requires_setting'] ?? null;
+            if ($setting && !Globalvars::get_instance()->get_setting($setting)) continue;
+            $tier = SandboxActions::assistantTier($plugin, $action, $descriptor);
+            unset($descriptor['ai_agent']);
+            if ($tier !== null) {
+                $descriptor['ai_agent'] = $tier;
             }
+            self::$actions[$name] = [
+                'name'           => $name,
+                'descriptor'     => $descriptor,
+                'logic_function' => null,
+                'sandboxed'      => [$plugin, $action],
+            ];
         }
     }
 
