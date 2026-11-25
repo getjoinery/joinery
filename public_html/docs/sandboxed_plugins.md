@@ -49,8 +49,8 @@ PHP or `plugin.json` to `SandboxPluginManager`.
 ## Writing one
 
 Start from the sample, `docs/examples/notes_sample/`: a model of its own
-(`Note`, with a class of its own in `src/data/Note.php` adding a method and a
-rule), a plain admin page that lists and adds notes (`src/admin/notes.php`), a
+(`Note`, a regular model file in `src/data/notes_class.php` with a method and a
+rule of its own), a plain admin page that lists and adds notes (`src/admin/notes.php`), a
 member page using a setting and an own-rows grant (`src/views/mine.php`), a
 framed board with its own script calling one handler (`src/views/board.php`),
 and `src/plugin.php` answering the signal, the schedule and the board's
@@ -62,7 +62,8 @@ plugins/notes_sample/
   src/plugin.php         on_ui(), on_signal(), on_schedule()
   src/admin/{slug}.php   an admin page it draws
   src/views/{slug}.php   a member page it draws (or a framed page's document)
-  src/data/, src/includes/   its classes, found by name
+  src/data/{table}_class.php its models, one file each (see Data)
+  src/includes/          its other classes, found by name
   src/assets/            images its pages show (assets/NAME)
 ```
 
@@ -138,12 +139,6 @@ manifest says can be code.
   "settings": [
     {"name": "webhook_url", "label": "Webhook URL", "type": "url", "secret": true}
   ],
-  "models": [
-    {"name": "SentLog", "label": "Sent messages", "fields": [
-      {"name": "signal", "type": "string", "max_length": 100, "index": true},
-      {"name": "message", "type": "text", "required": true}
-    ]}
-  ],
   "admin_pages": [{"slug": "log", "title": "Sent messages", "sections": [
     {"type": "table", "model": "SentLog", "columns": ["create_time", "signal", "message"], "order": "-create_time"}
   ]}],
@@ -167,7 +162,6 @@ manifest says can be code.
 | `send_email` | no | `true` when it sends mail (see [Mail](#mail)); `true` or `false` only |
 | `accept_uploads` | no | `true` when its drawn pages take uploaded files (see [Files](#files)); `true` or `false` only |
 | `settings` | no | `name`, `label`, `type` (`text`, `textarea`, `number`, `boolean`, `select`, `url`, `email`), `secret` (text and url only, no default), `default`, `required`, `options` (select), `help` |
-| `models` | no | Up to 20; see [Data](#data) |
 | `admin_pages`, `profile_pages` | no | `slug`, `title`, `sections` (`text`, `table`, `form`, `settings`); a profile page holds no table or settings |
 | `public_pages` | no | Pages anyone can open (see [Public pages](#public-pages)): what a profile page holds, plus `cache` (`true` or `false`, default `true`) and `cache_query` (up to 10 query names, each cached apart); a slug a profile page also uses is refused |
 
@@ -179,85 +173,219 @@ the form itself.
 | `limits` | no | `memory_mb` (default 16) and `timeout_ms` (100-10000, default 5000) for each call. A call gets at most the memory the site gives a page request (`memory_limit` of the web server's PHP, 128 MB unless the site sets otherwise; `SandboxManifest::memoryCeilingMb()`), which is what a native plugin's code has; asking for more gives that |
 
 Any key not listed is refused, so a misspelling is an error rather than a
-silently ignored declaration.
+silently ignored declaration. A plugin's models are not in the manifest: they
+are model files (see [Data](#data)), and a manifest with a `models` key is
+refused, pointing there.
 
 ## Data
 
-Each model a manifest declares is a real table, made and migrated by the same
-schema builder native plugins use, and a record endpoint on `/api/v1` like
-any model. Its names are built from the plugin's and the model's names in a
-way that cannot collide: a plugin name has no `__` and no trailing `_`, a
-model name has no `_`, so `__` (and, in a class name, the last `_`) splits
-them exactly one way; and every class starts `Sbx_` and every table and
-setting `sbx_`, which no core or native name does (native plugins may not be
-named `sbx…`). PHP compares class names without case, and these hold without
-case too, so a sandboxed model can never be, or shadow, another class.
+A sandboxed plugin declares its models as a first-party plugin does: one
+regular model file each, in `src/data/`, named for its table.
+
+```php
+<?php
+// src/data/sent_logs_class.php
+class SentLog extends SystemBase {
+	public static $prefix = 'snt';
+	public static $tablename = 'snt_sent_logs';
+	public static $pkey_column = 'snt_sent_log_id';
+	public static $access_class = 'content';
+
+	public static $field_specifications = array(
+		'snt_sent_log_id'  => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
+		'snt_usr_user_id'  => array('type' => 'int8', 'is_nullable' => true, 'index' => true),
+		'snt_signal'       => array('type' => 'varchar(100)', 'index' => true),
+		'snt_message'      => array('type' => 'text', 'required' => true),
+		'snt_create_time'  => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
+		'snt_delete_time'  => array('type' => 'timestamp(6)', 'is_nullable' => true),
+	);
+
+	protected static $foreign_key_actions = array(
+		'snt_usr_user_id' => array('action' => 'cascade'),
+	);
+
+	function prepare() {
+		if (trim((string)$this->get('snt_message')) === '') {
+			throw new RuntimeException('A message needs some text.');
+		}
+	}
+}
+
+class MultiSentLog extends SystemMultiBase {
+	protected static $model_class = 'SentLog';
+}
+```
+
+**The site reads the file and never runs it.** `SandboxModelFile` tokenizes
+each file in the parser jail (`DocumentText::parseWith()`), so the plugin's
+bytes meet PHP's tokenizer only there, and answers what it declares;
+`SandboxModelDeclarations` holds that to the allow-lists below and builds the
+declaration the site uses. Anything the sandbox cannot honour is refused at
+install, naming the file, the class and the thing; nothing is silently
+ignored. A box with no parser jail refuses the install. Inside the fence the
+plugin's code loads the same file as written.
+
+**What a file may hold.** `<?php`, comments, one class `extends SystemBase`
+and its `Multi{Name} extends SystemMultiBase`, whose `$model_class` names it.
+A static's value is a plain literal: a quoted string with nothing joined into
+it, a number, `true`, `false`, `null`, or an array of these with literal keys;
+`User::USER_DELETED` is read as a delete rule's `set_value`. Refused, each
+naming the line: anything else at the top level (a `require`, a `namespace`, a
+`use`, `declare(strict_types=1);`, a function, a statement), text after a
+closing `?>`, a trait, an attribute, a class constant, another base class, an
+interface, and a static that is a constant, a call, a joined or interpolated
+string or a heredoc. A file is at most 256 KB; a PHP file in `src/data/` not
+named `{table}_class.php`, or a folder there, is refused (helpers go in
+`src/includes/`).
+
+| Static | Rule |
+|---|---|
+| `$prefix` | Three lowercase letters, unique in the plugin, not the prefix of any core or first-party model |
+| `$tablename` | `{prefix}_` then `a-z`, `0-9` and single `_`. The real table is `sbx_{plugin}__{tablename}` |
+| `$pkey_column` | One of its columns, declared `'type' => 'int8', 'serial' => true` |
+| `$field_specifications` | At most 40 columns, each `{prefix}_…`, at most 63 characters |
+| `$foreign_key_actions` | See **Links** below |
+| `$access_class` | Required: a class in `permissions.json` |
+| `$read_permission`, `$write_permission`, `$delete_permission`, `$permanent_delete_permission` | A whole number 0-10 |
+| `$owner_column` | `false`, or one of its `int8` columns; left out, `{prefix}_usr_user_id` when it has one, as natively |
+| `$api_readable` | `true` or `false` |
+| `$api_writable` | `false` only: only the plugin's own code writes its rows |
+| `$api_unreadable_fields` | A list of its own columns |
+
+Every other static is refused by name ("SentLog::$sealed_fields is not
+available to a sandboxed plugin"), `$api_public_read`, `$sealed_fields` and
+`$retention_policy` among them, and so is any static of the author's own.
+
+A column's specification may hold `type`, `is_nullable`, `required`,
+`default`, `serial` and `is_primary_key` (the key column only), `unique`,
+`unique_with`, `index`, `index_with`, `allowed_values` (at most 50 numbers
+or strings of at most 100 characters), `zero_on_create`, `stamp_on_save`,
+`insert_only` and `access_class`. `type` is one of `varchar(1..2000)`,
+`text`, `int2`, `int4`, `int8`, `integer`, `bigint`, `smallint`,
+`numeric(p,s)` up to `(30,10)`, `bool`, `boolean`, `timestamp(6)`,
+`timestamp`, `date`, `json`, `jsonb`, matched whole. A `default` is a number,
+`true` or `false`, or a string; the one string written into SQL as it
+stands is `now()`, on a timestamp column. `unique_with` and `index_with` list
+the model's other columns. `foreign_key` (a database constraint) is refused:
+a link is declared in `$foreign_key_actions`.
+
+Methods are the author's own and run only in the fence. Of SystemBase's,
+only `prepare()` and `save()` may be written: the site calls the others itself
+(permission checks, deletes, API answers) and could not run the plugin's. The
+`Multi` class holds `$model_class` and methods of the author's own; it writes
+no `getMultiResults()` (which is SQL) and overrides nothing of
+`SystemMultiBase`. It lists with the built-in query by the model's columns,
+as any collection with no query of its own does.
 
 | | Plugin `notifier`, model `SentLog` |
 |---|---|
-| Class | `Sbx_notifier_SentLog` |
-| Table | `sbx_notifier__sent_log` |
-| Columns | `notifier__sent_log_{field}`, plus `notifier__sent_log_id`, `_create_time`, `_update_time`, `_delete_time` |
+| Class on the site | `Sbx_notifier_SentLog` (`MultiSbx_notifier_SentLog`) |
+| Table | `sbx_notifier__snt_sent_logs` |
+| Columns | as the file declares them (`snt_signal`) |
 | Endpoints | `GET/POST /api/v1/Sbx_notifier_SentLog`, `GET /api/v1/Sbx_notifier_SentLogs`, `PUT/DELETE /api/v1/Sbx_notifier_SentLog/{id}` |
 | Setting | `sbx_notifier__{name}` |
 
-The validator refuses a plugin and model whose names together would make a
-database name (the table's id sequence is the longest) past 63 characters,
-which Postgres would otherwise cut short silently. Two models in one manifest
-may not differ only by case.
+A plugin name has no `__` and no trailing `_`, and a model's table name holds
+no `__`, so `sbx_{plugin}__` splits a table exactly one way; a class name has
+no `_` past the plugin's, so the last `_` splits a class. Every class starts
+`Sbx_` and every table and setting `sbx_`, which no core or native name does,
+with or without case, so a sandboxed model can never be, or shadow, another
+class. A model named like a core or native class (`Post`) is refused, since
+in the plugin's own code it would mean the site's.
 
-Field types and the column each becomes:
+**Links.** A key of `$foreign_key_actions` is one of the model's columns, and
+a rule holds `action` (`cascade`, `permanent_delete`, `null`, `set_value`,
+`prevent`), `value` (a `set_value`'s number, string or `User::USER_DELETED`),
+and `source_class` or `source_table` where the column's name does not say
+what it links to. As natively, `{prefix}_{their prefix}_{entity}_id` links
+by its name, the plugin's own models first and then the site's
+(`snt_usr_user_id` is a user). A column whose name reads as a link and has no
+rule is refused, never registered as a guess. A link to another sandboxed
+plugin's table is refused. A rule's `message` is the platform's: a `prevent`
+reads "The plugin {title} holds {model} records for this."
 
-| Type | Column |
-|---|---|
-| `string` | `varchar(max_length)`, default 255, at most 2000 |
-| `text` | `text` |
-| `integer` | `int8` |
-| `decimal` | `numeric(14,4)` |
-| `boolean` | `bool` |
-| `datetime` | `timestamp(6)` |
-| `date` | `date` |
-| `json` | `jsonb` |
+**Who may do what with its rows.**
 
-`required` is enforced when a record is saved; the column itself stays
-nullable, so a field made required in a later version cannot fail on rows
-already stored. `index` adds an index. A field may not be named `id`,
-`create_time`, `update_time` or `delete_time` (the platform adds those), nor
-end in `_id`: a sandboxed model holds no foreign keys, and a name ending in
-`_id` would read as one.
+- Only the plugin's own code creates and changes them, so its `prepare()`
+  and `save()` run on every save. Its own requests (`SandboxRecord::isOwnRequest()`:
+  its key, no member named) read, write and delete its rows whatever its API
+  flags, are not held to the model's row and column levels (its code decides
+  what each member may do), and may set the owner column, so it saves a row
+  for the member in front of it. Anyone else who needs to change its data
+  asks the plugin: its pages, or its own API actions.
+- Reading through the API follows the native rules where the file opens it
+  (`$api_readable`): staff at the read level read every row, a member their
+  own by the owner column, and a member's list is narrowed to their rows.
+- Staff delete a row (to the trash, through the API's DELETE) at the model's
+  delete level; the row's owner gets no pass, since a member deletes their
+  own through the plugin. A model with no `{prefix}_delete_time` has no API
+  delete.
 
-**Who may use them.** A model is readable and writable through the API, with
-SystemBase's default per-record rule: a table with no owner column is staff
-only. A member's request for a list of one is refused outright, since it
-could never return them a row and its count would still answer for rows they
-cannot see. The plugin reaches its own models through its credential, which
-carries every verb on them.
+What a model opens beyond the plugin, and each `prevent` that can stop a
+site record being deleted, is part of what an admin approves (see
+[Approval](#approval)): until it is, the model is the narrower one (not read
+through the API, deleted only by a superadmin, no owner column) and the
+`prevent` is not registered. A `prevent` between two of the plugin's own
+models can stop a site record being deleted when that record's delete reaches
+the protected model through `permanent_delete` rules (a user's tasks deleted
+with the user, a task's notes refusing); it is approved as such, naming the
+site record. A `cascade`, `null` or `set_value` runs as SQL without the rows'
+own rules, so it carries no block. When an update makes a site record reach a
+`prevent` that was approved for another, the `prevent` is not registered at
+all until the new reach is approved: meanwhile that delete removes the rows it
+used to protect.
 
-**Filters.** A list request filters on any declared field, with or without
-its prefix, on one value or a list of them (any of them). A filter on a field the model does not declare, a value that is
-not the field's kind (a word for an integer, `maybe` for a boolean, a
-non-date for a date), or any filter on a JSON field is refused with a 400,
-never ignored or turned into something else.
+**Where the declarations live.** The checked declarations are kept on the
+plugin's row (`plg_metadata._sandbox_models`), with a sha256, size and time
+of each file. They are read and stored at install, at activation, at Sync
+with Filesystem and when an approval is given; opening the approval page
+reads them to show them and stores nothing. After that the stored copy is the
+only source: the classes, model discovery, the delete rules and the page of
+blocking rows work with the plugin's folder or manifest unreadable or gone.
+Before a call, core compares the files in `src/data/` with what it stored
+(size and time first, a hash only when one differs); while they differ the
+call is refused with "its model files changed since the site last read them;
+sync the plugin".
 
 **Lifecycle.** Install and activation make the tables and bring them up to
-the manifest as it stands; a column a newer manifest stops declaring is kept,
-as for a native plugin. The tables made are recorded on the plugin's row
-(`plg_metadata._sandbox_tables`). Deactivation keeps the data. Uninstall drops
-every table the manifest names or the row recorded, with each one's id
+the files as they stand; a column a file stops declaring is kept, as for a
+native plugin. The tables made are recorded on the plugin's row
+(`plg_metadata._sandbox_tables`). Deactivation keeps the data and the delete
+rules. Uninstall drops every table its declarations name or the row
+recorded (each held to the `sbx_{plugin}__` pattern), with each one's id
 sequence (made without `OWNED BY`, so `CASCADE` would leave it), and the
 deletion rules that named them.
+
+**Its rows blocking a delete.** A record of the site with a plugin's rows
+linked to it by an approved `prevent` cannot be permanently deleted, as with
+a first-party `prevent`; the rule counts the plugin's deleted rows too. An
+admin can always see and remove those rows: the refused delete (a user's
+permanent delete page) links to the page of the rows that block
+(`/admin/admin_sandbox_blocks`, `SandboxBlockingRows`), and so does the
+plugin's row on the Plugins page ("Rows that block deletes"), whether the
+plugin is active, inactive or its folder gone. The page lists the plugin's
+blocking links with how many rows hold a link now, and a link's rows (for
+one record or all), each with a **Delete permanently** button, at the
+model's permanent delete level. A delete there is `permanent_delete()` on the
+site's own class, so the plugin's own rules apply. The dry run of a delete
+names each blocker by table, column and record (`blockers`), a blocker on a
+record the delete would remove among them.
 
 **How the classes exist.** No file of a sandboxed plugin is included, so
 `SandboxModels` declares each model's class and its `Multi` collection at run
 time from one fixed template, with only the class name inserted, after it has
-been held to `SandboxModels::CLASS_PATTERN` twice. This is the one `eval` in
-the codebase; `tests/unit/sandbox_models_test.php` fails if another appears,
-or if any class or table in the tree starts with the sandboxed prefix. An active plugin's models resolve by name through `ClassAutoloader`
+been held to `SandboxModels::CLASS_PATTERN` twice, and fills their statics
+from the stored declaration (`SandboxRecord::sandboxFill()`). This is the one
+`eval` in the codebase; `tests/unit/sandbox_models_test.php` fails if another
+appears, or if any class or table in the tree starts with the sandboxed
+prefix. An active plugin's models resolve by name through `ClassAutoloader`
 like any class; one plugin's resolve through `SandboxModels::classesFor()`
 (its install and uninstall), and model discovery over many plugins (schema
-and deletion work) takes those with a registry row, so a folder merely
-sitting in `plugins/` declares nothing. The collection
-refuses a filter that names no field of the model, rather than ignoring it.
+and deletion work) takes the installed plugins whose declarations are stored,
+so a folder merely sitting in `plugins/` declares nothing. A sandboxed model
+is left out of the deletion system's prefix map, so a plugin's prefix never
+becomes a candidate for a core column's link, and registers its declared
+rules only.
 
 ## Installing
 
@@ -351,9 +479,13 @@ Activate, and `PluginManager::activate()` refuses it
 | Accept uploaded files | `accept_uploads`: on its own pages, from the person viewing; each file kept in that person's account, private to them and admins; it reaches only the files it kept |
 | Add these pages to members' menus | `profile_pages`, saying which have a form members fill in and which the plugin draws |
 | Pages anyone can open, signed in or not. What they show and do runs with the access approved here | `public_pages`, saying the same of each |
+| Open its own records beyond the plugin | its model files: each model read through the API, a read or delete level below its class's, each member reading their own rows |
+| Stop the site's records being deleted while it holds rows for them | its model files: each `prevent` on a site table |
 | Warning | personal records (all rows or own), or the files people upload to it, beside outside websites or email: it could send them off the site |
 
-and, as its own, its models, its admin pages and its settings. A record grant
+and, as its own, its models (one line each: who may read it and what it is
+linked to, from its files as they are now), its admin pages and its settings.
+A record grant
 reaches every record of the model ("All users: read only"), since the
 plugin's credential acts as an admin; each signal says what personal data it
 carries. **Approve and activate** records the approval
@@ -457,7 +589,7 @@ errors}`. Sections:
 | Section | Shows |
 |---|---|
 | `text` | Its words |
-| `table` | Rows of one of the plugin's own models: `columns`, `order` (a field, `-` for descending), `limit` |
+| `table` | Rows of one of the plugin's own models (`model`, its class name): `columns` (its columns, with or without the prefix, checked against its model file at install), `order` (a column, `-` for descending; newest first by its key when left out), `limit` |
 | `form` | Its `fields`; a submission is the plugin's `handler` to answer |
 | `settings` | The plugin's settings, saved by `SettingsWriter` |
 
@@ -712,18 +844,17 @@ core draws the page around what the plugin returns.
 reads like native code and each load, save, trash and list is an ask:
 
 ```php
-$event = new Location(12, TRUE);                                   // record.get
-$note = new Note(); $note->set('text', 'hi'); $note->save();       // record.create
-foreach (new MultiNote(['text' => 'hi'], ['qty' => 'DESC'], 50) as $row) { … }   // record.list
-foreach (new MultiNote(['id' => [4, 9, 12]]) as $row) { … }                   // record.list, any of them
+$event = new Location(12, TRUE);                                        // record.get
+$note = new Note(); $note->set('nte_text', 'hi'); $note->save();        // record.create
+foreach (new MultiNote(['text' => 'hi'], ['nte_qty' => 'DESC'], 50) as $row) { … }   // record.list
+foreach (new MultiNote(['note_id' => [4, 9, 12]]) as $row) { … }                     // record.list, any of them
 ```
 
-The plugin's own models go by their short names (`Note`, `MultiNote`,
-declared in the fence from the envelope's `models`) or core's
-(`Sbx_{plugin}_Note`), and a field by its manifest name or full column name.
-A class of the plugin's in `src/data/` named like its model and extending
-the core name adds methods (`class Note extends Sbx_myplugin_Note { … }`); it
-declares no fields, and its collection yields it. A core or native plugin's
+The plugin's own models are its model files, loaded as written (`Note`,
+`MultiNote`); the envelope's `models` maps each to the name the site knows it
+by (`Note` => `Sbx_notes_Note`), which each ask carries. Its methods are
+there, and its `prepare()` runs before a save is asked for. A class of the
+plugin's that extends one of its models saves to that model. A core or native plugin's
 model is read only if the plugin was approved for it; asking for another
 throws, saying so. Its native plugin's `includes/` and `data/` `.php` files
 are granted to the fence for that, so the approval screen lists that
@@ -804,10 +935,10 @@ if (SandboxPage::isPost() && ($_FILES['doc']['error'] ?? null) === UPLOAD_ERR_OK
 	$file = File::createFromUpload($_FILES['doc']['tmp_name'], $_FILES['doc']['name'], $_FILES['doc']['type'], $me,
 		array('fil_title' => 'Import'));
 	$note = new Note();
-	$note->set('attachment', $file->key);   // an integer field of its own model
+	$note->set('nte_fil_file_id', $file->key);   // an int8 column of its own model, its link to the file
 	$note->save();
 }
-$file = new File($note->get('attachment'), TRUE);
+$file = new File($note->get('nte_fil_file_id'), TRUE);
 echo '<a href="' . htmlspecialchars($file->get_url()) . '">' . htmlspecialchars($file->get_name()) . '</a>';
 $csv = $file->read_bytes();
 $file->set('fil_title', 'Imported'); $file->save();
@@ -886,8 +1017,8 @@ Every ask the fence writes, and what core does with it:
 | `file.read` | `id`, `offset` | one 1 MB part of `read_bytes()` of a file it reaches; answers `bytes` (base64), `size`, `next` |
 | `page.refresh` | `path`, `with_children` | `StaticPageCache::invalidatePath()` of a path under `/<plugin>/`; answers `removed` |
 
-`model` is the plugin's own model by its short name (`SentLog`) or a core
-model it was approved for (`Event`). Record and action asks go to the site's
+`model` is one of the plugin's own models by its class name (`SentLog`) or a
+core model it was approved for (`Event`). Record and action asks go to the site's
 own API over this machine's loopback, signed with the plugin's key, so every
 API rule applies as for any caller: the scope, the model's opt-in, the
 unreadable-column floor, per-row checks, the page cap, rate limits and the

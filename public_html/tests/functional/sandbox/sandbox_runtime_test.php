@@ -29,6 +29,7 @@
  *    edges hold: no non-.php file of includes/, no other plugin's
  *    plugin.json, no utils/ script but the runner's.
  *
+ * @version 1.2 - its class in src/data is a model file (spec sandboxed_plugin_model_files)
  * @version 1.1 - reviewer2 F1, F2, F5
  *
  * Run: php tests/run.php db --filter=sandbox_runtime
@@ -108,7 +109,8 @@ PHP;
 $files = array(
 	'plugin.php' => $plugin_php,
 	'includes/SbxHelper.php' => "<?php\nclass SbxHelper { public static function hello() { return 'from includes'; } }\n",
-	'data/SbxThing.php' => "<?php\nclass SbxThing { public function name() { return 'from data'; } }\n",
+	// Its model file in src/data, which the fence loads as written.
+	'data/things_class.php' => sandbox_model_file('SbxThing', 'qrt', array(), array(), "\tpublic function name() { return 'from data'; }\n"),
 	'includes/Deep/Ns.php' => "<?php\nnamespace Acme\\Deep;\n\nclass Ns { public static function where() { return 'namespaced'; } }\n",
 	// A plugin's class named like a core one: core's wins.
 	'includes/LibraryFunctions.php' => "<?php\nclass LibraryFunctions { }\n",

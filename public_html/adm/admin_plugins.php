@@ -1,5 +1,6 @@
 <?php
 /** @joinery-admin class=config */
+// @version 1.17 - a sandboxed plugin whose rows can block a delete links to them (Rows that block deletes)
 // @version 1.16 - a sandboxed plugin's public pages count among the pages its view draws
 // @version 1.15 - an uninstalled plugin whose files are back on disk after its removal finished offers Install; a
 //                not-yet-installed sandboxed plugin shows its manifest's name, description and version
@@ -518,6 +519,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                             $allow_warning = "The next deploy will replace your copy of $raw_name with the version Joinery ships. Your copy is not kept.";
                             $actions['Allow upgrade'] = $act('Allow upgrade', 'mark_upgradable', $allow_warning);
                         }
+                    }
+
+                    // A sandboxed plugin's rows that can stop a site record
+                    // being deleted: always reachable, even with its folder gone.
+                    if ($is_sandboxed && $plugin['plugin'] && $plugin_status !== Plugin::STATUS_UNINSTALLED
+                            && SandboxBlockingRows::links($plugin['name'])) {
+                        $actions['Rows that block deletes'] = $go('Rows that block deletes', SandboxBlockingRows::url($plugin['name']));
                     }
 
                     if ($plugin_status === Plugin::STATUS_UNINSTALLED && !$files_back) {

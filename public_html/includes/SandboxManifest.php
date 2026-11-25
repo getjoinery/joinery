@@ -35,7 +35,6 @@
  *     "send_email": true,                   door 6: it sends mail through the site's EmailSender
  *     "accept_uploads": true,               door 7: its own pages take uploaded files, kept with File
  *     "settings": [ {"name", "label", "type", "secret", "default", "required", "options", "help"} ],
- *     "models": [ {"name": "SentLog", "label": "…", "fields": [ {"name", "type", "label", "required", "max_length", "index"} ]} ],
  *     "admin_pages":   [ {"slug", "title", "sections": [ … ]} ],   door 4; with no sections the
  *                                           plugin's own view draws the page (a plain page, cleaned by core)
  *     "profile_pages": [ {"slug", "title", "sections": [ … ]} ],
@@ -46,6 +45,12 @@
  *     "limits": {"memory_mb": 16, "timeout_ms": 5000}
  *   }
  *
+ * Its models are not in the manifest: they are regular model files in
+ * src/data/ (SandboxModelDeclarations, spec sandboxed_plugin_model_files).
+ *
+ * @version 1.11 - no "models": a manifest that has the key is refused, pointing at src/data/; a table section names
+ *                 a model class and its columns, checked against the model files at install
+ *                 (SandboxPluginManager::tableSectionProblems()); scopeEntries() goes (SandboxCredentials::scopeFor() is the key's scope)
  * @version 1.10 - a form field may not take a name the site uses on the form (SandboxHtmlCleaner::RESERVED_NAMES)
  * @version 1.9 - "public_pages": pages anyone can open, signed in or not, with "cache" and "cache_query"
  *                (spec sandboxed_plugin_public_pages)
@@ -91,21 +96,6 @@ class SandboxManifest {
 	const ACTION_PATTERN  = '~^[a-z0-9_]+(/[a-z0-9_]+)?$~D';
 	const HOST_PATTERN    = '~^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$~D';
 	const VERSION_PATTERN = '~^\d{1,4}\.\d{1,4}\.\d{1,4}$~D';
-
-	/** Field types a model may declare, and the column each becomes. */
-	const FIELD_TYPES = array(
-		'string'   => 'varchar',          // max_length, default 255, at most 2000
-		'text'     => 'text',
-		'integer'  => 'int8',
-		'decimal'  => 'numeric(14,4)',
-		'boolean'  => 'bool',
-		'datetime' => 'timestamp(6)',
-		'date'     => 'date',
-		'json'     => 'jsonb',
-	);
-
-	/** Field names the platform adds to every model itself. */
-	const RESERVED_FIELDS = array('id', 'create_time', 'update_time', 'delete_time');
 
 	/** Setting types a manifest may declare. */
 	const SETTING_TYPES = array('text', 'textarea', 'number', 'boolean', 'select', 'url', 'email');
@@ -198,8 +188,13 @@ class SandboxManifest {
 	public static function problems(array $d, ?string $expected_name = null): array {
 		$e = array();
 		$known = array('name', 'id', 'title', 'version', 'description', 'author', 'platform', 'permissions', 'signals',
-			'schedules', 'outbound_hosts', 'send_email', 'accept_uploads', 'settings', 'models', 'admin_pages', 'profile_pages', 'public_pages', 'menu', 'limits');
+			'schedules', 'outbound_hosts', 'send_email', 'accept_uploads', 'settings', 'admin_pages', 'profile_pages', 'public_pages', 'menu', 'limits');
 		foreach (array_keys($d) as $key) {
+			if ($key === 'models') {
+				$e[] = 'models are not declared in the manifest: write each as a model file in src/data/ '
+					. '(src/data/notes_class.php: class Note extends SystemBase, and class MultiNote extends SystemMultiBase)';
+				continue;
+			}
 			if (!in_array($key, $known, true)) {
 				$e[] = "unknown key '" . self::show($key) . "'";
 			}
@@ -242,10 +237,9 @@ class SandboxManifest {
 			$e[] = 'accept_uploads must be true or false';
 		}
 		$settings = self::checkSettings($d['settings'] ?? array(), $e);
-		$models = self::checkModels($d['models'] ?? array(), is_string($name) ? $name : '', $e);
 		$slugs = array();
 		foreach (array('admin_pages', 'profile_pages', 'public_pages') as $key) {
-			self::checkPages($d[$key] ?? array(), $key, $models, $settings, $slugs, $e);
+			self::checkPages($d[$key] ?? array(), $key, $settings, $slugs, $e);
 		}
 		if (isset($d['menu'])) {
 			if (!is_array($d['menu']) || !self::isText($d['menu']['title'] ?? null, 40, true)) {
@@ -423,101 +417,7 @@ class SandboxManifest {
 		return $out;
 	}
 
-	/** @return array<string,array> model name => field name => field */
-	private static function checkModels($models, string $plugin, array &$e): array {
-		$out = array();
-		if (!is_array($models) || !self::isList($models)) {
-			$e[] = 'models must be a list';
-			return $out;
-		}
-		if (count($models) > 20) {
-			$e[] = 'a plugin may declare at most 20 models';
-		}
-		foreach ($models as $i => $m) {
-			$label = 'models[' . $i . ']';
-			if (!is_array($m) || !is_string($m['name'] ?? null) || !preg_match(self::MODEL_PATTERN, $m['name'])) {
-				$e[] = "$label needs a name like SentLog: a capital letter, then letters and digits (at most 20)";
-				continue;
-			}
-			$model = $m['name'];
-			foreach (array_keys($out) as $seen) {
-				if (strcasecmp($seen, $model) === 0) {
-					$e[] = "$label: '$model' is declared twice (model names are not told apart by case)";
-				}
-			}
-			if (array_diff(array_keys($m), array('name', 'label', 'fields'))) {
-				$e[] = "models.$model may hold only name, label and fields";
-			}
-			if (isset($m['label']) && !self::isText($m['label'], 80, true)) {
-				$e[] = "models.$model: label must be at most 80 characters";
-			}
-			$fields = array();
-			if (!is_array($m['fields'] ?? null) || !self::isList($m['fields']) || empty($m['fields'])) {
-				$e[] = "models.$model needs a list of fields";
-			} else {
-				if (count($m['fields']) > 40) {
-					$e[] = "models.$model: at most 40 fields";
-				}
-				foreach ($m['fields'] as $j => $f) {
-					$flabel = "models.$model.fields[$j]";
-					if (!is_array($f) || !is_string($f['name'] ?? null) || !preg_match(self::FIELD_PATTERN, $f['name'])) {
-						$e[] = "$flabel needs a name of a-z, 0-9 and _ (at most 20)";
-						continue;
-					}
-					$fname = $f['name'];
-					if (in_array($fname, self::RESERVED_FIELDS, true)) {
-						$e[] = "models.$model.$fname: the platform adds " . implode(', ', self::RESERVED_FIELDS) . ' itself';
-					}
-					if (substr($fname, -3) === '_id') {
-						$e[] = "models.$model.$fname: a field name may not end in _id (it would read as a link to another table); name it for what it holds";
-					}
-					if (isset($fields[$fname])) {
-						$e[] = "models.$model.$fname is declared twice";
-					}
-					if (array_diff(array_keys($f), array('name', 'type', 'label', 'required', 'max_length', 'index'))) {
-						$e[] = "models.$model.$fname may hold only name, type, label, required, max_length and index";
-					}
-					$type = $f['type'] ?? null;
-					if (!is_string($type) || !isset(self::FIELD_TYPES[$type])) {
-						$e[] = "models.$model.$fname: type must be one of " . implode(', ', array_keys(self::FIELD_TYPES));
-					}
-					if (isset($f['max_length']) && ($type !== 'string' || !is_int($f['max_length']) || $f['max_length'] < 1 || $f['max_length'] > 2000)) {
-						$e[] = "models.$model.$fname: max_length is for a string field, 1 to 2000";
-					}
-					foreach (array('required', 'index') as $flag) {
-						if (isset($f[$flag]) && !is_bool($f[$flag])) {
-							$e[] = "models.$model.$fname: $flag must be true or false";
-						}
-					}
-					if (isset($f['label']) && !self::isText($f['label'], 80, true)) {
-						$e[] = "models.$model.$fname: label must be at most 80 characters";
-					}
-					$fields[$fname] = $f;
-				}
-			}
-			$out[$model] = $fields;
-			if ($plugin !== '' && preg_match(self::NAME_PATTERN, $plugin)) {
-				// Every name the database gets must fit its 63-character limit,
-				// which it would otherwise cut silently: the table, its id
-				// sequence, and each column.
-				$prefix = self::prefixFor($plugin, $model);
-				$names = array(
-					self::tableFor($plugin, $model) . '_' . $prefix . '_id_seq',
-					$prefix . '_create_time', $prefix . '_update_time', $prefix . '_delete_time',
-				);
-				foreach (array_keys($fields) as $fname) {
-					$names[] = $prefix . '_' . $fname;
-				}
-				$longest = max(array_map('strlen', $names));
-				if ($longest > 63) {
-					$e[] = "models.$model: the plugin and model names together are too long for the database's names (at most 63 characters, this needs $longest); shorten one";
-				}
-			}
-		}
-		return $out;
-	}
-
-	private static function checkPages($pages, string $key, array $models, array $settings, array &$slugs, array &$e): void {
+	private static function checkPages($pages, string $key, array $settings, array &$slugs, array &$e): void {
 		if (!is_array($pages) || !self::isList($pages)) {
 			$e[] = "$key must be a list";
 			return;
@@ -600,12 +500,12 @@ class SandboxManifest {
 				continue;
 			}
 			foreach ($page['sections'] as $j => $section) {
-				self::checkSection($section, "$key.$slug.sections[$j]", $member, $models, $settings, $e);
+				self::checkSection($section, "$key.$slug.sections[$j]", $member, $settings, $e);
 			}
 		}
 	}
 
-	private static function checkSection($s, string $label, bool $member, array $models, array $settings, array &$e): void {
+	private static function checkSection($s, string $label, bool $member, array $settings, array &$e): void {
 		$type = is_array($s) ? ($s['type'] ?? null) : null;
 		if (!in_array($type, self::SECTION_TYPES, true)) {
 			$e[] = "$label: type must be one of " . implode(', ', self::SECTION_TYPES);
@@ -632,26 +532,24 @@ class SandboxManifest {
 				if (array_diff(array_keys($s), array('type', 'title', 'model', 'columns', 'order', 'limit'))) {
 					$e[] = "$label: a table section holds type, title, model, columns, order and limit";
 				}
+				// The model and its columns are checked against the plugin's
+				// model files when it is installed (SandboxPluginManager).
 				$model = $s['model'] ?? null;
-				if (!is_string($model) || !isset($models[$model])) {
-					$e[] = "$label: model must name one of this plugin's models";
+				if (!is_string($model) || !preg_match(self::MODEL_PATTERN, $model)) {
+					$e[] = "$label: model names one of this plugin's model classes";
 					break;
 				}
-				$allowed = array_merge(array_keys($models[$model]), self::RESERVED_FIELDS);
 				if (!is_array($s['columns'] ?? null) || !self::isList($s['columns']) || empty($s['columns'])) {
-					$e[] = "$label: columns must list the fields to show";
+					$e[] = "$label: columns must list the columns to show";
 				} else {
 					foreach ($s['columns'] as $col) {
-						if (!in_array($col, $allowed, true)) {
-							$e[] = "$label: '" . self::show($col) . "' is not a field of $model";
+						if (!is_string($col) || !preg_match(self::QUERY_NAME_PATTERN, $col)) {
+							$e[] = "$label: '" . self::show($col) . "' is not a column name";
 						}
 					}
 				}
-				if (isset($s['order'])) {
-					$order = is_string($s['order']) ? ltrim($s['order'], '-') : null;
-					if ($order === null || !in_array($order, $allowed, true)) {
-						$e[] = "$label: order must be a field of $model, with a leading - for newest first";
-					}
+				if (isset($s['order']) && (!is_string($s['order']) || !preg_match(self::QUERY_NAME_PATTERN, ltrim($s['order'], '-')))) {
+					$e[] = "$label: order is a column of $model, with a leading - for newest first";
 				}
 				if (isset($s['limit']) && (!is_int($s['limit']) || $s['limit'] < 1 || $s['limit'] > 200)) {
 					$e[] = "$label: limit must be 1 to 200";
@@ -771,7 +669,6 @@ class SandboxManifest {
 	}
 
 	/** @return array[] model declarations */
-	public function models(): array { return array_values($this->data['models'] ?? array()); }
 
 	/** @return array[] */
 	public function adminPages(): array { return array_values($this->data['admin_pages'] ?? array()); }
@@ -842,62 +739,26 @@ class SandboxManifest {
 		);
 	}
 
-	/**
-	 * The scope entries the plugin's API credential carries: the actions and
-	 * records its permissions name, and every verb on its own models.
-	 *
-	 * @return string[]
-	 */
-	public function scopeEntries(): array {
-		$entries = $this->permittedActions();
-		foreach ($this->permittedRecords() as $model => $verbs) {
-			foreach ($verbs as $verb) {
-				$entries[] = $model . ':' . $verb;
-			}
-		}
-		foreach ($this->models() as $model) {
-			foreach (ApiKey::RECORD_VERBS as $verb) {
-				$entries[] = self::classFor($this->name(), $model['name']) . ':' . $verb;
-			}
-		}
-		return array_values(array_unique($entries));
-	}
-
 	// ------------------------------------------------------------------
 	// Names the platform derives (each from validated parts)
 	// ------------------------------------------------------------------
 
 	/*
 	 * Derived names are unique by construction, so two plugins cannot meet in
-	 * a class, table or setting, and no sandboxed name can be a core or native
-	 * one:
-	 *  - a plugin name has no '__' and does not end in '_', and a model's
-	 *    snake case has no '__', so '__' splits plugin from model, and from
-	 *    a setting's name, exactly one way;
-	 *  - a model name has no '_', so a class name splits at its last '_';
+	 * a class or setting, and no sandboxed name can be a core or native one:
+	 *  - a plugin name has no '__' and does not end in '_', so '__' splits
+	 *    plugin from setting, and a table's sbx_{plugin}__ from the model's own
+	 *    table name (SandboxModelDeclarations::tableFor()), exactly one way;
+	 *  - a model class name has no '_', so a class name splits at its last '_';
 	 *  - every class starts 'Sbx_', and every table and setting 'sbx_', which
 	 *    no core or native name does (tests/unit/sandbox_models_test.php).
 	 *    PHP compares class names without case; 'Sbx_' + the lower-case
 	 *    plugin holds whatever the case.
 	 */
 
-	/** The model's class: 'Sbx_' + plugin + '_' + model ('Sbx_notifier_SentLog'). */
+	/** The model's class on the site: 'Sbx_' + plugin + '_' + its class ('Sbx_notes_Note'). */
 	public static function classFor(string $plugin, string $model): string {
 		return 'Sbx_' . $plugin . '_' . $model;
-	}
-
-	/** The model's column prefix: plugin + '__' + model in snake case ('notifier__sent_log'). */
-	public static function prefixFor(string $plugin, string $model): string {
-		return $plugin . '__' . self::snake($model);
-	}
-
-	/** The model's table: 'sbx_' + prefix ('sbx_notifier__sent_log'). */
-	public static function tableFor(string $plugin, string $model): string {
-		return 'sbx_' . self::prefixFor($plugin, $model);
-	}
-
-	public static function snake(string $studly): string {
-		return strtolower(preg_replace('~(?<!^)[A-Z]~', '_$0', $studly));
 	}
 
 	/** The stored setting's name: 'sbx_' + plugin + '__' + setting ('sbx_notifier__webhook_url'). */

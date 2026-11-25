@@ -23,6 +23,14 @@
  * disabled or deleted. Once they cannot, the plugin's credential is switched
  * off (User::save()) and the plugin waits on another admin's approval.
  *
+ * @version 1.14 - blockEntries(): a prevent between the plugin's own models is a block when a site record's delete
+ *                 reaches it through permanent_delete rules (reviewer1 R6)
+ * @version 1.13 - a model's reach says the levels that result (read through the API, delete, permanent delete), so a
+ *                 change of its class or a level is a new entry (reviewer1 R2); table words from the name alone
+ * @version 1.12 - its models (spec sandboxed_plugin_model_files section 7): model_reach, each way a model is open beyond
+ *                 the plugin (read through the API, a read or delete level below its class's, each member's own rows),
+ *                 and blocks, each prevent on a site table, are grants; effectiveModels() reads them from the stored
+ *                 declarations, never the manifest; the digest covers the models shown
  * @version 1.11 - public pages (spec sandboxed_plugin_public_pages): each is a grant, its own kind, described as
  *                 pages anyone can open, signed in or not
  * @version 1.10 - the File grant line says Drive files are read only; the uploads line no longer says "never other files"
@@ -56,7 +64,8 @@ class SandboxConsent {
 	 * @return array{actions:string[], records:array<string,string[]>, signals:string[],
 	 *               schedules:array<string,string>, outbound_hosts:string[], email:string[], uploads:string[]}
 	 */
-	public static function grantsOf(SandboxManifest $m): array {
+	public static function grantsOf(SandboxManifest $m, ?array $models = null): array {
+		$models = $models ?? SandboxModels::declarations($m->name());
 		$actions = $m->permittedActions();
 		sort($actions);
 		$records = array();
@@ -116,6 +125,259 @@ class SandboxConsent {
 			'member_pages'   => $member_pages,
 			'public_pages'   => $public_pages,
 			'framed_admin_pages' => $framed_admin_pages,
+		) + self::modelGrants($m->name(), $models);
+	}
+
+	/** The list kinds every approval is compared in, a value each. */
+	const LIST_KINDS = array('actions', 'signals', 'outbound_hosts', 'email', 'uploads', 'model_reach', 'blocks');
+
+	/**
+	 * What a plugin's models open beyond the plugin, from their checked
+	 * declarations: model_reach, each way a model is open (readable through
+	 * the API, a read or delete level below its class's, each member their
+	 * own rows), and blocks, each prevent on a table that is not the
+	 * plugin's own. cascade, null and set_value change only the plugin's own
+	 * rows and need no consent. Each entry is the words the approval page
+	 * shows, so one that changes is new.
+	 *
+	 * @return array{model_reach:string[], blocks:string[]}
+	 */
+	public static function modelGrants(string $plugin, array $models): array {
+		$reach = array();
+		$blocks = array();
+		foreach ($models as $name => $declaration) {
+			foreach (array_keys(self::modelReachOf((string)$name, $declaration)) as $entry) {
+				$reach[] = $entry;
+			}
+		}
+		foreach (self::blockEntries($plugin, $models) as $columns) {
+			foreach ($columns as $entries) {
+				$blocks = array_merge($blocks, $entries);
+			}
+		}
+		$blocks = array_values(array_unique($blocks));
+		sort($reach);
+		sort($blocks);
+		return array('model_reach' => $reach, 'blocks' => $blocks);
+	}
+
+	/**
+	 * Each way one model is open beyond its plugin: entry (the words) =>
+	 * array(kind, value), kind one of api, read_permission, delete_permission,
+	 * permanent_delete_permission, owner.
+	 *
+	 * @return array<string,array{0:string,1:mixed}>
+	 */
+	public static function modelReachOf(string $name, array $declaration): array {
+		$words = SandboxModelDeclarations::words($name);
+		$out = array();
+		// Each entry says the level that results, from the model's class and
+		// its own statics together: a change to either (personal to content,
+		// say) is a new entry, so it waits on an approval (reviewer1 R2).
+		// Reading reaches past the plugin only through the API, so the read
+		// level and an owner column open something only there; deleting is
+		// open to staff whatever the API flag (section 8).
+		$readable = ($declaration['api_readable'] ?? false) === true;
+		if ($readable) {
+			$out["Its $words records can be read through the site's API by staff at level " . self::levelOf($declaration, 'read_permission') . ' and above']
+				= array('api', true);
+			$owner = self::ownerOf($declaration);
+			if ($owner !== null) {
+				$out["Each member can read their own $words records through the API (the member named in $owner)"] = array('owner', $owner);
+			}
+		}
+		foreach (array('delete_permission' => 'deleted', 'permanent_delete_permission' => 'permanently deleted') as $static => $verb) {
+			$out["Its $words records can be $verb by staff at level " . self::levelOf($declaration, $static) . ' and above']
+				= array($static, self::levelOf($declaration, $static));
+		}
+		return $out;
+	}
+
+	/** The level a model needs for a verb: its own static, else its class's. */
+	public static function levelOf(array $declaration, string $static): int {
+		$level = $declaration[$static] ?? null;
+		return is_int($level) ? $level : self::classLevel($declaration, $static);
+	}
+
+	private static function classLevel(array $declaration, string $static): int {
+		$verb = array_search($static, SystemBase::ACCESS_EXCEPTIONS, true);
+		return Access::level((string)($declaration['access_class'] ?? 'keys') . ':' . $verb);
+	}
+
+	/** The column that names a row's member, as SystemBase::access_owner_column() finds it, or null. */
+	public static function ownerOf(array $declaration): ?string {
+		$owner = $declaration['owner_column'] ?? null;
+		if ($owner === false) {
+			return null;
+		}
+		if (is_string($owner)) {
+			return $owner;
+		}
+		$conventional = $declaration['prefix'] . '_usr_user_id';
+		return isset($declaration['field_specifications'][$conventional]) ? $conventional : null;
+	}
+
+	/**
+	 * Each prevent of the plugin's that can stop a site record being
+	 * permanently deleted, in words: model => column => entries.
+	 *
+	 * A prevent on a site table blocks that table's record. A prevent on one
+	 * of the plugin's own tables blocks a site record too when that table's
+	 * rows are themselves removed with the site record: a permanent_delete
+	 * rule from the site table, directly or through a chain of the plugin's
+	 * own permanent_delete rules, deletes each row with its own rules, and
+	 * the prevent refuses (reviewer1 R6). A cascade, null or set_value runs
+	 * as SQL and consults no rule of the rows it touches, so it cannot carry
+	 * a block. A prevent that no site record's delete can reach is the
+	 * plugin's own business and needs no consent.
+	 *
+	 * @return array<string,array<string,string[]>>
+	 */
+	public static function blockEntries(string $plugin, array $models): array {
+		$own = array();
+		foreach ($models as $name => $declaration) {
+			$own[(string)($declaration['table'] ?? '')] = (string)$name;
+		}
+		// own table => the site tables whose delete removes its rows
+		$removed = array();
+		for ($pass = 0; $pass <= count($models); $pass++) {
+			$grew = false;
+			foreach ($models as $declaration) {
+				$table = (string)($declaration['table'] ?? '');
+				foreach ((array)($declaration['foreign_key_actions'] ?? array()) as $rule) {
+					if (($rule['action'] ?? null) !== 'permanent_delete') {
+						continue;
+					}
+					$source = (string)($rule['source_table'] ?? '');
+					$sites = isset($own[$source]) ? array_keys($removed[$source] ?? array()) : array($source);
+					foreach ($sites as $site) {
+						if (!isset($removed[$table][$site])) {
+							$removed[$table][$site] = true;
+							$grew = true;
+						}
+					}
+				}
+			}
+			if (!$grew) {
+				break;
+			}
+		}
+		$out = array();
+		foreach ($models as $name => $declaration) {
+			$words = SandboxModelDeclarations::words((string)$name);
+			foreach ((array)($declaration['foreign_key_actions'] ?? array()) as $column => $rule) {
+				if (!is_array($rule) || ($rule['action'] ?? null) !== 'prevent') {
+					continue;
+				}
+				$source = (string)($rule['source_table'] ?? '');
+				if (!isset($own[$source])) {
+					$out[(string)$name][(string)$column][] = 'A ' . self::tableWords($source) . ' cannot be permanently deleted while it holds '
+						. $words . " records for them ($column)";
+					continue;
+				}
+				foreach (array_keys($removed[$source] ?? array()) as $site) {
+					$out[(string)$name][(string)$column][] = 'A ' . self::tableWords($site) . ' cannot be permanently deleted while its '
+						. SandboxModelDeclarations::words($own[$source]) . " records hold $words records ($column)";
+				}
+			}
+		}
+		return $out;
+	}
+
+	/** Whether every block a rule carries is approved (one that carries none needs nothing). */
+	public static function ruleApproved(array $entries, array $approved_blocks): bool {
+		foreach ($entries as $entry) {
+			if (!in_array($entry, $approved_blocks, true)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * One line a model for the approval page: who may read it and what it is
+	 * linked to, from its declaration.
+	 *
+	 * @return string[]
+	 */
+	public static function modelLines(string $plugin, array $models): array {
+		$own = array();
+		foreach ($models as $name => $declaration) {
+			$own[(string)($declaration['table'] ?? '')] = SandboxModelDeclarations::words((string)$name);
+		}
+		$lines = array();
+		foreach ($models as $name => $declaration) {
+			$words = SandboxModelDeclarations::words((string)$name);
+			$read = array('staff (level ' . self::levelOf($declaration, 'read_permission') . ' and above)');
+			if (($declaration['api_readable'] ?? false) === true) {
+				if (self::ownerOf($declaration) !== null) {
+					$read[] = 'each member their own';
+				}
+				$read[] = 'also through the API';
+			}
+			$links = array();
+			foreach ((array)($declaration['foreign_key_actions'] ?? array()) as $rule) {
+				$table = (string)($rule['source_table'] ?? '');
+				$target = $own[$table] ?? self::tableWords($table);
+				switch ($rule['action'] ?? '') {
+					case 'cascade':
+					case 'permanent_delete':
+						$links[] = "removed with its $target";
+						break;
+					case 'null':
+						$links[] = "kept when its $target is deleted";
+						break;
+					case 'set_value':
+						$links[] = "kept, pointed elsewhere, when its $target is deleted";
+						break;
+					case 'prevent':
+						$links[] = "can stop its $target being permanently deleted";
+						break;
+				}
+			}
+			$lines[] = ucfirst($words) . ' records: read by ' . implode(', ', $read) . '.'
+				. ($links ? ' ' . ucfirst(implode('; ', array_unique($links))) . '.' : '');
+		}
+		return $lines;
+	}
+
+	/**
+	 * 'usr_users' => 'user': a site table's record, in words, from its name
+	 * alone. Never the model registry: this runs while a sandboxed class is
+	 * being filled, which the registry's own discovery does.
+	 */
+	private static function tableWords(string $table): string {
+		if (!preg_match('~^[a-z0-9]+_([a-z0-9_]+)$~D', $table, $m)) {
+			return 'record in ' . $table;
+		}
+		$stem = $m[1];
+		if (substr($stem, -3) === 'ies') {
+			$stem = substr($stem, 0, -3) . 'y';
+		} elseif (substr($stem, -1) === 's' && substr($stem, -2) !== 'ss') {
+			$stem = substr($stem, 0, -1);
+		}
+		return str_replace('_', ' ', $stem);
+	}
+
+	/**
+	 * What the plugin's models may open now: their reach and blocks that the
+	 * approval covers. Read from the stored declarations and the approval
+	 * alone, never the manifest, so a rule an admin approved stays while the
+	 * plugin's files are unreadable.
+	 *
+	 * @return array{model_reach:string[], blocks:string[]}
+	 */
+	public static function effectiveModels(string $plugin): array {
+		$none = array('model_reach' => array(), 'blocks' => array());
+		$row = SandboxInstall::forPlugin($plugin);
+		if ($row === null || !$row->get('sbi_consent_time')) {
+			return $none;
+		}
+		$asked = self::modelGrants($plugin, SandboxModels::declarations($plugin));
+		$approved = $row->consent();
+		return array(
+			'model_reach' => array_values(array_intersect($asked['model_reach'], $approved['model_reach'] ?? array())),
+			'blocks'      => array_values(array_intersect($asked['blocks'], $approved['blocks'] ?? array())),
 		);
 	}
 
@@ -124,8 +386,9 @@ class SandboxConsent {
 	 * the page posts back: an approval is of what the admin saw, so a
 	 * plugin replaced between showing and approving is not approved unseen.
 	 */
-	public static function reviewDigest(SandboxManifest $m): string {
-		return hash('sha256', json_encode(array($m->version(), self::grantsOf($m), $m->adminPages(), $m->settings())));
+	public static function reviewDigest(SandboxManifest $m, ?array $models = null): string {
+		$models = $models ?? SandboxModels::declarations($m->name());
+		return hash('sha256', json_encode(array($m->version(), self::grantsOf($m, $models), $m->adminPages(), $m->settings(), $models)));
 	}
 
 	/**
@@ -134,7 +397,7 @@ class SandboxConsent {
 	 */
 	public static function additions(array $asked, array $approved): array {
 		$out = array();
-		foreach (array('actions', 'signals', 'outbound_hosts', 'email', 'uploads') as $kind) {
+		foreach (self::LIST_KINDS as $kind) {
 			$more = array_values(array_diff($asked[$kind] ?? array(), $approved[$kind] ?? array()));
 			if ($more) {
 				$out[$kind] = $more;
@@ -171,7 +434,7 @@ class SandboxConsent {
 	 * approval covers. Nothing at all with no approval.
 	 */
 	public static function effective(string $plugin): array {
-		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array());
+		$none = array('actions' => array(), 'records' => array(), 'own_records' => array(), 'signals' => array(), 'schedules' => array(), 'outbound_hosts' => array(), 'email' => array(), 'uploads' => array(), 'member_pages' => array(), 'public_pages' => array(), 'framed_admin_pages' => array(), 'model_reach' => array(), 'blocks' => array());
 		try {
 			$asked = self::grantsOf(SandboxPlugins::manifest($plugin));
 		} catch (SandboxManifestException $e) {
@@ -183,7 +446,7 @@ class SandboxConsent {
 		}
 		$approved = $row->consent();
 		$out = $none;
-		foreach (array('actions', 'signals', 'outbound_hosts', 'email', 'uploads') as $kind) {
+		foreach (self::LIST_KINDS as $kind) {
 			$out[$kind] = array_values(array_intersect($asked[$kind], $approved[$kind] ?? array()));
 		}
 		foreach (array('records', 'own_records') as $kind) {
@@ -261,7 +524,9 @@ class SandboxConsent {
 	 */
 	public static function approve(string $plugin, User $by, string $reviewed): SandboxInstall {
 		$manifest = SandboxPlugins::manifest($plugin);
-		if (!hash_equals(self::reviewDigest($manifest), $reviewed)) {
+		// The model files as they are now (a POST): what the admin was shown.
+		$models = SandboxModels::refresh($plugin);
+		if (!hash_equals(self::reviewDigest($manifest, $models), $reviewed)) {
 			throw new SandboxManifestException('The plugin changed since you reviewed it. Review what it asks for again.');
 		}
 		$row = SandboxInstall::forPlugin($plugin);
@@ -269,11 +534,14 @@ class SandboxConsent {
 			$row = new SandboxInstall(NULL);
 			$row->set('sbi_plugin', $plugin);
 		}
-		$row->set('sbi_consent', self::grantsOf($manifest));
+		$row->set('sbi_consent', self::grantsOf($manifest, $models));
 		$row->set('sbi_consented_version', $manifest->version());
 		$row->set('sbi_usr_user_id', (int)$by->key);
 		$row->set('sbi_consent_time', gmdate('Y-m-d H:i:s'));
 		$row->save();
+		// What was approved is what the site now uses.
+		SandboxModels::storePending($plugin);
+		SandboxModels::reset();
 		return $row;
 	}
 
@@ -390,6 +658,12 @@ class SandboxConsent {
 			// What is true: the file is the viewer's, private; its reach is the
 			// files it kept (spec sandboxed_plugin_uploads, deviations 1 and 2).
 			$out['Accept uploaded files'] = array("On its own pages, from the person viewing. Each file is kept in that person's account, private to them and admins. It can read, rename and remove the files it kept");
+		}
+		if (!empty($grants['model_reach'])) {
+			$out['Open its own records beyond the plugin'] = $grants['model_reach'];
+		}
+		if (!empty($grants['blocks'])) {
+			$out["Stop the site's records being deleted while it holds rows for them (an admin can see and remove those rows)"] = $grants['blocks'];
 		}
 		if (!empty($grants['framed_admin_pages'])) {
 			$out["Run its own script in admins' browsers, on these framed admin pages"] = array_values($grants['framed_admin_pages']);

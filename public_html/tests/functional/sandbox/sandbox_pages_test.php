@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_pages
  *
+ * @version 1.2 - its model is a model file; a table section names its own columns (spec sandboxed_plugin_model_files)
  * @version 1.1 - the platform's runner is the fence; a fixture with no plugin user is unavailable, saying why
  * @version 1.0
  */
@@ -78,14 +79,10 @@ try {
 			array('name' => 'webhook_url', 'label' => 'Webhook URL', 'type' => 'url', 'secret' => true),
 			array('name' => 'enabled', 'label' => 'Enabled', 'type' => 'boolean', 'default' => true),
 		),
-		'models' => array(array('name' => 'Item', 'fields' => array(
-			array('name' => 'title', 'type' => 'string', 'label' => '<img src=x onerror=alert(1)> Title'),
-			array('name' => 'qty', 'type' => 'integer'),
-		))),
 		'admin_pages' => array(
 			array('slug' => 'main', 'title' => 'Main', 'sections' => array(
 				array('type' => 'text', 'text' => 'Hello admins.'),
-				array('type' => 'table', 'model' => 'Item', 'columns' => array('title', 'qty', 'create_time'), 'order' => 'qty'),
+				array('type' => 'table', 'model' => 'Thing', 'columns' => array('title', 'qpg_qty', 'create_time'), 'order' => 'qty'),
 				array('type' => 'form', 'handler' => 'greet', 'submit_label' => 'Greet', 'fields' => array(
 					array('name' => 'who', 'label' => 'Who', 'type' => 'text', 'required' => true),
 					array('name' => 'loud', 'label' => 'Loud', 'type' => 'boolean'),
@@ -100,7 +97,10 @@ try {
 			array('type' => 'form', 'handler' => 'hello', 'fields' => array(array('name' => 'note', 'label' => 'Note', 'type' => 'textarea'))),
 		))),
 		'menu' => array('title' => 'HarnessTest menu'),
-	));
+	), array('files' => array('data/items_class.php' => sandbox_model_file('Thing', 'qpg', array(
+		'title' => array('type' => 'varchar(255)'),
+		'qty'   => array('type' => 'int8'),
+	)))));
 	$name = $p['name'];
 	$pm = PluginManager::getInstance();
 	$pm->install($name, false);
@@ -153,11 +153,11 @@ try {
 	check(SandboxSettings::values($name)['webhook_url'] === 'https://hooks.example.com/abc', 'A value failing its declared rule is refused');
 
 	section('The admin page');
-	$class = SandboxManifest::classFor($name, 'Item');
+	$class = SandboxManifest::classFor($name, 'Thing');
 	foreach (array(array('B', 9), array('A', 2)) as list($title, $qty)) {
 		$item = new $class(NULL);
-		$item->set(SandboxManifest::prefixFor($name, 'Item') . '_title', $title);
-		$item->set(SandboxManifest::prefixFor($name, 'Item') . '_qty', $qty);
+		$item->set('qpg_title', $title);
+		$item->set('qpg_qty', $qty);
 		$item->save();
 	}
 	$result = harness_call_logic($page_logic, 'admin_sandbox_page_logic', array('plugin' => $name, 'page' => 'main'), 'GET');
@@ -172,10 +172,12 @@ try {
 	$titles = array();
 	if ($table) {
 		foreach ($table['rows'] as $r) {
-			$titles[] = $r->get(SandboxManifest::prefixFor($name, 'Item') . '_title');
+			$titles[] = $r->get('qpg_title');
 		}
 	}
 	check($titles === array('A', 'B'), 'The table shows the plugin\'s rows in its declared order', json_encode($titles));
+	check(array_keys($table['columns'] ?? array()) === array('qpg_title', 'qpg_qty', 'qpg_create_time'),
+		'Its columns are the model\'s own, named with or without the prefix', json_encode(array_keys($table['columns'] ?? array())));
 	$result = harness_call_logic($page_logic, 'admin_sandbox_page_logic', array('plugin' => $name, 'page' => 'nope'), 'GET');
 	check((bool)$result->error, 'A page it does not declare is refused');
 
@@ -327,12 +329,14 @@ try {
 	$web_admin = make_user('SbxWebAdmin', 10);
 	$jar = harness_jar_new('sbxpg');
 	check(harness_web_login($jar, $web_admin->get('usr_email'), 'TestPassword_SbxWebAdmin') !== null, 'A superadmin signs in');
+	$marked = new $class(NULL);
+	$marked->set('qpg_title', '<img src=x onerror=alert(1)> Title');
+	$marked->set('qpg_qty', 5);
+	$marked->save();
 	$page_html = harness_request('GET', SandboxPluginManager::adminPageUrl($name, 'main'), array('jar' => $jar, 'accept' => null));
 	check($page_html['status'] === 200 && strpos($page_html['body'], 'Hello admins.') !== false, 'The admin page renders', (string)$page_html['status']);
-	check(strpos($page_html['body'], '<img src=x onerror') === false && strpos($page_html['body'], '&lt;img src=x onerror=alert(1)&gt; Title') !== false,
-		'A column label is printed as text, never as markup');
-	check(strpos($page_html['body'], 'data-label="&lt;img src=x onerror=alert(1)&gt; Title"') !== false && strpos($page_html['body'], '&amp;lt;img') === false,
-		'and its mobile label is escaped once');
+	check(strpos($page_html['body'], '<img src=x onerror') === false && strpos($page_html['body'], '&lt;img src=x onerror=alert(1)&gt; Title') !== false
+		&& strpos($page_html['body'], '&amp;lt;img') === false, 'A value the plugin stored is printed as text, escaped once, never as markup');
 
 	section('An inactive plugin has no pages');
 	$sign_in($admin);

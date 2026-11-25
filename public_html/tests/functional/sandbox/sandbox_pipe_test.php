@@ -42,6 +42,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_pipe
  *
+ * @version 1.2 - its model is a model file (spec sandboxed_plugin_model_files)
  * @version 1.1 - a filter's list of values, an empty list (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.0
  */
@@ -95,7 +96,7 @@ function on_ui(array $input) {
 	$answers['create'] = sbx_try('record.create', array('model' => 'Note', 'fields' => array('text' => 'hello', 'qty' => 3)));
 	$id = 0;
 	foreach (($answers['create']['record'] ?? array()) as $k => $val) {
-		if (substr($k, -9) === '__note_id') { $id = (int)$val; }
+		if ($k === 'qpn_note_id') { $id = (int)$val; }
 	}
 	$answers['id'] = $id;
 	$answers['get'] = sbx_try('record.get', array('model' => 'Note', 'id' => $id));
@@ -119,12 +120,12 @@ function on_ui(array $input) {
 }
 PHP;
 
+$note_file = sandbox_model_file('Note', 'qpn', array(
+	'text'        => array('type' => 'varchar(80)'),
+	'qty'         => array('type' => 'int8'),
+	'secret_hash' => array('type' => 'varchar(80)'),
+));
 $manifest = array(
-	'models' => array(array('name' => 'Note', 'fields' => array(
-		array('name' => 'text', 'type' => 'string', 'max_length' => 80),
-		array('name' => 'qty', 'type' => 'integer'),
-		array('name' => 'secret_hash', 'type' => 'string', 'max_length' => 80),
-	))),
 	'outbound_hosts' => array('hooks.example.com'),
 	'limits' => array('memory_mb' => 16, 'timeout_ms' => 3000),
 );
@@ -141,10 +142,10 @@ function sbx_pipe_unfenced(): void {
 }
 
 try {
-	$p = sandbox_fixture_plugin($manifest, array('files' => array('plugin.php' => $plugin_php)));
+	$p = sandbox_fixture_plugin($manifest, array('files' => array('plugin.php' => $plugin_php, 'data/notes_class.php' => $note_file)));
 	$name = $p['name'];
 	$class = SandboxManifest::classFor($name, 'Note');
-	$prefix = SandboxManifest::prefixFor($name, 'Note');
+	$prefix = 'qpn';
 	$pm = PluginManager::getInstance();
 	$pm->install($name, false);
 	$admin = sandbox_approve($name);
@@ -336,7 +337,7 @@ try {
 	};
 	$pm->deactivate($name);
 	check(strpos($refused(function () use ($pm, $name) { $pm->activate($name); }), 'shared with other sites') !== false, 'Activation is refused, saying why');
-	check(strpos($refused(function () use ($name) { SandboxPluginManager::install($name); }), 'shared with other sites') !== false, 'Install is refused, saying why');
+	check(strpos($refused(function () use ($pm, $name) { $pm->install($name, false); }), 'shared with other sites') !== false, 'Install is refused, saying why');
 	HostRestrictions::useFile(null);
 	$pm->activate($name);
 
@@ -346,7 +347,7 @@ try {
 		harness_skip('The fenced call', 'this box has no launcher with the allowlist');
 	} else {
 		$user_ready = function_exists('posix_getpwnam') && posix_getpwnam(SandboxRunner::userFor($fence_name)) !== false;
-		$f = sandbox_fixture_plugin($manifest + array(), array('name' => $fence_name, 'files' => array('plugin.php' => $plugin_php),
+		$f = sandbox_fixture_plugin($manifest + array(), array('name' => $fence_name, 'files' => array('plugin.php' => $plugin_php, 'data/notes_class.php' => $note_file),
 			'keep_folder' => !$user_ready));
 		if (!$user_ready) {
 			harness_skip('The fenced call', 'jpx-' . $fence_name . ' is not made yet; the root step makes it within a minute of this folder, which is left in place. Run again then.');
@@ -362,7 +363,7 @@ try {
 			$pw = posix_getpwnam(SandboxRunner::userFor($fence_name));
 			check($result['status'] === SandboxLog::STATUS_OK && ($result['output']['uid'] ?? null) === $pw['uid'],
 				'The call ran as jpx-' . $fence_name . ' (uid ' . $pw['uid'] . ')', json_encode($result));
-			$fprefix = SandboxManifest::prefixFor($fence_name, 'Note');
+			$fprefix = 'qpn';
 			check(($result['output']['record'][$fprefix . '_text'] ?? null) === 'fenced', 'and its ask reached the API through the relay');
 			check(($result['output']['config'] ?? true) === false, 'It cannot read the site\'s config file');
 			check(true, 'One fenced call with one ask took ' . $ms . ' ms (V4)');

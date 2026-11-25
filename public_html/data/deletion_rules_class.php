@@ -8,6 +8,9 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * when a parent record is permanently deleted. Rules are auto-registered during
  * database updates by scanning all model classes for foreign key patterns.
  *
+ * @version 1.4 - a sandboxed plugin's model (SandboxRecord) is left out of the prefix map, so its prefix never
+ *   becomes a candidate for a core column, and registers its declared rules only; modelPrefixes() and
+ *   knownTables() read the registry (spec sandboxed_plugin_model_files section 5)
  * @version 1.3 - registerModelRules() registers no rule whose source table is not in this
  *   database: sync pruned it again a moment later, and printed that on every apply
  * @version 1.2 - pruneOrphanedRules() also drops a rule whose table is declared by a model
@@ -107,6 +110,16 @@ class DeletionRule extends SystemBase {
         $warnings = [];
         $pending = [];
 
+        // A sandboxed plugin's model registers the rules its file declares and
+        // no others: its checked declaration resolved each one's source table
+        // (SandboxModelDeclarations), and the guess for an undeclared column
+        // would make an unapproved prevent of a column like nte_abc_thing_id
+        // the day a first-party plugin with prefix abc is installed.
+        $sandboxed = is_subclass_of($model_class, 'SandboxRecord');
+        if ($sandboxed) {
+            $field_specs = array_intersect_key($field_specs, (array)$fk_actions);
+        }
+
         foreach ($field_specs as $column => $spec) {
             // The primary key is never itself a foreign key
             if ($pkey_column !== null && $column === $pkey_column) {
@@ -115,6 +128,10 @@ class DeletionRule extends SystemBase {
 
             $override = $fk_actions[$column] ?? null;
             $source_table = null;
+
+            if ($sandboxed && !isset($override['source_table'])) {
+                continue;
+            }
 
             if ($override !== null && (isset($override['source_table']) || isset($override['source_class']))) {
                 // Explicit override always wins over convention.
@@ -352,6 +369,14 @@ class DeletionRule extends SystemBase {
                 $table = $reflection->getStaticPropertyValue('tablename');
                 $all_tables[$table] = true;
 
+                // A sandboxed plugin's model names its own prefix, which may
+                // be any three letters: as a candidate here, a plugin taking
+                // 'usr' would unsettle every core column named {x}_usr_user_id.
+                // Its table stays known, so the prune keeps its rules.
+                if (is_subclass_of($class, 'SandboxRecord')) {
+                    continue;
+                }
+
                 if ($reflection->hasProperty('prefix')) {
                     $prefix = $reflection->getStaticPropertyValue('prefix');
                     // Keep every table claiming the prefix. Every prefix has one
@@ -370,6 +395,31 @@ class DeletionRule extends SystemBase {
         }
 
         return self::$model_registry;
+    }
+
+    /**
+     * prefix => the tables of the core and first-party models that declare
+     * it, from every model on disk. No sandboxed plugin's model is here.
+     *
+     * @return array<string,string[]>
+     */
+    public static function modelPrefixes() {
+        return self::getModelRegistry()['prefix_to_tables'];
+    }
+
+    /**
+     * Every table a model on disk declares, sandboxed plugins' installed
+     * ones among them, as a set (table => true).
+     *
+     * @return array<string,bool>
+     */
+    public static function knownTables() {
+        return self::getModelRegistry()['all_tables'];
+    }
+
+    /** Forget the registry; after a model is added or removed in this process. */
+    public static function resetModelRegistry() {
+        self::$model_registry = null;
     }
 
     /**

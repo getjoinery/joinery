@@ -29,6 +29,7 @@
  * "A dev site" is one with the debug setting on: load writes into plugins/,
  * which the installer does everywhere else, and call fires real calls.
  *
+ * @version 1.8 - validate reads the folder's model files in the parser jail and shows each model's line (spec sandboxed_plugin_model_files)
  * @version 1.7 - public pages: listed on load; call ... page --kind=public with no --as is a visitor's call, read only
  * @version 1.6 - log PLUGIN shows this install's calls only
  * @version 1.5 - call ... ui --from=frame --page=SLUG: a framed page's handler, as its script calls it
@@ -147,6 +148,15 @@ switch ($command) {
 		foreach (SandboxCompatibility::problems($manifest) as $p) {
 			$problems[] = 'On this site: ' . $p;
 		}
+		// Its model files, read in the parser jail as an install reads them.
+		$models = array();
+		try {
+			$models = SandboxModelDeclarations::readDir($manifest->name(), $manifest->title(),
+				$dir . '/' . SandboxPlugins::SOURCE_DIR . '/' . SandboxModelDeclarations::DATA_DIR)['models'];
+			$problems = array_merge($problems, SandboxPluginManager::tableSectionProblems($manifest, $models));
+		} catch (SandboxModelException $e) {
+			$problems = array_merge($problems, $e->problems);
+		}
 		$cleanup();
 		if ($problems) {
 			foreach ($problems as $p) {
@@ -155,7 +165,10 @@ switch ($command) {
 			exit(1);
 		}
 		sbx_out($manifest->title() . ' ' . $manifest->version() . ' (' . $manifest->name() . ') would install here.');
-		foreach (SandboxConsent::describe(SandboxConsent::grantsOf($manifest)) as $heading => $lines) {
+		foreach (SandboxConsent::modelLines($manifest->name(), $models) as $line) {
+			sbx_out('Its own: ' . $line);
+		}
+		foreach (SandboxConsent::describe(SandboxConsent::grantsOf($manifest, $models)) as $heading => $lines) {
 			sbx_out($heading . ':');
 			foreach ($lines as $line) {
 				sbx_out('  ' . $line);

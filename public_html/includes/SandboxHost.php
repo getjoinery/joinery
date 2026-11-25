@@ -15,7 +15,7 @@
  *     "settings": {"webhook_url": "…"},          secrets opened
  *     "outbound_hosts": ["hooks.slack.com"],      the approved ones
  *     "site":     {"site_name": "…", "webDir": "…", "default_timezone": "…", "default_email_template": "…", "upload_web_dir": "…"},
- *     "models":   [ … the manifest's model declarations … ]
+ *     "models":   {"Note": "Sbx_notes_Note", …}       its model classes, by the site's names
  *   }
  *
  * The envelope carries no credential: it is written to the fenced process,
@@ -45,6 +45,8 @@
  * share BACKGROUND_SLOTS of their own: each ask of a call holds a second web
  * worker, and a plugin that loops asks must not hold the worker pool.
  *
+ * @version 1.13 - the envelope's models map each model class to the site's name; a call is refused while the model
+ *                files differ from what the site read (spec sandboxed_plugin_model_files)
  * @version 1.12 - a ui() or page() call with no user is always a visitor's (reviewer2 R5); the network's count is read
  *                under its lock
  * @version 1.11 - a call for a visitor not signed in, from a public page (spec sandboxed_plugin_public_pages design 4):
@@ -292,6 +294,14 @@ class SandboxHost {
 			throw new SandboxManifestException("'$plugin' is not an active sandboxed plugin.");
 		}
 		$manifest = SandboxPlugins::manifest($plugin);
+		// The fence would run new model files against the tables made for the old.
+		if (SandboxModels::filesChanged($plugin)) {
+			throw new SandboxManifestException(SandboxModels::FILES_CHANGED . '.');
+		}
+		$models = array();
+		foreach (array_keys(SandboxModels::declarations($plugin)) as $name) {
+			$models[(string)$name] = SandboxManifest::classFor($plugin, (string)$name);
+		}
 		return array(
 			'call_id'        => 'c_' . bin2hex(random_bytes(8)),
 			'plugin'         => $plugin,
@@ -303,8 +313,8 @@ class SandboxHost {
 			'outbound_hosts' => SandboxConsent::effective($plugin)['outbound_hosts'],
 			// Public facts of the site, the only settings of the site's it sees.
 			'site'           => self::siteFacts(),
-			// Its own models' declarations, as core read them from its manifest.
-			'models'         => $manifest->models(),
+			// Its own model classes, each with the name the site knows it by.
+			'models'         => $models ?: new stdClass(),
 		);
 	}
 

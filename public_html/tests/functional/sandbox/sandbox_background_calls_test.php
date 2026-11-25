@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_background_calls
  *
+ * @version 1.2 - its model is a model file (spec sandboxed_plugin_model_files)
  * @version 1.1 - reviewer2 L1-L4: a withdrawn signal ends unsent, a plugin's share of a pass, busy not counted, the wording
  * @version 1.0
  */
@@ -42,28 +43,29 @@ function on_signal(array $input) {
 		throw new RuntimeException('not today');
 	}
 	$e = new Entry();
-	$e->set('what', 'signal ' . $input['signal'] . ' ' . (int)($input['data']['user_id'] ?? 0));
+	$e->set('qbe_what', 'signal ' . $input['signal'] . ' ' . (int)($input['data']['user_id'] ?? 0));
 	$e->save();
 	return array('saved' => $e->key);
 }
 function on_schedule(array $input) {
 	$e = new Entry();
-	$e->set('what', 'schedule ' . $input['schedule']);
+	$e->set('qbe_what', 'schedule ' . $input['schedule']);
 	$e->save();
 	return array('saved' => $e->key);
 }
-PHP);
+PHP,
+	'data/entries_class.php' => sandbox_model_file('Entry', 'qbe', array('what' => array('type' => 'varchar(200)'))),
+);
 $manifest = array(
 	'signals' => array($signal),
 	'schedules' => array(array('name' => 'nightly', 'frequency' => 'daily', 'time' => '03:00')),
-	'models' => array(array('name' => 'Entry', 'fields' => array(array('name' => 'what', 'type' => 'string', 'max_length' => 200)))),
 	'limits' => array('memory_mb' => 32, 'timeout_ms' => 8000),
 );
 $db = DbConnector::get_instance()->get_db_link();
 
 $checks = function (string $name, string $label) use ($signal, $db) {
 	$class = SandboxManifest::classFor($name, 'Entry');
-	$prefix = SandboxManifest::prefixFor($name, 'Entry');
+	$prefix = 'qbe';
 	$receivers = iterator_to_array(new MultiSignalReceiver(array('kind' => SignalReceiver::KIND_SANDBOX, 'plugin' => $name)), false);
 	check(count($receivers) === 1, $label . ': it has a receiver for its approved signal');
 	$last_delivery = function () use ($db, $receivers) {

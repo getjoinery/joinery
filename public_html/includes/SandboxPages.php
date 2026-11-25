@@ -8,6 +8,8 @@
  * answered and reads a table's rows. A member's page's logic is
  * logic/sandbox_page_logic.php, which is also the API action the apps call.
  *
+ * @version 1.8 - a table section reads its model's declaration (its own columns, with or without the prefix), newest
+ *                first by its key (spec sandboxed_plugin_model_files)
  * @version 1.7 - the public kind (spec sandboxed_plugin_public_pages): framed and drawn public pages, a public page's
  *                redirects to its own public pages, no uploads, the spam checks' inputs in a visitor's POST forms,
  *                and the checks' fields never handed to the plugin
@@ -104,30 +106,30 @@ class SandboxPages {
 	/**
 	 * A table section's rows, newest first unless it says otherwise.
 	 *
-	 * @return array{rows: SystemMultiBase, columns: array<string,string>, prefix: string}
+	 * @return array{rows: SystemMultiBase, columns: array<string,string>, prefix: string, fields: array} columns by their full names
 	 */
 	public static function tableRows(string $plugin, SandboxManifest $manifest, array $section): array {
 		$model_name = $section['model'];
 		$class = SandboxManifest::classFor($plugin, $model_name);
-		$prefix = SandboxManifest::prefixFor($plugin, $model_name);
-		$fields = array();
-		foreach ($manifest->models() as $model) {
-			if ($model['name'] === $model_name) {
-				foreach ($model['fields'] as $field) {
-					$fields[$field['name']] = $field;
-				}
-			}
+		$declaration = SandboxModels::declarations($plugin)[$model_name] ?? null;
+		if ($declaration === null) {
+			throw new SandboxManifestException("'$model_name' is not one of this plugin's models.");
 		}
+		$prefix = (string)$declaration['prefix'];
 		$columns = array();
 		foreach ($section['columns'] as $column) {
-			$columns[$column] = $fields[$column]['label'] ?? ucfirst(str_replace('_', ' ', $column));
+			$full = SandboxPluginManager::columnOf($declaration, (string)$column);
+			if ($full !== null) {
+				$columns[$full] = ucfirst(str_replace('_', ' ', substr($full, strlen($prefix) + 1)));
+			}
 		}
-		$order = (string)($section['order'] ?? '-create_time');
+		$order = (string)($section['order'] ?? '-' . $declaration['pkey_column']);
 		$direction = substr($order, 0, 1) === '-' ? 'DESC' : 'ASC';
-		$order_column = $prefix . '_' . ltrim($order, '-');
+		$order_column = SandboxPluginManager::columnOf($declaration, ltrim($order, '-')) ?? (string)$declaration['pkey_column'];
 		$multi = 'Multi' . $class;
-		$rows = new $multi(array('deleted' => false), array($order_column => $direction), (int)($section['limit'] ?? 50));
-		return array('rows' => $rows, 'columns' => $columns, 'prefix' => $prefix, 'fields' => $fields);
+		$options = $class::hasSoftDelete() ? array('deleted' => false) : array();
+		$rows = new $multi($options, array($order_column => $direction), (int)($section['limit'] ?? 50));
+		return array('rows' => $rows, 'columns' => $columns, 'prefix' => $prefix, 'fields' => (array)$declaration['field_specifications']);
 	}
 
 	/** Image types an asset may be, by extension. Never SVG: it can carry script. */

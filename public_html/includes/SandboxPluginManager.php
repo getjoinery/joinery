@@ -27,6 +27,9 @@
  * what was approved: on activation, on a new approval, and when an active
  * plugin's files are replaced.
  *
+ * @version 1.5 - its models come from its model files (spec sandboxed_plugin_model_files): validate() reads them in
+ *                the parser jail and checks its pages' table sections against them; reconcile() and sync store what
+ *                was read on the row; modelCollisions() reads the declarations
  * @version 1.4 - install, reconcile, deactivate and teardown drop the plugin's cached public pages
  *                (SandboxPublicPages::dropCache(), spec sandboxed_plugin_public_pages design 5)
  * @version 1.3 - modelCollisions() refuses a model name a core or native class already has (its short name in the fence)
@@ -69,13 +72,20 @@ class SandboxPluginManager {
 	 * @return array{valid:bool,errors:string[],warnings:string[]}
 	 */
 	public static function validate(string $name): array {
-		$errors = array();
 		try {
 			$manifest = SandboxPlugins::manifest($name);
 		} catch (SandboxManifestException $e) {
 			return array('valid' => false, 'errors' => array($e->getMessage()), 'warnings' => array());
 		}
-		$errors = array_merge($errors, self::modelCollisions($manifest), SandboxCompatibility::problems($manifest));
+		// Its model files, read now in the parser jail and held for this
+		// process (stored by whoever goes on to install, activate or approve).
+		try {
+			$models = SandboxModels::refresh($name);
+		} catch (SandboxModelException $e) {
+			return array('valid' => false, 'errors' => $e->problems, 'warnings' => array());
+		}
+		$errors = array_merge(self::modelCollisions($name, $models), self::tableSectionProblems($manifest, $models),
+			SandboxCompatibility::problems($manifest));
 		return array('valid' => empty($errors), 'errors' => $errors, 'warnings' => array());
 	}
 
@@ -84,27 +94,73 @@ class SandboxPluginManager {
 	 * own. Derived names cannot meet a core, native or other sandboxed name
 	 * (SandboxManifest), so this is a second line, not the first.
 	 *
+	 * @param array $models class => declaration
 	 * @return string[]
 	 */
-	public static function modelCollisions(SandboxManifest $manifest): array {
+	public static function modelCollisions(string $plugin, array $models): array {
 		$errors = array();
-		foreach ($manifest->models() as $model) {
-			$class = SandboxManifest::classFor($manifest->name(), $model['name']);
-			if (class_exists($class) && !(is_subclass_of($class, 'SandboxRecord') && $class::sandboxPlugin() === $manifest->name())) {
-				$errors[] = "The model {$model['name']} would be the class $class, which this site already has.";
+		foreach ($models as $name => $declaration) {
+			$name = (string)$name;
+			$class = SandboxManifest::classFor($plugin, $name);
+			if (class_exists($class, false) && !(is_subclass_of($class, 'SandboxRecord') && in_array($class::$sandbox_plugin, array(null, $plugin), true))) {
+				$errors[] = "{$declaration['file']}: the model $name would be the class $class, which this site already has.";
 			}
-			// The plugin's code reaches its models by their short names too
-			// (Note, MultiNote). One a core or native class already has would
-			// mean the site's model in the plugin's code, a write to the
-			// site's rows the author meant for its own table.
-			foreach (array($model['name'], 'Multi' . $model['name']) as $short) {
+			// The plugin's code reaches its models by their own names (Note,
+			// MultiNote). One a core or native class already has would mean
+			// the site's model in the plugin's code, a write to the site's
+			// rows the author meant for its own table.
+			foreach (array($name, 'Multi' . $name) as $short) {
 				if (class_exists($short)) {
-					$errors[] = "The model name {$model['name']} is taken by the site's own $short; name the model something else.";
+					$errors[] = "{$declaration['file']}: the model name $name is taken by the site's own $short; name the model something else.";
 					break;
 				}
 			}
 		}
 		return $errors;
+	}
+
+	/**
+	 * A page's table section names one of the plugin's model classes and
+	 * columns of it, with or without the prefix, as a collection's filter
+	 * does.
+	 *
+	 * @return string[]
+	 */
+	public static function tableSectionProblems(SandboxManifest $manifest, array $models): array {
+		$errors = array();
+		foreach ($manifest->adminPages() as $page) {
+			foreach ($page['sections'] ?? array() as $j => $section) {
+				if (($section['type'] ?? '') !== 'table') {
+					continue;
+				}
+				$label = "admin_pages.{$page['slug']}.sections[$j]";
+				$declaration = $models[$section['model']] ?? null;
+				if ($declaration === null) {
+					$errors[] = "$label: '{$section['model']}' is not one of this plugin's models (src/data/)";
+					continue;
+				}
+				$asked = $section['columns'];
+				if (isset($section['order'])) {
+					$asked[] = ltrim($section['order'], '-');
+				}
+				foreach ($asked as $column) {
+					if (self::columnOf($declaration, (string)$column) === null) {
+						$errors[] = "$label: '$column' is not a column of {$section['model']}";
+					}
+				}
+			}
+		}
+		return $errors;
+	}
+
+	/** A column of a model by its name, with or without the prefix, or null. */
+	public static function columnOf(array $declaration, string $column): ?string {
+		$specs = (array)($declaration['field_specifications'] ?? array());
+		if (isset($specs[$column])) {
+			return $column;
+		}
+		$full = $declaration['prefix'] . '_' . $column;
+		return isset($specs[$full]) ? $full : null;
 	}
 
 	/** The admin permission a sandboxed plugin's pages and settings need. */
@@ -176,14 +232,6 @@ class SandboxPluginManager {
 		SandboxSettings::seed($name);
 	}
 
-	/** Install: the plugin's model tables. */
-	public static function install(string $name): void {
-		SandboxPlugins::demandEnabled();
-		self::syncTables($name);
-		// A copy an earlier install of this name left is never this one's page.
-		SandboxPublicPages::dropCache($name);
-	}
-
 	/** Where an admin reviews and approves what a sandboxed plugin asks for. */
 	public static function approvalUrl(string $name): string {
 		return '/admin/admin_sandbox_approve?plugin=' . rawurlencode($name);
@@ -216,6 +264,8 @@ class SandboxPluginManager {
 	 * active plugin's files are replaced.
 	 */
 	public static function reconcile(string $name): void {
+		// The model files read for this activation, approval or install.
+		SandboxModels::storePending($name);
 		self::syncTables($name);
 		SandboxSettings::seed($name);
 		SandboxPlugins::reset();
@@ -336,10 +386,11 @@ class SandboxPluginManager {
 	}
 
 	/**
-	 * Create the plugin's model tables, add columns a newer manifest declares,
-	 * and apply its indexes, through the same schema builder native plugins
-	 * use. Columns a manifest stops declaring are kept (the builder never
-	 * drops one here), as for a native plugin.
+	 * Create the plugin's model tables, add columns its model files newly
+	 * declare, and apply its indexes and delete rules, through the same schema
+	 * builder and rule registration native plugins use. Columns a file stops
+	 * declaring are kept (the builder never drops one here), as for a native
+	 * plugin.
 	 *
 	 * @return string[] what changed, in words
 	 * @throws Exception when a table cannot be made
@@ -358,14 +409,19 @@ class SandboxPluginManager {
 		$messages = $result['messages'] ?? array();
 		$index_result = $updater->manageIndexes($classes);
 		self::recordTables($name, $classes);
-		return array_merge($messages, $index_result['messages'] ?? array());
+		// Its delete rules, within what was approved (SandboxRecord::sandboxFill()).
+		$warnings = array();
+		foreach ($classes as $class) {
+			$warnings = array_merge($warnings, DeletionRule::registerModelRules($class));
+		}
+		return array_merge($messages, $index_result['messages'] ?? array(), $warnings);
 	}
 
 	/**
 	 * Remember the tables made for a plugin, in its row's metadata under a
 	 * runtime key (sync keeps '_' keys), so uninstall drops every one even
-	 * after its manifest stops naming it. Before the row exists (a first
-	 * install), the manifest still names them all.
+	 * after its model files stop naming it. Before the row exists (a first
+	 * install), the declarations still name them all.
 	 */
 	public static function recordTables(string $name, array $classes): void {
 		$plugin = Plugin::get_by_plugin_name($name);

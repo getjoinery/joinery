@@ -75,6 +75,7 @@
  * most MAX_ANON_RECIPIENTS people, each counted against the visitor's
  * network (ANON_MAIL_FEATURE), and never send a batch.
  *
+ * @version 1.10 - its own models by their class names in its model files (SandboxModels::declarations())
  * @version 1.9 - a list filter carries a list of values (any of them, at most MAX_LIST_ROWS); an empty list
  *               matches no row without asking (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.8 - a call for a visitor not signed in reads only outside a checked form POST, and within one writes
@@ -1360,8 +1361,8 @@ class SandboxRelay {
 	private function ownModels(): array {
 		if ($this->own === null) {
 			$this->own = array();
-			foreach (SandboxPlugins::manifest($this->plugin)->models() as $model) {
-				$this->own[$model['name']] = SandboxManifest::classFor($this->plugin, $model['name']);
+			foreach (array_keys(SandboxModels::declarations($this->plugin)) as $name) {
+				$this->own[(string)$name] = SandboxManifest::classFor($this->plugin, (string)$name);
 			}
 		}
 		return $this->own;

@@ -34,6 +34,10 @@ if (!$dry_run['can_delete']) {
 	foreach ($dry_run['blocking_reasons'] as $reason) {
 		echo '<li>' . htmlspecialchars($reason) . '</li>';
 	}
+	// Rows of a sandboxed plugin that block: the page that shows and removes them.
+	foreach (SandboxBlockingRows::urlsForDryRun($dry_run) as $url) {
+		echo '<li><a href="' . htmlspecialchars($url) . '">See and delete the plugin rows that block this</a></li>';
+	}
 	echo '</ul></div>';
 } else {
 	echo '<table class="table table-striped">';

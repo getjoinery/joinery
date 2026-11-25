@@ -8,6 +8,7 @@
  *
  * Usage: php validate_php_file.php <path_to_php_file>
  *
+ * @version 1.4 - X::class is not a class declaration: it no longer loses the parent of the class it is in
  * @version 1.3 - a collection with no getMultiResults() of its own is checked for a model the built-in query can list
  * @version 1.2 - the method-name position starts set, so a call with no name after :: or -> reads no stale index
  * @version 1.1 - includes the file only when it just declares, or is a class file in includes/ or data/;
@@ -513,8 +514,16 @@ class MethodExistenceTest {
             $line_number = $token[2];
 
             // Track when we enter a class — capture the class name and (if present) parent class
-            // so self::, static::, and parent:: calls can be resolved later.
-            if ($token_type === T_CLASS) {
+            // so self::, static::, and parent:: calls can be resolved later. `self::class`
+            // and `static::class` are T_CLASS too, and declare nothing.
+            $previous = null;
+            for ($back = $i - 1; $back >= 0; $back--) {
+                if (is_array($this->tokens[$back]) && in_array($this->tokens[$back][0], array(T_WHITESPACE, T_COMMENT, T_DOC_COMMENT), true)) continue;
+                $previous = $this->tokens[$back];
+                break;
+            }
+            $is_class_constant = is_array($previous) && $previous[0] === T_DOUBLE_COLON;
+            if ($token_type === T_CLASS && !$is_class_constant) {
                 $in_class = true;
                 $class_depth = $brace_depth + 1;
                 // Look ahead for the class name (next T_STRING after whitespace)

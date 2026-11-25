@@ -13,6 +13,9 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.28 - a sandboxed plugin's model files are read at sync and stored with its row at install (spec
+ *                 sandboxed_plugin_model_files); install() refuses one while sandboxed plugins are switched off, and drops the
+ *                 public pages an earlier install of its name left in the cache
  * @version 1.27 - activation refuses a plugin that requires an extension or package the platform does not run
  *                 (RefusedDependencies: ImageMagick)
  * @version 1.26 - activation refuses a plugin whose own vendor/ is not built as required, needs what this PHP
@@ -279,13 +282,30 @@ class PluginManager extends AbstractExtensionManager {
                 $model->set('plg_install_error', 'Invalid ' . SandboxManifest::FILE);
                 return;
             }
+            // Its runtime keys stay (the tables it made, its menus), and the
+            // model files read for this install are stored with the row.
+            $stored = json_decode((string)$model->get('plg_metadata'), true);
+            foreach (is_array($stored) ? $stored : array() as $key => $value) {
+                if (is_string($key) && isset($key[0]) && $key[0] === '_') {
+                    $metadata[$key] = $value;
+                }
+            }
+            $read = SandboxModels::pending((string)$name);
+            if ($read !== null) {
+                $metadata[SandboxModels::METADATA_KEY] = $read;
+            }
             $model->set('plg_install_error', null);
         } else {
             $metadata = parent::loadMetadataIntoModel($model, $name);
             if ($metadata === false) return; // Error already set by parent
         }
 
-        $model->set('plg_metadata', json_encode($metadata));
+        $json = json_encode($metadata);
+        if ($json === false) {
+            // Never a row's metadata replaced by nothing.
+            throw new Exception("Plugin '$name': its metadata cannot be stored (" . json_last_error_msg() . ').');
+        }
+        $model->set('plg_metadata', $json);
         $model->set('plg_receives_upgrades', $metadata['receives_upgrades'] ?? true);
         $model->set('plg_is_system', $metadata['is_system'] ?? false);
         $model->set('plg_installed_time', date('Y-m-d H:i:s'));
@@ -1362,6 +1382,10 @@ class PluginManager extends AbstractExtensionManager {
         if (!$this->validateName($name)) {
             throw new Exception("Invalid plugin name: $name");
         }
+        // A sandboxed plugin installs only where they are switched on.
+        if (SandboxPlugins::isSandboxed((string)$name)) {
+            SandboxPlugins::demandEnabled();
+        }
 
         // Plugins with included_in_publish=true on the upgrade server get fresh
         // code on every install; plugins not in the catalog 404 silently and
@@ -1443,6 +1467,12 @@ class PluginManager extends AbstractExtensionManager {
                 $plugin->set('plg_install_error', null);
                 $this->setRemoveRequestId($plugin, '');
                 $plugin->save();
+
+                // A copy of a public page an earlier install of this name
+                // left is never this one's.
+                if (SandboxPlugins::isSandboxed($name)) {
+                    SandboxPublicPages::dropCache($name);
+                }
 
                 // An active sandboxed plugin whose files were replaced: what it
                 // owns follows its new manifest at once, within what was approved
@@ -1886,6 +1916,18 @@ class PluginManager extends AbstractExtensionManager {
         $result['warnings'] = $result['warnings'] ?? [];
         foreach ($active_plugins as $plugin) {
             $plugin_name = $plugin->get('plg_name');
+
+            // A sandboxed plugin's model files, read again in the parser jail
+            // and stored on its row. A file gone bad keeps the stored copy,
+            // and its fenced calls are refused until it reads clean.
+            if (SandboxPlugins::isSandboxed($plugin_name)) {
+                try {
+                    SandboxModels::refresh($plugin_name);
+                    SandboxModels::storePending($plugin_name);
+                } catch (Exception $e) {
+                    $result['warnings'][] = "$plugin_name: its model files were not read again, so the site keeps what it read before - " . $e->getMessage();
+                }
+            }
 
             // Update tables (adds missing columns, creates new tables)
             self::routeTableStep($plugin_name, 'table', $database_updater->runPluginTablesOnly($plugin_name),

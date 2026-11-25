@@ -2,17 +2,10 @@
   "name": "notes_sample",
   "id": "be9bcef88eaa3897e9f879e6a4c9de11",
   "title": "Notes (sample)",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "platform": 1,
   "description": "The sample sandboxed PHP plugin of docs/sandboxed_plugins.md: notes kept in a table of its own, an admin page that lists and adds them, a member page, a framed board, a signal and a schedule.",
   "author": "Joinery",
-  "models": [
-    {"name": "Note", "label": "Note", "fields": [
-      {"name": "text", "type": "string", "max_length": 200, "required": true},
-      {"name": "author", "type": "integer", "index": true},
-      {"name": "pinned", "type": "boolean"}
-    ]}
-  ],
   "permissions": {"own_records": {"Notification": ["read"]}},
   "signals": ["account.signup"],
   "schedules": [{"name": "tidy", "frequency": "daily", "time": "04:00"}],

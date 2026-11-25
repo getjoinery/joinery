@@ -38,6 +38,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_public_pages
  *
+ * @version 1.2 - its model is a model file; an install is PluginManager's (spec sandboxed_plugin_model_files)
  * @version 1.1 - reviewer2 R1-R6: forms found by the cleaner, actions in the write cap, the request's own query
  *                names, reserved field names, a userless call always a visitor's, distinct cache keys
  * @version 1.0
@@ -105,7 +106,6 @@ $net_lock = function (string $ip): string {
 
 $manifest = array(
 	'send_email' => true,
-	'models' => array(array('name' => 'Note', 'fields' => array(array('name' => 'text', 'type' => 'text')))),
 	'profile_pages' => array(array('slug' => 'mine', 'title' => 'Mine', 'sections' => array(array('type' => 'text', 'text' => 'Yours.')))),
 	'public_pages' => array(
 		array('slug' => 'index', 'title' => 'Welcome', 'sections' => array(array('type' => 'text', 'text' => 'Hello, anyone.'))),
@@ -166,7 +166,7 @@ try {
 	check(isset($more['public_pages']['about']), 'A new public page asks again', json_encode($more));
 
 	section('Installed and approved');
-	$p = sandbox_fixture_plugin($manifest);
+	$p = sandbox_fixture_plugin($manifest, array('files' => array('data/notes_class.php' => sandbox_model_file('Note', 'qpp', array('text' => array('type' => 'text'))))));
 	$name = $p['name'];
 	$pm = PluginManager::getInstance();
 	$pm->install($name, false);
@@ -476,7 +476,7 @@ try {
 	SandboxPluginManager::reconcile($name);
 	check(StaticPageCache::countPath('/' . $name . '/about') === 0, 'and so does a new approval, activation or files');
 	StaticPageCache::createCache('/' . $name . '/about', array(), '<html><body>a</body></html>', array('headers' => array(), 'https_redirect' => false));
-	SandboxPluginManager::install($name);
+	PluginManager::getInstance()->install($name, false);
 	check(StaticPageCache::countPath('/' . $name . '/about') === 0, 'and an install');
 	$in_fence = (string)file_get_contents(PathHelper::getIncludePath('utils/sandbox_runtime.php'));
 	check(strpos($in_fence, "SandboxPipe::ask('page.refresh'") !== false

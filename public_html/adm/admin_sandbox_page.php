@@ -4,6 +4,7 @@
  * Admin: a sandboxed plugin's page, drawn from its manifest.
  * See adm/logic/admin_sandbox_page_logic.php.
  *
+ * @version 1.3 - a table's cells by its model's own columns and their types (spec sandboxed_plugin_model_files)
  * @version 1.2 - a framed page: its frame and core's bridge, frame-src naming the framed route alone
  * @version 1.1 - a page drawn by the plugin's view: its cleaned body under the provenance line
  * @version 1.0
@@ -39,18 +40,18 @@ $page->admin_header(array(
 
 /** One stored value, as text for a table cell. */
 $cell = function ($value, ?array $field) use ($tz) {
-	$type = $field['type'] ?? null;
+	$type = strtolower((string)($field['type'] ?? ''));
 	if ($value === null || $value === '') {
 		return '';
 	}
-	if ($type === 'boolean') {
+	if ($type === 'bool' || $type === 'boolean') {
 		return $value && $value !== 'f' ? 'Yes' : 'No';
 	}
-	if ($type === 'json') {
+	if ($type === 'json' || $type === 'jsonb') {
 		$decoded = is_string($value) ? json_decode($value, true) : $value;
 		return '<code>' . htmlspecialchars(mb_substr(json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 0, 300)) . '</code>';
 	}
-	if ($type === 'datetime' || $type === null) {
+	if (strpos($type, 'timestamp') === 0) {
 		if (is_string($value) && preg_match('~^\d{4}-\d\d-\d\d \d\d:\d\d~', $value)) {
 			return htmlspecialchars(LibraryFunctions::convert_time($value, 'UTC', $tz, 'M j, Y g:i A'));
 		}
@@ -96,7 +97,7 @@ foreach ($page_vars['sections'] as $data) {
 			foreach ($data['rows'] as $row) {
 				$values = array();
 				foreach (array_keys($data['columns']) as $column) {
-					$values[] = $cell($row->get($data['prefix'] . '_' . $column), $data['fields'][$column] ?? null);
+					$values[] = $cell($row->get($column), $data['fields'][$column] ?? null);
 				}
 				$page->disprow($values);
 			}

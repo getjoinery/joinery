@@ -32,6 +32,7 @@
         "/admin/admin_question",
         "/admin/admin_require_second_factor",
         "/admin/admin_sandbox_approve",
+        "/admin/admin_sandbox_blocks",
         "/admin/admin_sandbox_log",
         "/admin/admin_sandbox_page",
         "/admin/admin_survey",

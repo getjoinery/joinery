@@ -24,6 +24,7 @@
  *
  * Run: php tests/unit/sandbox_models_test.php
  *
+ * @version 1.1 - a table is sbx_{plugin}__ and the model file's own table name (spec sandboxed_plugin_model_files)
  * @version 1.0
  */
 
@@ -89,7 +90,9 @@ foreach ($plugins as $plugin) {
 	foreach ($models as $model) {
 		$key = $plugin . '/' . $model;
 		$class = strtolower(SandboxManifest::classFor($plugin, $model));
-		$table = SandboxManifest::tableFor($plugin, $model);
+		// The table: sbx_{plugin}__ and the model file's own table name,
+		// which holds no '__' (SandboxModelDeclarations).
+		$table = SandboxModelDeclarations::tableFor($plugin, 'qqq_' . strtolower(preg_replace('~(?<!^)[A-Z]~', '_$0', $model)) . 's');
 		// Models told apart only by case are one model (the manifest refuses
 		// the pair), so they may share a table but never across plugins.
 		$model_key = $plugin . '/' . strtolower($model);

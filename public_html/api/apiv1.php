@@ -2,6 +2,11 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.45 - a sandboxed plugin's own key on its own models (SandboxRecord::isOwnRequest()) reads and writes them
+ *                whatever their API flags and levels, and may set their owner column; for anyone else such a model
+ *                is readable only when its file says so and is never written, and DELETE is a soft delete at the
+ *                delete level alone (the record check is authenticate_delete(), for every model) (spec
+ *                sandboxed_plugin_model_files)
  * @version 2.44 - a collection filter on a column takes a list of values (any of them), at most API_MAX_PAGE
  * @version 2.43 - a sandboxed plugin's key has no budget of its own; its rows are stamped sandbox:{install id}
  *   and stay out of the loopback address's count (spec sandboxed_plugin_public_pages D3)
@@ -340,8 +345,25 @@ function api_resolve_logic_path($url_segments, $noun) {
  * the SystemBase `false` default, so a class predating the property is simply not
  * exposed. $prop is 'api_readable' or 'api_writable'.
  */
-function api_flag($class_name, $prop) {
+function api_flag($class_name, $prop, $method = null) {
+	// A sandboxed plugin's model (spec sandboxed_plugin_model_files D3): its
+	// own key reaches it whatever its flags; for anyone else it is read when
+	// its file says so, never created or changed, and deleted by staff (a
+	// soft delete, so only a model that keeps deleted rows).
+	if (is_subclass_of($class_name, 'SandboxRecord')) {
+		if ($class_name::isOwnRequest()) {
+			return true;
+		}
+		if ($prop === 'api_writable') {
+			return $method === 'delete' && $class_name::hasSoftDelete();
+		}
+	}
 	return (bool) $class_name::${$prop};
+}
+
+/** Whether the request is a sandboxed plugin's own, on one of its own models. */
+function api_sandbox_own($class_name) {
+	return is_subclass_of($class_name, 'SandboxRecord') && $class_name::isOwnRequest();
 }
 
 /**
@@ -378,6 +400,11 @@ function api_record_write_fields(array $fallback) {
  */
 function api_sanitize_write_input(array $input, $class_name, $is_update = false) {
 	$owner_col = api_owner_column($class_name);
+	// A sandboxed plugin saves its own rows for the member in front of it,
+	// as first-party code does in process: its own request may set the owner.
+	if (api_sandbox_own($class_name)) {
+		$owner_col = null;
+	}
 	$clean = array();
 	foreach ($input as $key => $value) {
 		if ($class_name::is_unwritable_field($key)) continue;
@@ -673,6 +700,9 @@ if ($viewer_header !== null) {
 	$api_user = $viewer;
 	$auth_data = array('current_user_id' => (int)$viewer->key, 'current_user_permission' => 0) + $auth_data;
 }
+// The plugin a sandboxed key belongs to, for its own models' rules
+// (SandboxRecord::isOwnRequest(), which also needs no member named).
+SandboxRecord::setRequestingPlugin($sandbox_plugin);
 if ($sandbox_plugin !== null) {
 	RequestLogger::set_request_key(RequestLogger::SANDBOX_KEY_PREFIX . (PluginInstallIdentity::idOf($sandbox_plugin) ?? ''));
 }
@@ -933,7 +963,7 @@ if ($record_class !== null) {
 			// caller by construction (and a supplied owner cannot spoof).
 			$write_input = api_sanitize_write_input(api_record_write_fields($_POST), $class_name);
 			$owner_col = api_owner_column($class_name);
-			if ($owner_col !== null) {
+			if ($owner_col !== null && !api_sandbox_own($class_name)) {
 				$write_input[$owner_col] = $auth_data['current_user_id'];
 			}
 
@@ -964,7 +994,7 @@ if ($record_class !== null) {
 
 	} else if ($request_method == 'delete') {
 
-		if (!api_flag($class_name, 'api_writable')) {
+		if (!api_flag($class_name, 'api_writable', 'delete')) {
 			api_error('Not found', 'NotFound', 404);
 		}
 
@@ -975,7 +1005,9 @@ if ($record_class !== null) {
 		try {
 			$object = new $class_name($entity_id, TRUE);
 			api_refuse_unless_viewer_owns($object, $class_name);
-			api_authorize_row($object, 'authenticate_write', $auth_data);
+			// The check soft_delete() makes, asked first: natively the write
+			// rule, then the delete level.
+			api_authorize_row($object, 'authenticate_delete', $auth_data);
 			$object->soft_delete();
 			$object = new $class_name($entity_id, TRUE);
 
@@ -1012,9 +1044,10 @@ if ($record_class !== null) {
 	// rule is read at its read level only: no one below it is shown a row. The list would still
 	// answer num_results for whatever the member filtered on, a yes-or-no on
 	// rows they may not see, so the list is refused before it is counted.
-	if (!$class_name::$api_public_read && api_owner_column($class_name) === null
+	$read_rule = (new ReflectionMethod($class_name, 'authenticate_read'))->getDeclaringClass()->getName();
+	if (!$class_name::$api_public_read && api_owner_column($class_name) === null && !api_sandbox_own($class_name)
 			&& !Access::allows($class_name::access_level('read'), (int)$auth_data['current_user_permission'])
-			&& (new ReflectionMethod($class_name, 'authenticate_read'))->getDeclaringClass()->getName() === 'SystemBase') {
+			&& ($read_rule === 'SystemBase' || $read_rule === 'SandboxRecord')) {
 		api_error('Fetch objects: ' . $class_name . ' needs level ' . $class_name::access_level('read'), 'AuthenticationError', 403);
 	}
 
@@ -1085,7 +1118,7 @@ if ($record_class !== null) {
 	// read level get the unfiltered query.
 	$is_public_read = $class_name::$api_public_read;
 	$owner_col = api_owner_column($class_name);
-	if (!$is_public_read && $owner_col !== null
+	if (!$is_public_read && $owner_col !== null && !api_sandbox_own($class_name)
 			&& !Access::allows($class_name::access_level('read'), (int)$auth_data['current_user_permission'])) {
 		$objects->api_owner_scope = [$owner_col, $auth_data['current_user_id']];
 	}

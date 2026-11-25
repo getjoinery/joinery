@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_consent
  *
+ * @version 1.2 - its models are model files; an install by name is refused while switched off (spec sandboxed_plugin_model_files)
  * @version 1.1 - the envelope carries no credential
  * @version 1.0
  */
@@ -99,8 +100,7 @@ try {
 		'signals' => array($signal),
 		'schedules' => array(array('name' => 'digest', 'frequency' => 'daily', 'time' => '08:30')),
 		'outbound_hosts' => array('hooks.example.com'),
-		'models' => array(array('name' => 'Sent', 'fields' => array(array('name' => 'note', 'type' => 'text')))),
-	));
+	), array('files' => array('data/sents_class.php' => sandbox_model_file('Sent', 'qcs', array('note' => array('type' => 'text'))))));
 	$name = $p['name'];
 	$pm = PluginManager::getInstance();
 
@@ -151,7 +151,7 @@ try {
 	check($off === SandboxPlugins::OFF_MESSAGE, 'With sandboxed plugins switched off, activation is refused saying so', (string)$off);
 	$off = null;
 	try {
-		SandboxPluginManager::install($name);
+		$pm->install($name, false);
 	} catch (Exception $e) {
 		$off = $e->getMessage();
 	}
@@ -328,16 +328,18 @@ try {
 	$old_key = (int)$key->key;
 	$rewrite($p['dir'], array('version' => '1.1.0', 'outbound_hosts' => array('hooks.example.com', 'more.example.com'),
 		'profile_pages' => array(array('slug' => 'ask', 'title' => 'Tell us', 'sections' => array(
-			array('type' => 'form', 'handler' => 'ask', 'fields' => array(array('name' => 'secret', 'label' => 'Your password', 'type' => 'text')))))),
-		'models' => array(array('name' => 'Sent', 'fields' => array(array('name' => 'note', 'type' => 'text'))),
-			array('name' => 'Extra', 'fields' => array(array('name' => 'v', 'type' => 'integer'))))));
+			array('type' => 'form', 'handler' => 'ask', 'fields' => array(array('name' => 'secret', 'label' => 'Your password', 'type' => 'text'))))))));
+	// And a second model file.
+	file_put_contents($p['dir'] . '/src/data/extras_class.php', sandbox_model_file('Extra', 'qce', array('v' => array('type' => 'int8'))));
 	$reset();
 	$pm->install($name, false);
 	$reset();
 	check(SandboxPlugins::isActive($name), 'Replacing its files leaves it active');
 	check(SandboxConsent::needsApproval($name) && SandboxConsent::pending($name) === array('outbound_hosts' => array('more.example.com'),
+		'model_reach' => array('Its extra records can be deleted by staff at level 7 and above', 'Its extra records can be permanently deleted by staff at level 9 and above'),
 		'member_pages' => array('ask' => 'Tell us (with a form members fill in)')),
-		'waiting on approval of exactly what is new: a host, and a page asking members for something', json_encode(SandboxConsent::pending($name)));
+		'waiting on approval of exactly what is new: a host, who may delete the new model\'s rows, and a page asking members for something',
+		json_encode(SandboxConsent::pending($name)));
 	$member_page = harness_call_logic('logic/sandbox_page_logic.php', 'sandbox_page_logic', array('plugin' => $name, 'page' => 'ask'), 'GET');
 	check((bool)$member_page->error, 'The new member page is not there until approved');
 	$envelope = SandboxHost::envelope($name, 'on_ui', array());

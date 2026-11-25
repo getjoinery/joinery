@@ -19,19 +19,15 @@
  * prepare() its code declares, which may refuse the save, and a save() it
  * overrides. They bind only the plugin.
  *
- * A model's short name is the plugin's only when no core or native class has
- * it: the manifest check refuses such a name at install
- * (SandboxPluginManager::modelCollisions), and a class core gains later wins,
- * the plugin's model staying reachable by its Sbx_ name.
- *
- * The plugin's own models are declared here from the envelope's `models`
- * (the manifest's declarations, as core read them), under core's class
- * names (Sbx_{plugin}_{Model}) and their short names (SentLog,
- * MultiSentLog). A plugin may add methods in src/data with a class of the
- * short name that extends the core name (class SentLog extends
- * Sbx_myplugin_SentLog); it declares no fields there. Its collection then
- * yields its class.
- *
+ * The plugin's own models are its model files in src/data, loaded as
+ * written (class Note extends SystemBase, class MultiNote extends
+ * SystemMultiBase): the same files the site read, without running, for its
+ * own classes (spec sandboxed_plugin_model_files). The envelope's `models`
+ * maps each to the name the site knows it by (Note => Sbx_notes_Note), which
+ * every ask carries. A model's name is the plugin's only when no core or
+ * native class has it: the install refuses such a name
+ * (SandboxPluginManager::modelCollisions).
+
  * Refused, each with a message naming the alternative: raw SQL (the
  * database stand-in), a string condition ("IS NULL") or a split-parenthesis
  * OR (they are SQL text), a NULL filter (not carried by the API; use another
@@ -46,6 +42,8 @@
  * A collection with no limit is read a page (200 rows) at a time, each page
  * one ask, within the call's 200 asks.
  *
+ * @version 2.0 - the plugin's own model files load as written; the envelope maps each class to the site's name
+ *                (SandboxFenceModels); its prepare() runs when its own class declares it (spec sandboxed_plugin_model_files)
  * @version 1.3 - a collection with no query of its own sends its default options, which are column filters
  *                (spec collection_default_query)
  * @version 1.2 - a filter takes a list of values, as natively; the [value, PDO::PARAM_*] form, which a column
@@ -61,26 +59,35 @@ final class SandboxRemoteStore implements SystemBaseRemoteStore {
 	const PAGE = 200;
 
 	/**
-	 * The class core knows a model by: the first class up from $class that is
-	 * core's, an approved native plugin's, or one of the plugin's declared
-	 * models (Sbx_), wherever the plugin wrote the class below it.
+	 * The class core knows a model by: the site's name of one of the plugin's
+	 * own models, or the first class up from $class that is core's or an
+	 * approved native plugin's, wherever the plugin wrote the class below it.
 	 */
 	public static function coreName(string $class): string {
-		while (!SandboxRuntime::isKnownModelClass($class) && ($parent = get_parent_class($class)) !== false) {
-			$class = $parent;
+		$at = $class;
+		while ($at !== false) {
+			$site = SandboxFenceModels::siteName($at);
+			if ($site !== null) {
+				return $site;
+			}
+			if (SandboxRuntime::isKnownModelClass($at)) {
+				return $at;
+			}
+			$at = get_parent_class($at);
 		}
 		return $class;
 	}
 
 	/**
 	 * The plugin's own rules on a row it saves: prepare() when the plugin's
-	 * code declares it (on its own model class or one it extends). They may
-	 * refuse, as natively. A core model's rules are core's, run where the API
-	 * saves the row; in the fence they could only reach the database stand-in.
+	 * code declares it (on its own model or a class it extends a model with).
+	 * They may refuse, as natively. A core model's rules are core's, run
+	 * where the API saves the row; in the fence they could only reach the
+	 * database stand-in.
 	 */
 	public function beforeWrite(SystemBase $row): void {
 		$declaring = (new ReflectionMethod($row, 'prepare'))->getDeclaringClass()->getName();
-		if (!SandboxRuntime::isKnownModelClass($declaring) && !in_array($declaring, array('SystemBase', 'SandboxRecord'), true)) {
+		if (SandboxRuntime::isPluginClass($declaring)) {
 			$row->prepare();
 		}
 	}
@@ -217,57 +224,29 @@ final class SandboxRemoteStore implements SystemBaseRemoteStore {
 	}
 }
 
-/** The plugin's own models, declared in the fence from the envelope. */
+/** The plugin's own models, by the names the site knows them (the envelope's `models`). */
 final class SandboxFenceModels {
 
-	/** short name => core class name */
-	private static $short = array();
+	/** the plugin's class (lower case) => the site's class name */
+	private static $site = array();
 
-	/** core class name (lower case) => model declaration */
-	private static $declarations = array();
-
+	/** @param array $models the plugin's class => the site's name ('Note' => 'Sbx_notes_Note') */
 	public static function register(string $plugin, array $models): void {
+		self::$site = array();
 		if (!preg_match(SandboxManifest::NAME_PATTERN, $plugin)) {
 			return;
 		}
-		foreach ($models as $model) {
-			if (!is_array($model) || !is_string($model['name'] ?? null) || !preg_match(SandboxManifest::MODEL_PATTERN, $model['name'])) {
-				continue;
+		foreach ($models as $class => $site) {
+			if (is_string($class) && preg_match(SandboxManifest::MODEL_PATTERN, $class)
+					&& $site === SandboxManifest::classFor($plugin, $class)) {
+				self::$site[strtolower($class)] = $site;
 			}
-			$class = SandboxManifest::classFor($plugin, $model['name']);
-			self::$short[$model['name']] = $class;
-			self::$declarations[strtolower($class)] = array($plugin, $model);
 		}
 	}
 
-	/** The autoloader for the plugin's models: core names, short names, their collections. */
-	public static function load(string $class): void {
-		$lower = strtolower($class);
-		$multi = strncmp($lower, 'multi', 5) === 0;
-		$base = $multi ? substr($class, 5) : $class;
-		if (isset(self::$declarations[strtolower($base)])) {
-			self::declare(strtolower($base));
-			return;
-		}
-		$core = self::$short[$base] ?? null;
-		if ($core === null) {
-			return;
-		}
-		self::declare(strtolower($core));
-		if (!$multi) {
-			class_alias($core, $base);
-			return;
-		}
-		if (SandboxRuntime::isPluginClass($base)) {
-			// The plugin's own model class: its collection yields it.
-			SandboxModels::declareFenceCollection($base, $core);
-		} else {
-			class_alias('Multi' . $core, 'Multi' . $base);
-		}
-	}
-
-	private static function declare(string $lower): void {
-		list($plugin, $model) = self::$declarations[$lower];
-		SandboxModels::declareExtendable($plugin, $model);
+	/** The site's name of one of the plugin's own model classes, or null. */
+	public static function siteName(string $class): ?string {
+		$site = self::$site[strtolower(ltrim($class, '\\'))] ?? null;
+		return $site !== null && SandboxRuntime::isPluginClass($class) ? $site : null;
 	}
 }

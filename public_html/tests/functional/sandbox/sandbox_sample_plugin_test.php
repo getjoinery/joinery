@@ -21,6 +21,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_sample_plugin
  *
+ * @version 1.2 - its model is a model file, src/data/notes_class.php (spec sandboxed_plugin_model_files)
  * @version 1.1 - reviewer2 M5: only a note's author may pin it
  * @version 1.0
  */
@@ -59,7 +60,7 @@ $checks = function (string $label, User $admin, User $member) use ($sign_in) {
 	$name = 'notes_sample';
 	$class = SandboxManifest::classFor($name, 'Note');
 	$multi = 'Multi' . $class;
-	$prefix = SandboxManifest::prefixFor($name, 'Note');
+	$prefix = 'nte';
 	$admin_logic = 'adm/logic/admin_sandbox_page_logic.php';
 
 	$sign_in($admin);
@@ -132,6 +133,7 @@ try {
 	$pm = PluginManager::getInstance();
 	$sign_in($admin);
 	$pm->install('notes_sample', false);
+	check(isset(SandboxModels::declarations('notes_sample')['Note']), 'Its model file, src/data/notes_class.php, is read and kept');
 	sandbox_approve('notes_sample');
 	$pm->activate('notes_sample');
 	SandboxPlugins::reset();

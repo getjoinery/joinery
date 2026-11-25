@@ -1511,17 +1511,24 @@ class LibraryFunctions {
 				}
 			}
 
-			// A sandboxed plugin's models come from its manifest, not from
-			// files (SandboxModels declares them); they meet every option above.
-			// One plugin asked for by name is answered whatever its row says
-			// (its own install makes its tables before the row is saved); a
-			// sweep over many takes only the installed ones.
+			// A sandboxed plugin's models come from the declarations stored on
+			// its row (SandboxModels), never its folder: a plugin whose files
+			// are gone or gone bad still declares its tables and delete rules.
+			// They meet every option above. One plugin asked for by name is
+			// answered whatever its row says (its own install makes its tables
+			// before the row is saved); a sweep takes the installed ones.
 			if ($options['plugin_filter']) {
 				// $plugins is the filter, or nothing when it is not active and only active ones were asked for.
 				$sandbox_classes = in_array((string)$options['plugin_filter'], $plugins, true)
 					? SandboxModels::classesFor((string)$options['plugin_filter']) : array();
 			} else {
-				$sandbox_classes = SandboxModels::classesForPlugins($plugins);
+				$sandbox_plugins = SandboxModels::installedWithModels();
+				if ($options['plugin_status'] === 'active') {
+					$sandbox_plugins = array_values(array_filter($sandbox_plugins, function ($plugin) {
+						return PluginHelper::isActiveOfEitherKind($plugin);
+					}));
+				}
+				$sandbox_classes = SandboxModels::classesForPlugins($sandbox_plugins);
 			}
 			foreach ($sandbox_classes as $sandbox_class) {
 				if (!in_array($sandbox_class, $classes, true)) {
@@ -1569,7 +1576,7 @@ class LibraryFunctions {
 		$file = $reflection->getFileName();
 		if ($file === false || strpos($file, "eval()'d code") !== false) {
 			// No file: only a sandboxed plugin's model, declared from its
-			// manifest (SandboxModels), is one.
+			// stored declarations (SandboxModels), is one.
 			if (!preg_match(SandboxModels::CLASS_PATTERN, $name)) {
 				return null;
 			}

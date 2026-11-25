@@ -1,7 +1,7 @@
 <?php
 /** The framed board: the plugin's own document, script and styles inline. */
 $notes = array();
-foreach (new MultiNote(array('deleted' => false), array('id' => 'DESC'), 20) as $note) {
+foreach (new MultiNote(array('deleted' => false), array('nte_note_id' => 'DESC'), 20) as $note) {
 	$notes[] = array('id' => (int)$note->key, 'line' => $note->line());
 }
 ?><!doctype html>

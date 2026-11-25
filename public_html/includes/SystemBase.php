@@ -3139,7 +3139,10 @@ abstract class SystemBase {
 			'dependencies' => [],
 			'total_affected' => 1,  // Start with the primary record
 			'can_delete' => true,
-			'blocking_reasons' => []
+			'blocking_reasons' => [],
+			// Each prevent that blocks, here or on a record this delete would
+			// remove: the rows' table and column, and the record they point at.
+			'blockers' => []
 		];
 
 		// Get all deletion rules for this table from the database
@@ -3176,6 +3179,7 @@ abstract class SystemBase {
 					$results['blocking_reasons'][] = $rule['del_message'] ??
 						"Cannot delete: {$count} record(s) in {$dep_table} depend on this record";
 					$dependency['blocks_deletion'] = true;
+					$results['blockers'][] = ['table' => $dep_table, 'column' => $dep_column, 'key' => $this->key, 'count' => $count];
 				} elseif ($rule['del_action'] === 'permanent_delete') {
 					// Recursively count what model-level permanent_delete would affect
 					$model_class = static::getModelClassForTable($dep_table);
@@ -3194,6 +3198,7 @@ abstract class SystemBase {
 									$results['blocking_reasons'],
 									$sub_result['blocking_reasons']
 								);
+								$results['blockers'] = array_merge($results['blockers'], $sub_result['blockers'] ?? []);
 							}
 						}
 					} else {

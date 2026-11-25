@@ -7,7 +7,7 @@
 /** A member signed up: a note saying so. */
 function on_signal(array $input) {
 	$note = new Note();
-	$note->set('text', 'Someone new signed up.');
+	$note->set('nte_text', 'Someone new signed up.');
 	$note->save();
 	sandbox_log('signal ' . $input['signal'] . ' noted');
 	return array('note' => $note->key);
@@ -20,8 +20,8 @@ function on_signal(array $input) {
  */
 function on_schedule(array $input) {
 	$unpinned = 0;
-	foreach (new MultiNote(array('pinned' => true, 'deleted' => false), array('id' => 'ASC'), 20) as $note) {
-		$note->set('pinned', false);
+	foreach (new MultiNote(array('pinned' => true, 'deleted' => false), array('nte_note_id' => 'ASC'), 20) as $note) {
+		$note->set('nte_pinned', false);
 		$note->save();
 		$unpinned++;
 	}
@@ -42,10 +42,10 @@ function on_ui(array $input) {
 	if (!$note->key) {
 		return array('status' => 'error', 'message' => 'No such note.');
 	}
-	if ((int)$note->get('author') !== (int)($input['user']['id'] ?? 0)) {
+	if ((int)$note->get('nte_usr_user_id') !== (int)($input['user']['id'] ?? 0)) {
 		return array('status' => 'error', 'message' => 'Only its author may pin a note.');
 	}
-	$note->set('pinned', true);
+	$note->set('nte_pinned', true);
 	$note->save();
 	return array('pinned' => $note->key);
 }

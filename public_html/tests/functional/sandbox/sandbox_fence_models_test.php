@@ -13,11 +13,10 @@
  *
  * What is pinned here, unfenced through the same PHP command line and, where
  * this box has the plugin's user, in the real fence:
- *  - its own model by its short name: create, read, update, list with a
- *    filter, a sort and a limit, count, count_all, trash; a field set by its
- *    manifest name; a missing id loads no key;
- *  - a class of its own in src/data extending its model adds methods, and its
- *    collection yields that class;
+ *  - its own model file, loaded as written (spec sandboxed_plugin_model_files):
+ *    create, read, update, list with a filter, a sort and a limit, count,
+ *    count_all, trash; a missing id loads no key; the methods it writes, and
+ *    its collection yields its class; a class extending it saves to it;
  *  - a core model (Page) and a native plugin's (Location) it was approved to
  *    read load by id; one it was not approved for throws, saying so;
  *  - a collection with no limit is read a page at a time;
@@ -32,6 +31,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_fence_models
  *
+ * @version 2.0 - the plugin's model is its model file, loaded as written (spec sandboxed_plugin_model_files)
  * @version 1.3 - a collection with no query of its own sends its default options (spec collection_default_query)
  * @version 1.2 - a filter's list of values (spec sandboxed_plugin_ask_speed WP2)
  * @version 1.1 - reviewer2 G1-G3, G5, G6: a clashing model name, the plugin's prepare(), a class in plugin.php,
@@ -59,33 +59,33 @@ function on_ui(array $input) {
 	$v = $input['values'] ?? array();
 	$o = array();
 	$n = new Note();
-	$n->set('text', 'alpha');
-	$n->set('qty', 3);
+	$n->set('qfn_text', 'alpha');
+	$n->set('qfn_qty', 3);
 	$n->save();
 	$o['created'] = $n->key;
 	$o['class'] = get_class($n);
 	$n2 = new Note();
-	$n2->set('text', 'alpha');
-	$n2->set('qty', 9);
+	$n2->set('qfn_text', 'alpha');
+	$n2->set('qfn_qty', 9);
 	$n2->save();
 	$read = new Note($n->key, TRUE);
-	$o['read_text'] = $read->get('text');
+	$o['read_text'] = $read->get('qfn_text');
 	$o['shout'] = $read->shout();
-	$read->set('qty', 4);
+	$read->set('qfn_qty', 4);
 	$read->save();
-	$o['updated_qty'] = (new Note($n->key, TRUE))->get('qty');
-	$list = new MultiNote(array('text' => 'alpha', 'deleted' => false), array('qty' => 'DESC'), 10);
+	$o['updated_qty'] = (new Note($n->key, TRUE))->get('qfn_qty');
+	$list = new MultiNote(array('text' => 'alpha', 'deleted' => false), array('qfn_qty' => 'DESC'), 10);
 	$o['list_count'] = count($list);
 	$o['list_order'] = array();
 	foreach ($list as $row) {
-		$o['list_order'][] = (int)$row->get('qty');
+		$o['list_order'][] = (int)$row->get('qfn_qty');
 		$o['list_class'] = get_class($row);
 	}
 	$o['count_all'] = (new MultiNote(array('text' => 'alpha')))->count_all();
 	// Several rows by a list of values, one ask (spec sandboxed_plugin_ask_speed WP2).
 	$pk = Note::$pkey_column;
 	$o['by_ids'] = array();
-	foreach (new MultiNote(array($pk => array($n->key, $n2->key, 999999999)), array('qty' => 'ASC')) as $row) {
+	foreach (new MultiNote(array($pk => array($n->key, $n2->key, 999999999)), array('qfn_qty' => 'ASC')) as $row) {
 		$o['by_ids'][] = (int)$row->key;
 	}
 	$o['want_ids'] = array((int)$n->key, (int)$n2->key);
@@ -96,7 +96,7 @@ function on_ui(array $input) {
 	$o['by_too_many'] = sbx_try(function () use ($pk) { return count(new MultiNote(array($pk => range(1, 201)))); });
 	$o['missing'] = (new Note(999999999, TRUE))->key;
 	$o['trash'] = sbx_try(function () use ($n2) { return $n2->soft_delete(); });
-	$o['trashed_time'] = (new Note($n2->key, TRUE))->get('delete_time') !== null;
+	$o['trashed_time'] = (new Note($n2->key, TRUE))->get('qfn_delete_time') !== null;
 	$o['live_after_trash'] = count(new MultiNote(array('text' => 'alpha', 'deleted' => false)));
 	$o['all_after_trash'] = count(new MultiNote(array('text' => 'alpha')));
 	$o['default_live'] = sbx_try(function () { return count(new MultiSbxLiveNotes(array('text' => 'alpha'))); });
@@ -110,34 +110,36 @@ function on_ui(array $input) {
 	$o['paren'] = sbx_try(function () { return count(new MultiNote(array('(text' => "= 'a' OR 1=1)"))); });
 	$o['null'] = sbx_try(function () { return count(new MultiNote(array('text' => null))); });
 	$o['or'] = sbx_try(function () { return count(new MultiNote(array('text' => 'a', 'qty' => 1), array(), null, null, 'OR')); });
-	$o['two_sorts'] = sbx_try(function () { return count(new MultiNote(array(), array('qty' => 'ASC', 'text' => 'ASC'))); });
+	$o['two_sorts'] = sbx_try(function () { return count(new MultiNote(array(), array('qfn_qty' => 'ASC', 'qfn_text' => 'ASC'))); });
 	$o['offset'] = sbx_try(function () { return count(new MultiNote(array(), array(), 10, 5)); });
 	$o['own_sql'] = sbx_try(function () { return count(new MultiSbxSqlNotes(array())); });
 	$o['raw_sql'] = sbx_try(function () { return DbConnector::get_instance()->get_db_link()->query('SELECT 1'); });
-	$o['rule'] = sbx_try(function () { $b = new Note(); $b->set('text', 'bad'); $b->save(); return $b->key; });
+	$o['rule'] = sbx_try(function () { $b = new Note(); $b->set('qfn_text', 'bad'); $b->save(); return $b->key; });
 	$o['bad_rows'] = count(new MultiNote(array('text' => 'bad')));
-	$o['inline'] = sbx_try(function () { $i = new SbxInlineNote(); $i->set('text', 'inline'); $i->save(); return $i->key; });
+	$o['inline'] = sbx_try(function () { $i = new SbxInlineNote(); $i->set('qfn_text', 'inline'); $i->save(); return $i->key; });
 	return $o;
 }
 PHP;
-	// A model class written in plugin.php itself, not in src/data.
-	$plugin_php .= "\nclass SbxInlineNote extends Sbx_" . $name . "_Note {}\n";
+	// A class written in plugin.php itself that extends its model.
+	$plugin_php .= "\nclass SbxInlineNote extends Note {}\n";
 	return array(
 		'plugin.php' => $plugin_php,
-		'data/Note.php' => "<?php\nclass Note extends Sbx_" . $name . "_Note {\n\tfunction shout() { return strtoupper((string)\$this->get('text')); }\n"
-			. "\tfunction prepare() { if (\$this->get('text') === 'bad') { throw new RuntimeException('no bad notes'); } }\n}\n",
-		// No query of its own, and a default option: a column filter the fence must send.
-		'data/LiveNotes.php' => "<?php\nclass MultiSbxLiveNotes extends SystemMultiBase {\n\tprotected static \$model_class = 'Note';\n"
+		// Its model file, as a first-party one is written, with methods of its own.
+		'data/notes_class.php' => sandbox_model_file('Note', 'qfn', array(
+			'text' => array('type' => 'varchar(80)'),
+			'qty'  => array('type' => 'int8'),
+		), array(), "\tfunction shout() { return strtoupper((string)\$this->get('qfn_text')); }\n"
+			. "\tfunction prepare() { if (\$this->get('qfn_text') === 'bad') { throw new RuntimeException('no bad notes'); } }\n"),
+		// Collections of its own, in src/includes: one with no query of its
+		// own and a default option (a column filter the fence must send), one
+		// that writes SQL.
+		'includes/LiveNotes.php' => "<?php\nclass MultiSbxLiveNotes extends SystemMultiBase {\n\tprotected static \$model_class = 'Note';\n"
 			. "\tprotected static \$default_options = array('deleted' => false);\n}\n",
-		'data/SqlNotes.php' => "<?php\nclass MultiSbxSqlNotes extends MultiNote {\n\tprotected function getMultiResults(\$only_count = false, \$debug = false) { return null; }\n}\n",
+		'includes/SqlNotes.php' => "<?php\nclass MultiSbxSqlNotes extends MultiNote {\n\tprotected function getMultiResults(\$only_count = false, \$debug = false) { return null; }\n}\n",
 	);
 }
 
 $manifest = array(
-	'models' => array(array('name' => 'Note', 'fields' => array(
-		array('name' => 'text', 'type' => 'string', 'max_length' => 80),
-		array('name' => 'qty', 'type' => 'integer'),
-	))),
 	'permissions' => array('records' => array('Page' => array('read'), 'Location' => array('read'))),
 	'limits' => array('memory_mb' => 32, 'timeout_ms' => 10000),
 );
@@ -146,10 +148,10 @@ function sbx_fm_checks(array $result, string $label, string $name, array $values
 	check($result['status'] === SandboxLog::STATUS_OK, $label . ': the call is answered', json_encode(array($result['status'], $result['message'])));
 	$o = is_array($result['output'] ?? null) ? $result['output'] : array();
 	$class = SandboxManifest::classFor($name, 'Note');
-	$prefix = SandboxManifest::prefixFor($name, 'Note');
+	$prefix = 'qfn';
 	check(($o['created'] ?? 0) > 0 && ($o['class'] ?? '') === 'Note', $label . ': new Note() and save() made a row, as its own class', json_encode(array($o['created'] ?? null, $o['class'] ?? null)));
 	$row = new $class((int)($o['created'] ?? 0), TRUE);
-	check($row->key && $row->get($prefix . '_text') === 'alpha', $label . ': the row is in its table, its field set by the manifest name');
+	check($row->key && $row->get($prefix . '_text') === 'alpha', $label . ': the row is in its table, its column set by its own name');
 	check(($o['read_text'] ?? null) === 'alpha' && ($o['shout'] ?? null) === 'ALPHA', $label . ': new Note($id, TRUE) read it, with the method its class adds');
 	check(($o['updated_qty'] ?? null) == 4, $label . ': an update saved', json_encode($o['updated_qty'] ?? null));
 	check(($o['list_count'] ?? 0) === 2 && ($o['list_order'] ?? array()) === array(9, 4) && ($o['list_class'] ?? '') === 'Note',
@@ -186,20 +188,12 @@ function sbx_fm_checks(array $result, string $label, string $name, array $values
 
 try {
 	check(SystemBase::$remote_store === null, 'On the site the model layer goes to the database (no remote store)');
-	$clash = SandboxManifest::fromArray(array('name' => 'hts_clash', 'title' => 'x', 'version' => '1.0.0', 'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef',
-		'models' => array(array('name' => 'Post', 'fields' => array(array('name' => 'x', 'type' => 'text'))))), 'hts_clash');
-	check(strpos(implode(' ', SandboxPluginManager::modelCollisions($clash)), 'taken by the site') !== false,
-		'A model named like a core class (Post) is refused at install', json_encode(SandboxPluginManager::modelCollisions($clash)));
+	$clash = SandboxPluginManager::modelCollisions('hts_clash', array('Post' => array('file' => 'posts_class.php')));
+	check(strpos(implode(' ', $clash), 'taken by the site') !== false, 'A model named like a core class (Post) is refused at install', json_encode($clash));
 	$described = SandboxConsent::describe(SandboxConsent::grantsOf(SandboxManifest::fromArray(array('name' => 'hts_desc', 'title' => 'x', 'version' => '1.0.0',
 		'platform' => 1, 'id' => '0123456789abcdef0123456789abcdef', 'permissions' => array('records' => array('Location' => array('read'), 'Page' => array('read')))), 'hts_desc')));
 	check(isset($described['Read this program code']) && count($described['Read this program code']) === 1,
 		'Approving a native plugin\'s model names that plugin\'s code too, and core\'s none', json_encode($described['Read this program code'] ?? null));
-	try {
-		SandboxModels::declareExtendable('hts_x', array('name' => 'Nope', 'fields' => array()));
-		check(false, 'The fence\'s declarations refuse on the site');
-	} catch (LogicException $e) {
-		check(true, 'The fence\'s declarations refuse on the site');
-	}
 	if (!class_exists('Location')) {
 		harness_skip('The fenced model layer', 'the event_manager plugin is not active here, and the test reads one of its models');
 		harness_finish();
@@ -222,6 +216,8 @@ try {
 		'page_title' => $page->get('pag_title'), 'location_name' => $location->get('loc_name'));
 
 	$run = function (string $name, string $label, bool $fenced) use ($manifest, $admin, $values) {
+		// The site never includes the plugin's model file.
+		check(!class_exists('Note', false), $label . ': the site has no class Note of its own (the file is read, never run)');
 		$pm = PluginManager::getInstance();
 		$pm->install($name, false);
 		sandbox_approve($name);

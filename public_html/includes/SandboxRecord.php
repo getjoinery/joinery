@@ -1,184 +1,178 @@
 <?php
 /**
  * SandboxRecord and SandboxRecordCollection — the base of every model a
- * sandboxed plugin's manifest declares.
+ * sandboxed plugin declares in its model files (spec
+ * sandboxed_plugin_model_files).
  *
- * SandboxModels declares one subclass of each per manifest model (the class
- * Sbx_notifier_SentLog for model SentLog of plugin notifier, and
- * MultiSbx_notifier_SentLog), filling the static properties every SystemBase model
- * carries from the manifest. From there the model is an ordinary one: its
- * table is built and migrated by update_database and plugin sync, it is a
- * record endpoint on /api/v1 (exposed read and write; per-record
- * authorization is SystemBase's default for the content class: no owner
- * column, so read at 5 and written at 6, spec declared_permissions 3.2), and
- * the deletion system knows it.
+ * SandboxModels declares one subclass of each per model (the class
+ * Sbx_notes_Note for the model Note of plugin notes, and
+ * MultiSbx_notes_Note), filling the static properties every SystemBase model
+ * carries from the model's checked declaration (sandboxFill()). From there
+ * the model is an ordinary one: its table is built and migrated by
+ * update_database and plugin sync, the deletion system knows its rules, and
+ * it is a record endpoint on /api/v1 for its plugin's own key, and for
+ * reading when its file says so.
  *
- * Every model gets {prefix}_id, {prefix}_create_time, {prefix}_update_time and
- * {prefix}_delete_time (soft delete) beside its declared fields, each stored
- * as {prefix}_{field}.
+ * Who may do what with its rows:
  *
- * @version 1.3 - a filter takes a list of values (any of them), each held to its column's type, as a declared
- *                column takes one natively (spec sandboxed_plugin_ask_speed WP2)
- * @version 1.2 - columnFor(): a field by its manifest name or its column (the fenced runtime's set/get)
+ *  - The plugin's own request (isOwnRequest(): its own key, asking for itself,
+ *    with no member named) reads, writes and deletes them, and is not held to
+ *    the model's row or column levels. First-party code reaches its models in
+ *    process; those levels would otherwise be measured against the admin who
+ *    approved the plugin. The plugin's code decides what each member may do.
+ *    The test is on this class, so no core model can be reached by it.
+ *  - No one else creates or changes a row (D3): only the plugin's own code
+ *    does, so its prepare() and save() rules run on every save.
+ *  - Reading follows the native rules (owner, or the read level).
+ *  - Deleting follows the delete level alone, the owner given no pass: staff
+ *    may delete a plugin's rows; a member deletes theirs through the plugin,
+ *    which may have reasons to refuse (section 8).
+ *
+ * @version 2.2 - a rule that carries a block not yet approved is left out, own-table prevents included (reviewer1 R6)
+ * @version 2.1 - delete levels not yet approved are 10; the unused $reach goes (reviewer1 R2, N2)
+ * @version 2.0 - statics from the model file's declaration; the plugin's own request is exempt from the row and
+ *                column levels; nobody else writes; delete at the level alone; the collection has no query of its
+ *                own (spec sandboxed_plugin_model_files)
+ * @version 1.3 - a filter takes a list of values (spec sandboxed_plugin_ask_speed WP2)
+ * @version 1.2 - columnFor()
  * @version 1.1 - every sandboxed model is content (permissions.json)
  * @version 1.0
  */
 
 abstract class SandboxRecord extends SystemBase {
 
-	/** A plugin's records are content: what it stores is its own feature's data. */
-	public static $access_class = 'content';
+	/** The sandboxed plugin whose own key makes this request, or null (set once by api/apiv1.php). */
+	private static $requesting_plugin = null;
+
+	/** api/apiv1.php, once a request's key is known: the sandboxed plugin it belongs to, or null. */
+	public static function setRequestingPlugin(?string $plugin): void {
+		self::$requesting_plugin = $plugin;
+	}
 
 	/**
-	 * The field specifications a manifest model becomes.
-	 *
-	 * @param string $prefix e.g. 'notifier_sent_log'
-	 * @param array  $fields the model's validated manifest fields
+	 * Whether this request is the plugin's own on its own model: its key, and
+	 * no member named (core's relay names one only for an own-rows grant on
+	 * another model, never for the plugin's own).
 	 */
-	public static function specificationsFor(string $prefix, array $fields): array {
-		$specs = array(
-			$prefix . '_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		);
-		foreach ($fields as $field) {
-			$type = $field['type'];
-			$column = SandboxManifest::FIELD_TYPES[$type];
-			if ($type === 'string') {
-				$column = 'varchar(' . (int)($field['max_length'] ?? 255) . ')';
-			}
-			$spec = array('type' => $column, 'is_nullable' => true);
-			if (!empty($field['required'])) {
-				// Enforced on save. The column stays nullable, so a field made
-				// required in a later version cannot fail on rows already stored.
-				$spec['required'] = true;
-			}
-			if (!empty($field['index'])) {
-				$spec['index'] = true;
-			}
-			$specs[$prefix . '_' . $field['name']] = $spec;
-		}
-		$specs[$prefix . '_create_time'] = array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()');
-		$specs[$prefix . '_update_time'] = array('type' => 'timestamp(6)', 'is_nullable' => true);
-		$specs[$prefix . '_delete_time'] = array('type' => 'timestamp(6)', 'is_nullable' => true);
-		return $specs;
+	public static function isOwnRequest(): bool {
+		return self::$requesting_plugin !== null && self::$requesting_plugin === static::$sandbox_plugin
+			&& (!class_exists('ApiAuth', false) || ApiAuth::$sandbox_viewer === null);
 	}
 
-	function save($debug = false) {
-		if ($this->key) {
-			$this->set(static::$prefix . '_update_time', gmdate('Y-m-d H:i:s'));
+	/**
+	 * Fill the class's statics from its checked declaration, within what was
+	 * approved: an opening not approved yet leaves the narrower native value,
+	 * and a rule that blocks deleting a site record not approved yet is not
+	 * this class's.
+	 *
+	 * @param array $reach SandboxConsent::effectiveModels(): {model_reach: string[], blocks: string[]}
+	 */
+	public static function sandboxFill(string $plugin, array $declaration, array $reach): void {
+		if (get_parent_class(get_called_class()) !== __CLASS__) {
+			throw new LogicException('sandboxFill() is for the site\'s own sandboxed model classes.');
 		}
-		return parent::save($debug);
+		$name = (string)$declaration['class'];
+		$open = array_flip((array)($reach['model_reach'] ?? array()));
+		$blocks = array_flip((array)($reach['blocks'] ?? array()));
+		static::$sandbox_plugin = $plugin;
+		static::$sandbox_model = $name;
+		static::$prefix = (string)$declaration['prefix'];
+		static::$tablename = (string)$declaration['table'];
+		static::$pkey_column = (string)$declaration['pkey_column'];
+		static::$field_specifications = (array)$declaration['field_specifications'];
+		static::$access_class = (string)$declaration['access_class'];
+		static::$write_permission = $declaration['write_permission'];
+		static::$api_unreadable_fields = (array)$declaration['api_unreadable_fields'];
+		static::$api_writable = false;
+		$reach_of = SandboxConsent::modelReachOf($name, $declaration);
+		static::$api_readable = $declaration['api_readable'] === true && self::approved($reach_of, $open, 'api');
+		static::$read_permission = $declaration['read_permission'];
+		// The delete levels as approved; until then, deleting is for
+		// superadmins only, whatever the class or the file says now.
+		static::$delete_permission = self::approved($reach_of, $open, 'delete_permission') ? $declaration['delete_permission'] : 10;
+		static::$permanent_delete_permission = self::approved($reach_of, $open, 'permanent_delete_permission')
+			? $declaration['permanent_delete_permission'] : 10;
+		$owner = SandboxConsent::ownerOf($declaration);
+		static::$owner_column = $owner !== null && self::approved($reach_of, $open, 'owner') ? $owner : false;
+		$rules = array();
+		$carried = SandboxConsent::blockEntries($plugin, SandboxModels::declarations($plugin) + array($name => $declaration))[$name] ?? array();
+		foreach ((array)$declaration['foreign_key_actions'] as $column => $rule) {
+			if (!SandboxConsent::ruleApproved($carried[$column] ?? array(), array_keys($blocks))) {
+				continue;
+			}
+			$rules[$column] = $rule;
+		}
+		static::$foreign_key_actions = $rules;
 	}
 
-	/** A field's column: the full column name, or the column of its manifest name. */
-	public static function columnFor($key): string {
-		$key = (string)$key;
-		if (isset(static::$field_specifications[$key])) {
-			return $key;
+	/** Whether the approval covers one way the model opens; one it does not open needs none. */
+	private static function approved(array $reach_of, array $open, string $kind): bool {
+		foreach ($reach_of as $entry => $what) {
+			if ($what[0] === $kind) {
+				return isset($open[$entry]);
+			}
 		}
-		$full = static::$prefix . '_' . $key;
-		return isset(static::$field_specifications[$full]) ? $full : $key;
+		return true;
+	}
+
+	function authenticate_read($data) {
+		if (static::isOwnRequest()) {
+			return;
+		}
+		parent::authenticate_read($data);
+	}
+
+	/** Only the plugin's own code creates and changes its rows (D3). */
+	function authenticate_write($data) {
+		if (static::isOwnRequest()) {
+			return;
+		}
+		throw new SystemAuthenticationError('Only the plugin ' . static::$sandbox_plugin . ' changes its '
+			. SandboxModelDeclarations::words((string)static::$sandbox_model) . ' records; ask it through its pages or actions.');
+	}
+
+	function authenticate_columns($data) {
+		if (static::isOwnRequest()) {
+			return;
+		}
+		parent::authenticate_columns($data);
+	}
+
+	/**
+	 * Deleting: the plugin's own request, or a caller at the model's level for
+	 * the verb, with no pass for the row's owner and no write rule first.
+	 */
+	function authenticate_delete($data, string $verb = 'soft_delete') {
+		if (static::isOwnRequest()) {
+			return;
+		}
+		if (!Access::allows(static::access_level($verb), (int)($data['current_user_permission'] ?? 0))) {
+			throw new SystemAuthenticationError(($verb === 'permanent_delete' ? 'Permanently deleting' : 'Deleting')
+				. ' this entry in ' . static::$tablename . ' needs level ' . static::access_level($verb)
+				. ($verb === 'soft_delete' ? '; a member deletes their own through the plugin.' : '.'));
+		}
+	}
+
+	/** Whether the model keeps deleted rows (has {prefix}_delete_time). */
+	public static function hasSoftDelete(): bool {
+		return isset(static::$field_specifications[static::$prefix . '_delete_time']);
 	}
 
 	/** The plugin this model belongs to. */
 	public static function sandboxPlugin(): string {
-		return static::$sandbox_plugin;
+		return (string)static::$sandbox_plugin;
 	}
 
-	/** The model's name in its manifest. */
+	/** The model's class name in its plugin's files ('Note'). */
 	public static function sandboxModel(): string {
-		return static::$sandbox_model;
+		return (string)static::$sandbox_model;
 	}
 }
 
+/**
+ * A sandboxed model's collection: the built-in list query, by the model's
+ * columns (spec collection_default_query), as the plugin's own
+ * `class MultiNote extends SystemMultiBase { protected static $model_class = 'Note'; }` is.
+ */
 abstract class SandboxRecordCollection extends SystemMultiBase {
-
-	/**
-	 * Every option must name one of the model's columns, with or without its
-	 * prefix, or be 'deleted'. An unknown key is refused, not dropped: a
-	 * filter that is silently ignored returns every row as if filtered. A
-	 * value is one value or a list of them (any of them; an empty list
-	 * matches no row), each held to the column's type.
-	 */
-	protected function getMultiResults($only_count = false, $debug = false) {
-		$model = static::$model_class;
-		$specs = $model::$field_specifications;
-		$prefix = $model::$prefix;
-		$filters = array();
-		foreach ((array)$this->options as $key => $value) {
-			if ($key === 'deleted') {
-				if ($value !== null) {
-					$filters[$prefix . '_delete_time'] = $value ? 'IS NOT NULL' : 'IS NULL';
-				}
-				continue;
-			}
-			$column = isset($specs[$key]) ? $key : (isset($specs[$prefix . '_' . $key]) ? $prefix . '_' . $key : null);
-			if ($column === null) {
-				throw new UnknownMultiOptionException(get_class($this) . " has no field '" . $key . "' to filter on.");
-			}
-			if ($value === null) {
-				$filters[$column] = 'IS NULL';
-				continue;
-			}
-			$type = strtolower($specs[$column]['type']);
-			if (is_array($value) && array_is_list($value)) {
-				$members = array();
-				foreach ($value as $member) {
-					if (!is_scalar($member)) {
-						throw new UnknownMultiOptionException(get_class($this) . ": a filter on '" . $key . "' takes one value or a list of values.");
-					}
-					$members[] = self::filterValue(get_class($this), $key, $type, (string)$member)[0];
-				}
-				$filters[$column] = SqlCondition::bind('IN (?)', $members);
-				continue;
-			}
-			if (!is_scalar($value)) {
-				throw new UnknownMultiOptionException(get_class($this) . ": a filter on '" . $key . "' takes one value or a list of values.");
-			}
-			$filters[$column] = self::filterValue(get_class($this), $key, $type, (string)$value);
-		}
-		return $this->_get_resultsv2($model::$tablename, $filters, $this->order_by, $only_count, $debug);
-	}
-
-	/**
-	 * A filter value bound as its column's type, or refused when it is not
-	 * one: a value turned into something else ("abc" into 0) would return
-	 * rows as if filtered on what the caller did not ask for.
-	 *
-	 * @return array the value and its PDO type, for the filter list
-	 * @throws UnknownMultiOptionException
-	 */
-	private static function filterValue(string $collection, string $key, string $type, string $value): array {
-		$refuse = function ($what) use ($collection, $key, $value) {
-			throw new UnknownMultiOptionException($collection . ": '" . mb_substr($value, 0, 40) . "' is not $what, which '" . $key . "' holds.");
-		};
-		if ($type === 'jsonb') {
-			throw new UnknownMultiOptionException($collection . ": '" . $key . "' holds JSON, which cannot be filtered on.");
-		}
-		if (strpos($type, 'bool') !== false) {
-			$bool = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-			if ($bool === null) {
-				$refuse('true or false');
-			}
-			return array($bool, PDO::PARAM_BOOL);
-		}
-		if (strpos($type, 'int') !== false) {
-			if (!preg_match('~^-?\d{1,18}$~D', $value)) {
-				$refuse('a whole number');
-			}
-			return array((int)$value, PDO::PARAM_INT);
-		}
-		if (strpos($type, 'numeric') === 0) {
-			if (!is_numeric($value)) {
-				$refuse('a number');
-			}
-			return array($value, PDO::PARAM_STR);
-		}
-		if (strpos($type, 'timestamp') === 0 || $type === 'date') {
-			if (strtotime($value) === false) {
-				$refuse('a date');
-			}
-			return array($value, PDO::PARAM_STR);
-		}
-		return array($value, PDO::PARAM_STR);
-	}
 }

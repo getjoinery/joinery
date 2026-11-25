@@ -54,6 +54,8 @@
  * below, so a plugin drops its own public pages' cached copies as native code
  * drops its pages'.
  *
+ * @version 1.6 - the plugin's own models are its model files, loaded as written; isKnownModelClass() knows them by the
+ *                envelope's map (spec sandboxed_plugin_model_files)
  * @version 1.5 - StaticPageCache::invalidatePath() asks the site (joinery_fence_page_refresh, page.refresh)
  * @version 1.4 - files: File::$remote (sandbox_runtime_files.php, spec sandboxed_plugin_uploads)
  * @version 1.3 - mail: EmailSender::$remote (sandbox_runtime_mail.php, spec sandboxed_plugin_email)
@@ -157,7 +159,6 @@ final class SandboxRuntime {
 		// The model layer (design 5): every model reads and writes through core.
 		require_once __DIR__ . '/sandbox_runtime_models.php';
 		SandboxFenceModels::register((string)($envelope['plugin'] ?? ''), (array)($envelope['models'] ?? array()));
-		spl_autoload_register(array('SandboxFenceModels', 'load'));
 		SystemBase::$remote_store = new SandboxRemoteStore();
 
 	}
@@ -205,14 +206,12 @@ final class SandboxRuntime {
 
 	/**
 	 * Whether core knows a model by this class: core's, an approved native
-	 * plugin's, or one of the plugin's declared models (Sbx_{plugin}_...).
+	 * plugin's, or one of the plugin's own models (by the site's name,
+	 * SandboxFenceModels).
 	 */
 	public static function isKnownModelClass(string $class): bool {
 		$key = strtolower(ltrim($class, '\\'));
-		if (isset(self::$core[$key]) || isset(self::$native[$key])) {
-			return true;
-		}
-		return strncmp($key, 'sbx_', 4) === 0 && is_subclass_of($class, 'SandboxRecord');
+		return isset(self::$core[$key]) || isset(self::$native[$key]) || SandboxFenceModels::siteName($class) !== null;
 	}
 
 	/** Whether a class is the plugin's own (declared in its src/). */
