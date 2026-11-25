@@ -11,13 +11,14 @@
  *
  * The receipt, the ended notice and the reminder each have a store setting
  * that switches them off. A line whose product tells its buyer itself (a
- * hosted site: FulfillmentTellsBuyer) gets no cancel or ended email from here,
- * and a line that grants a tier gets its ended email from TierBilling.
+ * hosted site: FulfillmentTellsBuyer) gets no cancel, failed-payment or ended
+ * email from here, and a line that grants a tier gets its ended email from TierBilling.
  *
  * Every method answers with what it did in a few words ('sent', or why
  * nothing went), never throws, and never undoes what it was called about: an
  * email that fails leaves the payment, the cancel or the ending as it is.
  *
+ * @version 1.2 - told_by_store(): a failed-payment email leaves out the lines whose product tells its buyer itself
  * @version 1.1 - payment_failed_vars(): a failed-payment email names every line and the invoice amount
  * @version 1.0
  */
@@ -115,12 +116,7 @@ class SubscriptionEmails {
 		try {
 			// The cancel ends the whole subscription: every line on it that
 			// its product does not tell of itself is named.
-			$lines = array();
-			foreach (self::with_siblings($line) as $one) {
-				if (!self::provider_tells_buyer($one)) {
-					$lines[] = $one;
-				}
-			}
+			$lines = self::told_by_store(self::with_siblings($line));
 			if (!$lines) {
 				return 'its product tells the buyer';
 			}
@@ -314,7 +310,24 @@ class SubscriptionEmails {
 		);
 	}
 
-	/** Does this line's product tell its buyer about a cancel and an ending itself? */
+	/**
+	 * The lines the store itself tells their buyer about: those whose product
+	 * does not. None left means the store sends nothing.
+	 *
+	 * @param OrderItem[] $lines
+	 * @return OrderItem[]
+	 */
+	public static function told_by_store(array $lines): array {
+		$ours = array();
+		foreach ($lines as $line) {
+			if (!self::provider_tells_buyer($line)) {
+				$ours[] = $line;
+			}
+		}
+		return $ours;
+	}
+
+	/** Does this line's product tell its buyer about a cancel, a failed payment and an ending itself? */
 	public static function provider_tells_buyer(OrderItem $line): bool {
 		try {
 			$product = new Product((int)$line->get('odi_pro_product_id'), TRUE);

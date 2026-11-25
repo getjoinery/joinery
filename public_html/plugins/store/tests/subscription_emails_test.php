@@ -200,6 +200,13 @@ $last = end($sent);
 check($said === 'sent' && count($sent) === $before + 1 && strpos((string)$last['vars']['tier_name'], 'SE Shared Services') !== false
 	&& strpos((string)$last['vars']['tier_name'], 'SE Shared Site') === false,
 	'a cancel pressed on a site\'s line still tells of the services line its subscription also pays for', $said . ': ' . (string)$last['vars']['tier_name']);
+
+// A failed payment: the same split, and nothing at all for a site alone.
+$ours = SubscriptionEmails::told_by_store(array($site_line, $svc_line));
+check(count($ours) === 1 && (int)$ours[0]->key === (int)$svc_line->key,
+	'a failed payment\'s email leaves out the line whose product tells its buyer', (string)count($ours));
+check(SubscriptionEmails::told_by_store(array($told_itself)) === array(),
+	'and a subscription paying only for such a line gets none from the store');
 $before = count($sent);
 
 $a->set('odi_subscription_status', 'incomplete_expired');

@@ -90,12 +90,13 @@ interface FulfillmentCancelNotice {
 
 /**
  * Optional, for a provider that tells a subscription's buyer itself when the
- * subscription is cancelled and when it ends (a hosted site's own notices).
- * The store then sends no cancel or ended email for the line
+ * subscription is cancelled, when a payment for it fails and when it ends (a
+ * hosted site's own notices). The store then sends no cancel, failed-payment
+ * or ended email for the line
  * (SubscriptionEmails), so the buyer is told once.
  */
 interface FulfillmentTellsBuyer {
-    /** Does this provider tell this line's buyer of its cancel and its ending? */
+    /** Does this provider tell this line's buyer of its cancel, a failed payment and its ending? */
     public function tellsBuyerOfEnding(OrderItem $order_item): bool;
 }
 

@@ -361,11 +361,12 @@ try {
                         ));
                     }
 
-                    // One payment failure email for the subscription (with dedup)
-                    $order_item = $order_items[0];
-                    $user_id = $order_item->get('odi_usr_user_id');
-                    if ($user_id) {
-                        _stripe_webhook_send_payment_failure_email($user_id, $order_item, $order_items, $invoice);
+                    // One payment failure email for the subscription (with
+                    // dedup), for the lines whose product does not tell its
+                    // buyer itself (a hosted site's grace notice does).
+                    $told = SubscriptionEmails::told_by_store($order_items);
+                    if ($told && $told[0]->get('odi_usr_user_id')) {
+                        _stripe_webhook_send_payment_failure_email($told[0]->get('odi_usr_user_id'), $told[0], $told, $invoice);
                     }
 
                     error_log("Stripe webhook: payment failed for subscription $subscription_id");

@@ -184,9 +184,10 @@ try {
                 'provider_subscription_id' => $subscription_id,
             ));
 
-            // Send payment failure email (with dedup) and admin notification
+            // Send payment failure email (with dedup) and admin notification.
+            // A line whose product tells its buyer itself gets none from here.
             $user_id = $order_item->get('odi_usr_user_id');
-            if ($user_id) {
+            if ($user_id && SubscriptionEmails::told_by_store(array($order_item))) {
                 _paypal_webhook_send_payment_failure_email($user_id, $order_item);
             }
 
