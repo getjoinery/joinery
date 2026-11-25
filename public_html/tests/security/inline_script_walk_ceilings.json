@@ -136,6 +136,7 @@
         "/profile/joinery_ai/chat_send",
         "/profile/joinery_ai/chat_thread_action",
         "/profile/joinery_ai/chat_turn_action",
+        "/profile/office_editor/edit",
         "/profile/persona_browser/media",
         "/profile/sandbox_page",
         "/profile/settings",

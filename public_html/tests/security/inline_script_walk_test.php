@@ -51,6 +51,7 @@
  * Lower the ceilings: php tests/security/inline_script_walk_test.php --lower
  * First ceilings only: php tests/security/inline_script_walk_test.php --baseline
  *
+ * @version 1.3 - a newly skipped page is named as not on the skipped list (it may never have been walked)
  * @version 1.2 - a nonced script counts (the strict policy names no nonce); every response is checked to name none; --baseline only records
  * @version 1.1 - a missing ceilings file fails (--baseline makes one); the skipped list is held; says when no nonce could be checked
  * @version 1.0
@@ -245,7 +246,7 @@ foreach ($skipped as $url => $status) {
 	}
 }
 check($newly_skipped === array(), count($skipped) . ' pages skipped (they need a record id or redirect), none newly',
-	"these pages answered no 200 HTML page and were walked before:\n" . implode("\n", $newly_skipped));
+	"these pages answered no 200 HTML page and are not on the skipped list:\n" . implode("\n", $newly_skipped));
 if ($skipped) {
 	isw_note(implode(', ', array_map(function ($u) use ($skipped) { return "$u ({$skipped[$u]})"; }, array_keys($skipped))));
 }
