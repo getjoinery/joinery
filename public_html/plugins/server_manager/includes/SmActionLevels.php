@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.17 - auto_reboot (node page switch: when the Reboot When Quiet task may reboot the machine) is level 10, as Reboot
  * @version 1.16 - fleet_security retry_fix (Try again on a withdrawn package fix build) is level 8, as Withdraw
  * @version 1.15 - retry_hosted_mail (node page) and retry_provision (board) are level 10 (hosting_after_purchase E2, O1)
  * @version 1.14 - bring_back_hosted is level 10 (hosting_paid_launch O3)
@@ -49,7 +50,7 @@ final class SmActionLevels {
 			'provision_ssl' => 8, 'run_plugin_installers' => 8, 'restart_agent' => 8, 'set_reverse_dns' => 8,
 			'save_node' => 8,
 			// Destructive or key-changing (10)
-			'reboot_machine' => 10, 'disable_root_login' => 10, 'move_to_plane' => 10, 'recreate_site' => 10,
+			'reboot_machine' => 10, 'auto_reboot' => 10, 'disable_root_login' => 10, 'move_to_plane' => 10, 'recreate_site' => 10,
 			'data_root_migrate' => 10, 'data_root_enrol' => 10, 'data_root_unlock' => 10, 'data_root_escrow_retire' => 10,
 			'data_root_encrypt' => 10, 'data_root_decrypt' => 10, 'data_root_rekey' => 10, 'data_root_escrow_excuse' => 10,
 			'restore_database' => 10, 'restore_project' => 10, 'restore_chain' => 10, 'move_backup_storage' => 10,

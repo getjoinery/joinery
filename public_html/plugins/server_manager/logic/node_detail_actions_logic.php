@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.99 - auto_reboot: when the Reboot When Quiet task may reboot this machine (specs/automatic_reboot_when_quiet.md WP4)
  * @version 1.98 - log_table_tail passes kind (the error table's kinds)
  * @version 1.97 - retry_hosted_mail: a failed hosted email setup starts again (hosting_after_purchase E2)
  * @version 1.96 - Hide, Permanently Delete Site (not held) and Remove Permanently refuse while the hosting still bills (hosting_after_purchase B10)
@@ -233,6 +234,7 @@ class NodeDetailActions {
 		'mail_test_send'           => 'diagnostics',
 		'relay_status'             => 'diagnostics',
 		'reboot_machine'           => 'overview',
+		'auto_reboot'              => 'overview',
 		'disable_root_login'       => 'overview',
 		'never_do_accept'          => 'overview',
 		'never_do_clear'           => 'overview',
@@ -758,6 +760,25 @@ class NodeDetailActions {
 				$session->save_message(new DisplayMessage(
 					'Recorded with your name. Its next ask is answered, if nothing new has happened to it since.',
 					'Excused', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url;
+			}
+
+			case 'auto_reboot': {
+				// When the Reboot When Quiet task may reboot this machine
+				// (RebootWhenQuietRunner): at the first quiet moment, only in the
+				// nightly window, or never.
+				$mode = (string)($_POST['mode'] ?? '');
+				if (!in_array($mode, RebootWhenQuietRunner::MODES, true) || trim((string)$node->get('mgn_container_name')) !== '') {
+					self::fail($session, $page_regex, 'That is not a setting for this machine.');
+					return $base_url;
+				}
+				$node->set('mgn_auto_reboot', $mode);
+				$node->save();
+				$said = array('quiet' => 'It reboots by itself at the first moment nobody is busy on it, or in the nightly window once it has owed a reboot a day.',
+					'window' => 'It reboots by itself only in the nightly window (04:00-05:00 UTC), when it owes a reboot.',
+					'never' => 'It never reboots by itself; Fleet Security lists it while it owes a reboot.');
+				$session->save_message(new DisplayMessage($said[$mode], 'Automatic reboot', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 				return $base_url;
 			}
 

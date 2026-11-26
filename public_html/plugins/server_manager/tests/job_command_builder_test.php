@@ -3289,6 +3289,25 @@ section('The running list\'s words: listening_sockets, container_inventory, mail
 	check(strpos($said, 'encrypted, decrypted or re-keyed') !== false, 'a data root mid-run is not rebooted, even with a holder', $said);
 }
 
+section('quiet_check (specs/automatic_reboot_when_quiet.md)');
+{
+	$qc_node = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)),
+		'mgn_agent_version'    => '1.133.0',
+		'mgn_agent_primitives' => 'check_status,quiet_check',
+	));
+	check(JobCommandBuilder::build_quiet_check($qc_node) === array('primitive' => 'quiet_check', 'params' => array()),
+		'quiet_check travels as its name alone: the node passes its own site root');
+	$qc_old = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x1e", 32)),
+		'mgn_agent_version'    => '1.132.0',
+		'mgn_agent_primitives' => 'check_status',
+	));
+	$said = '';
+	try { JobCommandBuilder::build_quiet_check($qc_old); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'quiet_check') !== false, 'an agent without quiet_check is told to update, naming it', $said);
+}
+
 section('net_health, web_workers and the access log (specs/slow_request_diagnosis_words.md)');
 {
 	$sr_words = 'check_status,site_log,net_health,web_workers';

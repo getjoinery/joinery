@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.149 - quiet_check results: whether anyone is busy, each signal a count or unknown (specs/automatic_reboot_when_quiet.md)
  * @version 1.148 - process_site_log keeps journal, the host converger's 'this host logs it to the journal' answer
  * @version 1.147 - process_unban_address: the jail, the address and how many bans the node lifted
  * @version 1.146 - web_workers keeps apache_modules, the names of the modules Apache loads (web_workers.sh 1.3)
@@ -4259,6 +4260,52 @@ HTML;
 		}
 		return ($saturated ? 'Out of workers now. ' : (is_int($ev) && $ev > 0 ? 'Free now, short at times. ' : 'Workers free. '))
 			. implode('; ', $parts) . '.';
+	}
+
+	/** The signals quiet_check.sh names, in its order. */
+	const QUIET_SIGNALS = ['logins', 'signed_in', 'visits', 'writes', 'packages', 'installers', 'site_work', 'db_queries', 'mail_sent'];
+
+	/**
+	 * A quiet_check job's result: quiet, the signals that said busy and those
+	 * that could not be read, and each signal as a count, 'unknown' or
+	 * 'not_reported'. A result that cannot be read is never quiet. Pure.
+	 */
+	public static function sanitise_quiet_check($d) {
+		if (!is_array($d) || !array_key_exists('quiet', $d)) {
+			return ['read' => false, 'quiet' => false, 'busy' => [], 'unknown' => []];
+		}
+		$names = function ($v) {
+			return array_values(array_intersect(self::QUIET_SIGNALS, is_array($v) ? $v : []));
+		};
+		$out = ['read' => true, 'busy' => $names($d['busy'] ?? null), 'unknown' => $names($d['unknown'] ?? null)];
+		foreach (self::QUIET_SIGNALS as $k) {
+			$v = $d[$k] ?? 'unknown';
+			$out[$k] = is_int($v) && $v >= 0 ? $v : (in_array($v, ['unknown', 'not_reported'], true) ? $v : 'unknown');
+		}
+		// Quiet only as the node says it, and only with no busy signal named.
+		$out['quiet'] = ($d['quiet'] ?? null) === true && !$out['busy'];
+		return $out;
+	}
+
+	/** What kept a machine from being quiet, in words: "signed-in visitors (2), a form sent (1)". */
+	public static function quiet_check_words(array $r) {
+		if (empty($r['read'])) {
+			return 'its answer could not be read';
+		}
+		$say = ['logins' => 'someone logged in to the machine', 'signed_in' => 'signed-in visitors', 'writes' => 'forms sent from a browser',
+			'packages' => 'a package install', 'installers' => 'the installers running', 'site_work' => 'a backup or task run',
+			'db_queries' => 'a long database query', 'mail_sent' => 'mail being sent by a person'];
+		$parts = [];
+		foreach ($r['busy'] as $k) {
+			$v = $r[$k] ?? 'unknown';
+			$parts[] = ($say[$k] ?? $k) . ($v === 'unknown' ? ' (could not be read)' : (is_int($v) && $v > 1 ? ' (' . $v . ')' : ''));
+		}
+		return $parts ? implode(', ', $parts) : 'nothing';
+	}
+
+	private static function process_quiet_check($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_quiet_check(self::script_json($job))));
+		$job->save();
 	}
 
 	private static function process_web_workers($job) {

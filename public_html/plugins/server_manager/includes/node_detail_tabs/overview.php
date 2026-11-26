@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.115 - automatic reboot: why a machine owing a reboot waits, the last reboot marked automatic, and the When quiet / Nightly window only / Never setting (specs/automatic_reboot_when_quiet.md)
  * @version 1.114 - Errors (24 h): the site's error table counted by kind (check_status errors_24h, agent 1.127.0)
  * @version 1.113 - names the variables node_detail.php sets; the gateway, containers and SSL words are set on every path
  * @version 1.112 - Email setup: a failed hosted mail leg shows why and offers Retry email setup (hosting_after_purchase E2)
@@ -1597,6 +1598,17 @@
 				echo '<div><span class="badge bg-' . ($reboot_overdue ? 'warning' : 'secondary') . '">Reboot required</span>'
 					. (is_int($reboot_since) ? ' <span class="small text-muted">asked for ' . $hr_str($hr_when($reboot_since)) . '</span>' : '')
 					. '</div>';
+				// What the Reboot When Quiet task is doing about it.
+				if (trim((string)$node->get('mgn_container_name')) === '') {
+					$rwq_containers = array();
+					$rwq_group = (int)$node->get('mgn_mgh_managed_host_id');
+					if ($rwq_group > 0) {
+						foreach (new MultiManagedNode(array('deleted' => false, 'mgn_mgh_managed_host_id' => $rwq_group)) as $rwq_n) {
+							if (trim((string)$rwq_n->get('mgn_container_name')) !== '') { $rwq_containers[] = (int)$rwq_n->key; }
+						}
+					}
+					echo '<div class="small text-muted">' . htmlspecialchars(ucfirst(RebootWhenQuietRunner::waiting_words($node, $rwq_containers))) . '.</div>';
+				}
 			} elseif ($hr['reboot_required'] === false) {
 				echo '<div><span class="badge bg-success">No reboot pending</span></div>';
 			}
@@ -1609,8 +1621,10 @@
 				$lr_link = '<a href="/admin/server_manager/job_detail?job_id=' . (int)$lr_job->key . '">';
 				$lr_asked = $lr_job->get_local('mjb_create_time', 'M j, g:i A');
 				$lr_result = json_decode((string)$lr_job->get('mjb_result'), true);
+				$lr_params = json_decode((string)$lr_job->get('mjb_parameters'), true);
+				$lr_auto = is_array($lr_params) && ($lr_params['automatic'] ?? '') === 'reboot_when_quiet' ? ' automatically' : '';
 				if (!empty($last_reboot['came_back_at'])) {
-					echo '<div class="small mt-2">' . $lr_link . 'Rebooted</a>: asked ' . $hr_str($lr_asked) . ', back by '
+					echo '<div class="small mt-2">' . $lr_link . 'Rebooted</a>' . $lr_auto . ': asked ' . $hr_str($lr_asked) . ', back by '
 						. $hr_str(LibraryFunctions::convert_time((string)$last_reboot['came_back_at'], 'UTC', $session->get_timezone(), 'g:i A')) . '</div>';
 				} elseif ($last_reboot['scheduled']) {
 					$lr_age = time() - (int)strtotime($last_reboot['asked_at'] . ' UTC');
@@ -1642,6 +1656,21 @@
 			}
 			if ($mb_buttons) {
 				echo '<div class="mt-2 d-flex flex-wrap gap-1 align-items-center">' . implode(' ', $mb_buttons) . '</div>';
+			}
+			// When the Reboot When Quiet task may reboot it: the setting, and a
+			// button for each other choice.
+			if (trim((string)$node->get('mgn_container_name')) === '') {
+				$ar_mode = RebootWhenQuietRunner::mode($node);
+				$ar_words = array('quiet' => 'when nobody is busy on it', 'window' => 'only in the nightly window (04:00-05:00 UTC)', 'never' => 'never');
+				$ar_labels = array('quiet' => 'When quiet', 'window' => 'Nightly window only', 'never' => 'Never');
+				echo '<div class="mt-2 small d-flex flex-wrap gap-1 align-items-center">Reboots by itself ' . htmlspecialchars($ar_words[$ar_mode]) . '.';
+				foreach ($ar_labels as $ar_m => $ar_label) {
+					if ($ar_m === $ar_mode) { continue; }
+					echo '<form method="post" action="' . $base_url . '" class="m-0 d-inline">' . SmAdminCsrf::field()
+						. '<input type="hidden" name="action" value="auto_reboot"><input type="hidden" name="mode" value="' . $ar_m . '">'
+						. '<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075">' . $ar_label . '</button></form>';
+				}
+				echo '</div>';
 			}
 			if ($hr['failed_units'] === 'unknown') {
 				echo '<div class="mt-2 text-muted small">Failed units: unknown</div>';

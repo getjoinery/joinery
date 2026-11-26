@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.176 - build_quiet_check: whether anyone is busy on the machine, before a reboot when it is quiet
+ *                (specs/automatic_reboot_when_quiet.md WP1)
  * @version 1.175 - build_unban_address reads the jail name as given: one with a line break or space around it is refused
  * @version 1.174 - SITE_LOG_FILES reads the dev box's follow_main pull log (agent 1.131.0, a per-value floor)
  * @version 1.173 - build_unban_address: lift one fail2ban ban on a node, a jail name and an IPv4 or IPv6 address (agent 1.131.0)
@@ -3791,6 +3793,26 @@ class JobCommandBuilder {
 
 	public static function build_web_workers_primitive($node) {
 		return ['primitive' => 'web_workers', 'params' => []];
+	}
+
+	/**
+	 * Whether anyone is busy on the machine right now: logins, signed-in
+	 * sessions and browser writes in the last 15 minutes, package runs,
+	 * installers, backups and task runs, long queries, mail a person sent
+	 * (quiet_check.sh). Counts only, no parameters: the node passes its own
+	 * site root. The Reboot When Quiet task asks it before a reboot.
+	 */
+	public static function build_quiet_check($node) {
+		if (!self::has_primitive($node, 'quiet_check')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot say whether it is quiet. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['quiet_check']));
+		}
+		return self::build_quiet_check_primitive($node);
+	}
+
+	public static function build_quiet_check_primitive($node) {
+		return ['primitive' => 'quiet_check', 'params' => []];
 	}
 
 	/**

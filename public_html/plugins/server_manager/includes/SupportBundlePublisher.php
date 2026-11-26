@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.43 - carries quiet_check.sh, the machine word of agent 1.133.0 (specs/automatic_reboot_when_quiet.md)
  * @version 1.42 - carries unban_address.sh, the machine word of agent 1.131.0 that lifts one fail2ban ban
  * @version 1.41 - carries install_package_fixes.sh and fixes/ACTIVE, so a container host fetches the package
  *                fixes its base installs (specs/package_fixes_ahead_of_ubuntu.md WP3)
@@ -244,6 +245,9 @@ class SupportBundlePublisher {
 		// its own: the word says so). Both source nothing.
 		'maintenance_scripts/sysadmin_tools/net_health.sh',
 		'maintenance_scripts/sysadmin_tools/web_workers.sh',
+		// quiet_check (agent 1.133.0): whether anyone is busy on a Docker host,
+		// before the Reboot When Quiet task reboots it. Sources nothing.
+		'maintenance_scripts/sysadmin_tools/quiet_check.sh',
 		// install_security_updates (agent 1.87.0): a Docker host needs its
 		// fixes the day they ship as much as a site does. Sources nothing.
 		'maintenance_scripts/sysadmin_tools/install_security_updates.sh',

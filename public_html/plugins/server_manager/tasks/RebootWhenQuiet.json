@@ -1,0 +1,7 @@
+{
+  "name": "Reboot When Quiet",
+  "description": "Reboots a machine that owes a reboot (a kernel fix takes effect only then) at the first moment nobody is busy on it: no one logged in, no one signed in and using its sites, no install, backup or long query under way. One machine at a time; one that does not come back stops the rest. A machine never quiet reboots in the nightly window (04:00-05:00 UTC) once it has owed one a day. Each machine's page can set it to the window only, or never.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

@@ -54,6 +54,7 @@
  * A changed word in neither list (publish_upgrade, which only the publishing
  * box runs) is proven by hand with record_live_proof.php.
  *
+ * @version 1.6 - quiet_check is a word a bare machine proves
  * @version 1.5 - wait_ssh(), ssh(), scp(), must() and run_local() are public: the site copy live test
  *                (SiteCopyLiveRun) reaches its servers with them too
  * @version 1.4 - install.sh server --keep-root-login: the run logs in with the root password after the install
@@ -80,6 +81,7 @@ class AgentLiveProofRun {
 		'install_security_updates' => array('params' => array(), 'wait' => 1200),
 		'net_health'               => array('params' => array(), 'wait' => 300),
 		'web_workers'              => array('params' => array(), 'wait' => 300),
+		'quiet_check'              => array('params' => array(), 'wait' => 300),
 	);
 
 	/**

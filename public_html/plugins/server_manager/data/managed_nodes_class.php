@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.82 - mgn_auto_reboot: when the Reboot When Quiet task may reboot the machine (specs/automatic_reboot_when_quiet.md WP4)
  * @version 1.81 - mgn_uptime_down_answered: whether a down site's machine answered at all
  * @version 1.80 - self_node() and is_self() match this site's address on either scheme and in any letter case
  *                (package_fixes_automatic.md B1, reviewer2 B17)
@@ -222,6 +223,10 @@ class ManagedNode extends SystemBase {
 		// A SecretBox blob (API_SECRET_LOCATOR), never plain text: api_secret_key() opens it.
 		'mgn_api_secret_key'      => array('access_class' => 'keys', 'type'=>'text'),
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// When the Reboot When Quiet task may reboot this machine: 'quiet' (at the
+		// first quiet moment, or in the nightly window once it has owed a reboot a
+		// day), 'window' (only in the nightly window), 'never'. RebootWhenQuietRunner.
+		'mgn_auto_reboot'         => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'quiet'),
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Fingerprint of the backup recovery public key this node is holding, as
 		// the status check last found it. Stored so the fleet view can show which

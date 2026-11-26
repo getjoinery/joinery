@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.36 - plane:reboot_not_back (a machine asked to reboot that has not come back; specs/automatic_reboot_when_quiet.md WP3)
  * @version 1.35 - plane:fix_ahead_of_ubuntu and plane:package_fix_ubuntu_newer (specs/package_fixes_ahead_of_ubuntu.md WP5)
  * @version 1.34 - plane:site_build_failed: an ordered site stopped on a failed build
  * @version 1.33 - plane:site_no_relay_slot: a built site whose plan brings a relay slot and has none
@@ -77,7 +78,7 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceBreakGlassAttention', 'IncidentSourceBreakGlassNoHolder', 'IncidentSourceNeverDo',
 	'IncidentSourceUnsealDaemon', 'IncidentSourceAgentNotAdmitted', 'IncidentSourceBuyerMailFailed',
 	'IncidentSourceSiteNoRelaySlot', 'IncidentSourceSiteBuildFailed', 'IncidentSourceFixAheadOfUbuntu',
-	'IncidentSourcePackageFixUbuntuNewer') as $incident_source) {
+	'IncidentSourcePackageFixUbuntuNewer', 'IncidentSourceRebootNotBack') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // A kept root password is sealed to its holder's vault (beta_break_glass_root_access

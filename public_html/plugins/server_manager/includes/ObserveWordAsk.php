@@ -17,6 +17,7 @@
  * primitive than the word asked for is refused here, so the list cannot be
  * widened to an operate word by a builder's mapping.
  *
+ * @version 1.3.0 - quiet_check (specs/automatic_reboot_when_quiet.md)
  * @version 1.2.0 - log_table_tail takes kind (the error table's kinds, agent 1.127.0)
  * @version 1.1.0 - mailbox_status, sent as spam_learning_status to an older agent
  * @version 1.0.0 - shared by SupportNodeTools and ask_node (the 2026-11-10 running-list entry)
@@ -28,7 +29,7 @@ class ObserveWordAsk {
 		'host_report', 'check_status', 'install_report', 'site_log', 'site_log_count', 'log_table_tail',
 		'unit_journal', 'site_converger', 'file_head', 'disk_usage', 'largest_files', 'schema_probe',
 		'page_probe', 'container_inventory', 'listening_sockets', 'site_state_report', 'net_health',
-		'web_workers', 'mailbox_status', 'relay_status',
+		'web_workers', 'mailbox_status', 'relay_status', 'quiet_check',
 	);
 
 	/** The older observe word a builder may send instead, to an agent that predates the word asked for. */
@@ -103,6 +104,7 @@ class ObserveWordAsk {
 			case 'site_state_report':   $built = JobCommandBuilder::build_site_state_report($node); break;
 			case 'net_health':          $built = JobCommandBuilder::build_net_health($node); break;
 			case 'web_workers':         $built = JobCommandBuilder::build_web_workers($node); break;
+			case 'quiet_check':         $built = JobCommandBuilder::build_quiet_check($node); break;
 			case 'mailbox_status':
 				$built = JobCommandBuilder::build_mailbox_status($node, isset($in['domain']) ? (string)$in['domain'] : null);
 				break;

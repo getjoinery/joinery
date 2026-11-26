@@ -16,6 +16,8 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.13 - a machine owing a reboot is listed as rebooting by itself (RebootWhenQuietRunner: why it waits), or
+ *                as one to reboot by hand when set to never or refused
  * @version 1.12 - one answer first: whether anything needs a person, and what (FleetSecurityView::summary()); the fixes
  *                Ubuntu has not shipped each with a plain status; every machine's row in short words, the detail folded;
  *                the update run below, its last run folded
@@ -187,9 +189,30 @@ if ($sum['look']) {
 	echo '</ul></div>';
 }
 if ($sum['reboot']) {
-	echo '<div class="mt-2"><strong>Reboot when convenient</strong>: ' . $names($sum['reboot'])
-		. '<div class="small">Their updates are installed. Some background services keep running the old code until the machine restarts; '
-		. 'nothing that serves your sites does. Each machine\'s page has a Reboot button.</div></div>';
+	// Each reboots by itself (RebootWhenQuietRunner) unless set to never or refused.
+	$by_itself = array();
+	$by_hand = array();
+	foreach ($sum['reboot'] as $e) {
+		$n = new ManagedNode((int)$e[0]['id'], TRUE);
+		$why = RebootWhenQuietRunner::waiting_words($n);
+		if (RebootWhenQuietRunner::mode($n) === 'never' || JobCommandBuilder::reboot_refusal($n) !== null) {
+			$by_hand[] = array($e[0], $why);
+		} else {
+			$by_itself[] = array($e[0], $why);
+		}
+	}
+	if ($by_itself) {
+		echo '<div class="mt-2"><strong>Reboots by itself</strong><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+		foreach ($by_itself as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h($e[1]) . '</li>'; }
+		echo '</ul><div class="small">Their updates are installed; a restart finishes them. Some background services run the old code until then; '
+			. 'nothing that serves your sites does. Nothing to do.</div></div>';
+	}
+	if ($by_hand) {
+		echo '<div class="mt-2"><strong>Reboot when convenient</strong> <span class="small">(each machine\'s page has a Reboot button)</span>'
+			. '<ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+		foreach ($by_hand as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h($e[1]) . '</li>'; }
+		echo '</ul></div>';
+	}
 }
 if ($sum['wait']) {
 	echo '<div class="mt-2"><strong>Finishes by itself</strong>: ' . $names($sum['wait'])
