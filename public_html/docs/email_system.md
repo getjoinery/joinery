@@ -89,8 +89,8 @@ $result = $sender->sendBatch($message, $recipients);
 - Primary service: `email_service` setting (mailgun/smtp)
 - Fallback service: `email_fallback_service` setting
 - Automatic fallback if primary fails
-- Queue failed emails for retry
-- **Neither set means nothing is sent.** No provider is substituted, so `send()` returns false with "no email service is configured" and queues the message rather than reporting some provider's authentication error to a deployer who never chose that provider. Read the setting through `EmailSender::activeServiceKey()`, which returns `''` when nobody has chosen one — the honest answer, and the one every caller handles.
+- A failed email is retried from its outbox row, with or without a fallback (see [The outbox](#the-outbox))
+- **Neither set means nothing is sent.** No provider is substituted, so `send()` returns false with "no email service is configured" and keeps the message for its retry rather than reporting some provider's authentication error to a deployer who never chose that provider. Read the setting through `EmailSender::activeServiceKey()`, which returns `''` when nobody has chosen one — the honest answer, and the one every caller handles.
 
 **Sending defaults.** A message with no From gets `defaultemail` /
 `defaultemailname`. A message with no Reply-To gets `defaultreplyto` (when the
@@ -540,10 +540,9 @@ Existing sites are unaffected — they carry a value in `stg_settings`, and a de
 
 ### Debug and Testing
 
-**Debug Mode:**
-```php
-email_debug_mode = "1"  // Enable debug logging to dbl_debug_email_logs
-```
+What each send did is on the **Outbox** page (`/admin/admin_outbox`, under
+Emails): its recipients, the service it left by, its outcome and error. See
+[The outbox](#the-outbox).
 
 **Test Mode:**
 ```php
@@ -553,21 +552,23 @@ email_test_recipient = "trap@example.com"
 
 Every message — To, Cc and Bcc alike — is delivered only to
 `email_test_recipient`, with the original recipients folded into the subject
-(`[for a@b, c@d +3 more] …`) and the full list in the debug log. The rewrite
+(`[for a@b, c@d +3 more] …`); the outbox row is the trap's, as sent. The rewrite
 happens in `EmailSender::send()` above the Joinery Direct branch, so a
 redirect can never leak through the instance-to-instance fast lane, and in
 `sendBatch()`, where one trap send stands in for the whole list. With test
-mode on and no recipient configured, sends are suppressed and logged
-(service name `test-mode`) rather than falling back to the real recipient.
+mode on and no recipient configured, sends are suppressed, with an error log
+line, rather than falling back to the real recipient.
 
 The same trap is applied where a recipient is *decided*, not only where the
-message leaves: a `QueuedEmail` row created while test mode is on is written
-already addressed to the trap, with the real recipient in its subject
-(`QueuedEmail::save()`). The queue is drained by the `SendQueuedEmails` task
-in its own process under the site's real settings, so a row that carried its
-real recipient out of a test-mode process would otherwise be delivered for
-real. A row already at the trap (a redirected message queued for retry) is
-left as it is; test mode with no trap address writes the row `DELETED`.
+message leaves. `EmailSender` writes an outbox row after its own redirect, so
+the row is already the trap's. A `QueuedEmail` row written with `save()` (the
+provisioning plane posts its welcome email that way over the API) while test
+mode is on is written addressed to the trap, with the real recipient in its
+subject (`QueuedEmail::save()`). The outbox is drained by the
+`SendQueuedEmails` task in its own process under the site's real settings, so
+a row that carried its real recipient out of a test-mode process would
+otherwise be delivered for real. A row already at the trap is left as it is;
+test mode with no trap address writes the row `DELETED`.
 
 The send path runs for real end to end — transport, provider, delivery — so
 this is the safety switch for a staging clone of a production site, and it is
@@ -590,8 +591,9 @@ email_dry_run = "1"           // Build and validate, never transmit
 `EmailSender::send()` returns success without touching a transport and without
 queueing, and `sendBatch()` answers success with no failed recipients. The check sits after validation, so a malformed message still fails
 loudly, and above both transport branches, so an injected per-mailbox transport
-is suppressed along with the globally selected service. Suppressed sends are
-recorded through the debug log with the service name `dry-run`.
+is suppressed along with the globally selected service. A suppressed send
+writes no outbox row and leaves one error log line; `lastSendReport()` names
+it (`suppressed`: `dry_run` or `test_trap_empty`).
 
 This is what a test suite sets when the code under test sends mail as a side
 effect — registration and password reset both do — so a gate run cannot emit
@@ -635,20 +637,11 @@ never sends to a runner flag such as `--json`.
 
 ### Debug Tools
 
-**Debug Logging:**
-```php
-// Enable in settings
-email_debug_mode = "1"
-
-// View logs: /admin/admin_debug_email_logs, or
-SELECT dbl_create_time, dbl_service, dbl_status, dbl_message
-  FROM dbl_debug_email_logs ORDER BY dbl_create_time DESC;
-```
-
-Each row is one step the pipeline took: which service a message went to,
-a dry-run or test-mode suppression, a fallback. The log is diagnostic
-scratch (the admin page has a Clear button) and is not a per-message
-history; the mailbox reader's **Show logs** timeline is that.
+**The Outbox page** (`/admin/admin_outbox`) lists every recorded email,
+newest first, filtered by address, status, template, record and date: who it
+went to, its subject, the template, the record it was about, its status, the
+service it left by and its last error. It never shows a body. The mailbox
+reader's **Show logs** timeline is the per-message history of a person's own mail.
 
 **What a send did — `lastSendReport()`:**
 ```php
@@ -660,6 +653,7 @@ $report = $sender->lastSendReport();
 //   'transport'        => 'mailgun',                // provider key that carried the rest (null if none ran)
 //   'receipt'          => ['id' => '…', 'response' => 'Queued. Thank you.'],   // what the carrier said, if it can repeat it
 //   'error'            => null,                     // the transport's error text on a refusal
+//   'suppressed'       => null,                     // 'dry_run' or 'test_trap_empty' when nothing was sent
 // ]
 ```
 
@@ -714,18 +708,121 @@ $success = $sender->send($message);
 if ($success) {
     // Email sent successfully (primary or fallback)
 } else {
-    // Both services failed - email queued for retry
+    // Both services failed - the email waits on the outbox for its retry
 }
 ```
 
-### Failed Email Queue
+### The outbox
 
-Failed emails are automatically queued:
+Every email the platform sends on its own behalf has one row in
+`equ_queued_emails` (`QueuedEmail`): receipts, notices, reminders, sign-in and
+reset emails, alerts to the operator, a plugin's mail. The row says who it went
+to (`equ_recipients`: every To, Cc and Bcc; `equ_to`: the first To), its
+subject, the template (`equ_template`), the record it was about
+(`equ_entity_type`, `equ_entity_id`), its status, when it went
+(`equ_sent_time`), the service it left by (`equ_service`: a provider key,
+`joinery_direct`, or both as `joinery_direct+<key>`) and its last error.
+
+**Content only while it may be needed.** `send()` writes the row Locked,
+without its body, and sends the message from memory; `QueuedEmail::settle()`
+writes the outcome. The body and the rest of the message (`equ_message_extras`:
+the text part, the caller's own Reply-To, headers, metadata, a pinned
+Message-ID, attachments as bytes, and after a partial Joinery Direct delivery
+the addresses still owed) are written only when the email must outlive the
+process: a failed send waiting for its retry, a queued email, a send-once email
+until it is sent. Finishing a row (Sent, Permanent failure, Deleted) clears
+them. A sign-in code reaches the database only when its send fails. The stored
+message is held to `QueuedEmail::EXTRAS_MAX_BYTES` (1 MiB); one that cannot be
+stored (over the cap, an attached file that cannot be read, a NUL) is still sent
+and recorded, and its failure is Permanent failure, saying why.
+
+**Statuses:** Ready to send 2, Locked 3, Sent 4, Deleted 5, Error sending 6,
+Permanent failure 8. `equ_given_up_time` is set whenever a row goes to Permanent
+failure, kept when a send-once key is revived, and cleared only by Sent: the
+Server Manager's failed-email alarm reads it, so a notice that keeps failing
+stays an open incident across its feature's next passes.
+
+**Retries.** A failed first try goes to Error sending when the caller allows a
+retry (`$queue_on_failure`, the default), with or without a fallback provider.
+The `SendQueuedEmails` task, each run: `QueuedEmail::expire_stale()` settles
+rows Locked over 15 minutes (with content: back to Error sending, counting a
+try; without: Permanent failure, since whether it went is unknown);
+`give_up($max_retries)` ends rows that have used their tries (3); then it
+retries Error rows and sends Ready ones. `QueuedEmail::send()` claims a row
+(`claim()`: Ready or Error sending to Locked in one UPDATE), rebuilds the whole
+message from it (`to_message()`, marked with the row's id by
+`EmailMessage::fromRow()`) and hands it to `EmailSender::send()`, which runs
+every guard again and writes the outcome to that row. A retry's failure counts
+one try; one Joinery Direct partly delivered writes the still-owed addresses to
+the row. Retries are at least once: a send whose process dies after the
+provider took it, or a batch whose provider throws part-way (every recipient's
+row is retried), can bring some people a second copy. A retry redirected to the test trap (written with test mode off, sent
+with it on) rewrites its row's recipients and subject to the trap's
+(`QueuedEmail::readdress()`), so the row never says a real person was emailed.
+
+**Queueing.** `$sender->queue($message)` writes a Ready row with its content
+and sends nothing; the task sends it. It throws for a message that cannot be
+stored, and refuses in a process that has opened sealed content.
+
+**What is not recorded.** A send through an injected transport (a person's own
+mailbox) writes no row and is never queued; its failure reaches the caller
+through `lastSendReport()`. A message marked `EmailMessage::unrecorded($why)`
+writes no row: mail carrying another person's content (the delivery-failure
+notice, an AI recipe's result) or with its own per-recipient record (campaigns,
+an admin's direct messages), and the deliverability probe. An unrecorded
+message that fails is kept for its retry as one row with service
+`unrecorded`, deleted once it is finished. `tests/email/outbox_rules_test.php`
+lists every file that makes an `EmailSender`, recorded or not.
+
+**About a record.** `$message->about($record)` names the record an email
+concerns; the Outbox page and the failed-email alarm read it.
+
+**Send once.** `$message->about($record)->once($key)` (one To, no Cc or Bcc)
+sends at most once per key on that record, or the short form:
 
 ```php
-// Failed emails go to queued_email table
-// Can be retried later with queue processing script
+// True when this call took the key: the email went, or waits for its retry.
+// False when the key was already taken; the template is not even rendered.
+EmailSender::sendTemplateOnce($provision, 'setup:failed', 'hosting_setup_failed', $to, $vars);
+
+EmailSender::onceKeys($provision, 'setup:');       // the record's live keys
+EmailSender::onceKeys($provision, 'setup:', true); // ...and the keys that failed for good
+EmailSender::forgetOnce($provision, 'setup:failed'); // let that key send again
 ```
+
+The row is the permission to send: it is claimed by `INSERT ... ON CONFLICT`
+on the unique (`equ_entity_type`, `equ_entity_id`, `equ_once_key`), so of two
+processes one sends. A key whose row failed for good (Permanent failure) or was
+withdrawn by dry run or an empty trap is revived as the same row by the next
+claim, so a feature's next pass tries again. `forgetOnce()` withdraws a row
+still to send or at Permanent failure (to Deleted, content and given-up time
+cleared), so a state that has passed is neither sent nor held as a failure. A
+claim that fails on a database error throws, and so does a blank address (false
+means "already told"). A send-once message cannot be batch-sent. Send-once refuses inside a transaction (a rollback would lose the
+row after the email went) and, in a process that has opened sealed content,
+any send not asserted content-free. Dry run and an empty test trap return true
+and write nothing. A send-once email is at least once: a process that dies
+after the provider took it is retried.
+
+**Transactions and page views.** Inside a caller's transaction each outbox
+write runs behind a SAVEPOINT, so a failed write never breaks the caller; the
+row is invisible to the task until the caller commits. Every outbox write is
+the server's own (`SystemBase::server_initiated_write()`). In a process that
+has opened sealed content, a send asserting `EGRESS_CONTENT_FREE` writes its row
+and outcome inside the `email_outbox` content-free site, never its content (a
+failure is Permanent failure); any other hot send writes no row.
+
+**Retention.** Finished rows older than `email_outbox_retention_days` (180)
+are deleted by the retention sweep (`QueuedEmail::purge_finished()`), except a
+send-once row whose record still exists, soft-deleted included, or whose
+record's model does not resolve here. Ready, Locked and Error rows are never
+swept by age.
+
+**Tests.** `EmailSender::$capture`, a callable, stands in for every transport:
+it is handed `($template, $to, $vars, $message)` (`$to` as the caller addressed
+it, before the test trap) and its return is the result. The row is still
+written. The harness removes the outbox rows its process wrote
+(`QueuedEmail::$written_ids`).
 
 ### How each domain's mail left (send outcome counters)
 
@@ -841,8 +938,8 @@ $sender = new EmailSender();
 $result = $sender->sendBatch($message, $recipients);
 // $result['success'] — true if all recipients succeeded
 // $result['failed_recipients'] — array of email addresses that failed
-// Failed recipients are automatically retried via the fallback provider,
-// then queued for later retry if both providers fail.
+// Failed recipients are retried via the fallback provider; each recipient has its
+// own outbox row, and one still failed waits on it for its retry.
 ```
 
 ## Error Handling
@@ -861,8 +958,8 @@ try {
     $success = $sender->send($message);
     
     if (!$success) {
-        // Email queued for retry
-        error_log("Email queued due to service failure");
+        // The email waits on the outbox for its retry
+        error_log("Email not sent yet; it will be retried");
     }
 } catch (EmailTemplateError $e) {
     // Template issue
@@ -1023,8 +1120,8 @@ granted), reporting "Reconnect to allow sending."
 - `$transport === null` (default) — select the provider by the `email_service` setting, with the
   `email_fallback_service` fallback (unchanged).
 - `$transport` provided — send through it directly. **Fallback is skipped** (you cannot fall back a
-  "send as this mailbox" to a different identity), but validation, the retry-queue, and debug
-  logging are kept.
+  "send as this mailbox" to a different identity), and the send is never recorded on the outbox or
+  queued: its failure reaches the caller through `lastSendReport()`. Validation is kept.
 
 This is how "send **as** a specific mailbox" stays on the one pipeline. `resolveOutboundTransport($mailbox)`
 (`includes/OutboundTransport.php`) returns a configured transport for a mailbox — an `SmtpProvider`
@@ -1038,7 +1135,7 @@ capability; when false, two-way sync APPENDs the copy). The caller sends via
 
 Per-provider send limits are the signal to move to an ESP. On a rate-limit/quota response the
 connected-account path records a visible status ("<provider> is rate-limiting send — consider a
-dedicated provider") and the message uses the existing retry queue. Migrating is one setting:
+dedicated provider") and the message waits on the outbox for its retry. Migrating is one setting:
 connect Mailgun/SES and change the active provider — no message-path changes. Bulk volume stays an
 ESP job; sending a list through a connected account is allowed but warned against.
 
@@ -1164,7 +1261,7 @@ Every HTTP-API provider sends its requests through `ProviderHttp` (`includes/Pro
 
 SES and Route 53 sign their requests with `AwsSigV4` (`includes/AwsSigV4.php`), the platform's one AWS Signature Version 4 signer, which `S3Signer` also uses.
 
-An attachment that cannot be read at send time (a file that is gone or unreadable) fails the send on every provider, with the reason logged; the failed send is queued for retry like any other.
+An attachment that cannot be read at send time (a file that is gone or unreadable) fails the send on every provider, with the reason logged. Its outbox row cannot store the message either (the file is read to store it), so it ends at Permanent failure, saying why.
 
 **A pinned Message-ID** (`messageId()`, which the mailbox sets on every compose and reply so its stored copy matches the sent message) reaches the recipient on Mailgun, SMTP2GO, SES, Postmark (sent with `X-PM-KeepID: true`, without which Postmark replaces it), SendGrid and every SMTP transport. **Brevo, Mailjet and Resend cannot carry one:** Brevo's API refuses standard headers, Mailjet forbids `Message-Id`, and Resend replaces it with Amazon SES's own. Each assigns its own, so a message sent through any of them arrives with a Message-ID the stored copy does not have, and a reply to it is not matched to that copy by Message-ID.
 

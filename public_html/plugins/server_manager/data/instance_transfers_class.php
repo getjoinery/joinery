@@ -31,6 +31,7 @@
  * status is asked by — code_issued and accepted — and erased the moment the
  * row is anywhere else.
  *
+ * @version 1.3 - itx_email_times becomes itx_done_acts (the finish's acts only); last_email() reads the outbox
  * @version 1.2 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.1 - the state options combine instead of the last one replacing the rest; the queue's last
  *                email reads customer emails only
@@ -47,7 +48,7 @@ class InstanceTransfer extends SystemBase {
 	public static $access_class = 'config';
 	public static $pkey_column = 'itx_instance_transfer_id';
 
-	public static $json_vars = array('itx_check_result', 'itx_email_times');
+	public static $json_vars = array('itx_check_result', 'itx_done_acts');
 
 	const STATE_REQUESTED   = 'requested';
 	const STATE_INVITED     = 'invited';
@@ -136,8 +137,8 @@ class InstanceTransfer extends SystemBase {
 		// deletion was withdrawn, and the finish brings it back on our books.
 		'itx_deletion_withdrawn' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'itx_error'            => array('type'=>'text'),
-		// Which emails went, and when: {invite, code_ready, code_expired, done, failed, …}.
-		'itx_email_times'      => array('type'=>'jsonb'),
+		// The finish's one-time acts (stuck_alert, node_note, done_alert) and when.
+		'itx_done_acts'        => array('type'=>'jsonb'),
 		'itx_create_time'      => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'itx_update_time'      => array('type'=>'timestamp(6)', 'stamp_on_save'=>true),
 		'itx_delete_time'      => array('type'=>'timestamp(6)'),
@@ -192,36 +193,44 @@ class InstanceTransfer extends SystemBase {
 		return $opened['state'] === 'ok' ? (string)$opened['value'] : '';
 	}
 
-	/** When an email of this kind last went, or ''. */
-	public function email_time(string $kind): string {
-		$times = $this->get('itx_email_times');
+	/**
+	 * When one of the finish's one-time acts was done (stuck_alert, node_note,
+	 * done_alert), or ''.
+	 */
+	public function done_time(string $act): string {
+		$times = $this->get('itx_done_acts');
 		if (is_string($times)) { $times = json_decode($times, true); }
-		return is_array($times) ? (string)($times[$kind] ?? '') : '';
+		return is_array($times) ? (string)($times[$act] ?? '') : '';
 	}
 
-	/** Note that an email of this kind went now. Does not save. */
-	public function mark_emailed(string $kind): void {
-		$times = $this->get('itx_email_times');
+	/** Note that one of the finish's one-time acts was done now. Does not save. */
+	public function mark_done(string $act): void {
+		$times = $this->get('itx_done_acts');
 		if (is_string($times)) { $times = json_decode($times, true); }
 		$times = is_array($times) ? $times : array();
-		$times[$kind] = gmdate('Y-m-d H:i:s');
-		$this->set('itx_email_times', $times);
+		$times[$act] = gmdate('Y-m-d H:i:s');
+		$this->set('itx_done_acts', $times);
 	}
 
-	/** The emails a customer is sent; the other marks in itx_email_times are one-time acts. */
-	const CUSTOMER_EMAILS = array('invite', 'code_ready', 'code_expired', 'failed', 'done');
-
-	/** The newest customer email sent: [kind, time], or ['', '']. */
+	/**
+	 * The newest customer email sent about this transfer, from the outbox:
+	 * [kind, time], or ['', '']. A row still waiting for its retry is not shown.
+	 */
 	public function last_email(): array {
-		$times = $this->get('itx_email_times');
-		if (is_string($times)) { $times = json_decode($times, true); }
-		$times = is_array($times) ? array_intersect_key($times, array_flip(self::CUSTOMER_EMAILS)) : array();
-		if (!$times) {
+		if ($this->key === null) {
 			return array('', '');
 		}
-		arsort($times);
-		$kind = (string)array_key_first($times);
-		return array($kind, (string)$times[$kind]);
+		$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT equ_template, coalesce(equ_sent_time, equ_timestamp)'
+			. ' FROM equ_queued_emails WHERE equ_entity_type = ? AND equ_entity_id = ? AND equ_status = ? AND equ_template IN (?, ?, ?, ?, ?)'
+			. ' ORDER BY coalesce(equ_sent_time, equ_timestamp) DESC, equ_queued_email_id DESC LIMIT 1');
+		$templates = array_values(InstanceTransfers::EMAIL_TEMPLATES);
+		$q->execute(array_merge(array(self::$tablename, (int)$this->key, QueuedEmail::SENT), $templates));
+		$found = $q->fetch(PDO::FETCH_NUM);
+		if (!$found) {
+			return array('', '');
+		}
+		$kind = (string)(array_search($found[0], InstanceTransfers::EMAIL_TEMPLATES, true) ?: '');
+		return array($kind, substr((string)$found[1], 0, 19));
 	}
 
 	/** The last eligibility check, or null. */

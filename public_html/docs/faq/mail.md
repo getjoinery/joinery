@@ -36,13 +36,12 @@ See: docs/email_system.md > Connected account as the system provider
 
 ## Emails are not going out. How do I find out why?
 
-1. Turn on the `email_debug_mode` setting.
-2. Read the log at `/admin/admin_debug_email_logs`. Each row is one step: which service a message went to, a fallback, or a send held back by test mode or dry run.
-3. Check that `email_test_mode` and `email_dry_run` are off. Test mode sends every message only to `email_test_recipient`; dry run sends nothing at all.
+1. Open the Outbox page, `/admin/admin_outbox` (under Emails). Each line is one email: who it went to, its status, the service it left by and its last error.
+2. Check that `email_test_mode` and `email_dry_run` are off. Test mode sends every message only to `email_test_recipient`; dry run sends nothing at all (and leaves no line on the Outbox page, only one in the error log).
 
-Messages that fail on both the main and the fallback service are queued and retried later.
+A failed email is retried up to three times, with or without a fallback service, and its line says so.
 
-See: docs/email_system.md > Debug Tools
+See: docs/email_system.md > The outbox
 
 ## How do I receive email at my own domain?
 

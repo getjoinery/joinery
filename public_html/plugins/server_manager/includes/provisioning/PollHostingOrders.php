@@ -246,12 +246,13 @@ class PollHostingOrders {
 </body></html>
 HTML;
 
+		// The store may run older code: the old columns at their old sizes.
 		$client->post('QueuedEmail', [
 			'equ_from'      => $from_email,
-			'equ_from_name' => $from_name,
+			'equ_from_name' => mb_substr((string)$from_name, 0, 70),
 			'equ_to'        => $to_email,
-			'equ_to_name'   => $to_name,
-			'equ_subject'   => 'Connect your account to finish setting up ' . $domain,
+			'equ_to_name'   => mb_substr((string)($to_name ?: $to_email), 0, 70),
+			'equ_subject'   => mb_substr('Connect your account to finish setting up ' . $domain, 0, 128),
 			'equ_body'      => $body,
 			'equ_status'    => 2, // READY_TO_SEND
 		]);

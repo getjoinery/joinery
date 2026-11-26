@@ -1033,4 +1033,114 @@ return [
 				AND COALESCE(cvp_instance_id, '') = ''");
 		},
 	],
+	[
+		// The reminder to a buyer whose built site still waits for its DNS
+		// records (HostingBuyerNotices 'dns_reminder', walkthrough Q41).
+		'id' => 'sm_038_hosting_dns_reminder_template',
+		'version' => '1.30.246',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$insert = $dblink->prepare("INSERT INTO emt_email_templates (emt_name, emt_type, emt_subject, emt_body, emt_create_time, emt_update_time)
+				SELECT ?, 2, ?, ?, now(), now()
+				WHERE NOT EXISTS (SELECT 1 FROM emt_email_templates WHERE emt_name = ?)");
+			$insert->execute(array('hosting_dns_reminder', '*domain* is built, but it is waiting for its DNS records',
+				'<p>Hi *buyer_name*,</p>
+<p>Your site at <strong>*domain*</strong> is built and running, but nobody can open it yet: the domain does not point to it. Its DNS records have been waiting since *listed_date*.</p>
+<p>Add the records listed on <a href="*sites_url*">your sites page</a> where your domain\'s DNS is kept, usually where you bought the name. If that is a provider we know, the page can add them for you in one step.</p>
+<p>Once they are in, the site is ready within minutes. There is nothing else to do.</p>
+{support_email}<p>Stuck? Write to <a href="mailto:*support_email*">*support_email*</a> and tell us where your domain is registered.</p>{end}', 'hosting_dns_reminder'));
+		},
+	],
+	[
+		// What a buyer was told moves from cvp_buyer_notices to the outbox
+		// (specs/email_outbox.md §9.1): each key becomes a Sent row about the
+		// site, to its buyer, so the next pass sends nothing new; then the
+		// column goes. One transaction: a failure leaves nothing half done.
+		'id' => 'sm_039_buyer_notices_to_outbox',
+		'version' => '1.30.246',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$has = $db->query("SELECT 1 FROM information_schema.columns WHERE table_name = 'cvp_customer_cloud_provisions'
+				AND column_name = 'cvp_buyer_notices'")->fetchColumn();
+			if (!$has) {
+				return;
+			}
+			$settings = Globalvars::get_instance();
+			$from = (string)$settings->get_setting('defaultemail');
+			$from_name = (string)($settings->get_setting('defaultemailname') ?: $from);
+			// One transaction (joined, when the runner holds one): a failure
+			// leaves nothing half done.
+			DbConnector::transaction(function ($db) use ($from, $from_name) {
+				$q = $db->prepare("INSERT INTO equ_queued_emails (equ_from, equ_from_name, equ_to, equ_to_name, equ_subject,
+						equ_status, equ_retry_count, equ_timestamp, equ_sent_time, equ_service, equ_entity_type, equ_entity_id, equ_once_key, equ_body)
+					SELECT ?, ?, trim(c.cvp_buyer_email), trim(c.cvp_buyer_email), '(sent before the outbox)',
+						4, 0, now(), now(), 'carried', 'cvp_customer_cloud_provisions', c.cvp_customer_cloud_provision_id, k.key, NULL
+					FROM cvp_customer_cloud_provisions c,
+						jsonb_array_elements_text(CASE WHEN c.cvp_buyer_notices ~ '^\s*\[' THEN c.cvp_buyer_notices::jsonb ELSE '[]'::jsonb END) AS k(key)
+					WHERE coalesce(trim(c.cvp_buyer_email), '') <> '' AND length(k.key) BETWEEN 1 AND 191
+					ON CONFLICT (equ_entity_type, equ_entity_id, equ_once_key) DO NOTHING");
+				$q->execute(array($from, mb_substr($from_name, 0, 255)));
+				$carried = $q->rowCount();
+				$db->exec('ALTER TABLE cvp_customer_cloud_provisions DROP COLUMN cvp_buyer_notices');
+				error_log('sm_039: ' . $carried . ' told buyer notice(s) carried to the outbox; cvp_buyer_notices dropped.');
+			});
+		},
+	],
+	[
+		// A transfer's customer emails move from itx_email_times to the outbox
+		// (specs/email_outbox.md §9.3): each becomes a Sent row about the
+		// transfer, at the time it was marked, keyed 'done' for the one email
+		// sent once. The column becomes itx_done_acts, holding only the
+		// finish's one-time acts. update_database adds plugin columns before
+		// migrations, so the new column is there when the plugin is active
+		// (copy, then drop) and absent when it is not (rename in place).
+		// One transaction: a failure leaves nothing half done.
+		'id' => 'sm_040_transfer_emails_to_outbox',
+		'version' => '1.30.246',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$column = function ($name) use ($db) {
+				$q = $db->prepare("SELECT 1 FROM information_schema.columns WHERE table_name = 'itx_instance_transfers' AND column_name = ?");
+				$q->execute(array($name));
+				return (bool)$q->fetchColumn();
+			};
+			if (!$db->query("SELECT to_regclass('public.itx_instance_transfers')")->fetchColumn() || !$column('itx_email_times')) {
+				return;
+			}
+			$settings = Globalvars::get_instance();
+			$from = (string)$settings->get_setting('defaultemail');
+			$from_name = (string)($settings->get_setting('defaultemailname') ?: $from);
+			$has_new = $column('itx_done_acts');
+			DbConnector::transaction(function ($db) use ($from, $from_name, $has_new) {
+				$q = $db->prepare("INSERT INTO equ_queued_emails (equ_from, equ_from_name, equ_to, equ_to_name, equ_subject,
+						equ_status, equ_retry_count, equ_timestamp, equ_sent_time, equ_service, equ_entity_type, equ_entity_id,
+						equ_once_key, equ_template, equ_body)
+					SELECT ?, ?, trim(c.cvp_buyer_email), trim(c.cvp_buyer_email), '(sent before the outbox)', 4, 0,
+						coalesce(k.sent, now()), k.sent, 'carried', 'itx_instance_transfers', i.itx_instance_transfer_id,
+						CASE WHEN k.kind = 'done' THEN 'done' END, tpl.template, NULL
+					FROM itx_instance_transfers i
+					JOIN cvp_customer_cloud_provisions c ON c.cvp_customer_cloud_provision_id = i.itx_cvp_customer_cloud_provision_id
+					CROSS JOIN LATERAL (SELECT e.key AS kind,
+							CASE WHEN e.value ~ '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}' THEN e.value::timestamp END AS sent
+						FROM jsonb_each_text(CASE WHEN jsonb_typeof(i.itx_email_times) = 'object' THEN i.itx_email_times ELSE '{}'::jsonb END) e) k
+					JOIN (VALUES ('invite', 'instance_transfer_invite'), ('code_ready', 'instance_transfer_code_ready'),
+						('code_expired', 'instance_transfer_code_expired'), ('failed', 'instance_transfer_failed'),
+						('done', 'instance_transfer_done')) AS tpl(kind, template) ON tpl.kind = k.kind
+					WHERE coalesce(trim(c.cvp_buyer_email), '') <> ''
+					ON CONFLICT (equ_entity_type, equ_entity_id, equ_once_key) DO NOTHING");
+				$q->execute(array($from, mb_substr($from_name, 0, 255)));
+				$carried = $q->rowCount();
+				$strip = "- 'invite' - 'code_ready' - 'code_expired' - 'failed' - 'done'";
+				if ($has_new) {
+					$db->exec("UPDATE itx_instance_transfers SET itx_done_acts = coalesce(itx_done_acts, '{}'::jsonb) || (itx_email_times $strip)
+						WHERE jsonb_typeof(itx_email_times) = 'object'");
+					$db->exec('ALTER TABLE itx_instance_transfers DROP COLUMN itx_email_times');
+				} else {
+					$db->exec('ALTER TABLE itx_instance_transfers RENAME COLUMN itx_email_times TO itx_done_acts');
+					$db->exec("UPDATE itx_instance_transfers SET itx_done_acts = itx_done_acts $strip WHERE jsonb_typeof(itx_done_acts) = 'object'");
+				}
+				error_log('sm_040: ' . $carried . ' transfer email(s) carried to the outbox; itx_email_times is itx_done_acts.');
+			});
+		},
+	],
 ];

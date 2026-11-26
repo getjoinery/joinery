@@ -67,8 +67,11 @@ HostedSuspensions::$mail_client = new class($calls) {
 	public function reopenSubaccount(string $id): void { $this->calls[] = 'mail-reopen:' . $id; }
 };
 $mails = array();
-HostedSuspensions::$mailer = function ($to, $subject, $body) use (&$mails) {
-	$mails[] = array('to' => $to, 'subject' => $subject, 'body' => $body);
+EmailSender::$capture = function ($template, $to, $vars, $message) use (&$mails) {
+	// The subject as the caller wrote it (test mode prefixes the one sent).
+	$mails[] = array('to' => $to, 'subject' => preg_replace('/^\[for [^\]]*\] /', '', (string)$message->getSubject()),
+		'body' => (string)($message->getHtmlBody() ?: $message->getTextBody()));
+	return true;
 };
 
 // ── Fixtures ──
@@ -311,7 +314,7 @@ section('Cleanup');
 
 HostedSuspensions::$driver_stand_in = null;
 HostedSuspensions::$mail_client = null;
-HostedSuspensions::$mailer = null;
+EmailSender::$capture = null;
 $db->rollBack();
 $left = (int)$db->query("SELECT COUNT(*) FROM cvp_customer_cloud_provisions WHERE cvp_slug LIKE 'hsu%" . $suffix . "'")->fetchColumn();
 check($left === 0, 'every provision this test created is gone', $left . ' left');

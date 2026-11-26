@@ -2144,3 +2144,15 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = 'gif,jpeg,jpg,png,avif,webp,heic,pdf,txt,csv,xls,xlsx,doc,docx,ppt,pptx,odt,ods,zip,mp3,m4a,wav,mp4,mov' WHERE stg_name = 'allowed_upload_extensions' AND stg_value = 'gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a'";
 	$migrations[] = $migration;
+
+	// The outbox (specs/email_outbox.md): finished rows keep no body, rows
+	// left Locked from before (no lock time) and the dead status 7 end at
+	// Permanent failure, status 1 is withdrawn; the debug email log's table,
+	// setting and menu row go. Idempotent.
+	$migration = array();
+	$migration['database_version'] = '249';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'email_outbox_existing_rows.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+

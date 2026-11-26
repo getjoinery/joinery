@@ -26,7 +26,8 @@
  * whose notify block says `"push_text": "generic"`, or a dispatch whose
  * payload carries `push_protected` true, is pushed as the generic text only.
  *
- * @version 2.7
+ * @version 2.8
+ * @changelog 2.8 - The email goes on the outbox through EmailSender::queue(), about the recipient's account (specs/email_outbox.md).
  * @changelog 2.7 - The queued email saves as the server's own write: a member who causes a signal does not own the recipient's mail.
  * @changelog 2.6 - Push channel through PushSender; a preference carries ntp_push_enabled.
  * @changelog 2.5 - The `admins` and `superadmins` audiences leave out disabled accounts.
@@ -366,8 +367,9 @@ class Notify {
 	}
 
 	/**
-	 * Queue an email for a recipient. The email is written to `equ_queued_emails`
-	 * with READY_TO_SEND status; the SendQueuedEmails scheduled task delivers it.
+	 * Queue an email for a recipient. The email goes on the outbox
+	 * (EmailSender::queue(), Ready to send, about the recipient's account);
+	 * the SendQueuedEmails scheduled task delivers it.
 	 * Nothing is sent inline.
 	 *
 	 * $link is the signal's rendered link_template — the same destination the
@@ -377,7 +379,6 @@ class Notify {
 	 */
 	private static function _enqueue_email($user_id, $title, $body, $link = null) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
-		require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 		$user  = new User($user_id, TRUE);
@@ -434,17 +435,18 @@ class Notify {
 			}
 		}
 
-		$queued = new QueuedEmail(NULL);
-		$queued->set('equ_from', $from);
-		$queued->set('equ_from_name', mb_substr($from_name, 0, 70));
-		$queued->set('equ_to', $email);
-		$queued->set('equ_to_name', mb_substr($name, 0, 70));
-		$queued->set('equ_subject', mb_substr($title, 0, 128));
-		$queued->set('equ_body', $html);
-		$queued->set('equ_status', QueuedEmail::READY_TO_SEND);
-		$queued->set('equ_retry_count', 0);
-		// The platform's own mail to a recipient, which the person who caused
-		// the signal neither owns nor asked for: the server's write.
-		SystemBase::server_initiated_write(function () use ($queued) { $queued->save(); });
+		// On the outbox for the SendQueuedEmails task. The platform's own mail
+		// to a recipient: EmailSender writes it as the server's write.
+		$queued = new EmailMessage();
+		$queued->to($email, $name)
+			->from($from, $from_name)
+			->subject($title)
+			->html($html)
+			->about($user);
+		try {
+			(new EmailSender())->queue($queued);
+		} catch (Throwable $e) {
+			error_log('[Notify] could not queue a notification email: ' . $e->getMessage());
+		}
 	}
 }

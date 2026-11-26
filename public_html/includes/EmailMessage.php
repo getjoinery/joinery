@@ -5,6 +5,9 @@ require_once('EmailTemplateRenderer.php');
 /**
  * EmailMessage - one outgoing message, composed fluently and sent by EmailSender.
  *
+ * @version 1.3 - the outbox (specs/email_outbox.md): about() names the record an email concerns, once() makes it
+ *   send-once, unrecorded() keeps it off the outbox, fromRow() marks a message the queue rebuilt from its row;
+ *   fromTemplate() keeps the template's name and values (in memory only)
  * @version 1.2 - attachmentContent(): one attachment's bytes and name, read at send time; an entry that
  *   cannot be read throws (an empty one is sent as zero bytes), so every API provider fails the send instead of dropping the file
  *   (specs/email_provider_sdk_removal.md B6)
@@ -30,6 +33,15 @@ class EmailMessage {
     private $headers = [];
     private $metadata = [];
     private $messageId;
+
+    /** The outbox (specs/email_outbox.md): never sent with the message, never in toTransfer(). */
+    private $aboutType = null;
+    private $aboutId = null;
+    private $onceKey = null;
+    private $unrecordedWhy = null;
+    private $rowId = null;
+    private $templateName = null;
+    private $templateVars = null;
 
     /**
      * Headers header() refuses: the message's own fields write them, and
@@ -111,10 +123,88 @@ class EmailMessage {
         if (!$template->hasContent()) {
             throw new Exception('Template \'' . $templateName . '\' produced no content after processing');
         }
-        
+
+        $message->templateName = (string)$templateName;
+        $message->templateVars = is_array($values) ? $values : null;
         return $message;
     }
     
+    /**
+     * The record this email is about: the outbox row names its table and key,
+     * so the admin page, the failed-email alarm and a feature's own history
+     * can ask which emails a record produced.
+     *
+     * @throws InvalidArgumentException for a record with no key (an unsaved one)
+     */
+    public function about(SystemBase $record) {
+        if ($record->key === null || $record->key === '' || !is_numeric($record->key)) {
+            throw new InvalidArgumentException('An email can only be about a saved record.');
+        }
+        $this->aboutType = $record::$tablename;
+        $this->aboutId = (int)$record->key;
+        return $this;
+    }
+
+    /**
+     * Send this email once per $key on the record named by about(): a second
+     * send with the same key is not sent (EmailSender::send() returns false).
+     * One To address, no Cc or Bcc.
+     */
+    public function once(string $key) {
+        $key = trim($key);
+        if ($key === '' || strlen($key) > 191) {
+            throw new InvalidArgumentException('A send-once key is 1 to 191 characters.');
+        }
+        $this->onceKey = $key;
+        return $this;
+    }
+
+    /**
+     * Keep this email off the outbox: it carries another person's content, or
+     * has its own per-recipient record. $why is for the reader of the call
+     * site (and the retry row's service), never shown to anyone.
+     */
+    public function unrecorded(string $why) {
+        $this->unrecordedWhy = trim($why) !== '' ? trim($why) : 'unrecorded';
+        return $this;
+    }
+
+    /** Internal: the queue rebuilt this message from its outbox row $id; send() records to that row. */
+    public function fromRow(int $id) {
+        $this->rowId = $id;
+        return $this;
+    }
+
+    /** A copy of this message addressed to $email alone (no Cc or Bcc): one recipient of a batch. */
+    public function forRecipient(string $email): self {
+        $copy = clone $this;
+        $copy->recipients = array(array('email' => $email, 'name' => null));
+        $copy->ccRecipients = array();
+        $copy->bccRecipients = array();
+        return $copy;
+    }
+
+    public function getAbout(): ?array {
+        return $this->aboutType === null ? null : array('type' => $this->aboutType, 'id' => $this->aboutId);
+    }
+    public function getOnceKey(): ?string { return $this->onceKey; }
+    public function isUnrecorded(): bool { return $this->unrecordedWhy !== null; }
+    public function getRowId(): ?int { return $this->rowId; }
+    public function getTemplateName(): ?string { return $this->templateName; }
+    public function getTemplateVars(): ?array { return $this->templateVars; }
+
+    /** Internal, for a rebuilt row: the template it was sent from (its values are not kept). */
+    public function setTemplateName(?string $name) {
+        $this->templateName = $name;
+        return $this;
+    }
+
+    /** Internal, for a rebuilt unrecorded retry row. */
+    public function markUnrecordedFromRow() {
+        $this->unrecordedWhy = 'unrecorded';
+        return $this;
+    }
+
     /**
      * Fluent interface for building emails
      */

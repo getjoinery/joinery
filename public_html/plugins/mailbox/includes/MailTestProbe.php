@@ -23,6 +23,7 @@
  * The receiver is our inbound test node, a stopgap (owner, 2026-11-14): the
  * end state is an address on the site's own management node.
  *
+ * @version 1.0.1 - the probe is unrecorded: it is not an email to a person (specs/email_outbox.md)
  * @version 1.0.0
  */
 class MailTestProbe {
@@ -133,6 +134,8 @@ class MailTestProbe {
 			$message = EmailMessage::create(self::PROBE_ADDRESS, $subject, self::body($domain, $token));
 			$message->to(self::PROBE_ADDRESS);
 			$message->from($from);
+			// A deliverability probe, not an email to a person.
+			$message->unrecorded('deliverability probe');
 			$sender = new EmailSender();
 			$ok = (bool)$sender->send($message, false);
 			$report = $sender->lastSendReport();

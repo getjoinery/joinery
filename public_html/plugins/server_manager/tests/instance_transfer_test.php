@@ -122,8 +122,9 @@ class XferFakeDriver implements CloudComputeProvider, CloudInstanceTransfers {
 $driver = new XferFakeDriver();
 InstanceTransfers::$driver = $driver;
 $mails = array();
-InstanceTransfers::$mailer = function ($template, $to, $vars) use (&$mails) {
+EmailSender::$capture = function ($template, $to, $vars) use (&$mails) {
 	$mails[] = array('template' => $template, 'to' => $to, 'vars' => $vars);
+	return true;
 };
 $signals = array();
 InstanceTransfers::$signal = function ($name, $payload) use (&$signals) {
@@ -529,19 +530,20 @@ InstanceTransferFinish::run($row);
 check($step_after === 'told' && count(new MultiServiceTenant(array('node_id' => (int)$n->key, 'deleted' => false))) === $tenants_before,
 	'resumed after billing, the services step finds its rows and makes no second set');
 
+// This suite runs inside one transaction (rolled back at the end), and a
+// send-once email refuses to go inside a transaction (its row is the
+// permission to send): 'done' is checked once more after the rollback.
 $done_mails = count(array_filter($mails, function ($m) { return $m['template'] === 'instance_transfer_done'; }));
 $row->set('itx_state', InstanceTransfer::STATE_FINISHING);
 $row->set('itx_finish_step', 'banner');
 $row->save();
 $alerts_before = count($signals);
 InstanceTransferFinish::run($row);
-check($done_mails === 1 && count(array_filter($mails, function ($m) { return $m['template'] === 'instance_transfer_done'; })) === 1
-	&& count($signals) === $alerts_before, 'the last step run again sends no second email and no second alert');
-
-$done_mail = null;
-foreach ($mails as $m) { if ($m['template'] === 'instance_transfer_done') { $done_mail = $m; } }
-check($done_mail['template'] === 'instance_transfer_done' && strpos($done_mail['vars']['dns_records'], 's1._domainkey') !== false,
-	'the customer\'s last email lists the DNS records we hold for them');
+check($done_mails === 0 && count(array_filter($mails, function ($m) { return $m['template'] === 'instance_transfer_done'; })) === 0
+	&& count($signals) === $alerts_before && $row->state() === InstanceTransfer::STATE_DONE,
+	'the last step run again makes no second alert; inside a transaction the send-once done email is refused, never sent');
+$done_records = InstanceTransferFinish::records_we_hold($p);
+check(strpos($done_records, 's1._domainkey') !== false, 'the done email would list the DNS records we hold for them');
 
 section('The store\'s cancel arriving afterwards changes nothing');
 
@@ -687,10 +689,73 @@ section('Cleanup');
 ini_set('error_log', $previous_log ?: '');
 @unlink($log_file);
 InstanceTransfers::$driver = null;
-InstanceTransfers::$mailer = null;
+EmailSender::$capture = null;
 InstanceTransfers::$signal = null;
 IncidentReconciler::$dispatch = null;
 $db->rollBack();
 check(true, 'every fixture rolled back');
+
+// ---------------------------------------------------------------------------
+section('The done email goes once, outside any transaction');
+$mails = array();
+EmailSender::$capture = function ($template, $to, $vars) use (&$mails) {
+	$mails[] = array('template' => $template, 'to' => $to, 'vars' => $vars);
+	return true;
+};
+list($dp, $dn, $dt) = xfer_site('xfer-done-' . $suffix);
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $dp->key);
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $dn->key);
+harness_register_row('htr_hosted_trials', 'htr_hosted_trial_id', $dt->key);
+$drow = new InstanceTransfer(NULL);
+$drow->set('itx_cvp_customer_cloud_provision_id', (int)$dp->key);
+$drow->set('itx_instance_id', (string)$dp->get('cvp_instance_id'));
+$drow->set('itx_state', InstanceTransfer::STATE_DONE);
+$drow->save();
+$drow->load();
+harness_register_row('itx_instance_transfers', 'itx_instance_transfer_id', $drow->key);
+$first = InstanceTransfers::email($drow, $dp, 'done', array('dns_records' => 's1._domainkey'));
+$second = InstanceTransfers::email($drow, $dp, 'done', array('dns_records' => 's1._domainkey'));
+check($first && !$second && count($mails) === 1 && $mails[0]['template'] === 'instance_transfer_done'
+	&& $mails[0]['to'] === $dp->get('cvp_buyer_email'), 'done goes once per transfer, to the buyer');
+InstanceTransfers::email($drow, $dp, 'invite');
+InstanceTransfers::email($drow, $dp, 'invite');
+check(count($mails) === 3, 'an invite (a recurring kind) goes each time it is called for');
+list($last_kind, $last_time) = (new InstanceTransfer($drow->key, TRUE))->last_email();
+check($last_kind === 'invite' && $last_time !== '', 'last_email() names the newest Sent kind from the outbox', $last_kind);
+// The finish's last step, run for real outside a transaction (reviewer2 T1).
+$fin_signals = array();
+InstanceTransfers::$signal = function ($name, $payload) use (&$fin_signals) { $fin_signals[] = $name; };
+$frow = new InstanceTransfer(NULL);
+$frow->set('itx_cvp_customer_cloud_provision_id', (int)$dp->key);
+$frow->set('itx_instance_id', (string)$dp->get('cvp_instance_id'));
+$frow->set('itx_state', InstanceTransfer::STATE_FINISHING);
+$frow->set('itx_finish_step', 'banner');
+$frow->save();
+$frow->load();
+harness_register_row('itx_instance_transfers', 'itx_instance_transfer_id', $frow->key);
+$mails = array();
+InstanceTransferFinish::run($frow);
+$fin_done = array_values(array_filter($mails, function ($m) { return $m['template'] === 'instance_transfer_done'; }));
+// Started at its last step, so no services step has made the mail rows:
+// the records' content is checked inside the transaction above.
+check(count($fin_done) === 1 && $fin_done[0]['to'] === $dp->get('cvp_buyer_email')
+	&& array_key_exists('dns_records', (array)$fin_done[0]['vars']) && $frow->state() === InstanceTransfer::STATE_DONE,
+	'the finish sends the done email once, to the buyer, with the DNS records we hold for them',
+	json_encode(array_column($mails, 'template')));
+$frow->set('itx_state', InstanceTransfer::STATE_FINISHING);
+$frow->set('itx_finish_step', 'banner');
+$frow->save();
+$alerts = count($fin_signals);
+InstanceTransferFinish::run($frow);
+check(count(array_filter($mails, function ($m) { return $m['template'] === 'instance_transfer_done'; })) === 1 && count($fin_signals) === $alerts,
+	'run again, the last step sends no second email and no second alert');
+InstanceTransfers::$signal = null;
+$drows = DbConnector::get_instance()->get_db_link()->prepare("SELECT equ_queued_email_id FROM equ_queued_emails
+	WHERE equ_entity_type = 'itx_instance_transfers' AND equ_entity_id IN (?, ?)");
+$drows->execute(array((int)$drow->key, (int)$frow->key));
+foreach ($drows->fetchAll(PDO::FETCH_COLUMN) as $eid) {
+	harness_register_row('equ_queued_emails', 'equ_queued_email_id', (int)$eid);
+}
+EmailSender::$capture = null;
 
 harness_finish();

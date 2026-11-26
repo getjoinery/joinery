@@ -18,6 +18,12 @@
  * nothing went), never throws, and never undoes what it was called about: an
  * email that fails leaves the payment, the cancel or the ending as it is.
  *
+ * The receipt and the reminder are send-once emails on the outbox
+ * (EmailSender::sendTemplateOnce(), specs/email_outbox.md), about the
+ * subscription's oldest line: receipt:<invoice id>, renewal:<period end>.
+ *
+ * @version 1.3 - the receipt and the reminder are send-once on the outbox, about the subscription's anchor line; claim()
+ *   and release() and $mailer are gone; period_key(); $stripe_quote stands in for Stripe's next amount in tests
  * @version 1.2 - told_by_store(): a failed-payment email leaves out the lines whose product tells its buyer itself
  * @version 1.1 - payment_failed_vars(): a failed-payment email names every line and the invoice amount
  * @version 1.0
@@ -31,8 +37,8 @@ class SubscriptionEmails {
 	/** Days before a renewal its reminder goes, unless the task is told otherwise. */
 	const REMINDER_DAYS = 7;
 
-	/** A test's stand-in for EmailSender::sendTemplate($template, $to, $vars). */
-	public static $mailer = null;
+	/** A test's stand-in for Stripe's next amount: callable($subscription_id) returning ?string. */
+	public static $stripe_quote = null;
 
 	/** A test's clock, 'Y-m-d H:i:s' UTC. */
 	public static $now = null;
@@ -90,17 +96,10 @@ class SubscriptionEmails {
 				'paid_date'         => self::day($paid_at > 0 ? gmdate('Y-m-d H:i:s', $paid_at) : self::now(), $user),
 				'next_payment_date' => self::day($period_end, $user),
 			);
-			// Everything the email says is ready; only the send is left to fail.
-			$anchor = self::anchor($lines);
-			if (!self::claim($anchor, 'odi_receipted_invoice_id', $invoice_id)) {
-				return 'already sent for this invoice';
-			}
-			if (!self::send('subscription_renewal_receipt', $user, $vars)) {
-				// Not sent: the other event of the pair, if it is still to come, tries again.
-				self::release($anchor, 'odi_receipted_invoice_id');
-				return 'the email could not be sent';
-			}
-			return 'sent';
+			// Once per invoice, however many events Stripe sends for it: the two
+			// events of a pair pick the same anchor line and meet at its key.
+			return self::send_once('subscription_renewal_receipt', $user, $vars, self::anchor($lines), 'receipt:' . $invoice_id,
+				'already sent for this invoice');
 		} catch (Throwable $e) {
 			error_log('SubscriptionEmails::renewal_paid: ' . $e->getMessage());
 			return 'failed: ' . $e->getMessage();
@@ -215,7 +214,6 @@ class SubscriptionEmails {
 			    AND odi_usr_user_id IS NOT NULL
 			    AND odi_subscription_period_end > ?::timestamp
 			    AND odi_subscription_period_end <= ?::timestamp + make_interval(days => ?)
-			    AND (odi_renewal_reminded_for IS NULL OR odi_renewal_reminded_for <> odi_subscription_period_end)
 			    AND (?::int IS NULL OR odi_ord_order_id = ?::int)
 			  ORDER BY odi_order_item_id");
 		$q->execute(array(self::now(), self::now(), $days, $order_id, $order_id));
@@ -242,6 +240,13 @@ class SubscriptionEmails {
 					continue;
 				}
 				$renews = (string)$lines[0]->get('odi_subscription_period_end');
+				// A subscription already reminded of this renewal is left out of
+				// the send and the preview alike.
+				$anchor = self::anchor($lines);
+				$once = 'renewal:' . self::period_key($renews);
+				if (in_array($once, EmailSender::onceKeys($anchor, 'renewal:'), true)) {
+					continue;
+				}
 				$out['due'][] = $user->get('usr_email') . ': ' . html_entity_decode(self::labels($lines), ENT_NOQUOTES, 'UTF-8')
 					. ', renews ' . self::day($renews, $user);
 				if ($dry_run) {
@@ -254,24 +259,11 @@ class SubscriptionEmails {
 					'renewal_date' => self::day($renews, $user),
 					'amount'       => $amount === null ? '' : $amount,
 				);
-				// Everything the email says is ready; only the send is left to fail.
-				$claimed = array();
-				foreach ($lines as $line) {
-					if (self::claim($line, 'odi_renewal_reminded_for', (string)$line->get('odi_subscription_period_end'))) {
-						$claimed[] = $line;
-					}
-				}
-				if (!$claimed) {
-					continue;
-				}
-				$ok = self::send('subscription_renewal_reminder', $user, $vars);
-				if ($ok) {
+				$said = self::send_once('subscription_renewal_reminder', $user, $vars, $anchor, $once, 'already reminded');
+				if ($said === 'sent') {
 					$out['sent']++;
-				} else {
+				} elseif ($said !== 'already reminded') {
 					$out['failed']++;
-					foreach ($claimed as $line) {
-						self::release($line, 'odi_renewal_reminded_for');
-					}
 				}
 			} catch (Throwable $e) {
 				$out['failed']++;
@@ -362,6 +354,16 @@ class SubscriptionEmails {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * The text form of a period end in a renewal reminder's key: whole
+	 * seconds, UTC. The carry-over migration writes the same text
+	 * (to_char(..., 'YYYY-MM-DD HH24:MI:SS')).
+	 */
+	public static function period_key(string $period_end): string {
+		$t = strtotime(trim($period_end) . ' UTC');
+		return $t === false ? trim($period_end) : gmdate('Y-m-d H:i:s', $t);
 	}
 
 	/** The line a send is recorded on: the oldest, so every event picks the same one. */
@@ -462,8 +464,8 @@ class SubscriptionEmails {
 
 	/** What Stripe will charge at the next renewal, as the email says it, or null when it cannot say. */
 	private static function upcoming_amount(string $subscription_id): ?string {
-		if (self::$mailer !== null) {
-			return null; // a test never asks Stripe
+		if (self::$stripe_quote !== null) {
+			return call_user_func(self::$stripe_quote, $subscription_id); // a test never asks Stripe
 		}
 		try {
 			$due = (new StripeHelper())->upcoming_invoice_amount($subscription_id);
@@ -482,40 +484,32 @@ class SubscriptionEmails {
 		return (string)((new ProductVersion($version_id, TRUE))->is_subscription() ?: '');
 	}
 
-	/**
-	 * Take the right to send: writes $value into $column only where it is not
-	 * there already, so of two requests about the same thing one sends.
-	 */
-	private static function claim(OrderItem $line, string $column, string $value): bool {
-		$sql = array(
-			'odi_receipted_invoice_id' => 'UPDATE odi_order_items SET odi_receipted_invoice_id = ?
-				WHERE odi_order_item_id = ? AND odi_receipted_invoice_id IS DISTINCT FROM ?',
-			'odi_renewal_reminded_for' => 'UPDATE odi_order_items SET odi_renewal_reminded_for = ?::timestamp
-				WHERE odi_order_item_id = ? AND odi_renewal_reminded_for IS DISTINCT FROM ?::timestamp',
-		);
-		$q = DbConnector::get_instance()->get_db_link()->prepare($sql[$column]);
-		$q->execute(array($value, (int)$line->key, $value));
-		return $q->rowCount() === 1;
-	}
-
-	/** Give a claim back: the email did not go. */
-	private static function release(OrderItem $line, string $column): void {
-		$sql = array(
-			'odi_receipted_invoice_id' => 'UPDATE odi_order_items SET odi_receipted_invoice_id = NULL WHERE odi_order_item_id = ?',
-			'odi_renewal_reminded_for' => 'UPDATE odi_order_items SET odi_renewal_reminded_for = NULL WHERE odi_order_item_id = ?',
-		);
-		DbConnector::get_instance()->get_db_link()->prepare($sql[$column])->execute(array((int)$line->key));
-	}
-
 	private static function send(string $template, User $user, array $vars): bool {
 		$vars['billing_url'] = LibraryFunctions::get_absolute_url('/profile/billing');
 		try {
-			return self::$mailer !== null
-				? call_user_func(self::$mailer, $template, (string)$user->get('usr_email'), $vars) !== false
-				: EmailSender::sendTemplate($template, (string)$user->get('usr_email'), $vars) !== false;
+			return EmailSender::sendTemplate($template, (string)$user->get('usr_email'), $vars) !== false;
 		} catch (Throwable $e) {
 			error_log('SubscriptionEmails: ' . $template . ' to user ' . (int)$user->key . ' could not be sent: ' . $e->getMessage());
 			return false;
+		}
+	}
+
+	/**
+	 * Send $template once per $key on $anchor: 'sent' when this call took the
+	 * key (the email went, or waits for its retry), $taken when it was
+	 * already taken, or why it could not be sent.
+	 */
+	private static function send_once(string $template, User $user, array $vars, OrderItem $anchor, string $key, string $taken): string {
+		$vars['billing_url'] = LibraryFunctions::get_absolute_url('/profile/billing');
+		if (trim((string)$user->get('usr_email')) === '') {
+			return 'the account has no email address';
+		}
+		try {
+			return EmailSender::sendTemplateOnce($anchor, $key, $template, (string)$user->get('usr_email'), $vars)
+				? 'sent' : $taken;
+		} catch (Throwable $e) {
+			error_log('SubscriptionEmails: ' . $template . ' to user ' . (int)$user->key . ' could not be sent: ' . $e->getMessage());
+			return 'the email could not be sent';
 		}
 	}
 }

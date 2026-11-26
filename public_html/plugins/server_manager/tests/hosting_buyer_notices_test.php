@@ -4,7 +4,7 @@
  * tier: db
  * env: any
  * needs: []
- * covers: [plugins/server_manager/includes/provisioning/HostingBuyerNotices.php, plugins/server_manager/data/customer_cloud_provisions_class.php, plugins/server_manager/logic/profile_sites_logic.php]
+ * covers: [plugins/server_manager/includes/provisioning/HostingBuyerNotices.php, includes/EmailSender.php, plugins/server_manager/data/customer_cloud_provisions_class.php, plugins/server_manager/logic/profile_sites_logic.php]
  */
 /**
  * A paid site's buyer is told, once, each state they need to know
@@ -12,7 +12,8 @@
  * cancel scheduled, payment needed or hosting ended, shuts down soon, shut
  * down. A setup state left and reached again is told again; a site another
  * store sold is not told here. Also: Retry setup and Retry email setup, and
- * a row whose order was closed may be dismissed.
+ * a row whose order was closed may be dismissed. Each notice is a send-once
+ * email on the outbox (specs/email_outbox.md).
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -21,9 +22,12 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisi
 $run = getmypid() . '-' . random_int(1000, 9999);
 $buyer = make_user('BuyerNotices');
 $sent = array();
-HostingBuyerNotices::$mailer = function ($template, $to, $vars) use (&$sent) {
+$hbn_capture = function ($template, $to, $vars) use (&$sent) {
 	$sent[] = array('template' => $template, 'to' => $to, 'vars' => $vars);
+	return true;
 };
+EmailSender::$capture = $hbn_capture;
+harness_defer(function () { EmailSender::$capture = null; });
 HostingBuyerNotices::$now = gmdate('Y-m-d H:i:s');
 
 function hbn_line($buyer, bool $subscription = true) {
@@ -83,7 +87,7 @@ $site->set('cvp_status', 'ready');
 $site->save();
 HostingBuyerNotices::tell($site);
 $site = new CustomerCloudProvision($site->key, TRUE);
-check(HostingBuyerNotices::told($site) === array(), 'leaving the state forgets it');
+check(EmailSender::onceKeys($site, 'setup:') === array(), 'leaving the state forgets it');
 $site->fail('again');
 $sent = array();
 check(HostingBuyerNotices::tell(new CustomerCloudProvision($site->key, TRUE)) === 1, 'failing again is told again');
@@ -160,14 +164,42 @@ $immediate->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s', time() 
 check(!isset(HostingBuyerNotices::due(new CustomerCloudProvision($plan_site->key, TRUE), $immediate)['plan:cancel:' . $immediate->get('odi_subscription_cancelled_time')]),
 	'an immediate cancel is not told as running to the period end (B22)');
 $sent = array();
-HostingBuyerNotices::$mailer = function () { return false; };
+EmailSender::$capture = function () { return false; };
 $fail_item = hbn_line($buyer);
 $fail_site = hbn_site($buyer, 'hbn-nosend-' . $run, 'failed', (int)$fail_item->key);
-check(HostingBuyerNotices::tell($fail_site) === 0 && HostingBuyerNotices::told(new CustomerCloudProvision($fail_site->key, TRUE)) === array(),
-	'a send that did not go is not recorded as told (B20)');
-HostingBuyerNotices::$mailer = function ($template, $to, $vars) use (&$sent) {
-	$sent[] = array('template' => $template, 'to' => $to, 'vars' => $vars);
+$hbn_db = DbConnector::get_instance()->get_db_link();
+$hbn_row = function ($site) use ($hbn_db) {
+	$q = $hbn_db->prepare("SELECT equ_queued_email_id, equ_status, equ_body IS NOT NULL AS has_body FROM equ_queued_emails
+		WHERE equ_entity_type = 'cvp_customer_cloud_provisions' AND equ_entity_id = ? AND equ_once_key = 'setup:failed'");
+	$q->execute(array((int)$site->key));
+	return $q->fetch(PDO::FETCH_ASSOC) ?: array();
 };
+check(HostingBuyerNotices::tell($fail_site) === 1 && (int)($hbn_row($fail_site)['equ_status'] ?? 0) === QueuedEmail::ERROR_SENDING
+	&& !empty($hbn_row($fail_site)['has_body']),
+	'a send that did not go waits for the queue\'s retry, with what it needs (B20)');
+EmailSender::$capture = $hbn_capture;
+$sent = array();
+check(HostingBuyerNotices::tell(new CustomerCloudProvision($fail_site->key, TRUE)) === 0 && $sent === array(),
+	'while it waits for its retry, the next pass sends no second copy');
+$hbn_db->prepare('UPDATE equ_queued_emails SET equ_status = ? WHERE equ_queued_email_id = ?')
+	->execute(array(QueuedEmail::PERMANENT_FAILURE, (int)$hbn_row($fail_site)['equ_queued_email_id']));
+check(HostingBuyerNotices::tell(new CustomerCloudProvision($fail_site->key, TRUE)) === 1 && hbn_templates($sent) === array('hosting_setup_failed')
+	&& (int)$hbn_row($fail_site)['equ_status'] === QueuedEmail::SENT,
+	'one that failed for good is sent again by the next pass, as the same row (Q6)');
+$gone_id = (int)$hbn_row($fail_site)['equ_queued_email_id'];
+$hbn_db->prepare('UPDATE equ_queued_emails SET equ_status = ?, equ_given_up_time = now() WHERE equ_queued_email_id = ?')
+	->execute(array(QueuedEmail::PERMANENT_FAILURE, $gone_id));
+$passed = new CustomerCloudProvision($fail_site->key, TRUE);
+$passed->set('cvp_status', 'ready');
+$passed->save();
+$sent = array();
+HostingBuyerNotices::tell(new CustomerCloudProvision($fail_site->key, TRUE));
+$gone_row = $hbn_db->query('SELECT equ_status, equ_once_key, equ_given_up_time FROM equ_queued_emails WHERE equ_queued_email_id = '
+	. $gone_id)->fetch(PDO::FETCH_ASSOC);
+check($sent === array() && (int)$gone_row['equ_status'] === QueuedEmail::DELETED && $gone_row['equ_once_key'] === null
+	&& $gone_row['equ_given_up_time'] === null,
+	'one that failed for good whose state has passed is withdrawn, not sent and not held as a failure (reviewer2 N2)');
+$sent = array();
 
 $trial->set('htr_state', HostedTrial::STATE_GRACE);
 $trial->set('htr_grace_ends_time', gmdate('Y-m-d H:i:s', time() + 20 * 86400));
@@ -290,6 +322,120 @@ check(HostingBuyerNotices::tell_domain_expiry($dom) === 1, 'and again at the wee
 $dom->set('rdm_graduation_state', RegisteredDomain::GRAD_SELF);
 check(HostingBuyerNotices::tell_domain_expiry($dom) === 0, 'never for a domain already in the buyer\'s own account');
 
-HostingBuyerNotices::$mailer = null;
+// ---------------------------------------------------------------------------
+section('A built site still waiting for its DNS records is reminded after a day and a week (Q41)');
+$n_node = new ManagedNode(NULL);
+$n_node->set('mgn_name', 'HarnessTest dns reminder ' . $run);
+$n_node->set('mgn_slug', 'hbn-dnsr-' . $run);
+$n_node->set('mgn_host', '203.0.113.' . random_int(2, 250));
+$n_node->set('mgn_ssh_user', 'root');
+$n_node->set('mgn_web_root', '/var/www/html/hbn-dnsr/public_html');
+$n_node->set('mgn_enabled', true);
+$n_node->set('mgn_ssl_state', 'pending');
+$n_node->save();
+$n_node->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $n_node->key);
+$n_item = hbn_line($buyer);
+$n_site = hbn_site($buyer, 'hbn-dnsr-' . $run, 'done', (int)$n_item->key);
+$n_site->set('cvp_mgn_managed_node_id', (int)$n_node->key);
+$listed = gmdate('Y-m-d H:i:s', strtotime(HostingBuyerNotices::$now . ' UTC') - 3600);
+$n_site->set('cvp_site_dns_time', $listed);
+$n_site->save();
+$n_trial = new HostedTrial(NULL);
+$n_trial->set('htr_cvp_customer_cloud_provision_id', (int)$n_site->key);
+$n_trial->set('htr_external_order_item_id', (int)$n_item->key);
+$n_trial->set('htr_state', HostedTrial::STATE_SUBSCRIBED);
+$n_trial->save();
+$n_trial->load();
+harness_register_row('htr_hosted_trials', 'htr_hosted_trial_id', $n_trial->key);
+$reload = function () use ($n_site) { return new CustomerCloudProvision((int)$n_site->key, TRUE); };
+check(SmHosting::awaits_address($reload()), 'the site is built and waits for its address');
+$sent = array();
+check(HostingBuyerNotices::tell($reload()) === 0, 'an hour after the list was shown, nothing yet (the ready email told them)');
+$set_listed = function (int $seconds_ago) use ($n_site) {
+	$row = new CustomerCloudProvision((int)$n_site->key, TRUE);
+	$row->set('cvp_site_dns_time', gmdate('Y-m-d H:i:s', strtotime(HostingBuyerNotices::$now . ' UTC') - $seconds_ago));
+	$row->save();
+};
+$set_listed(86400 + 60);
+$sent = array();
+check(HostingBuyerNotices::tell($reload()) === 1 && hbn_templates($sent) === array('hosting_dns_reminder')
+	&& $sent[0]['vars']['domain'] === $n_site->get('cvp_domain') && $sent[0]['vars']['listed_date'] !== ''
+	&& $sent[0]['vars']['sites_url'] !== '',
+	'a day on, the buyer is reminded, naming the site, the date and the sites page', json_encode($sent));
+$sent = array();
+check(HostingBuyerNotices::tell($reload()) === 0, 'once per stage');
+// The list's date is in the key, so the stage moves with the same date.
+$row = $reload();
+$row->set('cvp_site_dns_time', gmdate('Y-m-d', strtotime($listed . ' UTC')) . ' 00:00:00');
+$row->save();
+HostingBuyerNotices::$now = gmdate('Y-m-d H:i:s', strtotime(gmdate('Y-m-d', strtotime($listed . ' UTC')) . ' 00:00:00 UTC') + 7 * 86400 + 60);
+$sent = array();
+check(HostingBuyerNotices::tell($reload()) === 1 && hbn_templates($sent) === array('hosting_dns_reminder'),
+	'a week on, reminded again', json_encode(hbn_templates($sent)));
+$sent = array();
+check(HostingBuyerNotices::tell($reload()) === 0, 'and not a third time');
+HostingBuyerNotices::$now = gmdate('Y-m-d H:i:s');
+
+section('No reminder once the name reaches the site, while hosting ends, or before the list is shown');
+$fresh = function (string $tag, array $site_cols, ?string $trial_state, int $listed_ago) use ($buyer, $run) {
+	$node = new ManagedNode(NULL);
+	$node->set('mgn_name', 'HarnessTest dns reminder ' . $tag . ' ' . $run);
+	$node->set('mgn_slug', 'hbn-dn' . $tag . '-' . $run);
+	$node->set('mgn_host', '203.0.113.' . random_int(2, 250));
+	$node->set('mgn_ssh_user', 'root');
+	$node->set('mgn_web_root', '/var/www/html/hbn-dn/public_html');
+	$node->set('mgn_enabled', true);
+	$node->set('mgn_ssl_state', $site_cols['ssl'] ?? 'pending');
+	$node->save();
+	$node->load();
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
+	$item = hbn_line($buyer);
+	if (!empty($site_cols['cancelled'])) {
+		$item->set('odi_subscription_cancelled_time', gmdate('Y-m-d H:i:s', time() + 5 * 86400));
+		$item->save();
+	}
+	$site = hbn_site($buyer, 'hbn-dn' . $tag . '-' . $run, 'done', (int)$item->key);
+	$site->set('cvp_mgn_managed_node_id', (int)$node->key);
+	$site->set('cvp_site_dns_time', $listed_ago > 0 ? gmdate('Y-m-d H:i:s', time() - $listed_ago) : null);
+	$site->save();
+	if ($trial_state !== null) {
+		$trial = new HostedTrial(NULL);
+		$trial->set('htr_cvp_customer_cloud_provision_id', (int)$site->key);
+		$trial->set('htr_external_order_item_id', (int)$item->key);
+		$trial->set('htr_state', $trial_state);
+		if ($trial_state === HostedTrial::STATE_GRACE) {
+			$trial->set('htr_grace_ends_time', gmdate('Y-m-d H:i:s', time() + 20 * 86400));
+		}
+		$trial->save();
+		$trial->load();
+		harness_register_row('htr_hosted_trials', 'htr_hosted_trial_id', $trial->key);
+	}
+	return new CustomerCloudProvision((int)$site->key, TRUE);
+};
+$sent = array();
+HostingBuyerNotices::tell($fresh('ok', array('ssl' => 'active'), HostedTrial::STATE_SUBSCRIBED, 2 * 86400));
+check(!in_array('hosting_dns_reminder', hbn_templates($sent), true), 'a site whose name reaches it is not reminded');
+$sent = array();
+HostingBuyerNotices::tell($fresh('nl', array(), HostedTrial::STATE_SUBSCRIBED, 0));
+check($sent === array(), 'a site whose list was never shown is not reminded', json_encode(hbn_templates($sent)));
+$sent = array();
+HostingBuyerNotices::tell($fresh('gr', array(), HostedTrial::STATE_GRACE, 2 * 86400));
+check(!in_array('hosting_dns_reminder', hbn_templates($sent), true) && in_array('hosting_grace_payment', hbn_templates($sent), true),
+	'a site in grace is told its grace, not reminded', json_encode(hbn_templates($sent)));
+$sent = array();
+HostingBuyerNotices::tell($fresh('cx', array('cancelled' => true), HostedTrial::STATE_SUBSCRIBED, 2 * 86400));
+check(!in_array('hosting_dns_reminder', hbn_templates($sent), true), 'a cancelled site is not reminded', json_encode(hbn_templates($sent)));
+$sent = array();
+HostingBuyerNotices::tell($fresh('lt', array(), HostedTrial::STATE_SUBSCRIBED, 30 * 86400));
+check(hbn_templates($sent) === array('hosting_dns_reminder'), 'a site found a month late gets one email, not two', json_encode(hbn_templates($sent)));
+
+section('The reminder template is installed');
+$tpl = DbConnector::get_instance()->get_db_link()->prepare('SELECT emt_subject, emt_body FROM emt_email_templates WHERE emt_name = ?');
+$tpl->execute(array('hosting_dns_reminder'));
+$tpl_row = $tpl->fetch(PDO::FETCH_ASSOC);
+check($tpl_row && strpos($tpl_row['emt_body'], '*sites_url*') !== false && strpos($tpl_row['emt_subject'], '*domain*') !== false,
+	'hosting_dns_reminder exists and links the sites page (run update_database if not)');
+
 HostingBuyerNotices::$now = null;
 harness_finish();

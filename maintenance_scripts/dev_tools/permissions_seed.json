@@ -111,9 +111,6 @@
    "class": "personal",
    "note": "private chats (Q13)"
   },
-  "/admin/admin_debug_email_logs": {
-   "class": "restricted"
-  },
   "/admin/admin_email": {
    "class": "personal",
    "note": "sent-mail archive (Q12)"
@@ -142,6 +139,10 @@
   },
   "/admin/admin_email_templates": {
    "class": "content"
+  },
+  "/admin/admin_outbox": {
+   "class": "personal",
+   "note": "who each system email went to and what became of it"
   },
   "/admin/admin_email_view": {
    "class": "personal",
@@ -1106,10 +1107,6 @@
    "class": "config",
    "confidence": "instinct",
    "reason": "escrowed secrets are keys columns"
-  },
-  "DebugEmailLog": {
-   "class": "restricted",
-   "confidence": "read"
   },
   "DeletionRule": {
    "class": "config",

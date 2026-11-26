@@ -27,12 +27,14 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 
 $sent = array();
-SubscriptionEmails::$mailer = function ($template, $to, $vars) use (&$sent) {
+$se_capture = function ($template, $to, $vars) use (&$sent) {
 	$sent[] = array('template' => $template, 'to' => $to, 'vars' => $vars);
 	return true;
 };
+EmailSender::$capture = $se_capture;
+SubscriptionEmails::$stripe_quote = function () { return null; }; // a test never asks Stripe
 SubscriptionEmails::$now = '2026-12-01 12:00:00';
-harness_defer(function () { SubscriptionEmails::$mailer = null; SubscriptionEmails::$now = null; });
+harness_defer(function () { EmailSender::$capture = null; SubscriptionEmails::$stripe_quote = null; SubscriptionEmails::$now = null; });
 
 /** A provider that tells its buyer itself, as a hosted site's does. */
 class SeTellingProvider implements FulfillmentProvider, FulfillmentTellsBuyer {
@@ -146,14 +148,17 @@ $said = SubscriptionEmails::renewal_paid(se_invoice('in_se_5_' . $run, 'subscrip
 check(count($sent) === 2, 'with receipts switched off nothing goes', $said);
 harness_set_setting_mem('store_renewal_receipts', '1');
 
-SubscriptionEmails::$mailer = function () { return false; };
+EmailSender::$capture = function () { return false; };
 $said = SubscriptionEmails::renewal_paid(se_invoice('in_se_6_' . $run, 'subscription_cycle', 1500), array($a, $b));
-SubscriptionEmails::$mailer = function ($template, $to, $vars) use (&$sent) {
-	$sent[] = array('template' => $template, 'to' => $to, 'vars' => $vars);
-	return true;
-};
+EmailSender::$capture = $se_capture;
 $said2 = SubscriptionEmails::renewal_paid(se_invoice('in_se_6_' . $run, 'subscription_cycle', 1500), array($a, $b));
-check($said !== 'sent' && $said2 === 'sent' && count($sent) === 3, 'a receipt that could not be sent is tried again by the invoice\'s other event', $said . ' / ' . $said2);
+$se_row = DbConnector::get_instance()->get_db_link()->prepare("SELECT equ_status FROM equ_queued_emails
+	WHERE equ_entity_type = 'odi_order_items' AND equ_once_key = ?");
+$se_row->execute(array('receipt:in_se_6_' . $run));
+check($said === 'sent' && $said2 === 'already sent for this invoice' && count($sent) === 2
+	&& (int)$se_row->fetchColumn() === QueuedEmail::ERROR_SENDING,
+	'a receipt that could not be sent waits for the queue\'s retry, and the invoice\'s other event sends no second copy',
+	$said . ' / ' . $said2);
 
 section('A failed payment names what the invoice bills');
 $vars = SubscriptionEmails::payment_failed_vars(array($a, $b), (object)array('amount_due' => 1298, 'currency' => 'usd'));

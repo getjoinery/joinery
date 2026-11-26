@@ -1525,6 +1525,21 @@ function harness_teardown_data() {
 		try { $fn(); } catch (\Throwable $e) { echo "  WARNING: teardown step failed: " . $e->getMessage() . "\n"; }
 	}
 	$h['deferred'] = array();
+	// Every email a test sends leaves an outbox row; the ones this process
+	// wrote go with the rest of its fixtures.
+	if (class_exists('QueuedEmail', false) && QueuedEmail::$written_ids) {
+		try {
+			$ids = array_map('intval', array_keys(QueuedEmail::$written_ids));
+			$db = DbConnector::get_instance()->get_db_link();
+			if (!$db->inTransaction()) {
+				$db->prepare('DELETE FROM equ_queued_emails WHERE equ_queued_email_id IN ('
+					. implode(',', array_fill(0, count($ids), '?')) . ')')->execute($ids);
+			}
+			QueuedEmail::$written_ids = array();
+		} catch (\Throwable $e) {
+			echo "  WARNING: the outbox rows this test wrote were not removed: " . $e->getMessage() . "\n";
+		}
+	}
 }
 
 // ==========================================================================

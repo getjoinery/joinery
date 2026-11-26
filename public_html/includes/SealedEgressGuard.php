@@ -78,6 +78,7 @@
  * egressGated() (hot OR a caller-declared durable restriction), while the
  * write-guard keeps asking isHot() alone.
  *
+ * @version 1.10 - email_outbox: the outbox row of a content-free send is a declared content-free write
  * @version 1.9 - mail_read_audit: MailboxReadAudit's foreign-read rows are a declared content-free write (mail_access_hardening WP1)
  * @version 1.8 - the X25519 frames (v1.seal., v1.edgeseal.) are not sealed blobs
  * @version 1.7 - vault_keys: an account vault row's own key material is a declared content-free write
@@ -144,8 +145,12 @@ class SealedEgressGuard {
 	 *   mail_read_audit — MailboxReadAudit's foreign-read rows (who looked,
 	 *                 which mailbox, which surface, how many, which ids): a
 	 *                 page that showed sealed mail is hot when it writes one.
+	 *   email_outbox — the outbox row of an email whose send asserted
+	 *                 EGRESS_CONTENT_FREE, and its outcome (QueuedEmail): the
+	 *                 recipients, subject, template and status, never its
+	 *                 body or stored message (specs/email_outbox.md §3.5).
 	 */
-	const CONTENT_FREE_WRITE_SITES = array('vault_audit', 'vault_keys', 'mail_read_audit');
+	const CONTENT_FREE_WRITE_SITES = array('vault_audit', 'vault_keys', 'mail_read_audit', 'email_outbox');
 
 	/** @var bool has this process opened sealed content? */
 	private static $hot = false;

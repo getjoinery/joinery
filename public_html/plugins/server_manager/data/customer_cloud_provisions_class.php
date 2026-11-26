@@ -42,6 +42,7 @@
  * sealed to one named operator's vault (the holder) in cvp_root_pass_vault_sealed,
  * until the holder's Retire puts it back under SecretBox, at held.
  *
+ * @version 1.49 - cvp_buyer_notices is gone: what a buyer was told is on the outbox (specs/email_outbox.md)
  * @version 1.48 - bundle_order_item_id(): the email and backups line bought with the site or later for its address
  * @version 1.47 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.46 - PROVIDER_REFUSED, provider_refusal(): a site waiting because its buyer's own account refused the server
@@ -179,9 +180,6 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_sitename'               => array('type'=>'varchar(50)'),
 		'cvp_buyer_email'            => array('type'=>'varchar(255)'),
 		'cvp_buyer_name'             => array('type'=>'varchar(255)'),
-		// What the buyer has been told of this site's state (HostingBuyerNotices),
-		// a JSON list of keys.
-		'cvp_buyer_notices'          => array('type'=>'text'),
 		// The freeze a cart line was made from: a token set each time the
 		// buyer saves the setup (ManagedSiteDraft::save_and_freeze) and cleared
 		// when it is reopened or swept back to draft. Any other save leaves it,

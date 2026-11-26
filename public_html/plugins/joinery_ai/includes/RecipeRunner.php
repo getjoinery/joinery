@@ -570,7 +570,9 @@ class RecipeRunner {
                        . '</p>';
 
             $message = EmailMessage::create($to, "[Joinery AI] $name", $text)
-                                   ->html($html_body);
+                                   ->html($html_body)
+                                   // The body is the member's own content: not the outbox's to keep.
+                                   ->unrecorded('a recipe\'s own result');
             // Content-free exactly when the tally was replaced by the pointer
             // above. A standard run's tally IS content, so if this process also
             // read protected mail the send is refused rather than quietly sent.

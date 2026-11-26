@@ -763,7 +763,7 @@ check($l3->get('cvp_status') === 'ready' && $l3->get('cvp_mail_state') === 'pend
 // Refuse gives the money back, tells the buyer, and only then takes it off the board.
 $refund_calls = array();
 $refused_mail = array();
-HostingBuyerNotices::$mailer = function ($template, $to, $vars) use (&$refused_mail) { $refused_mail[] = array($template, $to, $vars); return true; };
+EmailSender::$capture = function ($template, $to, $vars) use (&$refused_mail) { $refused_mail[] = array($template, $to, $vars); return true; };
 CustomerCloudFulfillment::$refund_stand_in = function ($line, $note) { throw new RuntimeException('card network down'); };
 $threw_refund = '';
 try { CustomerCloudFulfillment::refuse_held($c1, 1); } catch (RuntimeException $e) { $threw_refund = $e->getMessage(); }
@@ -774,7 +774,7 @@ CustomerCloudFulfillment::$refund_stand_in = function ($line, $note) use (&$refu
 $c1_lines = CustomerCloudFulfillment::site_lines($c1);
 $refusal = CustomerCloudFulfillment::refuse_held($c1, 1);
 CustomerCloudFulfillment::$refund_stand_in = null;
-HostingBuyerNotices::$mailer = null;
+EmailSender::$capture = null;
 $c1->load();
 check(!empty($c1->get('cvp_delete_time')), 'Refuse takes it off the board');
 check(count($c1_lines) >= 1 && count($refund_calls) === count($c1_lines) && abs($refusal['refunded'] - 9.99 * count($c1_lines)) < 0.001,

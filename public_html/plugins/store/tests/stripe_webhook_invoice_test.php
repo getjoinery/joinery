@@ -138,8 +138,10 @@ check($line2->get('odi_subscription_status') === 'active'
 	&& strtotime((string)$line2->get('odi_subscription_period_end') . ' UTC') === $period_end,
 	'the second line of the subscription is active with the same period end',
 	$line2->get('odi_subscription_status') . ' ' . $line2->get('odi_subscription_period_end'));
-check(trim((string)$line->get('odi_receipted_invoice_id')) === '' && trim((string)$line2->get('odi_receipted_invoice_id')) === '',
-	'an invoice with no renewal reason is not receipted');
+$swi_receipts = DbConnector::get_instance()->get_db_link()->prepare("SELECT count(*) FROM equ_queued_emails
+	WHERE equ_entity_type = 'odi_order_items' AND equ_entity_id IN (?, ?) AND equ_once_key LIKE 'receipt:%'");
+$swi_receipts->execute(array((int)$line->key, (int)$line2->key));
+check((int)$swi_receipts->fetchColumn() === 0, 'an invoice with no renewal reason is not receipted');
 
 section('invoice.paid (marked paid by hand in Stripe)');
 

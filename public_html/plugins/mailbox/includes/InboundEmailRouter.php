@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.61 - the delivery-failure notice is unrecorded: it carries the inbound message (specs/email_outbox.md)
  * @version 1.60 - a part is inline only when the HTML body shows it by cid: (InlineParts), whatever its
  *                Content-Disposition says; persistRawAndManifest() takes the body HTML, and Direct
  *                mail decides it from its own body rather than the sender's flag (B5)
@@ -3297,7 +3298,9 @@ class InboundEmailRouter {
 			$message = new EmailMessage();
 			$message->to($original_sender)
 				->subject('Delivery failure: ' . ($parsed['subject'] ?: '(no subject)'))
-				->text("Your email could not be delivered.\n\n" . ($parsed['body'] ?: ''));
+				->text("Your email could not be delivered.\n\n" . ($parsed['body'] ?: ''))
+				// It carries the inbound message's subject and body: not the outbox's to keep.
+				->unrecorded('carries the inbound message');
 
 			// No explicit From: EmailSender stamps its platform default — the
 			// identity the ambient provider is verified and DKIM-aligned for,

@@ -22,13 +22,19 @@
  * signed-in page, and never written into an email, a
  * job, a log line or an error message.
  *
- * Seams for tests: $driver (the operator-side provider driver), $mailer and
- * $signal stand in for the real ones when set.
+ * Seams for tests: $driver (the operator-side provider driver) and $signal
+ * stand in for the real ones when set; the emails are read from EmailSender::$capture.
+ *
+ * Every customer email is on the outbox, about the transfer row (specs/email_outbox.md):
+ * 'done' is send-once, the rest recur (a stale code, a new code, a resend).
+ * None is sent while the row's lock is held.
  *
  * TWO WRITERS, ONE ROW. A poll tick and a person's cancel can act on the same
  * row at once. Both take the row's lock (SELECT … FOR UPDATE) and re-read it
  * before they decide, so neither saves over the other's state.
  *
+ * @version 1.6 - the customer emails are on the outbox, about the row; done is send-once; apply_status() names the
+ *                email it owes and poll() and cancel() send it after the lock; $mailer is gone (specs/email_outbox.md)
  * @version 1.5 - a kept install password (beta_break_glass_root_access) is retired by its holder's Retire click, and the
  *                fix text says so
  * @version 1.4 - the driver is the account's provider's (ComputeDriverRegistry)
@@ -44,9 +50,6 @@ class InstanceTransfers {
 
 	/** @var object|null A CloudComputeProvider & CloudInstanceTransfers standing in for the operator's (tests). */
 	public static $driver = null;
-
-	/** @var callable|null fn(string $template, string $to, array $vars) (tests). */
-	public static $mailer = null;
 
 	/** @var callable|null fn(string $signal, array $payload) (tests). */
 	public static $signal = null;
@@ -401,6 +404,7 @@ class InstanceTransfers {
 				if ($token !== '' && $resolved['driver'] !== null) {
 					$status = $resolved['driver']->getTransferStatus($token);
 					if (in_array($status['status'], array('accepted', 'completed'), true)) {
+						// accepted or completed: a move that owes no email
 						self::apply_status($row, $status['status'], $status['expiry']);
 						return 'already_accepted';
 					}
@@ -511,21 +515,29 @@ class InstanceTransfers {
 		}
 		// Applied to the row as it is NOW: a cancel may have landed while
 		// Linode was being asked.
-		return (bool)self::locked($row, function () use ($row, $token, $status) {
+		// The email a move owes goes after the lock's transaction commits, so
+		// none is sent for a change that is then rolled back.
+		$owed = null;
+		$moved = (bool)self::locked($row, function () use ($row, $token, $status, &$owed) {
 			if (!in_array($row->state(), InstanceTransfer::TOKEN_STATES, true) || $row->open_token() !== $token) {
 				return false;
 			}
-			return self::apply_status($row, (string)$status['status'], (string)$status['expiry']);
+			return self::apply_status($row, (string)$status['status'], (string)$status['expiry'], $owed);
 		});
+		if ($owed !== null) {
+			self::email($row, self::provision_of($row), $owed);
+		}
+		return $moved;
 	}
 
 	/**
 	 * One provider status, applied. pending changes nothing; accepted means
 	 * nothing can stop it now; completed hands the row to the finish; failed
 	 * and stale and canceled each say what happened. Returns true when the
-	 * row's state moved.
+	 * row's state moved. $owed names the customer email the move calls for
+	 * (failed, code_expired), for the caller to send once its lock is let go.
 	 */
-	public static function apply_status(InstanceTransfer $row, string $status, string $expiry = ''): bool {
+	public static function apply_status(InstanceTransfer $row, string $status, string $expiry = '', ?string &$owed = null): bool {
 		$before = $row->state();
 		$row->set('itx_linode_status', $status);
 		$row->set('itx_linode_checked_time', gmdate('Y-m-d H:i:s'));
@@ -562,7 +574,7 @@ class InstanceTransfers {
 						. 'customer\'s account with the same label (' . self::label_hint($provision) . '): relabel ours, then issue a new code.');
 					$row->save();
 					self::alert($provision, 'A transfer failed at Linode', (string)$row->get('itx_error'), $row);
-					self::email($row, $provision, 'failed');
+					$owed = 'failed';
 				}
 				break;
 			case 'stale':
@@ -570,7 +582,7 @@ class InstanceTransfers {
 					$row->set('itx_state', InstanceTransfer::STATE_INVITED);
 					$row->set('itx_token_expiry', null);
 					$row->save();
-					self::email($row, $provision, 'code_expired');
+					$owed = 'code_expired';
 				}
 				break;
 			case 'canceled':
@@ -646,8 +658,11 @@ class InstanceTransfers {
 	// ── Telling people ────────────────────────────────────────────────────────
 
 	/**
-	 * One customer email. The code is never in it — an email is a copy in
-	 * somebody else's system; it links to the signed-in page that shows it.
+	 * One customer email, on the outbox about the transfer. The code is never
+	 * in it — an email is a copy in somebody else's system; it links to the
+	 * signed-in page that shows it. 'done' goes once per transfer; the others
+	 * go each time they are called for. Returns whether it went (or, for
+	 * 'done', whether this call took it).
 	 */
 	public static function email(InstanceTransfer $row, CustomerCloudProvision $provision, string $kind, array $extra = array()): bool {
 		$template = self::EMAIL_TEMPLATES[$kind] ?? '';
@@ -657,19 +672,17 @@ class InstanceTransfers {
 		}
 		$vars = array_merge(self::email_vars($row, $provision), $extra);
 		try {
-			if (self::$mailer !== null) {
-				call_user_func(self::$mailer, $template, $to, $vars);
-			} else {
-				EmailSender::sendTemplate($template, $to, $vars);
+			if ($kind === 'done') {
+				return EmailSender::sendTemplateOnce($row, 'done', $template, $to, $vars);
 			}
+			$message = EmailMessage::fromTemplate($template, $vars);
+			$message->to($to)->about($row);
+			return (bool)(new EmailSender())->send($message);
 		} catch (Throwable $e) {
 			error_log('InstanceTransfers: the ' . $kind . ' email for ' . $provision->get('cvp_domain')
 				. ' could not be sent: ' . $e->getMessage());
 			return false;
 		}
-		$row->mark_emailed($kind);
-		$row->save();
-		return true;
 	}
 
 	/** What every transfer email may say. Never the code. */

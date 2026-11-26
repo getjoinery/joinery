@@ -611,6 +611,28 @@ check($v !== null && $v['severity'] === 'warning' && strpos((string)($v['detail'
 	'The ready email failed for good: a warning naming the email and the From address it used', json_encode($v));
 $ia_mail(QueuedEmail::SENT);
 check($bm->evaluate($node) === null, 'A later one that was sent closes it');
+// A send-once notice about the site that failed for good: its next pass
+// revives the row (Locked, then Error sending), and the alarm stays open
+// through that and through a later email, until the notice itself is sent.
+$ia_db = DbConnector::get_instance()->get_db_link();
+$ia_q = $ia_db->prepare("INSERT INTO equ_queued_emails (equ_from, equ_from_name, equ_to, equ_to_name, equ_subject, equ_status,
+	equ_retry_count, equ_timestamp, equ_entity_type, equ_entity_id, equ_once_key, equ_given_up_time)
+	VALUES ('s@example.com', 's', ?, 'b', 'Setting up failed', ?, 0, now(), 'cvp_customer_cloud_provisions', ?, 'setup:failed', now())
+	RETURNING equ_queued_email_id");
+$ia_q->execute(array('ia-' . $ia_run . '@example.com', QueuedEmail::PERMANENT_FAILURE, (int)$ia_row->key));
+$ia_once = (int)$ia_q->fetchColumn();
+harness_register_row('equ_queued_emails', 'equ_queued_email_id', $ia_once);
+check($bm->evaluate($node) !== null, 'A send-once notice about the site that failed for good opens it');
+$ia_db->prepare('UPDATE equ_queued_emails SET equ_status = ? WHERE equ_queued_email_id = ?')
+	->execute(array(QueuedEmail::ERROR_SENDING, $ia_once));
+$ia_mail(QueuedEmail::SENT);
+check($bm->evaluate($node) !== null, 'and it stays open when its next pass revives the row and another email goes (reviewer2 F2)');
+$ia_db->prepare("UPDATE equ_queued_emails SET equ_status = ?, equ_service = 'dry_run' WHERE equ_queued_email_id = ?")
+	->execute(array(QueuedEmail::DELETED, $ia_once));
+check($bm->evaluate($node) === null, 'withdrawn by a suppression, it holds nothing open (reviewer2 N1)');
+$ia_db->prepare('UPDATE equ_queued_emails SET equ_status = ?, equ_given_up_time = NULL WHERE equ_queued_email_id = ?')
+	->execute(array(QueuedEmail::SENT, $ia_once));
+check($bm->evaluate($node) === null, 'until the notice itself is sent');
 // The node goes back to being one no order built, for the sections below.
 $ia_row->set('cvp_mgn_managed_node_id', null);
 $ia_row->save();

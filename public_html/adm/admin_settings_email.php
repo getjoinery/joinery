@@ -1,6 +1,7 @@
 <?php
 /** @joinery-admin class=config */
 /**
+ * @version 1.4 - the testing note points at the Outbox page (the debug email log is gone)
  * @version 1.3 - the connection check runs when validateConfiguration() passes, for every provider (SES hasCredentials() is gone)
  * @version 1.2 - no New Setting link (there is no such page; settings are declared in settings.json)
  * @version 1.1 - the provider sections' show/hide is assets/js/admin-settings-email.js (no inline script)
@@ -273,7 +274,7 @@
 		// Add note about existing session-based suppression
 		echo '<div class="alert alert-info" style="margin-bottom: 20px;">';
 		echo '<strong>Note:</strong> These are global settings. There is also a session-based email suppression ';
-		echo '(<code>$_SESSION[\'send_emails\']</code>) used for programmatic testing that logs to debug_email_logs.';
+		echo '(<code>$_SESSION[\'send_emails\']</code>) used for programmatic testing. What each send did is on the <a href="/admin/admin_outbox">Outbox</a> page.';
 		echo '</div>';
 
 		SettingsFieldRenderer::renderGroup($formwriter, 'email_testing', array('source' => 'core'));

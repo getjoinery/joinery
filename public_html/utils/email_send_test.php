@@ -300,7 +300,7 @@ if (!$result['ok']) {
     }
 
     echo '<p class="mt-2"><a class="btn btn-sm btn-outline-secondary" href="/utils/email_send_test">Back</a> '
-        . '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_debug_email_logs">Email debug logs</a></p>';
+        . '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_outbox">Outbox</a></p>';
     $page->admin_footer();
     exit;
 }

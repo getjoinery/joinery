@@ -651,17 +651,6 @@
       "helptext": "Site-wide, not payments-only: it drives component render tracing, FormWriter debug output, and the Stripe and Google Play helpers' test behaviour. Leave off in production."
     },
     {
-      "name": "email_debug_mode",
-      "default": "0",
-      "group": "email_testing",
-      "label": "Log every message to debug_email_logs",
-      "type": "select",
-      "options": {
-        "1": "Yes",
-        "0": "No"
-      }
-    },
-    {
       "name": "email_dry_run",
       "default": "0",
       "group": "email_testing",
@@ -944,6 +933,17 @@
         "0": "Never — keep every page view in full"
       },
       "helptext": "Page views older than this are rolled up into permanent daily totals and the individual rows removed, so the analytics table and every backup stay small. Top pages, traffic by day, and attribution are all preserved; only the ability to reconstruct one visitor's path is given up past this point, and page-view reports show visit counts rather than unique visitors for the older span. Conversion events (purchases, signups, cart adds) are always kept in full. Never keeps every page view row indefinitely."
+    },
+    {
+      "name": "email_outbox_retention_days",
+      "default": "180",
+      "group": "logging",
+      "label": "Days to keep the email outbox",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "Every email the site sends on its own behalf leaves a line in the Outbox (who, subject, outcome; never the body once it is sent). The daily retention sweep deletes finished lines older than this, except a send-once line whose record still exists. 0 keeps them indefinitely."
     },
     {
       "name": "calendar_email_log_retention_days",

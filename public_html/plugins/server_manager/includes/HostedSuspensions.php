@@ -44,6 +44,7 @@
  *                B6, B7)
  * @version 1.2 - disputes kept by id, so a won one clears the mark only when no other is open; the hourly re-ask
  *                runs under the suspend lock (reviewer2 N1, N2)
+ * @version 1.3 - the customer email has no stand-in of its own: tests read EmailSender::$capture (specs/email_outbox.md)
  * @version 1.0
  */
 
@@ -60,9 +61,6 @@ class HostedSuspensions {
 
 	/** Tests: callable($provision) returning the instance's cloud driver. */
 	public static $driver_stand_in = null;
-
-	/** Tests: callable($to, $subject, $body) in place of the customer email. */
-	public static $mailer = null;
 
 	/**
 	 * Suspend a hosted site. Returns the open record. Throws, with nothing
@@ -458,11 +456,7 @@ class HostedSuspensions {
 			return 'The customer was not emailed: no address on record.';
 		}
 		try {
-			if (is_callable(self::$mailer)) {
-				(self::$mailer)($to, $subject, $body);
-			} else {
-				EmailSender::quickSend($to, $subject, $body);
-			}
+			EmailSender::quickSend($to, $subject, $body);
 			return 'Emailed the customer at ' . $to . '.';
 		} catch (Throwable $e) {
 			return 'The customer email to ' . $to . ' failed: ' . $e->getMessage();

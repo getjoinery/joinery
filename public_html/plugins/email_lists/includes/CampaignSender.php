@@ -12,6 +12,7 @@
  * resumes where it stopped. On the included email nothing is queued or sent
  * (CampaignRules); a test send to yourself still is.
  *
+ * @version 1.2 - campaign mail is unrecorded: each send has its own erc_email_recipients row
  * @version 1.1 - campaigns go out with the mailing_list_footer footer
  * @version 1.0 - from the adm/admin_emails_send.php page
  */
@@ -95,7 +96,9 @@ class CampaignSender {
 			);
 
 			$sender = new EmailSender();
-			$ok = (bool)$sender->send(self::build_message($email, $data, $address, $name, $list, $list_name, $footer));
+			// One per subscriber, recorded in erc_email_recipients, not the outbox.
+			$ok = (bool)$sender->send(self::build_message($email, $data, $address, $name, $list, $list_name, $footer)
+				->unrecorded('campaign recipient'));
 			if ($ok) {
 				$recipient->set('erc_sent_time', 'now()');
 				$recipient->set('erc_status', EmailRecipient::EMAIL_SENT);
@@ -146,6 +149,7 @@ class CampaignSender {
 	public static function send_test(Email $email, User $to): bool {
 		list($list, $list_name) = self::list_of($email);
 		$message = self::build_message($email, $to->export_as_array(), $to->get('usr_email'), $to->display_name(), $list, $list_name, self::footer());
+		$message->unrecorded('campaign test');
 		$sender = new EmailSender();
 		return (bool)$sender->send($message);
 	}

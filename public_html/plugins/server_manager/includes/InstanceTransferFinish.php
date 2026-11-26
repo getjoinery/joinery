@@ -24,6 +24,7 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.7 - the done email is send-once on the outbox; the note and alert marks are itx_done_acts
  * @version 1.6 - let_go_node() disables the node last, so a step that throws is run again by pressing again
  * @version 1.5 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
  * @version 1.4 - link_node_services(): the node-linked mail and backup rows, shared with an own-Linode site built with the
@@ -87,11 +88,11 @@ class InstanceTransferFinish {
 		}
 		$row->set('itx_error', 'Linode reports the transfer completed, but the instance is still visible on our account. Waiting.');
 		$accepted = strtotime((string)$row->get('itx_accepted_time') . ' UTC');
-		if ($accepted !== false && time() - $accepted > self::LEFT_US_PATIENCE_SECONDS && $row->email_time('stuck_alert') === '') {
+		if ($accepted !== false && time() - $accepted > self::LEFT_US_PATIENCE_SECONDS && $row->done_time('stuck_alert') === '') {
 			InstanceTransfers::alert($provision, 'A finished transfer still shows the instance on our account',
 				'Linode reported the transfer completed, but our token still sees instance ' . $row->get('itx_instance_id')
 				. '. Check it in Cloud Manager.', $row);
-			$row->mark_emailed('stuck_alert');
+			$row->mark_done('stuck_alert');
 		}
 		return false;
 	}
@@ -341,25 +342,24 @@ class InstanceTransferFinish {
 	 * resumes without a second email, note or alert.
 	 */
 	private static function step_told(InstanceTransfer $row, CustomerCloudProvision $provision): bool {
-		if ($row->email_time('done') === '') {
-			InstanceTransfers::email($row, $provision, 'done', array(
-				'dns_records' => self::records_we_hold($provision),
-			));
-		}
+		// Send-once on the outbox: a resumed finish never sends it twice.
+		InstanceTransfers::email($row, $provision, 'done', array(
+			'dns_records' => self::records_we_hold($provision),
+		));
 		$node = InstanceTransfers::node_of($provision);
-		if ($node !== null && $row->email_time('node_note') === '') {
+		if ($node !== null && $row->done_time('node_note') === '') {
 			$node->set('mgn_notes', trim((string)$node->get('mgn_notes') . "\n"
 				. 'Moved to its customer\'s own Linode account on ' . gmdate('Y-m-d') . ' (transfer #' . (int)$row->key
 				. '). Still managed by us until its customer says otherwise.'));
 			$node->save();
-			$row->mark_emailed('node_note');
+			$row->mark_done('node_note');
 			$row->save();
 		}
-		if ($row->email_time('done_alert') === '') {
+		if ($row->done_time('done_alert') === '') {
 			InstanceTransfers::alert($provision, $provision->get('cvp_domain') . ' moved to its customer\'s Linode account',
 				'The finish ran: hosting cancelled, mail and backups carried on as a Services subscription'
 				. ($row->get('itx_operator_todo') ? '. There is a to-do on the queue.' : '.'), $row);
-			$row->mark_emailed('done_alert');
+			$row->mark_done('done_alert');
 			$row->save();
 		}
 		return true;

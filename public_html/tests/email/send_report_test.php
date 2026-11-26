@@ -20,11 +20,10 @@
  *  - A dry-run send reports nothing beyond the reset (no transport touched).
  *  - MailgunProvider::worstStatus(): each recipient's latest event stands for
  *    that recipient; the worst across recipients stands for the message.
- *  - DebugEmailLog (B1): the columns the sender writes are the columns the
- *    class declares.
  *
  * Run: php tests/run.php safe --filter=send_report
  *
+ * @version 1.1 - the debug email log is gone, and its column check with it
  * @version 1.0
  */
 
@@ -35,7 +34,6 @@ require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));
 require_once(PathHelper::getIncludePath('includes/email_providers/MailgunProvider.php'));
-require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
 /** A transport that does what it is told and can repeat a receipt. */
 class SendReportStubTransport implements EmailServiceProvider, SendReceiptSource {
@@ -133,14 +131,6 @@ try {
 		$ev('2026-09-16 10:00:00', 'delivered', 'a@x'), $ev('2026-09-16 10:00:00', 'deferred', 'b@x'))) === 'deferred');
 	ok('an event the map does not know counts as unknown, not as a failure', MailgunProvider::worstStatus(array(
 		$ev('2026-09-16 10:00:00', 'opened', 'a@x'))) === 'unknown');
-
-	section('B1: the debug log declares what the sender writes');
-	$sender_src = file_get_contents(PathHelper::getIncludePath('includes/EmailSender.php'));
-	preg_match_all('/\$log->set\(\'(dbl_[a-z_]+)\'/', $sender_src, $mm);
-	$written = array_unique($mm[1]);
-	ok('the sender writes at least the message and service', in_array('dbl_message', $written, true) && in_array('dbl_service', $written, true));
-	$undeclared = array_diff($written, array_keys(DebugEmailLog::$field_specifications));
-	ok('every column the sender writes is declared on DebugEmailLog', $undeclared === array(), implode(', ', $undeclared));
 
 } catch (\Throwable $e) {
 	check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());

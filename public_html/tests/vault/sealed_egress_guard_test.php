@@ -432,9 +432,9 @@ try {
 		'consent is given only by the action queue\'s approve step',
 		implode(', ', $callers['consentToValues(']));
 	sort($callers['contentFree(']);
-	check($callers['contentFree('] === array('includes/VaultAudit.php', 'includes/VaultCeremonies.php', 'includes/VaultPreviousKeys.php',
-			'plugins/mailbox/includes/MailboxReadAudit.php'),
-		'and only the vault audit, the vault row\'s own key writes and the mail read audit declare a content-free write',
+	check($callers['contentFree('] === array('data/queued_emails_class.php', 'includes/VaultAudit.php', 'includes/VaultCeremonies.php',
+			'includes/VaultPreviousKeys.php', 'plugins/mailbox/includes/MailboxReadAudit.php'),
+		'and only the vault audit, the vault row\'s own key writes, the mail read audit and a content-free email\'s outbox row declare a content-free write',
 		implode(', ', $callers['contentFree(']));
 
 	// =====================================================================

@@ -20,6 +20,8 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.15 - odi_receipted_invoice_id and odi_renewal_reminded_for are gone: the receipt and the reminder are
+ *                send-once emails on the outbox (specs/email_outbox.md)
  * @version 1.14 - odi_receipted_invoice_id, odi_renewal_reminded_for: what SubscriptionEmails has sent for the line;
  *                a Stripe cancel writes the subscription's new state to every line it pays for, not only the one cancelled
  * @version 1.13 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
@@ -115,10 +117,6 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	    'odi_app_store_original_transaction_id' => array('type'=>'varchar(64)'),
 	    'odi_play_purchase_token' => array('access_class' => 'restricted', 'type'=>'varchar(255)'),
 	    'odi_store_environment' => array('type'=>'varchar(20)'),
-	    // What SubscriptionEmails has sent for this line: the invoice its last
-	    // renewal receipt was for, and the renewal its last reminder was for.
-	    'odi_receipted_invoice_id' => array('type'=>'varchar(64)'),
-	    'odi_renewal_reminded_for' => array('type'=>'timestamp(6)'),
 	);
 
 function get_order() {

@@ -128,7 +128,10 @@ gives way to the plane's optional one, and so do its own signing key and SPF
 unless the site runs its own mail server: mail that server forwards leaves from
 the site's address, so both records are listed beside the provider's. Where the domain's DNS
 host has a driver the page offers to add every record at once
-(the DNS publish box, docs/dns_management.md). There
+(the DNS publish box, docs/dns_management.md). A buyer whose built site still
+waits for its name a day after the list was shown is reminded by email, and
+again a week after (`HostingBuyerNotices`, template `hosting_dns_reminder`);
+a site whose hosting is cancelled or ending is not reminded. There
 the admin password their account was born with is shown **once** — reading it
 erases it, and the site asks them to choose their own at first sign-in. On the
 buyer's own domain the button, and Visit your site, wait until the domain

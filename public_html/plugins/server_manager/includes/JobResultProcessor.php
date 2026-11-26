@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.150 - the ready email to a store on this site goes on the outbox with EmailSender::queue(), about its provision
  * @version 1.149 - quiet_check results: whether anyone is busy, each signal a count or unknown (specs/automatic_reboot_when_quiet.md)
  * @version 1.148 - process_site_log keeps journal, the host converger's 'this host logs it to the journal' answer
  * @version 1.147 - process_unban_address: the jail, the address and how many bans the node lifted
@@ -2053,12 +2054,25 @@ class JobResultProcessor {
 			'equ_status'    => QueuedEmail::READY_TO_SEND,
 		];
 		if ($is_self) {
-			$queued = new QueuedEmail(NULL);
-			foreach ($email as $col => $val) { $queued->set($col, $val); }
-			$queued->set('equ_retry_count', 0);
-			$queued->save();
+			// The store is this site: on its outbox, about the order's provision.
+			$message = new EmailMessage();
+			$message->to($admin_email, $user_name)
+				->from($from_email, $from_name)
+				->subject('Your site is ready: ' . $domain)
+				->html($email['equ_body']);
+			if ($provision !== null) {
+				$message->about($provision);
+			}
+			try {
+				(new EmailSender())->queue($message);
+			} catch (Throwable $e) {
+				// A bad address must never cost the job its recorded result.
+				error_log('JobResultProcessor: the ready email for ' . $domain . ' was not queued: ' . $e->getMessage());
+			}
 			return;
 		}
+		// Posted to another site's store, which may run older code: the old
+		// columns at their old sizes.
 		$client = new GetJoineryApiClient($api_url, $pub_key, $sec_key);
 		$client->post('QueuedEmail', $email);
 	}

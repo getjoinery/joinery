@@ -5,7 +5,6 @@ require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
 require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException (the locked-state signal)
 
-require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
 
 /**
@@ -13,6 +12,10 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 2.0 - the outbox (specs/email_outbox.md): every recorded email has its row in equ_queued_emails,
+ *   written before it is sent and settled after; deliver() holds Direct and the transports; queue(),
+ *   sendTemplateOnce(), forgetOnce(), onceKeys() and the $capture test hook; a failed email is retried with
+ *   or without a fallback (B3), whole (B6); sendBatch() keeps one row per recipient; the debug email log is gone
  * @version 1.9 - queueForRetry() catches any Throwable, so a refused retry row is logged, never thrown at the sender
  * @version 1.8 - sendBatch() honours email_dry_run, as send() does (it sent a test's batch to the trap)
  * @version 1.7 - EmailSender::$remote: inside a sandboxed plugin's fence, send(), sendBatch() and template
@@ -22,13 +25,12 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  * @version 1.5 - usesIncludedMail(): whether the site sends through the included Joinery email
  * @version 1.4 - quickSend() puts an HTML body in the blank inner template inside the default
  *   outer template; it had rendered the outer template as the inner one, which dropped the body
- * @version 1.3 - the retry queue, the refused-send event and the debug log save as the server's own writes (no person owns them);
+ * @version 1.3 - the retry queue and the refused-send event save as the server's own writes (no person owns them);
  *   a retry row with no display name is queued under the address, not refused
  * @version 1.2 - a refused protected-domain send logs its addresses, never its subject
  * @version 1.1 - lastSendReport(): which transport took the message, the carrier's
  *   receipt, which recipients Direct delivered, the error on refusal
- *   (specs/mailbox_message_timeline.md A3); the debug log writes the columns
- *   DebugEmailLog declares (B1)
+ *   (specs/mailbox_message_timeline.md A3)
  */
 /**
  * Where mail goes when this process cannot send it: a sandboxed plugin's
@@ -129,7 +131,6 @@ class EmailSender {
     private $defaultFrom;
     private $defaultFromName;
     private $defaultReplyTo;
-    private $debugMode;
 
     /**
      * What the most recent send() did, for the caller that owns the message.
@@ -140,9 +141,13 @@ class EmailSender {
      * record (specs/mailbox_message_timeline.md A2/A3). Reset at the top of
      * every send(); read with lastSendReport().
      *
-     * @var array{direct_delivered: string[], transport: ?string, receipt: ?array, error: ?string}
+     * suppressed names a send dry run or an empty test trap stopped
+     * ('dry_run', 'test_trap_empty'), null otherwise.
+     *
+     * @var array{direct_delivered: string[], transport: ?string, receipt: ?array, error: ?string, suppressed: ?string}
      */
-    private $last_send_report = array('direct_delivered' => array(), 'transport' => null, 'receipt' => null, 'error' => null);
+    private $last_send_report = array('direct_delivered' => array(), 'transport' => null, 'receipt' => null, 'error' => null,
+        'suppressed' => null);
 
     /** @var array|null Cached provider registry: key => class name */
     private static $providers = null;
@@ -152,7 +157,6 @@ class EmailSender {
         $this->defaultFrom = $this->settings->get_setting('defaultemail');
         $this->defaultFromName = $this->settings->get_setting('defaultemailname');
         $this->defaultReplyTo = $this->settings->get_setting('defaultreplyto');
-        $this->debugMode = $this->settings->get_setting('email_debug_mode') == '1';
     }
 
     // ── Provider Discovery ──────────────────────────────────────────────
@@ -406,23 +410,46 @@ class EmailSender {
     // ── Sending ─────────────────────────────────────────────────────────
 
     /**
+     * The test hook: null in production. A test sets a callable, and deliver()
+     * calls it with ($template, $to, $vars, $message) instead of any
+     * transport, taking its return as the result. $to is the first To as the
+     * caller addressed it (before the test-mode trap); $message is as sent.
+     * The outbox row is still written, so a test checks both. On a task
+     * retry $vars is null and $to is the row's.
+     *
+     * @var callable|null
+     */
+    public static $capture = null;
+
+    /**
      * Main sending method with clean interface
      *
+     * Every email the platform sends on its own behalf is recorded in the
+     * outbox (equ_queued_emails, specs/email_outbox.md): its row is written
+     * before it is sent, without its body, and its outcome after. Body and the
+     * rest of the message are written only when the email must outlive this
+     * process: a failed send waiting for its retry, a queued email, a
+     * send-once email. Mail sent through an injected transport (a person's
+     * own mailbox) and messages marked EmailMessage::unrecorded() write no row.
+     *
      * @param EmailMessage $message The email to send
-     * @param bool $queue_on_failure If true, save to equ_queued_emails on total failure for later retry.
-     *        Pass false when sending from the retry task to prevent infinite re-queuing.
+     * @param bool $queue_on_failure If true, a failed first try is kept for the
+     *        retry task. A message rebuilt from its row (the task) is always kept
+     *        for its next retry, up to the limit.
      * @param EmailServiceProvider|null $transport Optional pre-configured transport. When supplied
      *        the message is sent through it directly — used for "send AS this mailbox" (the system
      *        connected-account provider and the per-mailbox reply/forward transport). The global
      *        email_service selection AND its fallback are skipped (you cannot fall back a
-     *        send-as-this-identity to a different identity), but validation, the retry-queue, and
-     *        debug logging are kept. This is the single pipeline — no send path bypasses it.
+     *        send-as-this-identity to a different identity). Such a send is never recorded
+     *        and never queued. This is the single pipeline — no send path bypasses it.
      * @param string $egress_assertion One of the EGRESS_* constants, required to send at all from
      *        a process that has opened sealed content (the hot-turn rule — see
      *        includes/SealedEgressGuard.php). Not a convenience flag: each value is a claim a
      *        reviewer can check against the code that builds the message. Empty means no claim,
      *        which is right for the overwhelming majority of sends.
-     * @return bool True if sent successfully
+     * @return bool True if sent successfully. For a send-once message (once()):
+     *        true when this call took the key (the email went, or waits for its
+     *        retry), false when the key was already taken and nothing was sent.
      */
     public function send(EmailMessage $message, $queue_on_failure = true, ?EmailServiceProvider $transport = null,
             $egress_assertion = '') {
@@ -437,15 +464,63 @@ class EmailSender {
             $this->last_send_report = $answer['report'] + $this->last_send_report;
             return (bool)$answer['sent'];
         }
+        return $this->dispatch($message, (bool)$queue_on_failure, $transport, (string)$egress_assertion, false);
+    }
+
+    /**
+     * Put $message on the outbox for the SendQueuedEmails task to send, with
+     * its body and the rest of the message. Nothing is sent now. Returns true
+     * when it is queued (or suppressed by dry run or an empty test trap), false
+     * for a send-once key already taken, or when this process has opened
+     * sealed content (the row would hold content in the clear; logged).
+     *
+     * @throws Exception for a message that cannot be stored (over
+     *   QueuedEmail::EXTRAS_MAX_BYTES, an unreadable attachment), since nothing was sent
+     */
+    public function queue(EmailMessage $message): bool {
+        if (self::remote() !== null) {
+            throw new Exception('A sandboxed plugin sends with send(); the site has no queue for it.');
+        }
+        return $this->dispatch($message, true, null, '', true);
+    }
+
+    /**
+     * The one path for send() and queue(). See send().
+     */
+    private function dispatch(EmailMessage $message, bool $queue_on_failure, ?EmailServiceProvider $transport,
+            string $egress_assertion, bool $queue_only): bool {
         // Mail is an unencrypted channel, so a process holding sealed plaintext
         // may only send a message whose call site makes one of the assertions
         // above. Refusing here rather than at the transport is also what keeps
-        // sealed content out of equ_queued_emails: a message that is never sent
-        // is never queued for retry.
+        // sealed content out of the outbox: a message that is never sent is
+        // never recorded.
         require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
-        SealedEgressGuard::assertSendAllowed((string)$egress_assertion, (string)$message->getSubject());
-        $this->last_send_report = array('direct_delivered' => array(), 'transport' => null, 'receipt' => null, 'error' => null);
+        SealedEgressGuard::assertSendAllowed($egress_assertion, (string)$message->getSubject());
+        $this->last_send_report = array('direct_delivered' => array(), 'transport' => null, 'receipt' => null,
+            'error' => null, 'suppressed' => null);
+        $this->addressed_to = $message->getRecipients()[0]['email'] ?? null;
+        $this->redirected = false;
 
+        $row_id = $message->getRowId();
+        if ($row_id === null) {
+            return $this->dispatchNew($message, $queue_on_failure, $transport, $egress_assertion, $queue_only);
+        }
+        // A message the task rebuilt from its row: everything below runs again
+        // (defaults, guards, dry run, test mode, Direct), and the outcome goes
+        // to that row. A throw leaves it at Error sending, counting the try.
+        try {
+            return $this->dispatchRow($message, $row_id);
+        } catch (Throwable $e) {
+            QueuedEmail::settle($row_id, QueuedEmail::ERROR_SENDING, array('error' => $e->getMessage(), 'count_try' => true));
+            throw $e;
+        }
+    }
+
+    /**
+     * Defaults, the protected-identity guard and validation, which every send
+     * passes before anything is recorded or sent.
+     */
+    private function prepare(EmailMessage $message, ?EmailServiceProvider $transport): void {
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
@@ -479,19 +554,23 @@ class EmailSender {
         if (!empty($errors)) {
             throw new Exception('Invalid email message: ' . implode(', ', $errors));
         }
+    }
 
+    /**
+     * Dry run and the test-mode trap. Returns the suppression ('dry_run',
+     * 'test_trap_empty') when the message must not be sent at all, or null
+     * once the message is ready to go (redirected to the trap in test mode).
+     */
+    private function suppressOrRedirect(EmailMessage $message, bool $rebuilt): ?string {
         // Dry run: the message is fully built and validated, but no transport is
         // touched and nothing is queued. Placed after validation so a dry run still
         // surfaces a malformed message, and above the transport branches so it
         // covers the injected-transport path as well as the global-service one.
-        $settings = Globalvars::get_instance();
-        if ((string)$settings->get_setting('email_dry_run') === '1') {
-            $this->logEmailDebug(
-                'Dry run: suppressed send to '
-                . implode(', ', array_column($message->getRecipients() ?: array(), 'email'))
-                . ' — subject: ' . $message->getSubject(),
-                'dry-run');
-            return true;
+        $addresses = implode(', ', array_column($message->getRecipients() ?: array(), 'email'));
+        if ((string)Globalvars::get_instance()->get_setting('email_dry_run') === '1') {
+            error_log('[EmailSender] dry run: not sent to ' . $addresses);
+            $this->last_send_report['suppressed'] = 'dry_run';
+            return 'dry_run';
         }
 
         // Test mode: every message is delivered to the one configured trap
@@ -508,16 +587,283 @@ class EmailSender {
                 // Redirect-on with nowhere to redirect to: suppressing is the
                 // safe direction — a fallback to the real recipient would be
                 // the one behavior the operator switched this on to stop.
-                $this->logEmailDebug('Test mode is on but email_test_recipient is empty — '
-                    . 'suppressed send to '
-                    . implode(', ', array_column($message->getRecipients() ?: array(), 'email'))
-                    . ' — subject: ' . $message->getSubject(), 'test-mode');
-                return true;
+                error_log('[EmailSender] test mode is on but email_test_recipient is empty: not sent to ' . $addresses);
+                $this->last_send_report['suppressed'] = 'test_trap_empty';
+                return 'test_trap_empty';
             }
-            $originals = $message->redirectAllRecipientsTo($trap);
-            $message->subject(self::testModeSubject($originals, (string)$message->getSubject()));
-            $this->logEmailDebug('Test mode: redirected to ' . $trap . ' (was '
-                . implode(', ', $originals) . ') — subject: ' . $message->getSubject(), 'test-mode');
+            // A row written in test mode is already the trap's, its subject
+            // already naming who it was for.
+            $to = $message->getRecipients();
+            $already = $rebuilt && count($to) === 1 && strcasecmp((string)$to[0]['email'], $trap) === 0
+                && !$message->getCc() && !$message->getBcc();
+            if (!$already) {
+                $this->redirected = true;
+                $originals = $message->redirectAllRecipientsTo($trap);
+                $message->subject(self::testModeSubject($originals, (string)$message->getSubject()));
+            }
+        }
+        return null;
+    }
+
+    /** A first send (or a queue()): its row, its delivery, its outcome. */
+    private function dispatchNew(EmailMessage $message, bool $queue_on_failure, ?EmailServiceProvider $transport,
+            string $egress_assertion, bool $queue_only): bool {
+        // The caller's own Reply-To, before the site's default is stamped: a
+        // retry gets the default stamped again.
+        $own_reply_to = $message->getReplyTo();
+        $this->prepare($message, $transport);
+
+        $once = $message->getOnceKey() !== null;
+        $recorded = $transport === null && !$message->isUnrecorded();
+        $hot = SealedEgressGuard::isHot();
+        // A hot process may write a row only as a declared content-free write,
+        // and never its content (R43).
+        $content_free = $hot && trim($egress_assertion) === self::EGRESS_CONTENT_FREE;
+
+        if ($once) {
+            if ($transport !== null || $message->isUnrecorded()) {
+                throw new Exception('A send-once email is recorded; it cannot be unrecorded or go by an injected transport.');
+            }
+            if ($message->getAbout() === null) {
+                throw new Exception('A send-once email names the record it is about (EmailMessage::about()).');
+            }
+            if (count($message->getRecipients()) !== 1 || $message->getCc() || $message->getBcc()) {
+                throw new Exception('A send-once email has one To address and no Cc or Bcc.');
+            }
+            if (DbConnector::get_instance()->get_db_link()->inTransaction()) {
+                throw new Exception('A send-once email is sent outside any transaction: its row is the permission to send.');
+            }
+            if ($hot && !$content_free) {
+                throw new Exception('A send-once email from a process that has opened sealed content must be content-free.');
+            }
+        }
+        if ($queue_only && $hot) {
+            error_log('[EmailSender] not queued: this process has opened sealed content, and a queued email '
+                . 'stores its body in the clear');
+            return false;
+        }
+
+        if ($this->suppressOrRedirect($message, false) !== null) {
+            return true; // nothing sent and nothing recorded
+        }
+
+        if ($queue_only) {
+            // Ready for the task, with everything it needs to send it.
+            $content = $this->buildContent($message, $own_reply_to, null); // throws: nothing was sent
+            if ($once) {
+                return QueuedEmail::claim_once($message, QueuedEmail::READY_TO_SEND, $content['body'], $content['extras']) !== null;
+            }
+            QueuedEmail::open_row($message, QueuedEmail::READY_TO_SEND, $content['body'], $content['extras']);
+            return true;
+        }
+
+        $row_id = null;
+        $row_has_content = false;
+        if ($once) {
+            // The row is the permission: it holds the content, since a send-once
+            // email that dies with this process must still be retried.
+            $content = null;
+            if (!$content_free) {
+                try {
+                    $content = $this->buildContent($message, $own_reply_to, null);
+                } catch (Throwable $e) {
+                    error_log('[EmailSender] a send-once email\'s retry cannot be stored: ' . $e->getMessage());
+                }
+            }
+            $row_id = QueuedEmail::claim_once($message, QueuedEmail::LOCKED, $content['body'] ?? null,
+                $content['extras'] ?? null, $content_free); // throws on a database error
+            if ($row_id === null) {
+                return false; // already told
+            }
+            $row_has_content = $content !== null;
+        } elseif ($recorded && (!$hot || $content_free)) {
+            try {
+                $row_id = QueuedEmail::open_row($message, QueuedEmail::LOCKED, null, null, null, null, $content_free);
+            } catch (Throwable $e) {
+                // Recording never stops an ordinary email (R-C).
+                error_log('[EmailOutbox] could not record an email; sending it anyway: ' . $e->getMessage());
+            }
+        }
+
+        try {
+            $result = $this->deliver($message, $transport);
+        } catch (VaultLockedException $e) {
+            throw $e; // the locked-state signal of an injected transport: never recorded
+        } catch (Throwable $e) {
+            $this->last_send_report['error'] = $e->getMessage();
+            $this->finish($message, $row_id, false, $queue_on_failure && !$content_free, $row_has_content,
+                $own_reply_to, $content_free, $recorded);
+            throw $e;
+        }
+        $this->finish($message, $row_id, $result, $queue_on_failure && !$content_free, $row_has_content,
+            $own_reply_to, $content_free, $recorded);
+        return $once ? true : $result;
+    }
+
+    /** A message rebuilt from row $row_id, already Locked by QueuedEmail::claim(). */
+    private function dispatchRow(EmailMessage $message, int $row_id): bool {
+        $this->prepare($message, null);
+        $suppressed = $this->suppressOrRedirect($message, true);
+        if ($suppressed !== null) {
+            QueuedEmail::settle($row_id, QueuedEmail::DELETED, array('service' => $suppressed));
+            return true;
+        }
+        if ($this->redirected) {
+            // Written with test mode off, sent with it on: the row says it went
+            // to the trap, never that a real person was emailed.
+            QueuedEmail::readdress($row_id, $message);
+        }
+        $result = $this->deliver($message, null);
+        if ($result) {
+            QueuedEmail::settle($row_id, QueuedEmail::SENT, array('service' => $this->servicePath()));
+            return true;
+        }
+        $this->settleFailure($row_id, $message, true, true, null);
+        return false;
+    }
+
+    /**
+     * Write a first send's outcome. With a row: Sent; or, failed, Error
+     * sending with what a retry needs ($retryable), else Permanent failure.
+     * With none: an unrecorded message's failure goes to queueForRetry(); a
+     * recorded one whose row could not be written is logged.
+     */
+    private function finish(EmailMessage $message, ?int $row_id, bool $ok, bool $retryable, bool $row_has_content,
+            ?string $own_reply_to, bool $content_free, bool $recorded): void {
+        if ($row_id !== null) {
+            if ($ok) {
+                QueuedEmail::settle($row_id, QueuedEmail::SENT, array('service' => $this->servicePath()), $content_free);
+                return;
+            }
+            $this->settleFailure($row_id, $message, $retryable, $row_has_content, $own_reply_to, $content_free);
+            return;
+        }
+        if ($ok) {
+            return;
+        }
+        $why = (string)($this->last_send_report['error'] ?? 'the send failed');
+        if ($recorded) {
+            error_log('[EmailSender] an email with no outbox row was not sent (' . $why . '); it will not be retried');
+        } elseif ($message->isUnrecorded() && $retryable && !SealedEgressGuard::isHot()) {
+            $this->queueForRetry($message, $own_reply_to, $why);
+        } elseif ($message->isUnrecorded()) {
+            error_log('[EmailSender] an unrecorded email was not sent (' . $why . ')');
+        }
+    }
+
+    /**
+     * A failed send's row: Error sending with the error and, unless the row
+     * already holds it, the content a retry needs; Permanent failure when the
+     * caller allows no retry or the content cannot be stored (R38). Direct's
+     * partial delivery leaves the still-owed addresses in the extras.
+     */
+    private function settleFailure(int $row_id, EmailMessage $message, bool $retryable, bool $row_has_content,
+            ?string $own_reply_to, bool $content_free = false): void {
+        $error = (string)($this->last_send_report['error'] ?? '') ?: 'The send failed.';
+        if ($message->getRowId() !== null) {
+            // A retry: its content is on the row already. When Joinery Direct
+            // took some of its recipients this time, the row is told who is
+            // still owed, so the next retry never sends them a second copy.
+            $fields = array('error' => $error, 'count_try' => true);
+            if (!empty($this->last_send_report['direct_delivered'])) {
+                try {
+                    $stored = (new QueuedEmail($row_id, TRUE))->get_json_decoded('equ_message_extras');
+                    $content = $this->buildContent($message, is_array($stored) ? ($stored['reply_to'] ?? null) : null,
+                        array_column($message->getRecipients(), 'email'));
+                    $fields['body'] = $content['body'];
+                    $fields['extras'] = $content['extras'];
+                } catch (Throwable $e) {
+                    QueuedEmail::settle($row_id, QueuedEmail::PERMANENT_FAILURE, array('error' => $error
+                        . ' Not retried: the addresses still owed could not be stored (' . $e->getMessage() . ').'));
+                    return;
+                }
+            }
+            QueuedEmail::settle($row_id, QueuedEmail::ERROR_SENDING, $fields);
+            return;
+        }
+        if (!$retryable) {
+            QueuedEmail::settle($row_id, QueuedEmail::PERMANENT_FAILURE, array('error' => $error,
+                'service' => $this->servicePath()), $content_free);
+            return;
+        }
+        if ($row_has_content && empty($this->last_send_report['direct_delivered'])) {
+            QueuedEmail::settle($row_id, QueuedEmail::ERROR_SENDING, array('error' => $error, 'service' => $this->servicePath()));
+            return;
+        }
+        $owed = empty($this->last_send_report['direct_delivered'])
+            ? null : array_column($message->getRecipients(), 'email');
+        try {
+            $content = $this->buildContent($message, $own_reply_to, $owed);
+        } catch (Throwable $e) {
+            QueuedEmail::settle($row_id, QueuedEmail::PERMANENT_FAILURE, array('error' => $error
+                . ' Not retried: ' . $e->getMessage(), 'service' => $this->servicePath()));
+            return;
+        }
+        QueuedEmail::settle($row_id, QueuedEmail::ERROR_SENDING, array('error' => $error, 'service' => $this->servicePath(),
+            'body' => $content['body'], 'extras' => $content['extras']));
+    }
+
+    /** Which way the last send left: a provider key, joinery_direct, or both. */
+    private function servicePath(): ?string {
+        $transport = $this->last_send_report['transport'] ?? null;
+        if (!empty($this->last_send_report['direct_delivered'])) {
+            return $transport ? 'joinery_direct+' . $transport : 'joinery_direct';
+        }
+        return $transport;
+    }
+
+    /**
+     * The body and stored message (equ_message_extras) of $message as it
+     * stands now (after the test-mode redirect), for a retry: from
+     * EmailMessage::toTransfer(), keeping what the columns do not hold.
+     * $owed names the addresses still to send to after a partial delivery.
+     *
+     * @return array{body: string, extras: string}
+     * @throws Exception when it cannot be stored: an attached file that cannot
+     *   be read, a value JSON or jsonb refuses, or over QueuedEmail::EXTRAS_MAX_BYTES
+     */
+    public function buildContent(EmailMessage $message, ?string $own_reply_to, ?array $owed): array {
+        $t = $message->toTransfer();
+        $html = (string)($t['html'] ?? '');
+        $extras = array(
+            'text' => $html !== '' ? $t['text'] : null,
+            'reply_to' => $own_reply_to,
+            'headers' => $t['headers'] ?: new stdClass(),
+            'metadata' => $t['metadata'] ?: new stdClass(),
+            'message_id' => $t['message_id'],
+            'attachments' => $t['attachments'],
+        );
+        if ($html === '') {
+            $extras['plain'] = true;
+        }
+        if ($owed !== null) {
+            $extras['owed'] = array_values($owed);
+        }
+        $json = json_encode($extras, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        if (strpos($json, '\\u0000') !== false) {
+            throw new Exception('the message holds a NUL character, which the outbox cannot store');
+        }
+        if (strlen($json) > QueuedEmail::EXTRAS_MAX_BYTES) {
+            throw new Exception('the message is over ' . (QueuedEmail::EXTRAS_MAX_BYTES >> 20) . ' MiB');
+        }
+        $body = $html !== '' ? $html : (string)$t['text'];
+        if (strpos($body, "\0") !== false) {
+            throw new Exception('the message holds a NUL character, which the outbox cannot store');
+        }
+        return array('body' => $body, 'extras' => $json);
+    }
+
+    /**
+     * Send $message now: the test capture, Joinery Direct, then the injected
+     * transport or the configured service and its fallback. Writes no row.
+     */
+    private function deliver(EmailMessage $message, ?EmailServiceProvider $transport): bool {
+        if (self::$capture !== null) {
+            $to = $this->addressed_to ?? ($message->getRecipients()[0]['email'] ?? null);
+            $this->last_send_report['transport'] = 'capture';
+            $result = call_user_func(self::$capture, $message->getTemplateName(), $to, $message->getTemplateVars(), $message) !== false;
+            $this->last_send_report['error'] = $result ? null : 'The test capture refused the message.';
+            return $result;
         }
 
         // Joinery Direct, before any transport is chosen: when both ends are
@@ -525,20 +871,16 @@ class EmailSender {
         // the message goes straight there over a signed, sealed channel and
         // never touches SMTP or a paid sender.
         //
-        // It sits here — after validation and the dry-run guard, above BOTH
-        // transport branches — because it applies to every send, injected
-        // transport or configured provider alike, and because the fallback has
-        // to be the path the message would otherwise have taken. Recipients
-        // Direct delivered are dropped from the message so the send below is
-        // never a duplicate for them; if it delivered them all, there is nothing
-        // left to send.
+        // It applies to every send, injected transport or configured provider
+        // alike, and the fallback has to be the path the message would
+        // otherwise have taken. Recipients Direct delivered are dropped from the
+        // message so the send below is never a duplicate for them; if it
+        // delivered them all, there is nothing left to send.
         if (self::$direct_attempt !== null) {
             try {
                 $direct = call_user_func(self::$direct_attempt, $message);
                 if (!empty($direct['delivered'])) {
                     $this->last_send_report['direct_delivered'] = array_values($direct['delivered']);
-                    $this->logEmailDebug('Delivered over Joinery Direct to '
-                        . implode(', ', $direct['delivered']), 'joinery-direct');
                     $this->countSend($message, MailSendOutcome::PATH_DIRECT, 'joinery_direct');
                     if (empty($direct['remaining'])) {
                         return true;
@@ -553,6 +895,8 @@ class EmailSender {
         }
 
         // Injected transport: send through it directly, no provider fallback.
+        // Its failure reaches the caller through lastSendReport(); it is never
+        // queued (the mailbox keeps its own record).
         if ($transport !== null) {
             $service = method_exists($transport, 'getKey') ? $transport::getKey() : get_class($transport);
             $this->last_send_report['transport'] = $service;
@@ -564,40 +908,30 @@ class EmailSender {
                 }
                 $this->recordSendOutcome($transport, $result,
                     $result ? null : 'The ' . $service . ' transport refused the message.');
-                $this->logEmailDebug(
-                    $result ? "Email sent successfully via injected transport $service"
-                            : "Email send failed via injected transport $service",
-                    $service);
             } catch (VaultLockedException $e) {
                 // A protected-identity send whose vault window is closed: this is
                 // the locked-state signal, not a transport failure. Let it
                 // propagate so the compose path prompts a one-tap unlock instead
-                // of silently queueing/failing the send.
+                // of silently failing the send.
                 throw $e;
             } catch (\Exception $e) {
                 $this->last_send_report['error'] = $e->getMessage();
-                $this->logEmailDebug("Email send exception via injected transport $service: " . $e->getMessage(), $service);
                 $result = false;
-            }
-            if (!$result && $queue_on_failure) {
-                $this->queueForRetry($message);
             }
             return $result;
         }
 
         // Use service selection with fallback
+        $settings = Globalvars::get_instance();
         $service = self::activeServiceKey();
         $fallback = trim((string)$settings->get_setting('email_fallback_service'));
 
         if ($service === '' && $fallback === '') {
-            // Nothing to try. Queued rather than dropped, so the messages a
-            // brand-new site generates before anyone reaches the settings page
-            // are still there to go out once a provider is named.
+            // Nothing to try. Reported as a failure, never as some provider's
+            // authentication error: the email takes its retries and then ends
+            // at Permanent failure, which the Outbox page shows.
             $this->last_send_report['error'] = 'No email service is configured.';
-            $this->logEmailDebug('No email service is configured — nothing was sent. Set one at /admin/admin_settings_email.');
-            if ($queue_on_failure) {
-                $this->queueForRetry($message);
-            }
+            error_log('[EmailSender] no email service is configured; set one at /admin/admin_settings_email');
             return false;
         }
 
@@ -611,18 +945,16 @@ class EmailSender {
         $result = $this->sendWithService($service, $message);
 
         if (!$result && $fallback && $fallback !== $service) {
-            $this->logEmailDebug("Primary service $service failed, trying fallback $fallback");
-            $fallback_result = $this->sendWithService($fallback, $message);
-
-            if ($fallback_result) {
-                $this->logEmailDebug("Fallback service $fallback succeeded");
-                return true;
+            $first_error = $this->last_send_report['error'];
+            $result = $this->sendWithService($fallback, $message);
+            if (!$result) {
+                $this->last_send_report['error'] = 'Both ' . $service . ' and ' . $fallback . ' failed: '
+                    . $first_error . ' / ' . $this->last_send_report['error'];
             }
-
-            $this->logEmailDebug("Both primary and fallback services failed");
-            if ($queue_on_failure) {
-                $this->queueForRetry($message);
-            }
+        }
+        if (!$result) {
+            error_log('[EmailSender] send failed via ' . ($this->last_send_report['transport'] ?? $service) . ': '
+                . $this->last_send_report['error']);
         }
 
         return $result;
@@ -722,10 +1054,106 @@ class EmailSender {
     }
 
     /**
+     * Send template $template to $to once per $key on $record: a key whose
+     * email went, is queued or waits for its retry is not sent again, and the
+     * template is not even rendered. Returns true when this call took the key
+     * (the email went, or its row is queued or waiting for its retry), which
+     * the feature treats as told; false when the key was already taken.
+     * $queue puts it on the queue instead of sending it now.
+     *
+     * @throws Exception on a database error or a blank address (false would mean "already told"),
+     *   and for a send the outbox refuses (inside a transaction, a second To)
+     */
+    public static function sendTemplateOnce(SystemBase $record, string $key, string $template, $to, array $vars = array(),
+            bool $queue = false, string $egress_assertion = ''): bool {
+        if (self::noAddress($to, 'template ' . $template)) {
+            // Not false: a caller reads false as "already told".
+            throw new InvalidArgumentException('The recipient has no email address; nothing sent.');
+        }
+        // Read the key first, so a key already taken renders nothing (R61);
+        // the claim's INSERT ... ON CONFLICT still decides a race.
+        if (self::onceTaken($record, $key)) {
+            return false;
+        }
+        $message = EmailMessage::fromTemplate($template, $vars);
+        $message->to($to)->about($record)->once($key);
+        $sender = new self();
+        return $queue ? $sender->queue($message) : $sender->send($message, true, null, $egress_assertion);
+    }
+
+    /** Whether $key on $record is taken: a row neither failed for good nor withdrawn by a suppression. */
+    private static function onceTaken(SystemBase $record, string $key): bool {
+        $q = DbConnector::get_instance()->get_db_link()->prepare('SELECT 1 FROM equ_queued_emails'
+            . ' WHERE equ_entity_type = ? AND equ_entity_id = ? AND equ_once_key = ?' . self::liveKeyCondition());
+        $q->execute(array($record::$tablename, (int)$record->key, $key));
+        return (bool)$q->fetchColumn();
+    }
+
+    /** The SQL that leaves out a key row that may be revived (failed for good, or suppressed). */
+    private static function liveKeyCondition(): string {
+        return ' AND equ_status <> ' . QueuedEmail::PERMANENT_FAILURE
+            . ' AND NOT (equ_status = ' . QueuedEmail::DELETED . " AND coalesce(equ_service, '') IN ('"
+            . implode("', '", QueuedEmail::SUPPRESSED_SERVICES) . "'))";
+    }
+
+    /**
+     * Drop one exact send-once key from $record's rows, so the email can be
+     * sent again. The rows stay as history, their key cleared; one still
+     * Ready, Locked or Error sending, or at Permanent failure, is taken to
+     * Deleted with its content cleared, so a second copy cannot go while the
+     * first retries and the failed-email alarm does not hold a passed state. Returns
+     * whether a row held the key.
+     */
+    public static function forgetOnce(SystemBase $record, string $key): bool {
+        if ($record->key === null) {
+            return false;
+        }
+        return (bool)QueuedEmail::outbox_write(function ($db) use ($record, $key) {
+            // A row still to send, or one that failed for good, is withdrawn
+            // with its content: the state it told of has passed, so it is
+            // neither sent nor held as a failure (reviewer2 N2).
+            $open = '(' . QueuedEmail::READY_TO_SEND . ', ' . QueuedEmail::LOCKED . ', ' . QueuedEmail::ERROR_SENDING . ', '
+                . QueuedEmail::PERMANENT_FAILURE . ')';
+            $q = $db->prepare('UPDATE equ_queued_emails SET equ_once_key = NULL,'
+                . ' equ_status = CASE WHEN equ_status IN ' . $open . ' THEN ' . QueuedEmail::DELETED . ' ELSE equ_status END,'
+                . ' equ_body = CASE WHEN equ_status IN ' . $open . ' THEN NULL ELSE equ_body END,'
+                . ' equ_message_extras = CASE WHEN equ_status IN ' . $open . ' THEN NULL ELSE equ_message_extras END,'
+                . ' equ_given_up_time = NULL'
+                . ' WHERE equ_entity_type = ? AND equ_entity_id = ? AND equ_once_key = ?');
+            $q->execute(array($record::$tablename, (int)$record->key, $key));
+            return $q->rowCount() > 0;
+        });
+    }
+
+    /**
+     * $record's live send-once keys starting with $prefix (rows failed for
+     * good or withdrawn by a suppression are left out: their keys may send
+     * again). $with_failed adds the keys whose rows failed for good, for a
+     * feature forgetting the keys of states that have passed.
+     *
+     * @return string[]
+     */
+    public static function onceKeys(SystemBase $record, string $prefix = '', bool $with_failed = false): array {
+        if ($record->key === null) {
+            return array();
+        }
+        $q = DbConnector::get_instance()->get_db_link()->prepare('SELECT equ_once_key FROM equ_queued_emails'
+            . ' WHERE equ_entity_type = ? AND equ_entity_id = ? AND equ_once_key IS NOT NULL'
+            . " AND left(equ_once_key, ?) = ?" . ($with_failed ? ' AND NOT (equ_status = ' . QueuedEmail::DELETED . " AND coalesce(equ_service, '') IN ('"
+            . implode("', '", QueuedEmail::SUPPRESSED_SERVICES) . "'))" : self::liveKeyCondition()) . ' ORDER BY equ_once_key');
+        $q->execute(array($record::$tablename, (int)$record->key, strlen($prefix), $prefix));
+        return array_values(array_unique($q->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    /**
      * Batch send to multiple recipients.
      *
      * Uses the provider's native batch API when available (e.g., Mailgun's
      * recipient-variables). Falls back failed recipients to the fallback provider.
+     * Each recipient has its own outbox row, written just before the provider
+     * call and settled after it: Sent, or that recipient's own Error sending
+     * row with what its retry needs (an unrecorded message's leftovers go to
+     * queueForRetry() instead).
      *
      * @return array ['success' => bool, 'failed_recipients' => string[]]
      */
@@ -737,6 +1165,11 @@ class EmailSender {
         // is never the shape a sealed-content pointer takes. See send().
         require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
         SealedEgressGuard::assertSendAllowed('', (string)$message->getSubject());
+        if ($message->getOnceKey() !== null) {
+            throw new Exception('A send-once email has one recipient; it cannot be batch-sent.');
+        }
+
+        $own_reply_to = $message->getReplyTo();
 
         // Set defaults if not specified
         if (!$message->getFrom()) {
@@ -755,8 +1188,7 @@ class EmailSender {
 
         // Dry run covers batches too, as send()'s does: built and checked, never sent.
         if ((string)Globalvars::get_instance()->get_setting('email_dry_run') === '1') {
-            $this->logEmailDebug('Dry run: suppressed batch of ' . count($recipients) . ' — subject: '
-                . $message->getSubject(), 'dry-run');
+            error_log('[EmailSender] dry run: a batch of ' . count($recipients) . ' was not sent');
             return ['success' => true, 'failed_recipients' => []];
         }
 
@@ -767,17 +1199,14 @@ class EmailSender {
         $this->test_mode_send = ($trap !== null && $trap !== '');
         if ($trap !== null) {
             if ($trap === '') {
-                $this->logEmailDebug('Test mode is on but email_test_recipient is empty — '
-                    . 'suppressed batch of ' . count($recipients) . ' — subject: '
-                    . $message->getSubject(), 'test-mode');
+                error_log('[EmailSender] test mode is on but email_test_recipient is empty: a batch of '
+                    . count($recipients) . ' was not sent');
                 return ['success' => true, 'failed_recipients' => []];
             }
             $originals = array_values(array_map('strval', $recipients));
             $recipients = [$trap];
             $message->redirectAllRecipientsTo($trap);
             $message->subject(self::testModeSubject($originals, (string)$message->getSubject()));
-            $this->logEmailDebug('Test mode: batch of ' . count($originals) . ' redirected to '
-                . $trap, 'test-mode');
         }
 
         $settings = Globalvars::get_instance();
@@ -790,75 +1219,94 @@ class EmailSender {
         }
 
         if ($service === '') {
-            $this->logEmailDebug('No email service is configured — batch not sent. Set one at /admin/admin_settings_email.');
+            error_log('[EmailSender] no email service is configured: a batch of ' . count($recipients) . ' was not sent');
             return ['success' => false, 'failed_recipients' => $recipients];
         }
 
         $provider = self::getProvider($service);
         if (!$provider) {
-            $this->logEmailDebug("Unknown email service for batch: $service");
+            error_log('[EmailSender] unknown email service for a batch: ' . $service);
             return ['success' => false, 'failed_recipients' => $recipients];
         }
 
+        // One row per recipient, just before the provider call.
+        $rows = array();
+        if (!$message->isUnrecorded()) {
+            foreach ($recipients as $email) {
+                try {
+                    $rows[strtolower((string)$email)] = QueuedEmail::open_row($message->forRecipient((string)$email),
+                        QueuedEmail::LOCKED);
+                } catch (Throwable $e) {
+                    error_log('[EmailOutbox] could not record a batch recipient; sending anyway: ' . $e->getMessage());
+                }
+            }
+        }
+        $content = function ($email) use ($message, $own_reply_to) {
+            try {
+                return $this->buildContent($message->forRecipient($email), $own_reply_to, null);
+            } catch (Throwable $e) {
+                error_log('[EmailSender] a batch recipient\'s retry cannot be stored: ' . $e->getMessage());
+                return null;
+            }
+        };
+        $subset = function (array $emails) use ($rows) {
+            $emails = array_map('strtolower', array_map('strval', $emails));
+            return array_intersect_key($rows, array_flip($emails));
+        };
+
         // Try primary provider's native batch
         MailSendOutcome::resetNote();
-        $result = $provider->sendBatch($message, $recipients);
+        try {
+            $result = $provider->sendBatch($message, $recipients);
+        } catch (Throwable $e) {
+            // Every recipient failed: each row to Error sending with its content
+            // (not left Locked for the stale rule to end), then the throw goes on.
+            QueuedEmail::settle_batch($rows, array_keys($rows), $service, $content);
+            $this->queueBatchLeftovers($message, $recipients, $own_reply_to);
+            throw $e;
+        }
         $this->countSend($message, null, $service,
             count($recipients) - count($result['failed_recipients'] ?? array()));
 
-        if ($result['success']) {
-            $this->logEmailDebug("Batch sent successfully via $service (" . count($recipients) . " recipients)");
-            return $result;
+        $failed = $result['success'] ? array() : array_values($result['failed_recipients'] ?? array());
+        $fallback_provider = (!empty($failed) && $fallback && $fallback !== $service) ? self::getProvider($fallback) : null;
+
+        if ($fallback_provider === null) {
+            QueuedEmail::settle_batch($rows, $failed, $service, $content);
+            $this->queueBatchLeftovers($message, $failed, $own_reply_to);
+            return $result['success'] ? $result : ['success' => false, 'failed_recipients' => $failed];
         }
 
-        // If some recipients failed and there's a fallback, try those
-        $failed = $result['failed_recipients'];
-        if (!empty($failed) && $fallback && $fallback !== $service) {
-            $fallback_provider = self::getProvider($fallback);
-            if ($fallback_provider) {
-                $this->logEmailDebug("Batch: " . count($failed) . " recipients failed via $service, trying $fallback");
-                MailSendOutcome::resetNote();
-                $fallback_result = $fallback_provider->sendBatch($message, $failed);
-                $this->countSend($message, null, $fallback,
-                    count($failed) - count($fallback_result['failed_recipients'] ?? array()));
-
-                if ($fallback_result['success']) {
-                    $this->logEmailDebug("Batch fallback via $fallback succeeded");
-                    return ['success' => true, 'failed_recipients' => []];
-                }
-
-                // Queue whatever is still left
-                $still_failed = $fallback_result['failed_recipients'];
-                foreach ($still_failed as $email) {
-                    $individual = new EmailMessage();
-                    $individual->to($email, '')
-                               ->subject($message->getSubject())
-                               ->from($message->getFrom(), $message->getFromName());
-                    if ($message->getHtmlBody()) {
-                        $individual->html($message->getHtmlBody());
-                    } else {
-                        $individual->text($message->getTextBody());
-                    }
-                    $this->queueForRetry($individual);
-                }
-                return ['success' => false, 'failed_recipients' => $still_failed];
-            }
+        // Settle the delivered ones; try the rest on the fallback.
+        QueuedEmail::settle_batch(array_diff_key($rows, $subset($failed)), array(), $service, $content);
+        MailSendOutcome::resetNote();
+        try {
+            $fallback_result = $fallback_provider->sendBatch($message, $failed);
+        } catch (Throwable $e) {
+            QueuedEmail::settle_batch($subset($failed), $failed, $fallback, $content);
+            $this->queueBatchLeftovers($message, $failed, $own_reply_to);
+            throw $e;
         }
+        $this->countSend($message, null, $fallback,
+            count($failed) - count($fallback_result['failed_recipients'] ?? array()));
+        $still_failed = $fallback_result['success'] ? array() : array_values($fallback_result['failed_recipients'] ?? array());
+        if ($still_failed) {
+            error_log('[EmailSender] a batch failed via ' . $service . ' and ' . $fallback . ' for '
+                . count($still_failed) . ' recipient(s)');
+        }
+        QueuedEmail::settle_batch($subset($failed), $still_failed, $fallback, $content);
+        $this->queueBatchLeftovers($message, $still_failed, $own_reply_to);
+        return ['success' => empty($still_failed), 'failed_recipients' => $still_failed];
+    }
 
-        // No fallback — queue all failures
+    /** An unrecorded batch's leftovers, each queued for its own retry. */
+    private function queueBatchLeftovers(EmailMessage $message, array $failed, ?string $own_reply_to): void {
+        if (!$message->isUnrecorded()) {
+            return;
+        }
         foreach ($failed as $email) {
-            $individual = new EmailMessage();
-            $individual->to($email, '')
-                       ->subject($message->getSubject())
-                       ->from($message->getFrom(), $message->getFromName());
-            if ($message->getHtmlBody()) {
-                $individual->html($message->getHtmlBody());
-            } else {
-                $individual->text($message->getTextBody());
-            }
-            $this->queueForRetry($individual);
+            $this->queueForRetry($message->forRecipient((string)$email), $own_reply_to, 'The batch send failed for this recipient.');
         }
-        return $result;
     }
 
     // ── Internal ────────────────────────────────────────────────────────
@@ -894,7 +1342,8 @@ class EmailSender {
     private function sendWithService($service, EmailMessage $message) {
         $provider = self::getProvider($service);
         if (!$provider) {
-            $this->logEmailDebug("Unknown email service: $service");
+            error_log("[EmailSender] unknown email service: $service");
+            $this->last_send_report['error'] = "Unknown email service: $service";
             return false;
         }
 
@@ -907,7 +1356,6 @@ class EmailSender {
             $reason = !empty($config['errors']) ? implode('; ', $config['errors']) : 'missing required settings';
             $friendly = "Email service '$service' is selected but not configured: $reason. Skipping — configure it at /admin/admin_settings_email or select a different service.";
             error_log("[EmailSender] $friendly");
-            $this->logEmailDebug($friendly, $service);
             $this->last_send_report['error'] = "Email service '$service' is not configured: $reason";
             return false;
         }
@@ -924,18 +1372,18 @@ class EmailSender {
             }
             $this->recordSendOutcome($provider, $result,
                 $result ? null : "The $service service refused the message.");
-            if ($result) {
-                $this->logEmailDebug("Email sent successfully via $service", $service);
-            } else {
-                $this->logEmailDebug("Email send failed via $service", $service);
-            }
             return $result;
         } catch (\Exception $e) {
             $this->last_send_report['error'] = $e->getMessage();
-            $this->logEmailDebug("Email send exception via $service: " . $e->getMessage(), $service);
             return false;
         }
     }
+
+    /** Whether the send under way was redirected to the test trap just now. */
+    private $redirected = false;
+
+    /** The first To of the send under way as its caller addressed it, for $capture. */
+    private $addressed_to = null;
 
     /** Whether the send under way is a test-mode send (redirected to the trap). */
     private $test_mode_send = false;
@@ -1062,76 +1510,25 @@ class EmailSender {
     }
 
     /**
-     * Queue a failed email for later retry via the SendQueuedEmails scheduled task.
-     * Saves one row per recipient into equ_queued_emails with ERROR_SENDING status.
+     * Keep a failed unrecorded email for the SendQueuedEmails task: one row
+     * per email, at Error sending, with its recipients and everything its
+     * retry needs, marked service 'unrecorded'. The write that finishes it,
+     * Sent or Permanent failure, deletes it. A recorded email is retried from
+     * its own outbox row and never comes here.
      */
-    private function queueForRetry(EmailMessage $message) {
-        // The retry queue stores the full message body in the clear
-        // (equ_queued_emails), and a process holding sealed plaintext may not
-        // write long strings anywhere that cannot protect them — the hot-turn
-        // rule would refuse the row below regardless of what the message
-        // contains, because no assertion travels down to the database layer.
-        // Skip deliberately and say so, rather than letting the guard's refusal
-        // surface as a generic queue failure: a hot send is attempted once, and
-        // a transport failure is final. The call sites that send while hot are
-        // the asserted notification mails, whose loss is an inconvenience, not
-        // lost content.
+    private function queueForRetry(EmailMessage $message, ?string $own_reply_to, string $error) {
+        // A process holding sealed plaintext may not write content anywhere
+        // that cannot protect it: a hot send is attempted once.
         require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
         if (SealedEgressGuard::isHot()) {
-            error_log('[EmailSender] Not queueing "' . $message->getSubject() . '" for retry: this '
-                . 'process has opened sealed content, and the retry queue stores bodies in the clear. '
-                . 'The send was attempted once and will not retry.');
+            error_log('[EmailSender] an unrecorded email was not queued for its retry: this process has opened sealed content');
             return;
         }
         try {
-            require_once(PathHelper::getIncludePath('data/queued_emails_class.php'));
-
-            // Every column is required: a message with no display name is queued
-            // under its address, as Notify queues one, or the row is refused and
-            // the retry silently lost.
-            $fromName = mb_substr($message->getFromName() ?: (string)$message->getFrom(), 0, 70);
-
-            foreach ($message->getRecipients() as $recipient) {
-                $queued = new QueuedEmail(NULL);
-                $queued->set('equ_from', $message->getFrom());
-                $queued->set('equ_from_name', $fromName);
-                $queued->set('equ_to', $recipient['email']);
-                $queued->set('equ_to_name', mb_substr(($recipient['name'] ?? '') ?: $recipient['email'], 0, 70));
-                $queued->set('equ_subject', mb_substr((string)$message->getSubject(), 0, 128));
-                $queued->set('equ_body', $message->getHtmlBody() ?: $message->getTextBody());
-                $queued->set('equ_status', QueuedEmail::ERROR_SENDING);
-                $queued->set('equ_retry_count', 0);
-                // The platform's retry queue, which no person asked for or owns.
-                SystemBase::server_initiated_write(function () use ($queued) { $queued->save(); });
-            }
-
-            $count = count($message->getRecipients());
-            $this->logEmailDebug("Queued $count recipient(s) for retry");
+            $content = $this->buildContent($message, $own_reply_to, null);
+            QueuedEmail::open_row($message, QueuedEmail::ERROR_SENDING, $content['body'], $content['extras'], 'unrecorded', $error);
         } catch (Throwable $e) {
-            error_log("[EmailSender] Failed to queue email for retry: " . $e->getMessage());
-        }
-    }
-
-    /**
-     * Debug logging
-     * Made public to support deprecated EmailTemplateRenderer methods
-     */
-    public function logEmailDebug($message, $service = null) {
-        if (!$this->debugMode) {
-            return;
-        }
-
-        try {
-            require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
-
-            $log = new DebugEmailLog(null);
-            $log->set('dbl_message', $message);
-            $log->set('dbl_service', $service ?: 'unknown');
-            $log->set('dbl_status', 'debug');
-            // An observation the debug setting asked for: the server's own record.
-            SystemBase::server_initiated_write(function () use ($log) { $log->save(); });
-        } catch (Exception $e) {
-            error_log("Debug email log failed: " . $e->getMessage());
+            error_log('[EmailSender] an unrecorded email could not be queued for its retry: ' . $e->getMessage());
         }
     }
 }

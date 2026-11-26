@@ -98,6 +98,13 @@
             "parent": "blog"
         },
         {
+            "slug": "email-outbox",
+            "title": "Outbox",
+            "url": "admin_outbox",
+            "order": 6,
+            "parent": "emails"
+        },
+        {
             "slug": "email-templates",
             "title": "Email Templates",
             "url": "admin_email_templates",
@@ -133,13 +140,6 @@
             "order": 10,
             "settingActivate": "blog_active",
             "parent": "blog"
-        },
-        {
-            "slug": "email-debug-logs",
-            "title": "Email debug logs",
-            "url": "admin_debug_email_logs",
-            "order": 10,
-            "parent": "statistics"
         },
         {
             "slug": "surveys-parent",

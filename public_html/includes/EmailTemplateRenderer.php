@@ -19,6 +19,7 @@ class EmailTemplateError extends Exception {}
  * fill_template() has the site fill them with this same class, so every
  * getter answers as it would on the site.
  *
+ * @version 1.2 - the unused aliases (getEmailHtml, getEmailText, getEmailSubject, is_sendable) and reset() are gone
  * @version 1.1 - filled on the site when EmailSender::$remote is set (specs/sandboxed_plugin_email.md)
  */
 class EmailTemplateRenderer {
@@ -29,7 +30,6 @@ class EmailTemplateRenderer {
     protected $inner_template;
     protected $outer_template;
     protected $footer;
-    protected $orig_inner_template;
     protected $inner_html;
     
     // Template metadata
@@ -165,7 +165,6 @@ class EmailTemplateRenderer {
             }
         }
         
-        $this->orig_inner_template = $this->inner_template;
         
         // Extract template name
         $tmp_template_name = preg_split('/[\/\.]/', $inner_template);
@@ -193,18 +192,6 @@ class EmailTemplateRenderer {
         
         $this->inner_html = null;
         $this->email_has_content = false;
-    }
-    
-    /**
-     * Reset template for reuse
-     */
-    public function reset() {
-        $this->email_has_content = false;
-        $this->inner_html = null;
-        $this->inner_template = $this->orig_inner_template;
-        $this->email_subject = null;
-        $this->email_html = null;
-        $this->email_text = null;
     }
     
     /**
@@ -298,23 +285,9 @@ class EmailTemplateRenderer {
     }
     
     /**
-     * Alias for getHtml
-     */
-    public function getEmailHtml() {
-        return $this->email_html;
-    }
-    
-    /**
      * Get processed text
      */
     public function getText() {
-        return $this->email_text;
-    }
-    
-    /**
-     * Alias for getText
-     */
-    public function getEmailText() {
         return $this->email_text;
     }
     
@@ -326,23 +299,9 @@ class EmailTemplateRenderer {
     }
     
     /**
-     * Alias for getSubject
-     */
-    public function getEmailSubject() {
-        return $this->email_subject;
-    }
-    
-    /**
      * Check if template has processable content
      */
     public function hasContent() {
-        return $this->email_has_content;
-    }
-    
-    /**
-     * Alias for hasContent
-     */
-    public function is_sendable() {
         return $this->email_has_content;
     }
     

@@ -16,6 +16,7 @@
  * open and a pass that stops part way resumes where it stopped. The rows are
  * the history the group, event and user pages list.
  *
+ * @version 1.2 - each send is unrecorded: dmr_direct_message_recipients is its record
  * @version 1.1 - the dmg_eml_email_id deletion rule names eml_emails outright: on a site without the email_lists
  *   plugin the prefix resolved to nothing and the rule was never registered, with a warning every update (B31)
  * @version 1.0
@@ -264,7 +265,9 @@ class DirectMessage extends SystemBase {
 			? EmailMessage::fromTemplate($template, $vars)
 			: EmailMessage::create($recipient->get('dmr_email'), $this->get('dmg_subject'), $this->get('dmg_message_html'));
 		$message->subject($this->get('dmg_subject'))
-			->to($recipient->get('dmr_email'), (string)$recipient->get('dmr_name'));
+			->to($recipient->get('dmr_email'), (string)$recipient->get('dmr_name'))
+			// Recorded per recipient in dmr_direct_message_recipients, not the outbox.
+			->unrecorded('direct message recipient');
 
 		$sender = new EmailSender();
 		return (bool)$sender->send($message, false);
