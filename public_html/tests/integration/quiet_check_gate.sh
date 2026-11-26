@@ -155,7 +155,15 @@ echo 2 > "$T/db"; q
 chk "a long query is busy" "$(jv "$T/out" db_queries) $(jv "$T/out" busy)" "2 db_queries"
 rm -f "$T/db"; q
 chk "PostgreSQL that does not answer: unknown" "$(jv "$T/out" db_queries) $(jv "$T/out" quiet)" "unknown false"
+q "$SITE" 0
+chk "the agent's count of none: quiet, psql not asked" "$(jv "$T/out" db_queries) $(jv "$T/out" quiet)" "0 true"
+q "$SITE" 3
+chk "the agent's count of three long queries is busy" "$(jv "$T/out" db_queries) $(jv "$T/out" busy)" "3 db_queries"
+q "$SITE" unknown
+chk "the agent could not ask its database: unknown" "$(jv "$T/out" db_queries) $(jv "$T/out" quiet)" "unknown false"
 rm -rf "$R/etc/postgresql"
+q "$SITE" 'x; id'
+chk "a second argument that is not a count is ignored" "$(jv "$T/out" db_queries)" "not_reported"
 
 echo "== Mail a person sent =="
 mkdir -p "$R/etc/postfix" "$R/var/log"

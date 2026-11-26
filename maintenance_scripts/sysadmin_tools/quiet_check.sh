@@ -3,6 +3,9 @@
 # quiet_check.sh - is anyone busy on this machine right now? ONE JSON object
 # on stdout, counts only.
 #
+# Version: 1.2 - the long-query count comes from the agent (second argument), read over its own
+#                database connection: the postgres role takes a password over the local socket,
+#                so psql as postgres could not answer on any machine
 # Version: 1.1 - a scheduled-task run is busy only past TASK_RUN_SECONDS: the task that asks
 #                runs one itself; the agents' own endpoints are never a person's visit or write
 # Version: 1.0 - the quiet_check observe word of specs/automatic_reboot_when_quiet.md
@@ -13,10 +16,14 @@
 #
 # THE CONTRACT, which tests/integration/quiet_check_gate.sh pins:
 #
-#   - ONE argument: the site root (the directory holding config/ and
+#   - First argument: the site root (the directory holding config/ and
 #     public_html/), as the agent knows it, or nothing on a machine with no
 #     site. Anything that is not an absolute path of plain characters is
 #     treated as nothing.
+#   - Second argument: the count of database queries running over
+#     DB_LONG_SECONDS, which the agent (1.134.0+) reads over its own database
+#     connection: a number or "unknown". Absent (an older agent), the script
+#     asks psql as postgres itself.
 #   - The window is fixed here (WINDOW_MINUTES), never taken from the wire.
 #   - Busy, each signal named in "busy":
 #       logins      a person logged in to the machine (who: SSH, console)
@@ -53,6 +60,8 @@ TAIL_LINES=50000
 ROOT="${QUIET_CHECK_ROOT:-}"
 
 SITE="${1:-}"
+DB_ARG="${2:-}"
+[[ "$DB_ARG" =~ ^([0-9]{1,6}|unknown)$ ]] || DB_ARG=""
 [[ "$SITE" =~ ^/[A-Za-z0-9._/-]{1,250}$ && "$SITE" != *..* ]] || SITE=""
 [[ -n "$SITE" && -d "${ROOT}${SITE}" ]] || SITE=""
 
@@ -151,7 +160,9 @@ for pid in $(pgrep -f 'process_scheduled_tasks\.php' 2>/dev/null); do
 done
 count site_work "$(( ${n:-0} + long ))"
 
-if [[ -d "${ROOT}/etc/postgresql" ]]; then
+if [[ -n "$DB_ARG" ]]; then
+    count db_queries "$DB_ARG"
+elif [[ -d "${ROOT}/etc/postgresql" ]]; then
     n="$(run runuser -u postgres -- psql -XtAqc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' AND pid <> pg_backend_pid() AND now() - query_start > interval '${DB_LONG_SECONDS} seconds'" < /dev/null)"
     [[ "$n" =~ ^[0-9]+$ ]] && count db_queries "$n" || count db_queries unknown
 else
