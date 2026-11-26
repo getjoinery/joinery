@@ -28526,6 +28526,17 @@ fn a_folder_moved_into_a_folder_deleted_elsewhere(drop: DropInto) {
         .map(|o| (o.kind, o.attempts, o.last_error))
         .collect();
     assert!(failed.is_empty(), "{drop:?}: nothing failed on the way: {failed:?}");
+    // And it goes home under the name it will keep: the server took the
+    // rename before it refused the move, so the folder never wears its old
+    // name again here.
+    if let DropInto::ItUnderANewName = drop {
+        let tree = disk_tree(laptop);
+        assert!(
+            tree.contains_key("Home/Renamed/inner.txt"),
+            "{drop:?}: home at once under its new name: {:?}",
+            tree.keys().collect::<Vec<_>>()
+        );
+    }
     assert!(world.settle().is_some(), "{drop:?}: it has to stop, not wait for ever");
 
     assert_invariants(&world, &committed);
@@ -28764,4 +28775,45 @@ fn a_file_saved_in_the_vault_and_carried_out_before_it_was_sent_is_said_once() {
     world.pass(holder);
     let again: Vec<_> = holder.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "held_outside_the_vault").collect();
     assert_eq!(again.iter().map(|i| i.issue_id).collect::<Vec<_>>(), vec![held[0].issue_id], "the same notice stands: {again:?}");
+}
+
+#[test]
+fn a_move_parked_on_its_way_never_agrees_its_scratch_name() {
+    // The file travels to a name taken at both ends, so its move parks it
+    // under a scratch name on the server first, and the server falls over on
+    // some of the calls after (seeds a probe of 600 found reaching it). A
+    // half that landed under the scratch name is never written down as the
+    // agreement: that is the name the file is put back to, and naming, the
+    // scan and the record all read it as where the file stands.
+    for seed in [12u64, 13, 18, 24, 42] {
+        let world = World::new(50_000 + seed, &["laptop"]);
+        let laptop = world.device("laptop");
+        let alpha = world.server.seed_folder(None, "Alpha");
+        let beta = world.server.seed_folder(None, "Beta");
+        world.server.seed_file(Some(alpha), "report.txt", b"the one that travels");
+        world.server.seed_file(Some(alpha), "summary.txt", b"holds the target name");
+        world.server.seed_file(Some(beta), "report.txt", b"holds the source name");
+        assert!(world.settle().is_some());
+        laptop.fs.user_rename("Alpha/report.txt", "Beta/summary.txt");
+        laptop.net.set_faults(jd_sim::net::NetFaults { server_5xx: 250, ..jd_sim::net::NetFaults::none() });
+        for pass in 0..4 {
+            world.pass(laptop);
+            let scratch: Vec<_> = laptop
+                .store
+                .every_entry()
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.synced_placement.as_ref().is_some_and(|p| jd_vfs::is_internal(&p.name)))
+                .map(|e| e.id)
+                .collect();
+            assert!(scratch.is_empty(), "seed {seed} pass {pass}: no agreement wears a scratch name: {scratch:?}");
+        }
+        laptop.net.set_faults(jd_sim::net::NetFaults::none());
+        assert!(world.settle().is_some(), "seed {seed}: it settles");
+        assert_eq!(
+            disk_tree(laptop).get("Beta/summary.txt").cloned().flatten(),
+            Some(jd_sim::sha256_hex(b"the one that travels")),
+            "seed {seed}: the file arrives where the user put it"
+        );
+    }
 }

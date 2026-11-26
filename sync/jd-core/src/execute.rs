@@ -5974,7 +5974,12 @@ fn move_remote(
                     n += 1;
                 };
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                if attempt == 0 {
+                    record_a_landed_rename(env, entry.id, at.borrow().as_ref(), &to.name)?;
+                }
+                return Err(e);
+            }
         }
     }
     let asked_for = to.name.clone();
@@ -8637,6 +8642,50 @@ fn a_folder_moved_in_unseen(env: &ExecEnv, top: &std::path::Path, folder: i64) -
         }
     }
     Ok(None)
+}
+
+/// A move's rename landed and the move after it was refused: the server now
+/// holds the new name, in the old folder. Written down at once, so nothing
+/// later in this pass acts on the old name -- a put-back of the folder this
+/// one was moved into sent it home under a name the server no longer gives it,
+/// and the next pass renamed it again (B-VP4). Its agreement takes the name
+/// where it agreed the folder, and a note of where it stands keeps measuring
+/// against that agreement.
+fn record_a_landed_rename(env: &ExecEnv, id: EntityId, at: Option<&Placement>, planned: &str) -> Result<(), ExecError> {
+    let Some(at) = at else { return Ok(()) };
+    // Only the name this op was planned for, which is the name the disk
+    // already wears: a scratch name a park stepped into, or a conflict name
+    // the disk has not followed yet, is no name to agree on. Those halves are
+    // left as before, for the change feed to bring.
+    if at.name != planned || jd_vfs::is_internal(&at.name) {
+        return Ok(());
+    }
+    let Some(mut entry) = env.store.get_entry(id)? else { return Ok(()) };
+    if entry.remote.parent != at.parent || entry.remote.name == at.name {
+        return Ok(());
+    }
+    let was_standing = entry.standing_away().is_some();
+    entry.remote.name = at.name.clone();
+    // The local name on record was the old name's; the new one is what the
+    // disk wears where it stands, and none where that is the name itself.
+    if entry.local_name.is_some() {
+        entry.local_name = entry
+            .standing_away()
+            .map(|s| s.here.name.clone())
+            .filter(|here| *here != at.name);
+    }
+    if let Some(agreed) = entry.synced_placement.as_mut() {
+        if agreed.parent == at.parent {
+            agreed.name = at.name.clone();
+        }
+    }
+    if was_standing {
+        if let (Some(stands), Some(agreed)) = (entry.stands_at.as_mut(), entry.synced_placement.clone()) {
+            stands.agreed = agreed;
+        }
+    }
+    env.store.put_entry(&entry)?;
+    Ok(())
 }
 
 /// What became of a folder the user moved into a folder being trashed here.
