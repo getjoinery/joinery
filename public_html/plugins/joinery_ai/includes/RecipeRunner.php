@@ -168,9 +168,8 @@ class RecipeRunner {
             }
 
         } catch (LlmProviderException $e) {
-            $code = LlmProviderException::classify($e);
             $run->set('rcr_status', RecipeRun::STATUS_FAILED);
-            $run->set('rcr_error', "[$code] " . $e->getMessage());
+            $run->set('rcr_error', LlmProviderException::recordedError($e));
             $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
             $run->saveContent();
         } catch (Exception $e) {

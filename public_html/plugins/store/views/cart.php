@@ -89,7 +89,12 @@ foreach ($cart->items as $cart_item) {
     if (!empty($data['dob'])) {
         $meta_rows['Date of Birth'] = htmlspecialchars($data['dob'], ENT_QUOTES, 'UTF-8');
     }
-    if (!empty($data['user_price'])) {
+    // The amount a buyer typed for a version priced "User Chooses".
+    if (!empty($data['user_price_override']) && $product_version && $product_version->get('prv_price_type') == 'user') {
+        $meta_rows['Amount'] = $currency_symbol . htmlspecialchars($data['user_price_override'], ENT_QUOTES, 'UTF-8');
+    }
+    // The optional donation added beside another purchase.
+    if (!empty($data['user_price']) && $product->is_optional_donation()) {
         $meta_rows['Donation Amount'] = $currency_symbol . htmlspecialchars($data['user_price'], ENT_QUOTES, 'UTF-8');
     }
     if (!empty($data['address']) && is_object($data['address'])) {

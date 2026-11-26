@@ -229,7 +229,9 @@ class AiModelResolution {
 
         // Every provider reports cached tokens OUTSIDE input_tokens
         // (LlmProviderInterface). Anthropic prices each cache tier; an
-        // OpenAI-style host bills a cached token at half the input rate.
+        // OpenAI-style host bills a cached token at half the input rate unless
+        // its entry states a cache_read rate (the hosted endpoint charges a
+        // cached token the same as a new one).
         if ((string)($entry['dialect'] ?? 'openai') === 'anthropic') {
             return ($input * (float)$rates['input']
                   + $output * (float)$rates['output']
@@ -238,7 +240,7 @@ class AiModelResolution {
         }
         return ($input  * (float)$rates['input']
               + $write  * (float)$rates['input']
-              + $read   * (float)$rates['input'] * 0.5
+              + $read   * (float)($rates['cache_read'] ?? (float)$rates['input'] * 0.5)
               + $output * (float)$rates['output']) / 1000000.0;
     }
 

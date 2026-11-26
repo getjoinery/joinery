@@ -4,6 +4,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/AnthropicProvider.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/OpenAiCompatibleProvider.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/FireworksProvider.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/TrustedRouterProvider.php'));
 
 /**
  * Builds the transport for one endpoint.
@@ -52,10 +53,14 @@ class LlmProviderFactory {
         }
 
         // Every OpenAI-dialect endpoint rides the same wire translation.
-        // Fireworks subclasses it only for its own diagnostics and timeouts.
+        // Fireworks subclasses it only for its own diagnostics and timeouts;
+        // the hosted endpoint's subclass also forces zero-retention routing.
         $timeout = (int)$settings->get_setting('joinery_ai_local_timeout_seconds') ?: 300;
         if ($endpoint_key === 'fireworks') {
             return new FireworksProvider($api_key, $base_url, FireworksProvider::DEFAULT_MODEL, 120);
+        }
+        if ($endpoint_key === 'hosted') {
+            return new TrustedRouterProvider($api_key, $base_url, TrustedRouterProvider::DEFAULT_MODEL, 120);
         }
         if ($base_url === '') {
             throw new LlmProviderException(

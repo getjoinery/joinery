@@ -81,6 +81,18 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 			}
 		}
 
+		// The range a buyer may type, kept only on a version the buyer prices.
+		if (array_key_exists('prv_min_price', $input) || array_key_exists('prv_max_price', $input)) {
+			$is_user_priced = $product_version->get('prv_price_type') == 'user';
+			foreach (array('prv_min_price', 'prv_max_price') as $column) {
+				$value = trim((string)($input[$column] ?? ''));
+				$product_version->set($column, ($is_user_priced && $value !== '') ? $value : NULL);
+			}
+		} elseif ($product_version->get('prv_price_type') != 'user') {
+			$product_version->set('prv_min_price', NULL);
+			$product_version->set('prv_max_price', NULL);
+		}
+
 		$product_version->prepare();
 		$product_version->save();
 

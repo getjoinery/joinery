@@ -10,6 +10,8 @@
  * A provider's HTTP failure carries the status as the exception code and reads
  * "<Provider> 4xx: <error type>: <the provider's message>" (or 5xx).
  *
+ * @version 1.3 - the hosted endpoint's billing refusal says the site's AI credit is used up and
+ *   names "Buy more AI credit" on the hosting banner (isHostedCredit(), recordedError())
  * @version 1.2 - memberMessage(): a member's row never quotes the provider and names
  *   no settings page; 'model ... does not exist' is read from the provider's words,
  *   not the provider's label; the 404 and rate-limit texts fit a local host too
@@ -31,6 +33,21 @@ class LlmProviderException extends Exception {
         'api_auth_failed', 'api_permission_denied', 'api_model_not_found',
         'api_billing', 'api_request_too_large', 'api_request_invalid',
     ];
+
+    /**
+     * The provider label TrustedRouterProvider puts in front of its errors
+     * ("Hosted AI credit 4xx: ..."). It is how a failure, and the row it was
+     * recorded on, is known to come from the AI credit a site's hosting
+     * includes, whose remedy is buying more credit rather than visiting a
+     * provider's dashboard.
+     */
+    const HOSTED_PROVIDER_LABEL = 'Hosted AI credit';
+
+    /** api_billing on the hosted endpoint, for the site's administrator. */
+    const HOSTED_BILLING_MESSAGE = 'This site’s AI credit is used up. Use “Buy more AI credit” on the hosting banner to add more, or enter your own AI provider key on the Joinery AI settings page.';
+
+    /** api_billing on the hosted endpoint, for a member. */
+    const HOSTED_BILLING_MEMBER_MESSAGE = 'The assistant cannot answer right now because this site’s AI credit is used up. Let the site administrator know.';
 
     /** The longest stretch of the provider's message put on a row. */
     const PROVIDER_WORDS_MAX = 300;
@@ -132,7 +149,8 @@ class LlmProviderException extends Exception {
         if ($code === 'api_not_configured') {
             return $e->getMessage();
         }
-        $friendly = self::friendlyMessage($code);
+        $friendly = ($code === 'api_billing' && self::isHostedCredit($e))
+            ? self::HOSTED_BILLING_MESSAGE : self::friendlyMessage($code);
         if (in_array($code, self::CODES_WITH_PROVIDER_WORDS, true)) {
             $said = self::providerWords($e->getMessage());
             if ($said !== null) {
@@ -160,7 +178,31 @@ class LlmProviderException extends Exception {
      * the administrator can fix says so instead of naming their settings page.
      */
     public static function memberMessage(Throwable $e): string {
-        return self::memberMessageFor(self::classify($e));
+        $code = self::classify($e);
+        if ($code === 'api_billing' && self::isHostedCredit($e)) {
+            return self::HOSTED_BILLING_MEMBER_MESSAGE;
+        }
+        return self::memberMessageFor($code);
+    }
+
+    /** Did this failure come from the hosted endpoint (TrustedRouterProvider)? */
+    public static function isHostedCredit(Throwable $e): bool {
+        return strncmp(ltrim($e->getMessage()), self::HOSTED_PROVIDER_LABEL . ' ',
+            strlen(self::HOSTED_PROVIDER_LABEL) + 1) === 0;
+    }
+
+    /**
+     * The error a recipe run or pipeline records: "[code] " and the provider's
+     * full message, which the run page and the failure email show the owner.
+     * The hosted endpoint's billing refusal leads with what to do about it,
+     * since the provider's own words point at an account the site never sees.
+     */
+    public static function recordedError(Throwable $e): string {
+        $code = self::classify($e);
+        if ($code === 'api_billing' && self::isHostedCredit($e)) {
+            return '[' . $code . '] ' . self::HOSTED_BILLING_MESSAGE . ' (' . $e->getMessage() . ')';
+        }
+        return '[' . $code . '] ' . $e->getMessage();
     }
 
     /** memberMessage() for a classify() code. */

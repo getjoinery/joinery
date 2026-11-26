@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.26.35",
+    "version": "0.26.36",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -170,6 +170,13 @@
             "label": "Fireworks Base URL",
             "type": "text",
             "helptext": "OpenAI-compatible Fireworks endpoint. The default is correct for the public API."
+        },
+        {
+            "name": "joinery_ai_hosted_api_key",
+            "default": "",
+            "secret": true,
+            "managed": true,
+            "helptext": "The AI credit key for a site whose hosting includes AI credit. Written by utils/hosted_ai_settings.php from the hosting operator's management node, never typed in; empty means the hosted endpoint is not available."
         },
         {
             "name": "joinery_ai_brave_search_api_key",

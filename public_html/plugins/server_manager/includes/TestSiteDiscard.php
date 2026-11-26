@@ -59,6 +59,7 @@
  * remove is on the Main side of the dashboard: the provision's account and the
  * dashboard's record must agree that the site is a test one.
  *
+ * @version 1.6 - deletes the test site's AI credit key (specs/hosted_ai_credit.md)
  * @version 1.5 - a test purchase on the buyer's own cloud account is offered too: its server goes when it is found in
  *                the test account held here, and is left when it is not
  * @version 1.4 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
@@ -323,6 +324,10 @@ class TestSiteDiscard {
 		}
 		self::dns($provision, array_key_exists('dns', $seams) ? $seams['dns'] : TestCloudCleanup::zone_holder(TestCloudCleanup::accounts()), $out);
 		self::mail($provision, array_key_exists('mail', $seams) ? $seams['mail'] : (Smtp2GoClient::fromSettings() ?? false), $out);
+		$ai = HostedAiCredit::remove_provision((int)$provision->key, 'The test site was discarded.');
+		if ($ai['line'] !== '') {
+			$out[$ai['ok'] ? 'done' : 'failed'][] = $ai['line'];
+		}
 		list($nodes) = self::nodes($provision);
 		self::backups($nodes, $out);
 		self::subscription($provision, $seams['cancel'] ?? null, $out);

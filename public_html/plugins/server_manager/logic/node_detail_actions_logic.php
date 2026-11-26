@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.101 - retry_hosted_ai and hosted_ai_add_credit: the node page's AI credit box (specs/hosted_ai_credit.md)
  * @version 1.100 - quiet_check: is anyone busy on the machine, asked from the Diagnostics tab
  * @version 1.99 - auto_reboot: when the Reboot When Quiet task may reboot this machine (specs/automatic_reboot_when_quiet.md WP4)
  * @version 1.98 - log_table_tail passes kind (the error table's kinds)
@@ -246,6 +247,8 @@ class NodeDetailActions {
 		'hold_container'           => 'overview',
 		'suspend_site'             => 'overview',
 		'retry_hosted_mail'        => 'overview',
+		'retry_hosted_ai'          => 'overview',
+		'hosted_ai_add_credit'     => 'overview',
 		'unsuspend_site'           => 'overview',
 		'recreate_site'            => 'overview',
 		'site_limits'              => 'overview',
@@ -511,6 +514,51 @@ class NodeDetailActions {
 				}
 				self::ok($session, $page_regex, 'The email setup for ' . $provision->get('cvp_domain') . ' starts again (from '
 					. str_replace('_', ' ', $from) . ') on the next provisioning pass.');
+				return $base_url . '&tab=overview';
+			}
+
+			case 'retry_hosted_ai': {
+				// AI credit setup that stopped at failed (specs/hosted_ai_credit.md §3.8):
+				// back to pending, with a fresh push allowance.
+				$account = HostedAiCredit::account_for_node($node);
+				if ($account === null || (string)$account->get('hai_state') !== HostedAiAccount::STATE_FAILED) {
+					self::fail($session, $page_regex, 'This site has no failed AI credit setup to retry.');
+					return $base_url . '&tab=overview';
+				}
+				$account->set('hai_state', HostedAiAccount::STATE_PENDING);
+				$account->set('hai_retry_time', gmdate('Y-m-d H:i:s'));
+				$account->set('hai_attempts', 0);
+				$account->set('hai_note', null);
+				$account->save();
+				self::ok($session, $page_regex, 'AI credit setup starts again on the next provisioning pass.');
+				return $base_url . '&tab=overview';
+			}
+
+			case 'hosted_ai_add_credit': {
+				// An operator's correction to a site's bought credit, with a
+				// reason, on the ledger (class money).
+				if (!Access::decide('money:write', $session)) {
+					self::fail($session, $page_regex, 'Adding AI credit needs money permission.');
+					return $base_url . '&tab=overview';
+				}
+				$account = HostedAiCredit::account_for_node($node);
+				if ($account === null || in_array((string)$account->get('hai_state'),
+						array(HostedAiAccount::STATE_REMOVED, HostedAiAccount::STATE_REMOVING), true)) {
+					self::fail($session, $page_regex, 'This site has no AI credit account, or it is being closed.');
+					return $base_url . '&tab=overview';
+				}
+				$raw = trim((string)($_POST['amount_usd'] ?? ''));
+				if ($raw === '' || !is_numeric($raw) || (float)$raw == 0.0 || abs((float)$raw) > 1000) {
+					self::fail($session, $page_regex, 'Enter an amount of AI spend in dollars, up to 1000 (negative to take credit off).');
+					return $base_url . '&tab=overview';
+				}
+				try {
+					HostedAiCredit::adjust($account, HostedAiCap::micro($raw), (string)($_POST['reason'] ?? ''), (int)$uid);
+				} catch (Throwable $e) {
+					self::fail($session, $page_regex, $e->getMessage());
+					return $base_url . '&tab=overview';
+				}
+				self::ok($session, $page_regex, HostedAiCap::dollars(HostedAiCap::micro($raw)) . ' of AI credit recorded for this site.');
 				return $base_url . '&tab=overview';
 			}
 

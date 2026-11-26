@@ -45,6 +45,7 @@
  * @version 1.2 - disputes kept by id, so a won one clears the mark only when no other is open; the hourly re-ask
  *                runs under the suspend lock (reviewer2 N1, N2)
  * @version 1.3 - the customer email has no stand-in of its own: tests read EmailSender::$capture (specs/email_outbox.md)
+ * @version 1.4 - suspension switches the site's AI credit key off at TrustedRouter, and Unsuspend back on (specs/hosted_ai_credit.md)
  * @version 1.0
  */
 
@@ -103,7 +104,7 @@ class HostedSuspensions {
 			$row->add_steps(array($first));
 			$row->save();
 
-			$steps = array(self::mail($provision, 'close'));
+			$steps = array(self::mail($provision, 'close'), HostedAiCredit::suspend_provision((int)$provision->key));
 			try {
 				$node->set('mgn_backup_policy', json_encode(array('enabled' => false)));
 				$node->set('mgn_uptime_enabled', false);
@@ -149,6 +150,7 @@ class HostedSuspensions {
 			}
 
 			$steps[] = self::mail($provision, 'reopen');
+			$steps[] = HostedAiCredit::reopen_provision((int)$provision->key);
 
 			if ($ended) {
 				// The shutdown switched these off for its own reason; that stands.

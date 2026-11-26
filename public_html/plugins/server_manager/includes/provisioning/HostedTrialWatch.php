@@ -39,6 +39,7 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.13 - the banner carries an AI credit row, with Buy more AI credit (specs/hosted_ai_credit.md)
  * @version 1.12 - the plan row records the paying line only when this site's store sold it, and reads its period end the same way (hosting_after_purchase B11)
  * @version 1.11 - a held Starter site whose backups were pruned is marked ready to remove (htr_remove_ready_time)
  *                and hosted.removal_ready tells the operator once; a site with no storage space has nothing to
@@ -415,6 +416,11 @@ class HostedTrialWatch {
 			'action_url'   => trim((string)$settings->get_setting('server_manager_storage_referral_url')),
 		);
 
+		$ai = self::ai_allowance($provision);
+		if ($ai !== null) {
+			$out[] = $ai;
+		}
+
 		// Disk is the node's own figure, already badged on its overview. There
 		// is no action here that is not "move to your own server", and a full
 		// disk stops the site on its own long before anything we could do.
@@ -430,6 +436,46 @@ class HostedTrialWatch {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * The AI credit row (specs/hosted_ai_credit.md §3.5 step 5), or null when
+	 * the site has no working AI credit yet.
+	 *
+	 * Its action differs from the others on purpose: buying more from us is
+	 * the off-ramp here (the site can also enter its own provider key on its
+	 * AI settings page). What is used is rounded down to the quarter dollar and
+	 * the percentage to the nearest 10 (the allowance moves only at a purchase
+	 * or the month's roll), so an hourly usage read re-pushes the
+	 * banner only when what it shows has moved.
+	 */
+	public static function ai_allowance($provision): ?array {
+		$account = HostedAiAccount::for_provision($provision->key);
+		return $account === null ? null : self::ai_allowance_of($account);
+	}
+
+	public static function ai_allowance_of(HostedAiAccount $account): ?array {
+		if (!in_array((string)$account->get('hai_state'),
+				array(HostedAiAccount::STATE_DONE, HostedAiAccount::STATE_DISABLED), true)) {
+			return null;
+		}
+		$allowance = (int)$account->get('hai_allowance') + (int)$account->get('hai_purchased');
+		$spent = min($account->spent_this_month(), $allowance);
+		$quarter = 250000;
+		$shown_spent = (int)(floor($spent / $quarter) * $quarter);
+		$percent = $allowance > 0 ? (int)(round(10 * $spent / $allowance) * 10) : 100;
+		$url = trim((string)Globalvars::get_instance()->get_setting('server_manager_hosted_ai_credit_url'));
+		if ($url !== '') {
+			$url .= (strpos($url, '?') === false ? '?' : '&') . 'ai_site=' . (int)$account->key;
+		}
+		return array(
+			'label'        => 'AI credit this month',
+			'used'         => HostedAiCap::dollars($shown_spent),
+			'allowance'    => HostedAiCap::dollars($allowance),
+			'percent'      => $percent,
+			'action_label' => 'Buy more AI credit',
+			'action_url'   => $url,
+		);
 	}
 
 	// ── 3. The storage allowance ──────────────────────────────────────────────

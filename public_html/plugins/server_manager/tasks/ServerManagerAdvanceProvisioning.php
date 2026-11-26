@@ -21,6 +21,9 @@
  *  7. Hosted mail   build outbound mail for a site this operator hosts: the
  *                   customer's own subaccount, its sending domain and records,
  *                   the one SMTP credential that reaches their box.
+ *  7a. Hosted AI   AI credit for a hosted or bundle site: its own capped
+ *                   TrustedRouter key, the push that hands it over, and the
+ *                   hourly watch that rolls the month and moves the cap.
  *  8. Hosted watch  the commercial half of a hosted site: the trial clock, the
  *                   allowance banners, and what falls due when a payment fails.
  *  9. Services      the self-hosted sites renting our mail and backup storage:
@@ -41,6 +44,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
+ * @version 1.11 - Hosted AI: each hosted and bundle site's AI credit key and its cap (ProvisionHostedAi, specs/hosted_ai_credit.md)
  * @version 1.10 - Buyer DNS: a buyer's own-domain DNS list is completed with the site's own records (ProvisionBuyerDns)
  * @version 1.9 - Buyer notices run last: each paid site's buyer is told, once, a state they need to know
  *                (HostingBuyerNotices, specs/hosting_after_purchase.md WP2)
@@ -73,6 +77,7 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Domain watch'   => array($base . 'ManagedDomainWatch.php', 'ManagedDomainWatch'),
 			'Transfers'      => array($base . 'PollInstanceTransfers.php', 'PollInstanceTransfers'),
 			'Hosted mail'    => array($base . 'ProvisionHostedMail.php', 'ProvisionHostedMail'),
+			'Hosted AI'      => array($base . 'ProvisionHostedAi.php', 'ProvisionHostedAi'),
 			'Inbound mail'   => array($base . 'ProvisionSiteInboundMail.php', 'ProvisionSiteInboundMail'),
 			'Buyer DNS'      => array($base . 'ProvisionBuyerDns.php', 'ProvisionBuyerDns'),
 			'Own Linode'     => array($base . 'ProvisionOwnLinode.php', 'ProvisionOwnLinode'),

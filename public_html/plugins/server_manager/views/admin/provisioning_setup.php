@@ -38,6 +38,7 @@
  * @version 1.8 - the operator token's helptext names ips:read_write, for a site copy's switch by IP swap
  * @version 1.7 - the operator token's helptext names the scopes a server handover needs
  * @version 1.6 - stored credentials are locked fields with Reset (passwordinput 'stored'); the promotion code's remove box is gone
+ * @version 1.6 - the hosted card's AI credit settings (specs/hosted_ai_credit.md)
  * @version 1.5 - the hosted card's master-key field is named hosted_smtp2go_master_key: smtp2go_api_key is the core email provider's declared setting, which FormWriter refuses to hand-draw
  * @version 1.4 - the registrar promotion code on the domain card; the domain question card serves
  *                shared-host products only and a customer-cloud site is configured on the buyer's
@@ -560,6 +561,23 @@ $fw_hosted->textinput('smtp2go_referral_url', 'SMTP2GO referral URL',
 $fw_hosted->textinput('storage_referral_url', 'Backup storage referral URL',
 	['value' => $hosted['storage_referral_url'],
 	 'helptext' => 'Offered to a customer whose backup storage is nearly full.']);
+echo '<h5 class="mt-4">AI credit</h5>';
+$fw_hosted->passwordinput('hosted_trustedrouter_management_key', 'TrustedRouter management key', [
+	'stored' => $hosted['trustedrouter_present'],
+	'helptext' => 'Creates, caps and deletes each site\'s AI credit key. It never leaves this machine: a site gets only its own '
+		. 'capped key, and TrustedRouter refuses past the cap.']);
+$fw_hosted->textinput('hosted_ai_allowance_usd', 'Free AI usage per site per month (USD)',
+	['value' => $hosted['ai_allowance_usd'],
+	 'helptext' => 'Topped up to this each month, never added to; at most 1.00.']);
+$fw_hosted->textinput('hosted_ai_markup_percent', 'Markup on bought AI credit (%)',
+	['value' => $hosted['ai_markup_percent'],
+	 'helptext' => 'A buyer who pays $X gets X / (1 + markup) of AI spend. A change applies to purchases from now on.']);
+$fw_hosted->textinput('hosted_ai_low_balance_usd', 'Alert when our TrustedRouter balance is below (USD)',
+	['value' => $hosted['ai_low_balance_usd'],
+	 'helptext' => 'Every site\'s AI credit draws on this one balance. Empty: no alert.']);
+$fw_hosted->textinput('hosted_ai_credit_url', 'Where customers buy AI credit',
+	['value' => $hosted['ai_credit_url'],
+	 'helptext' => 'The https address of the AI credit product on the store; the hosting banner\'s Buy more AI credit link.']);
 $fw_hosted->submitbutton('btn_save_hosted', 'Save hosted tier settings');
 echo $fw_hosted->end_form();
 ?>

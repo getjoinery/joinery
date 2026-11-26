@@ -9,6 +9,7 @@
  * renders only at permission 10 and only once some endpoint is configured —
  * before that there is nothing to test.
  *
+ * @version 1.2 - a site with hosted AI credit can test it too
  * @version 1.1 - the button's script is assets/js/test-connection.js (no inline script)
  * @version 1.0
  */
@@ -16,6 +17,7 @@
 $ai_test_settings = Globalvars::get_instance();
 $ai_test_configured = (string)$ai_test_settings->get_setting('joinery_ai_anthropic_api_key') !== ''
 	|| (string)$ai_test_settings->get_setting('joinery_ai_fireworks_api_key') !== ''
+	|| (string)$ai_test_settings->get_setting('joinery_ai_hosted_api_key') !== ''
 	|| (string)$ai_test_settings->get_setting('joinery_ai_local_model') !== '';
 
 if ($ai_test_configured && Access::permits(10)) { ?>

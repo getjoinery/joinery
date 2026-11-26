@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.117 - AI credit: the site's state, spend, free usage, bought credit and cap, with Retry AI setup and Add credit (specs/hosted_ai_credit.md)
  * @version 1.116 - the reboot waiting words find the hosted sites themselves (RebootWhenQuietRunner 1.1)
  * @version 1.115 - automatic reboot: why a machine owing a reboot waits, the last reboot marked automatic, and the When quiet / Nightly window only / Never setting (specs/automatic_reboot_when_quiet.md)
  * @version 1.114 - Errors (24 h): the site's error table counted by kind (check_status errors_24h, agent 1.127.0)
@@ -3099,6 +3100,60 @@
 		echo '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-submit="nodeActionRetryMail"'
 			. ' data-jy-confirm="' . $mail_h('Retry the email setup for ' . $mail_provision->get('cvp_domain') . '? It carries on from the step '
 			. 'after the last one that was finished; fix the cause first or it stops the same way.') . '">Retry email setup</button>';
+		$page->end_box();
+	}
+
+	// ── AI credit (specs/hosted_ai_credit.md §3.8) ──
+	// The site's own capped TrustedRouter key: its state, this month's spend
+	// against free usage and bought credit, and the two operator acts.
+	$ai_account = HostedAiCredit::account_for_node($node);
+	if ($ai_account !== null) {
+		$ai_h = function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); };
+		$ai_state = (string)$ai_account->get('hai_state');
+		$ai_badge = array(
+			'pending'         => array('secondary', 'Waiting to be set up'),
+			'key_created'     => array('secondary', 'Key made, not sent'),
+			'settings_pushed' => array('info', 'Key sent to the site'),
+			'done'            => array('success', 'Working'),
+			'failed'          => array('danger', 'Failed'),
+			'disabled'        => array('warning', 'Switched off (suspended)'),
+			'removing'        => array('warning', 'Being closed: its key is deleted once TrustedRouter answers'),
+			'removed'         => array('secondary', 'Closed'),
+		)[$ai_state] ?? array('secondary', $ai_state);
+		$page->begin_box(['title' => 'AI credit']);
+		echo '<p class="mb-1"><span class="badge bg-' . $ai_badge[0] . '">' . $ai_h($ai_badge[1]) . '</span></p>';
+		echo '<table class="table table-sm mb-2"><tbody>';
+		echo '<tr><th>Spent this month</th><td>' . $ai_h(HostedAiCap::dollars($ai_account->spent_this_month())) . '</td></tr>';
+		echo '<tr><th>Free usage this month</th><td>' . $ai_h(HostedAiCap::dollars((int)$ai_account->get('hai_allowance'))) . '</td></tr>';
+		echo '<tr><th>Bought credit</th><td>' . $ai_h(HostedAiCap::dollars((int)$ai_account->get('hai_purchased')))
+			. ' <span class="text-muted">(' . $ai_h(HostedAiCap::dollars($ai_account->unspent_purchased())) . ' unspent, what a refund is measured against)</span></td></tr>';
+		if ((int)$ai_account->get('hai_owed') > 0) {
+			echo '<tr><th>Owed from past months</th><td>' . $ai_h(HostedAiCap::dollars((int)$ai_account->get('hai_owed')))
+				. ' <span class="text-muted">(spend past the cap; comes off the next free top-ups)</span></td></tr>';
+		}
+		echo '<tr><th>Cap at TrustedRouter</th><td>' . ($ai_account->get('hai_limit_set') === null ? '—'
+			: $ai_h(HostedAiCap::dollars((int)$ai_account->get('hai_limit_set'))) . ' lifetime') . '</td></tr>';
+		echo '<tr><th>Usage last read</th><td>' . ($ai_account->get('hai_usage_time') ? $ai_h($ai_account->get_local('hai_usage_time')) : 'not yet') . '</td></tr>';
+		if (trim((string)$ai_account->get('hai_note')) !== '') {
+			echo '<tr><th>Note</th><td>' . $ai_h($ai_account->get('hai_note')) . '</td></tr>';
+		}
+		echo '</tbody></table>';
+		if ($ai_state === 'failed') {
+			echo '<form id="nodeActionRetryAi" method="post" action="' . $ai_h($base_url) . '" hidden>'
+				. '<input type="hidden" name="action" value="retry_hosted_ai">' . SmAdminCsrf::field() . '</form>';
+			echo '<button type="button" class="btn btn-sm btn-outline-secondary mb-2" data-jy-submit="nodeActionRetryAi"'
+				. ' data-jy-confirm="' . $ai_h('Retry the AI credit setup? A fresh key is made and sent to the site; fix the cause first or it stops the same way.')
+				. '">Retry AI setup</button>';
+		}
+		if (!in_array($ai_state, array('removed', 'removing'), true) && Access::decide('money:write', SessionControl::get_instance())) {
+			$fw_ai = new FormWriterV2HTML5('form_hosted_ai_credit', ['action' => $base_url]);
+			echo $fw_ai->begin_form();
+			echo '<input type="hidden" name="action" value="hosted_ai_add_credit">' . SmAdminCsrf::field();
+			$fw_ai->textinput('amount_usd', 'Add credit (dollars of AI spend)', ['helptext' => 'Negative takes credit off. Recorded on the ledger with the reason.']);
+			$fw_ai->textinput('reason', 'Why');
+			$fw_ai->submitbutton('btn_hosted_ai_add_credit', 'Add credit');
+			echo $fw_ai->end_form();
+		}
 		$page->end_box();
 	}
 

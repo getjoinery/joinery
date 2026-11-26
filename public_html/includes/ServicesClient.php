@@ -16,6 +16,7 @@
  * sender domain; storeConnection() seals the pair; the daily poll writes the
  * banner settings from status().
  *
+ * @version 1.3 - enrolAi(): a bundle site collects its AI credit key (specs/hosted_ai_credit.md WP8)
  * @version 1.2 - applyShelfEnrolment() writes the `managed` backup target an enrol answers, and makes it where
  *                backups go; serviceTarget(); a released shelf switches that target off (specs/easy_signup_completion.md WP4)
  * @version 1.1 - shelfVerifiedRun(): report a passed verify of a chain to backup storage (specs/storage_targets.md F1)
@@ -155,6 +156,21 @@ class ServicesClient extends ServiceClient {
 		$answer = $this->call('services_enroll', array('service' => 'mail', 'host' => self::host()));
 		self::recordMailAnswer($answer);
 		return $answer;
+	}
+
+	/**
+	 * Collect this site's AI credit key from getjoinery (specs/hosted_ai_credit.md
+	 * WP8) and write it where Joinery AI's hosted endpoint reads it. Returns
+	 * whether a key was written. The key is never logged or returned.
+	 */
+	public function enrolAi(): bool {
+		$answer = $this->call('services_enroll', array('service' => 'ai', 'host' => self::host()));
+		$key = (string)($answer['api_key'] ?? '');
+		if ($key === '' || strlen($key) > 256 || preg_match('/[^\x20-\x7e]/', $key)) {
+			return false;
+		}
+		Setting::put('joinery_ai_hosted_api_key', $key);
+		return true;
 	}
 
 	public function enrolShelf(): array {

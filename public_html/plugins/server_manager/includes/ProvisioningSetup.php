@@ -15,6 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.15 - hostedStatus() carries the AI credit settings (specs/hosted_ai_credit.md)
  * @version 1.14 - hostedStatus() carries test_site_mail_trap
  * @version 1.13 - hostedStatus() carries smtp2go_check_error: why the master key's permissions could not be read
  * @version 1.12 - hostedStatus() reads the SMTP2GO master key's missing permissions; a key missing one is not ready (B179)
@@ -577,6 +578,11 @@ class ProvisioningSetup {
 			'manage_url'            => self::readSetting('server_manager_hosted_manage_url'),
 			'smtp2go_referral_url'  => self::readSetting('server_manager_smtp2go_referral_url'),
 			'storage_referral_url'  => self::readSetting('server_manager_storage_referral_url'),
+			'trustedrouter_present' => trim(self::readSecret('server_manager_trustedrouter_api_key')) !== '',
+			'ai_allowance_usd'      => self::readSetting('server_manager_hosted_ai_allowance_usd'),
+			'ai_markup_percent'     => self::readSetting('server_manager_hosted_ai_markup_percent'),
+			'ai_low_balance_usd'    => self::readSetting('server_manager_hosted_ai_low_balance_usd'),
+			'ai_credit_url'         => self::readSetting('server_manager_hosted_ai_credit_url'),
 			'ready'                 => $usable && $smtp2go && empty($smtp2go_missing)
 				&& is_array($missing) && !isset($missing[OperatorCloudAccount::CREATE_SCOPE]),
 		);

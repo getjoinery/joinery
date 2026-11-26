@@ -15,6 +15,8 @@
  * stale one. An unreachable operator leaves the banner as it was: one
  * missed day is not news.
  *
+ * @version 1.2 - AI credit: its row on the banner, and a site whose agent getjoinery does not reach collects its key
+ *               (specs/hosted_ai_credit.md WP8)
  * @version 1.1 - the paid period's own row, from the notice window out (not for a date that renews on its
  *               own): the date or the grace end, and the two doors, the site's own setup and the offer on sale;
  *               a banner whose every date renews carries no date and a row saying they renew; past the grace
@@ -36,9 +38,15 @@ class ServicesStatusPoll implements ScheduledTaskInterface {
 			return array('status' => 'error', 'message' => 'getjoinery did not answer: ' . $e->getMessage());
 		}
 		$written = self::writeBanner($status);
-		return array('status' => 'success', 'message' => $written === 0
+		$ai = '';
+		try {
+			$ai = self::collectAiKey($status);
+		} catch (\Throwable $e) {
+			$ai = ' The AI credit key was not collected: ' . $e->getMessage();
+		}
+		return array('status' => 'success', 'message' => ($written === 0
 			? 'Connected, no services held; the banner is clear.'
-			: $written . ' service(s) on the banner.');
+			: $written . ' service(s) on the banner.') . $ai);
 	}
 
 	/**
@@ -81,6 +89,19 @@ class ServicesStatusPoll implements ScheduledTaskInterface {
 				$notices[] = $notice;
 			}
 		}
+		// AI credit with getjoinery (specs/hosted_ai_credit.md WP8): its row,
+		// with Buy more AI credit, beside the email and backups rows.
+		$ai_row = is_array($status['ai']['row'] ?? null) ? $status['ai']['row'] : null;
+		if ($ai_row !== null && $rows) {
+			$rows[] = array(
+				'label'        => (string)($ai_row['label'] ?? ''),
+				'used'         => (string)($ai_row['used'] ?? ''),
+				'allowance'    => (string)($ai_row['allowance'] ?? ''),
+				'percent'      => (int)($ai_row['percent'] ?? 0),
+				'action_label' => (string)($ai_row['action_label'] ?? ''),
+				'action_url'   => (string)($ai_row['action_url'] ?? ''),
+			);
+		}
 		if (!$rows) {
 			self::put('hosted_plan_state', '');
 			self::put('hosted_plan_until_time', '');
@@ -105,6 +126,25 @@ class ServicesStatusPoll implements ScheduledTaskInterface {
 		self::put('hosted_plan_allowances', json_encode($rows));
 		self::put('hosted_plan_manage_url', $manage);
 		return count($rows);
+	}
+
+	/**
+	 * A bundle site whose agent getjoinery does not reach collects its AI
+	 * credit key here: when getjoinery says it has one waiting, or when this
+	 * site holds none although it has AI credit. Each collection is a fresh
+	 * key and the one before it stops working. Returns a sentence for the
+	 * task's message ('' when nothing was done).
+	 */
+	public static function collectAiKey(array $status): string {
+		$ai = is_array($status['ai'] ?? null) ? $status['ai'] : null;
+		if ($ai === null || !empty($ai['by_agent'])) {
+			return '';
+		}
+		$have = trim((string)Globalvars::get_instance()->get_setting('joinery_ai_hosted_api_key', true, true)) !== '';
+		if (empty($ai['needs_key']) && ($have || !is_array($ai['row'] ?? null))) {
+			return '';
+		}
+		return (new ServicesClient())->enrolAi() ? ' AI credit key collected.' : '';
 	}
 
 	/**

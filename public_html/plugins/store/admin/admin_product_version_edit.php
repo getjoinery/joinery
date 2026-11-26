@@ -34,6 +34,18 @@ $formwriter->begin_form();
 
 $formwriter->hiddeninput('product_id', '', ['value' => $product->key]);
 
+// The amounts a buyer may type when the buyer chooses the price.
+$range_fields = function ($formwriter) use ($product_version, $currency_symbol) {
+	$formwriter->textinput('prv_min_price', 'Minimum amount ('.$currency_symbol.')', [
+		'value' => $product_version->get('prv_min_price'),
+		'helptext' => 'The least a buyer may pay. Leave empty for any amount above zero.'
+	]);
+	$formwriter->textinput('prv_max_price', 'Maximum amount ('.$currency_symbol.')', [
+		'value' => $product_version->get('prv_max_price'),
+		'helptext' => 'The most a buyer may pay. Leave empty for no limit.'
+	]);
+};
+
 $formwriter->textinput('version_name', 'Label', [
 	'validation' => ['required' => true, 'maxlength' => 255],
 	'value' => $product_version->get('prv_version_name')
@@ -52,18 +64,20 @@ if(!$product_version->key || !$has_orders){
 		'validation' => ['required' => true],
 		'value' => $product_version->get('prv_price_type'),
 		'visibility_rules' => [
-			'single' => ['show' => [], 'hide' => ['prv_trial_period_days']],
-			'user' => ['show' => [], 'hide' => ['prv_trial_period_days']],
-			'day' => ['show' => ['prv_trial_period_days'], 'hide' => []],
-			'week' => ['show' => ['prv_trial_period_days'], 'hide' => []],
-			'month' => ['show' => ['prv_trial_period_days'], 'hide' => []],
-			'year' => ['show' => ['prv_trial_period_days'], 'hide' => []]
+			'single' => ['show' => [], 'hide' => ['prv_trial_period_days', 'prv_min_price', 'prv_max_price']],
+			'user' => ['show' => ['prv_min_price', 'prv_max_price'], 'hide' => ['prv_trial_period_days']],
+			'day' => ['show' => ['prv_trial_period_days'], 'hide' => ['prv_min_price', 'prv_max_price']],
+			'week' => ['show' => ['prv_trial_period_days'], 'hide' => ['prv_min_price', 'prv_max_price']],
+			'month' => ['show' => ['prv_trial_period_days'], 'hide' => ['prv_min_price', 'prv_max_price']],
+			'year' => ['show' => ['prv_trial_period_days'], 'hide' => ['prv_min_price', 'prv_max_price']]
 		]
 	]);
 
 	$formwriter->textinput('prv_trial_period_days', 'Subscription trial period (days):', [
 		'value' => $product_version->get('prv_trial_period_days') ?: 0
 	]);
+
+	$range_fields($formwriter);
 }
 else{
 	// Existing version with orders - show price as read-only
@@ -74,6 +88,11 @@ else{
 	echo '<div class="ctrlHolder"><p class="label">Current Price</p>';
 	echo '<div class="textInput"><strong>'.$currency_symbol . $product_version->get('prv_version_price') . ' / ' . $product_version->get('prv_price_type') . '</strong>';
 	echo '<br><em style="color: #666;">Price cannot be edited because orders reference this version. To change pricing, create a new version and make this one inactive.</em></div></div>';
+
+	// The range a buyer may type stays editable: it changes no order already placed.
+	if ($product_version->get('prv_price_type') == 'user') {
+		$range_fields($formwriter);
+	}
 }
 
 // Display priority - for pricing page

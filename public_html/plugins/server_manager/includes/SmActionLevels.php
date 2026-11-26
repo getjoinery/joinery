@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.19 - retry_hosted_ai and hosted_ai_add_credit (node page AI credit box) are level 10
  * @version 1.18 - quiet_check (Diagnostics: is anyone busy on the machine) is a look: 7
  * @version 1.17 - auto_reboot (node page switch: when the Reboot When Quiet task may reboot the machine) is level 10, as Reboot
  * @version 1.16 - fleet_security retry_fix (Try again on a withdrawn package fix build) is level 8, as Withdraw
@@ -67,6 +68,9 @@ final class SmActionLevels {
 			'bring_back_hosted' => 10,
 			// Starts a hosted site's failed email setup again (hosting_after_purchase E2).
 			'retry_hosted_mail' => 10,
+			// AI credit (specs/hosted_ai_credit.md §3.8): a failed setup started
+			// again, and credit added or taken off on the ledger.
+			'retry_hosted_ai' => 10, 'hosted_ai_add_credit' => 10,
 		),
 		'index' => array(
 			'adopt_join' => 10, 'adopt_provision_join' => 10, 'adopt_container_join' => 10, 'reject_join' => 10, 'reopen_join' => 10,

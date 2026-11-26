@@ -26,7 +26,9 @@ use GuzzleHttp\Exception\ConnectException;    // network / connection refused
  * OpenAI-compatible services (e.g.
  * Fireworks) subclass this, reusing all the wire translation and overriding the
  * vendor-specific seams — id(), systemThinkingSuffix(), applyReasoning(),
- * unreachableMessage().
+ * applyProviderFields(), unreachableMessage().
+ *
+ * @version 1.1 - applyProviderFields(): a subclass adds its own fields to every request
  */
 class OpenAiCompatibleProvider implements LlmProviderInterface {
 
@@ -411,6 +413,7 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         }
 
         $this->applyReasoning($request, $directive);
+        $this->applyProviderFields($request);
 
         return $request;
     }
@@ -442,6 +445,16 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     protected function applyReasoning(array &$request, array $directive): void {
         $request['reasoning_effort'] = empty($directive['enabled'])
             ? 'none' : (string)($directive['effort'] ?: 'low');
+    }
+
+    /**
+     * Add vendor-only fields to every request, after the reasoning control is
+     * set. Nothing for a plain OpenAI-compatible host; a router subclass puts
+     * its routing rules here (TrustedRouterProvider forces zero-retention
+     * routing), so the rule rides every request this class builds rather than
+     * the callers that build them.
+     */
+    protected function applyProviderFields(array &$request): void {
     }
 
     /**

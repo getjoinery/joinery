@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.177 - build_hosted_ai_settings: a site's AI credit key, one value, to an agent of 1.135.0 or later (specs/hosted_ai_credit.md)
  * @version 1.176 - build_quiet_check: whether anyone is busy on the machine, before a reboot when it is quiet
  *                (specs/automatic_reboot_when_quiet.md WP1)
  * @version 1.175 - build_unban_address reads the jail name as given: one with a line break or space around it is refused
@@ -6363,6 +6364,37 @@ class JobCommandBuilder {
 			$out['params']['dkim_key_name'] = $key_name;
 		}
 		return $out;
+	}
+
+	/**
+	 * Hand a site its AI credit key (specs/hosted_ai_credit.md §3.4).
+	 *
+	 * ONE VALUE CROSSES, AND NOT THE SETTING NAME. It is compiled into
+	 * utils/hosted_ai_settings.php on the node, so this word can write the
+	 * hosted AI key and nothing else. The key is capped at TrustedRouter, so a
+	 * copy of it spends only this site's own credit.
+	 *
+	 * An empty key CLEARS the setting, which is how a site leaving us is
+	 * switched off. That is safe here, unlike mail: the hosted AI key setting
+	 * is ours alone, and an owner's own provider keys live in other settings.
+	 */
+	public static function build_hosted_ai_settings($node, $params) {
+		if (!self::has_primitive($node, 'hosted_ai_settings')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be given its AI credit key: its agent does "
+				. "not offer the hosted_ai_settings primitive. Apply an update to the node.");
+		}
+		return self::build_hosted_ai_settings_primitive($node, $params);
+	}
+
+	public static function build_hosted_ai_settings_primitive($node, $params) {
+		$key = (string)($params['api_key'] ?? '');
+		// The node's own bound, refused here first so a bad value fails where
+		// the row that made it can be looked at.
+		if (strlen($key) > 256 || preg_match('/[^\x20-\x7e]/', $key)) {
+			throw new Exception('An AI credit key is printable text on one line, at most 256 characters.');
+		}
+		return ['primitive' => 'hosted_ai_settings', 'params' => ['api_key' => $key]];
 	}
 
 	/** The first agent whose hosted_mail_settings takes a test site's trap. */

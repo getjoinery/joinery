@@ -24,6 +24,7 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.8 - a moved site's AI credit carries on with its email and backups, or ends (specs/hosted_ai_credit.md)
  * @version 1.7 - the done email is send-once on the outbox; the note and alert marks are itx_done_acts
  * @version 1.6 - let_go_node() disables the node last, so a step that throws is run again by pressing again
  * @version 1.5 - reads the paying line through CustomerCloudProvision::local_order_item(), never another store's id (hosting_after_purchase B11)
@@ -203,6 +204,12 @@ class InstanceTransferFinish {
 		}
 		self::link_node_services($provision, $node, (string)$row->get('itx_paid_until'),
 			'Moved from Managed on ' . gmdate('Y-m-d') . '.');
+		// After the Services rows exist: AI credit carries on with them, or ends.
+		try {
+			HostedAiCredit::carry_or_end($provision, $node);
+		} catch (Throwable $e) {
+			error_log('InstanceTransferFinish: AI credit of ' . $provision->get('cvp_domain') . ': ' . $e->getMessage());
+		}
 		return true;
 	}
 

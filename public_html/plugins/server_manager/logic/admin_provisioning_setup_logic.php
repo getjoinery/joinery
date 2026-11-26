@@ -9,6 +9,7 @@
  *
  * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
  *
+ * @version 2.6 - the Hosted tier saves the AI credit settings: TrustedRouter key, free usage (at most $1.00), markup, low balance, product link
  * @version 2.5 - the Hosted tier saves where test sites' mail goes (server_manager_test_site_mail_trap), an address or empty
  * @version 2.4 - where this site does not sell hosting (SmHosting), only the cloud accounts (and the test-account
  *               cleanup where a test account is held): the selling tabs are not shown and their actions refused
@@ -246,8 +247,27 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					trim($input['smtp2go_referral_url'] ?? ''));
 				ProvisioningSetup::writeSetting('server_manager_storage_referral_url',
 					trim($input['storage_referral_url'] ?? ''));
+				// AI credit (specs/hosted_ai_credit.md §3.2). The $1 ceiling on free
+				// usage is the owner's rule, refused here rather than clamped.
+				$ai_free = trim($input['hosted_ai_allowance_usd'] ?? '1.00');
+				if (!is_numeric($ai_free) || (float)$ai_free < 0 || (float)$ai_free > 1.00) {
+					throw new Exception('Free AI usage per site per month is from $0 to $1.00; \'' . $ai_free . '\' was not saved.');
+				}
+				$ai_markup = trim($input['hosted_ai_markup_percent'] ?? '10');
+				if (!is_numeric($ai_markup) || (float)$ai_markup < 0 || (float)$ai_markup > 1000) {
+					throw new Exception('The AI credit markup is a percentage from 0 to 1000.');
+				}
+				$ai_low = trim($input['hosted_ai_low_balance_usd'] ?? '');
+				if ($ai_low !== '' && (!is_numeric($ai_low) || (float)$ai_low < 0)) {
+					throw new Exception('The low TrustedRouter balance alert is a dollar amount.');
+				}
+				ProvisioningSetup::writeSetting('server_manager_hosted_ai_allowance_usd', number_format((float)$ai_free, 2, '.', ''));
+				ProvisioningSetup::writeSetting('server_manager_hosted_ai_markup_percent', $ai_markup);
+				ProvisioningSetup::writeSetting('server_manager_hosted_ai_low_balance_usd', $ai_low);
+				ProvisioningSetup::writeSetting('server_manager_hosted_ai_credit_url', trim($input['hosted_ai_credit_url'] ?? ''));
 				$save_secret('hosted_smtp2go_master_key', 'server_manager_smtp2go_api_key');
 				$save_secret('smtp2go_webhook_secret', 'server_manager_smtp2go_webhook_secret');
+				$save_secret('hosted_trustedrouter_management_key', 'server_manager_trustedrouter_api_key');
 				$message = 'Hosted tier settings saved.';
 			} else {
 				$error = 'Unknown action.';

@@ -225,10 +225,25 @@ this is the whole of it.
 - **A price carried in the line's form data** — a version with
   `prv_price_type = 'user'` reads `user_price_override` from the form data
   rather than from the version row. That is how a line can cost something the
-  product row could not know in advance.
+  product row could not know in advance. The version's optional
+  `prv_min_price` and `prv_max_price` bound that amount: `get_price()` and the
+  product page's `validate_form()` both refuse an amount outside them, with
+  wording that names the range ("Enter an amount from $5 to $500"). A version
+  with neither takes any amount above zero. The range is set in the version
+  editor, which shows the two fields only when Pricing is "User Chooses", and
+  stays editable after orders reference the version.
 - **An amount the buyer typed** — the optional-donation product prices itself
   from `user_price` (`Product::is_optional_donation()`) and shows no fixed
   price in listings.
+
+On the product page a user-priced version gets an **Amount to pay** box, its
+range as help text and its length sized to the maximum (10 characters with no
+maximum). A product with several versions lists a user-priced one in the
+version dropdown as "you choose the amount", and the dropdown reveals the box
+(`visibility_rules`) only while such a version is picked; a fixed-price pick
+needs no amount and drops any typed one. The cart shows the typed amount as
+**Amount**, and the optional donation as **Donation Amount** on the donation
+line only.
 
 Because the price lives in the form data, **coupon repricing is free of side
 effects**: `ShoppingCart::update_items_for_coupon()` re-calls `get_price()`

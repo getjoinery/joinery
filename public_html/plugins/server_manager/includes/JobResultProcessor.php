@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.151 - hosted_ai_settings: the AI credit key is blanked from the job row once the node answers
  * @version 1.150 - the ready email to a store on this site goes on the outbox with EmailSender::queue(), about its provision
  * @version 1.149 - quiet_check results: whether anyone is busy, each signal a count or unknown (specs/automatic_reboot_when_quiet.md)
  * @version 1.148 - process_site_log keeps journal, the host converger's 'this host logs it to the journal' answer
@@ -2491,6 +2492,26 @@ HTML;
 		$job->set('mjb_result', json_encode([
 			'configured' => ($job->get('mjb_status') === 'completed'
 				&& strpos($text, 'HOSTED_MAIL_SETTINGS=ok') !== false),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * hosted_ai_settings: the site was given its AI credit key, or not.
+	 *
+	 * The key rode the job row to the node. Once the node has answered, either
+	 * way, it is blanked here, so it does not outlive the job that delivered
+	 * it. The plane keeps no copy: a retry mints a fresh key and deletes this
+	 * one at TrustedRouter.
+	 */
+	private static function process_hosted_ai_settings($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = is_array($data) && isset($data['output'])
+			? (string)$data['output'] : (string)($job->get('mjb_output') ?: '');
+		self::blank_secret_params($job, ['api_key']);
+		$job->set('mjb_result', json_encode([
+			'configured' => ($job->get('mjb_status') === 'completed'
+				&& strpos($text, 'HOSTED_AI_SETTINGS=ok') !== false),
 		]));
 		$job->save();
 	}

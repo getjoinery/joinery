@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.37 - the hosted_ai_credit fulfillment provider (AI credit for one of the buyer's sites; specs/hosted_ai_credit.md)
  * @version 1.36 - plane:reboot_not_back (a machine asked to reboot that has not come back; specs/automatic_reboot_when_quiet.md WP3)
  * @version 1.35 - plane:fix_ahead_of_ubuntu and plane:package_fix_ubuntu_newer (specs/package_fixes_ahead_of_ubuntu.md WP5)
  * @version 1.34 - plane:site_build_failed: an ordered site stopped on a failed build
@@ -103,6 +104,10 @@ if (class_exists('FulfillmentRegistry')) {
 	// product, the site's row id on the line, a paid-through date at payment.
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/JoineryServicesFulfillment.php'));
 	FulfillmentRegistry::register(new JoineryServicesFulfillment());
+	// AI credit for one of the buyer's sites: the amount they typed, less the
+	// markup, added to that site's TrustedRouter cap (specs/hosted_ai_credit.md).
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/HostedAiCreditFulfillment.php'));
+	FulfillmentRegistry::register(new HostedAiCreditFulfillment());
 }
 
 // ---- Setup wizard: a hosting purchase under way is not interrupted, and nor

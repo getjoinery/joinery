@@ -25,6 +25,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  *   provider_error -> the provider stopped answering mid-drain; the items
  *     already judged and the tokens already spent travel with the result
  *
+ * @version 1.3 - a provider failure is recorded with LlmProviderException::recordedError()
  * @version 1.2
  * @changelog 1.2 - systemText(): the system prompt as text, public, for a run
  *   in the person's own browser (specs/fortress_mail_device_ai.md § R5)
@@ -121,7 +122,7 @@ class PipelineRunner {
             } catch (LlmProviderException $e) {
                 $tally[] = "- **$label** — not judged: the provider did not answer.";
                 return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr,
-                    'provider_error', '[' . LlmProviderException::classify($e) . '] ' . $e->getMessage());
+                    'provider_error', LlmProviderException::recordedError($e));
             }
             $in += $call_in; $out += $call_out; $cw += $call_cw; $cr += $call_cr;
 

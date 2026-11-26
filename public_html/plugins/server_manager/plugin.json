@@ -567,6 +567,59 @@
       "helptext": "What a hosted customer can send each month. Their SMTP2GO subaccount is capped at the smallest size SMTP2GO accepts that covers it (2,000, 5,000, 10,000 and up, so the default is the smallest), set at creation and whenever this changes. The provider counts and enforces the cap; the platform is not in the send path."
     },
     {
+      "name": "server_manager_trustedrouter_api_key",
+      "default": "",
+      "secret": true,
+      "group": "hosted",
+      "label": "TrustedRouter management key",
+      "helptext": "The key every site's AI credit key is created, capped and deleted with. Set it on the Provisioning Setup page, which seals it at rest. It never leaves this machine: each site gets only its own capped inference key."
+    },
+    {
+      "name": "server_manager_hosted_ai_allowance_usd",
+      "default": "1.00",
+      "group": "hosted",
+      "label": "Free AI usage per site per month (USD)",
+      "type": "number",
+      "helptext": "Each month a site's free AI usage is topped up to this figure, never added to. Unused free usage does not carry over, and spend past a site's cap comes off its next top-up. At most 1.00."
+    },
+    {
+      "name": "server_manager_hosted_ai_markup_percent",
+      "default": "10",
+      "group": "hosted",
+      "label": "Markup on bought AI credit (%)",
+      "type": "number",
+      "helptext": "A buyer who pays $X gets X / (1 + markup) of AI spend. Read at purchase time and recorded on the purchase, so a change never touches credit already bought."
+    },
+    {
+      "name": "server_manager_hosted_ai_low_balance_usd",
+      "default": "50",
+      "group": "hosted",
+      "label": "Alert when our TrustedRouter balance is below (USD)",
+      "type": "number",
+      "helptext": "Every site's AI credit draws on this one prepaid balance, so an empty balance stops AI on every site at once. Below this figure the operator is alerted once a day. Auto-refill at TrustedRouter is the first line."
+    },
+    {
+      "name": "server_manager_hosted_ai_credit_url",
+      "default": "",
+      "group": "hosted",
+      "label": "Where customers buy AI credit",
+      "helptext": "The https address of the AI credit product on the store. A site's hosting banner links here as Buy more AI credit, with the site preselected."
+    },
+    {
+      "name": "server_manager_hosted_ai_watch_time",
+      "default": "",
+      "group": "hosted",
+      "label": "AI credit watch last ran (UTC)",
+      "helptext": "Written by the Hosted AI phase each time it reads every site's AI usage. Not an operator setting."
+    },
+    {
+      "name": "server_manager_hosted_ai_balance_alert_day",
+      "default": "",
+      "group": "hosted",
+      "label": "Low TrustedRouter balance last alerted (UTC day)",
+      "helptext": "Written by the Hosted AI phase so the low-balance alert goes once a day. Not an operator setting."
+    },
+    {
       "name": "server_manager_hosted_shelf_allowance_gb",
       "default": "500",
       "group": "hosted",
@@ -818,6 +871,12 @@
       "feature": "Hosted tier",
       "kind": "operator",
       "locator": "server_manager_smtp2go_api_key"
+    },
+    {
+      "label": "TrustedRouter management key",
+      "feature": "Hosted AI credit",
+      "kind": "operator",
+      "locator": "server_manager_trustedrouter_api_key"
     },
     {
       "label": "SMTP2GO webhook secret",

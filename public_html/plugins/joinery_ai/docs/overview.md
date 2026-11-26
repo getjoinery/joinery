@@ -50,6 +50,7 @@ plugins/joinery_ai/
       AnthropicProvider.php      # Anthropic Messages API (canonical IR passthrough)
       OpenAiCompatibleProvider.php # Ollama / llama.cpp / vLLM / LM Studio; base for remote OpenAI-compatible
       FireworksProvider.php      # Fireworks AI (extends OpenAiCompatibleProvider)
+      TrustedRouterProvider.php  # The hosted AI credit endpoint (extends OpenAiCompatibleProvider; forces zero-retention routing)
     CostGuard.php              # Per-run token/dollar ceilings
     ModelRegistry.php          # Generic reads: finds models with $ai_readable
     ModelSchemaBuilder.php     # Generic reads: field_specifications -> field schema
@@ -806,12 +807,48 @@ Claude entry accepts all five effort levels.
 A model id appears in exactly one endpoint, so routing and classification are the
 same lookup and cannot disagree — the property the sealed-mail gate rests on.
 
+An OpenAI-dialect model bills a cached input token at half its `input` rate unless its
+`cost` states a `cache_read` rate, which it then uses.
+
+### Hosted AI credit
+
+A site whose hosting includes AI credit has the `hosted` endpoint: label "AI credit
+(included with your hosting)", dialect `openai`, the literal base URL
+`https://api.trustedrouter.com/v1`, its key in `joinery_ai_hosted_api_key`, trust
+`trusted`. It serves one model, GLM 5.3 Flash (`z-ai/glm-5.3-flash`), graded `capable`
+and priced at TrustedRouter's rates with their fee included ($0.026375 per million tokens
+in, cached input the same, $0.07385 out), so the chat's and the run history's cost
+figures match what the credit is charged. The model always reasons; work that asks for
+no reasoning runs it at `low`.
+
+- **The key is the hosting operator's to write.** `joinery_ai_hosted_api_key` is a
+  managed secret: never on a settings form, sealed at rest. The management node writes it
+  through `utils/hosted_ai_settings.php` (one JSON object `{"api_key":"..."}` on stdin, the setting name compiled into the
+  script, prints `HOSTED_AI_SETTINGS=ok` and `key=set` or `key=cleared`, never the key).
+  An empty key clears it, which is how hosting turns the endpoint off. The write works
+  while the plugin is inactive (a plugin's declared settings are writable whenever the
+  plugin is on disk), and the key is used once the plugin is switched on.
+- **With no key the endpoint is not available**, like any endpoint, so a site that is not
+  hosted with AI credit never sees it.
+- **Zero-retention routing on every request.** `TrustedRouterProvider` adds
+  `"provider": {"zdr": true}` to every request it builds (the
+  `applyProviderFields()` seam), so a model with no zero-retention route is refused
+  rather than sent somewhere that keeps the text. That is what the `trusted` grade rests
+  on; a Private chat still needs the member's consent raised to `trusted`, as with
+  Fireworks.
+- **Out of credit.** The router answers 402 when the site's credit is spent, which
+  classifies as `api_billing`. Because the message carries the hosted provider label
+  (`Hosted AI credit 4xx: …`), the words say the site's AI credit is used up and point at
+  "Buy more AI credit" on the hosting banner, or at entering the site's own provider key,
+  rather than at a provider dashboard the site never sees.
+- `joinery_ai_global_monthly_token_cap` still applies on top: it is the site's own ceiling.
+
 ### Trust classes
 
 | Class | Meaning | Example |
 |---|---|---|
 | `local` | the bytes never leave hardware the operator controls | Ollama on this box or their own LAN host |
-| `trusted` | leaves the box to a named vendor under terms the operator accepted | Fireworks (contractual no-train on open-model traffic) |
+| `trusted` | leaves the box to a named vendor under terms the operator accepted | Fireworks (contractual no-train on open-model traffic); the hosted AI credit endpoint (zero-retention routing forced on every request) |
 | `cloud` | a general vendor on ordinary terms | Anthropic |
 
 One value answers three questions that used to be asked separately: whether the
@@ -1147,11 +1184,15 @@ whose cost is above zero.
   read. There is no prompt caching (`cache_control` ignored, full system prompt re-sent
   each call). Remote OpenAI-compatible services subclass it, reusing all the wire
   translation and overriding the vendor seams — `id()`, `systemThinkingSuffix()`,
-  `applyReasoning()`, `unreachableMessage()`.
+  `applyReasoning()`, `applyProviderFields()` (vendor-only fields added to every
+  request), `unreachableMessage()`.
 - **`FireworksProvider`** — Fireworks AI, an OpenAI-compatible remote, as a subclass of
   `OpenAiCompatibleProvider`. Supplies Fireworks-flavoured diagnostics and its own
   timeouts. `FireworksProvider::owns($model)` recognises the namespaced
   `accounts/fireworks/…` ids.
+- **`TrustedRouterProvider`** — the hosted AI credit endpoint, as a subclass of
+  `OpenAiCompatibleProvider`. Adds `"provider": {"zdr": true}` to every request, labels
+  its errors `Hosted AI credit`, and uses the remote timeouts.
 
 All providers stream with no total request timeout. The local provider bounds the
 streamed read in two phases: a shorter **first-token** timeout
@@ -1210,7 +1251,8 @@ OpenAI-style wording:
 | `api_request_invalid` | any other 4xx |
 | `api_server_error` | 5xx, `overloaded`, anything unrecognised |
 
-Recipes record `[code] <raw message>` in Run History. Only `api_network_error`,
+Recipes record `[code] <raw message>` in Run History (`LlmProviderException::recordedError()`);
+the hosted endpoint's `api_billing` puts the out-of-credit sentence ahead of the raw message. Only `api_network_error`,
 `api_server_error` and `api_no_response` earn a failover — an auth or quota error would
 fail identically on the sibling.
 
@@ -1223,7 +1265,10 @@ to fill in. A refusal about the key, account, model or request (`api_auth_failed
 `api_request_invalid`) shows `friendlyMessage()` followed by the provider's own sentence
 (`Anthropic said: “This API key is not scoped to a workspace…”`), cut to 300 characters,
 because that sentence names the fix. Network, timeout, rate-limit and server failures show
-`friendlyMessage()` alone. The `is empty` check stays ahead of the `4xx` branch — a
+`friendlyMessage()` alone. On the hosted endpoint `api_billing` shows
+`HOSTED_BILLING_MESSAGE` in place of the friendly sentence, and a member reads
+`HOSTED_BILLING_MEMBER_MESSAGE` (the site's AI credit is used up; tell the administrator).
+The `is empty` check stays ahead of the `4xx` branch — a
 configuration failure has no HTTP status to key on.
 
 A member's conversation gets `memberMessage()` instead: never the provider's words (a
@@ -1255,6 +1300,7 @@ a turn therefore goes through `ChatAsync::log()`, never `error_log()`.
 | `joinery_ai_local_first_token_timeout_seconds` | how long to wait for the model to start (default `60`) |
 | `joinery_ai_anthropic_api_key` | setting it makes the Anthropic endpoint available |
 | `joinery_ai_fireworks_api_key` / `joinery_ai_fireworks_base_url` | likewise for Fireworks |
+| `joinery_ai_hosted_api_key` | managed: the hosted AI credit key, written by `utils/hosted_ai_settings.php`; setting it makes the hosted endpoint available |
 | `joinery_ai_default_model` | which model a new **chat** starts on. Recipes never read it |
 
 **Clearing an API key is how you take an endpoint out of play** — an endpoint with no key

@@ -318,6 +318,114 @@ Two consequences follow, and both are fleet-wide rather than hosted-only:
   `plane:backups_stopped` opens on the management node once the node is two days
   old without a key.
 
+### AI credit
+
+A hosted site, and a self-hosted site on the email and backups bundle, can use
+Joinery AI with nothing set up by its owner. Each site gets one inference key in
+the operator's TrustedRouter account, and **TrustedRouter enforces the key's
+dollar cap**: past it, every request is refused with HTTP 402. The site's admin
+can read the key on their own box, but it spends only that site's credit.
+
+**The money model.** Every figure is microdollars of TrustedRouter spend
+(`HostedAiCap`). Per site, `hai_hosted_ai_accounts` keeps the key's lifetime
+usage when the month began (U0), this month's free usage (A), bought credit (B)
+and spend past the cap nothing has paid for (D). The key's cap is always
+U0 + A + B, and spend this month comes out of A first.
+
+- **Free usage is a top-up to $1, never an addition.** At each month's first
+  pass A is brought up to `server_manager_hosted_ai_allowance_usd` (1.00, and
+  the save refuses more), less anything owed. Unused free usage does not carry
+  over. Spend past the cap (requests already in flight when it was reached) is
+  owed and comes off the next top-ups, so no site has more than $1 of free
+  usage a month over time. A site whose plan is not in trial or subscribed (a
+  Managed site), or whose bundle is not paid (a bundle site), gets no top-up;
+  its bought credit still works.
+- **Bought credit carries over** until the site leaves.
+- Every change to A or B is a row in `hal_hosted_ai_ledger`: `grant`,
+  `purchase`, `refund`, `expire`, `adjust`.
+
+**The leg** is `ProvisionHostedAi`, the *Hosted AI* phase after *Hosted mail*.
+It follows the mail leg's doctrine: the management key never leaves this
+machine, and the one credential that reaches the site is cut to its slice. The
+key travels once in a `hosted_ai_settings` job (agent 1.135.0 and later). The
+site's `utils/hosted_ai_settings.php` holds the setting name
+(`joinery_ai_hosted_api_key`). The key is blanked from the job row when the node
+answers, and it is never stored here: a retry mints a fresh key. States:
+`pending` (waits until the node offers the word, and while the site is
+suspended; nothing is minted before), `settings_pushed`, `done`. Three failed
+pushes stop the leg at `failed` with an operator alert. A push the node has not
+collected in a day is cancelled, its key blanked, and a fresh key sent.
+
+**A replaced key is retired in two steps.**
+1. It is switched off at once and what it has spent is settled into A and B.
+   It is then parked (`hai_retiring_keys`).
+2. A couple of minutes later, a pass reads its final usage. Requests that were
+   still running when it was switched off have landed by then, and that late
+   spend is charged. Only then is the key deleted.
+
+A failure at either step changes nothing and is tried again on the next pass,
+so no spend is lost with a key and none is charged twice. Every change to an
+account's figures holds its row locked.
+
+**The watch**, hourly in the same phase:
+
+1. One key listing reads every site's usage.
+2. The month rolls.
+3. Refunds are found on the store's credit purchase lines.
+4. Wherever U0 + A + B differs from the cap last set, the cap is moved. This
+   runs every pass, so a purchase that could not reach TrustedRouter is applied
+   on the next one.
+
+Once a day the operator's own TrustedRouter balance is checked against
+`server_manager_hosted_ai_low_balance_usd`. Every site's cap draws on that one
+prepaid balance, so auto-refill at TrustedRouter is the first line.
+
+**Buying credit.** One store product, picked under Purchase grants as *AI credit
+for one of the buyer's sites* (`HostedAiCreditFulfillment`), with one version
+priced *User chooses* from $5 to $500. The buyer picks the site and types an
+amount; the site gets amount ÷ (1 + markup) of spend
+(`server_manager_hosted_ai_markup_percent`, 10, recorded on each purchase). A
+purchase applies once per order line. The banner's **Buy more AI credit** opens
+`server_manager_hosted_ai_credit_url` with the site preselected.
+
+**Refunds** are by hand, on the store's refund page, and only on request:
+unspent credit is refundable and ends when the site does. The watch reads each
+credit line's refunded total and takes the difference off, at the markup the
+purchase recorded. It never takes more than is unspent.
+
+**The site's life.**
+- **Suspend** switches the key off at TrustedRouter, and Unsuspend switches it
+  back on.
+- **Removal of a held site, and Discard test site,** delete the key. Unspent
+  bought credit gets an `expire` row. A removal that cannot reach TrustedRouter
+  is kept as `removing` and tried again on every pass. The leg also ends any
+  Managed account whose site is gone.
+- **A move to the buyer's own account:** once the move has finished, a site that
+  carries on with our email and backups keeps its account, key and credit (the
+  account gains its Services row). Otherwise its key is cleared on the site and
+  deleted.
+- **A bundle site whose services are all suspended** has its key switched off
+  and kept, and switched back on when it pays again.
+- **A bundle site whose services are all released** is ended. If it pays again
+  later, its account reopens with that month's free usage, less anything it
+  still owes.
+
+**A bundle site with no agent** collects its key over its connected key: its
+daily services status poll calls `services_enroll` with service `ai` when the
+plane says a key is waiting, or when the site holds none. Once a site holds a
+key it can collect a fresh one at most once a day; each collection mints a new
+key and retires the one before it in the two steps above.
+
+**The node page's AI credit box** shows the state, this month's spend, free
+usage, bought credit (and how much is unspent), the cap and the last usage read,
+with **Retry AI setup** on a failed leg and **Add credit** (an `adjust` row with
+a reason; money permission).
+
+**What TrustedRouter learns.** Model, tokens, cost and timing per key, with the
+key named and tagged by provision or tenant id. No domain or buyer identity is
+sent. Requests are routed only to providers that keep no copy of prompts
+(`provider.zdr`); see the Joinery AI overview, *Hosted AI credit*.
+
 ## The billing clock, and what happens when a payment fails
 
 `HostedTrialWatch` runs the commercial half, for sold sites only
@@ -670,6 +778,10 @@ the key with SMTP2GO each time it opens and shows each permission beside the
 key's field, Webhooks among them: every customer subaccount gets its own
 webhook to `/ajax/smtp2go_webhook` on this site, made with this key and carrying
 the webhook secret. Nothing is set up by hand in SMTP2GO's webhook screen.
+
+The same tab takes AI credit's TrustedRouter management key (sealed at rest),
+the monthly free usage (at most $1.00), the markup on bought credit, the
+low-balance alert figure and the address of the AI credit product.
 
 Then, on the product: pick *Customer cloud server* under Purchase grants and
 choose **Create the server on the operator's account (hosted)**. Give it one

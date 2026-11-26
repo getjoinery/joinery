@@ -32,6 +32,11 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.12 - enrolAi claims the collection under the row lock before minting (B12) and refuses a suspended bundle (B16)
+ * @version 1.11 - enrolAi: one fresh key a day once one is held, the old one retired in two steps, pending
+ *                while there is none (reviewer2 B2, B3)
+ * @version 1.10 - AI credit for a bundle site connected by key: status carries its banner row and whether it needs a key,
+ *                and an enrol for service 'ai' hands over a fresh capped key (specs/hosted_ai_credit.md WP8)
  * @version 1.9 - an enrol makes sure the tenant's subaccount carries its own webhook (Smtp2GoLeg::ensureWebhook)
  * @version 1.8 - selling (specs/services_phase3_selling_nudge.md §1, §2): status carries the offer on sale and
  *               each row's renews; an unpaid row's notice names the offer and where to buy it; noticeDays()
@@ -198,6 +203,9 @@ class JoineryServices {
 		$host = self::cleanHost($host);
 		if ($host === '') {
 			throw new JoineryServicesException('The site has to say its own hostname to enrol.');
+		}
+		if ($service === self::SERVICE_AI) {
+			return self::enrolAi($user_id, $key_id);
 		}
 		$row = self::tenant($user_id, $key_id, $service, $host);
 		$now = gmdate('Y-m-d H:i:s');
@@ -382,6 +390,104 @@ class JoineryServices {
 		);
 	}
 
+	// ── AI credit (specs/hosted_ai_credit.md WP8) ─────────────────────────────
+
+	/** The enrol word a site uses to collect its AI credit key. */
+	const SERVICE_AI = 'ai';
+
+	/**
+	 * The AI credit account of the site this key connects, or null. A bundle
+	 * site's account hangs from its first service row.
+	 */
+	public static function aiAccountForKey(int $user_id, int $key_id): ?HostedAiAccount {
+		$row = ServiceTenant::forKey($key_id, ServiceTenant::SERVICE_MAIL) ?? ServiceTenant::forKey($key_id, ServiceTenant::SERVICE_SHELF);
+		if ($row === null || (int)$row->get('svt_usr_user_id') !== $user_id) {
+			return null;
+		}
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionHostedAi.php'));
+		$anchor = ProvisionHostedAi::anchor_of($row) ?? $row;
+		return HostedAiAccount::for_tenant((int)$anchor->key);
+	}
+
+	/** How often a site that already has a key may collect a fresh one. */
+	const AI_COLLECT_EVERY_SECONDS = 86400;
+
+	/**
+	 * Hand a bundle site with no agent its AI credit key. The key travels in
+	 * this answer, once, and is not kept here.
+	 *
+	 * A site that already holds a key may collect a fresh one once a day (it
+	 * lost its setting, say), not on demand: each collection is a new key at
+	 * what is left of the cap, and the old one is retired in two steps
+	 * (switched off and settled now, its last spend charged and the key
+	 * deleted on a later pass), so spend in flight is never lost with it
+	 * (reviewer2 B2). The account is pending while it has no key, so a mint
+	 * that fails leaves the site asking again rather than holding a dead key
+	 * (B3).
+	 */
+	public static function enrolAi(int $user_id, int $key_id): array {
+		$account = self::aiAccountForKey($user_id, $key_id);
+		if ($account === null || in_array((string)$account->get('hai_state'), array(HostedAiAccount::STATE_REMOVED,
+				HostedAiAccount::STATE_REMOVING, HostedAiAccount::STATE_FAILED, HostedAiAccount::STATE_DISABLED), true)) {
+			return array('service' => self::SERVICE_AI, 'entitled' => false);
+		}
+		if (ProvisionHostedAi::node_of($account) !== null) {
+			// A site with an agent is handed its key through it.
+			return array('service' => self::SERVICE_AI, 'entitled' => true, 'delivered_by_agent' => true);
+		}
+		// A suspended bundle is not handed a working key (B16).
+		if (ProvisionHostedAi::site_stopped($account)) {
+			return array('service' => self::SERVICE_AI, 'entitled' => false);
+		}
+		$client = HostedAiCredit::client();
+		if ($client === null) {
+			throw new JoineryServicesException('AI credit is not configured on this plane yet.');
+		}
+		// Claimed under the row lock first, so two collections at once mint
+		// one key, not two (B12).
+		try {
+			HostedAiCredit::claim_collection($account, self::AI_COLLECT_EVERY_SECONDS);
+		} catch (HostedAiAccountException $e) {
+			throw new JoineryServicesException($e->getMessage());
+		}
+		$old = trim((string)$account->get('hai_key_hash'));
+		if ($old !== '') {
+			$usage = $client->listUsage();
+			HostedAiCredit::retire_key($account, $client, (int)($usage[$old]['usage'] ?? $account->get('hai_usage')));
+		}
+		$account->set('hai_state', HostedAiAccount::STATE_PENDING);
+		$account->save();
+		$named = ProvisionHostedAi::key_name($account);
+		$cap = $account->wanted_cap();
+		$minted = $client->createKey($named['name'], $cap, $named['tags']);
+		$account->set('hai_key_hash', $minted['hash']);
+		$account->set('hai_key_time', gmdate('Y-m-d H:i:s'));
+		$account->set('hai_limit_set', $cap);
+		$account->set('hai_state', HostedAiAccount::STATE_DONE);
+		$account->set('hai_note', 'Key collected by the site on ' . gmdate('Y-m-d H:i') . ' UTC.');
+		$account->save();
+		return array('service' => self::SERVICE_AI, 'entitled' => true, 'api_key' => $minted['key']);
+	}
+
+	/**
+	 * What a connected bundle site is told about its AI credit in its status
+	 * answer: its banner row, and whether it has a key to collect.
+	 */
+	public static function aiStatus(int $user_id, int $key_id): ?array {
+		$account = self::aiAccountForKey($user_id, $key_id);
+		if ($account === null || (string)$account->get('hai_state') === HostedAiAccount::STATE_REMOVED) {
+			return null;
+		}
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/HostedTrialWatch.php'));
+		$by_agent = ProvisionHostedAi::node_of($account) !== null;
+		return array(
+			'needs_key'  => !$by_agent && (string)$account->get('hai_state') === HostedAiAccount::STATE_PENDING
+				&& trim((string)$account->get('hai_key_hash')) === '',
+			'by_agent'   => $by_agent,
+			'row'        => HostedTrialWatch::ai_allowance_of($account),
+		);
+	}
+
 	// ── Status ────────────────────────────────────────────────────────────────
 
 	/**
@@ -426,6 +532,7 @@ class JoineryServices {
 			'services'   => $services,
 			'offer'      => self::offer(),
 			'notice_days' => self::noticeDays(),
+			'ai'         => self::aiStatus($user_id, $key_id),
 		);
 	}
 

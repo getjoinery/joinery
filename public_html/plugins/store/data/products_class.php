@@ -28,6 +28,9 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.12 - a user-priced version's minimum and maximum: validate_form() and get_price() refuse an
+ *                amount outside them; the amount box shows the range, is sized to the maximum, and
+ *                appears beside the version dropdown when a product has several versions
  * @version 1.11 - OWNERSHIP_EACH_ALL: one more per purchase, and its owner owns every own-once product
  * @version 1.10 - a filter that carries a value binds it (SqlCondition); no value is joined into a condition
  * @version 1.9 - the name_like filter's value is quoted and product_id_is_not is a whole number, never joined into the condition
@@ -413,9 +416,13 @@ public function get_requirement_info($output='text') {
 			return $donation;
 		}
 		else if($product_version->get('prv_price_type') == 'user'){
-			// The buyer chooses the price: a well-formed amount above zero.
+			// The buyer chooses the price: a well-formed amount above zero,
+			// within the version's minimum and maximum.
 			$amount = self::buyer_amount($data['user_price_override'] ?? '');
 			if ($amount !== null && (float)$amount > 0) {
+				if (!$product_version->amount_in_range($amount)) {
+					throw new SystemDisplayableError($product_version->price_range_text() . '.');
+				}
 				return $amount;
 			}
 			$error = 'This product is missing a valid amount to pay.';
@@ -623,12 +630,22 @@ public function get_requirement_info($output='text') {
 		$form_data['product_version'] = $product_version->get('prv_product_version_id');
 
 		//VALIDATE THE USER PRICE OVERRIDE IF THAT EXISTS
-		if($product_version->get('prv_price_type') == 'user' && isset($form_data['user_price_override'])){
-			$amount = self::buyer_amount($form_data['user_price_override']);
+		if($product_version->get('prv_price_type') == 'user'){
+			$amount = self::buyer_amount($form_data['user_price_override'] ?? '');
+			$range = $product_version->price_range_text();
 			if($amount === null || (float)$amount <= 0){
-				throw new SystemDisplayableErrorNoLog(
-					'Enter the amount to pay as a number above zero, like 25 or 25.50.');
+				throw new SystemDisplayableErrorNoLog($range !== ''
+					? $range . ', like 25 or 25.50.'
+					: 'Enter the amount to pay as a number above zero, like 25 or 25.50.');
 			}
+			if(!$product_version->amount_in_range($amount)){
+				throw new SystemDisplayableErrorNoLog($range . '.');
+			}
+			$form_data['user_price_override'] = $amount;
+		}
+		else{
+			// A fixed-price version picked on a form that also offered an amount box.
+			unset($form_data['user_price_override']);
 		}
 
 		//IF NO ITEMS REMAINING, SHOW ERROR
@@ -776,24 +793,61 @@ public function get_requirement_info($output='text') {
 		}
 	}
 
+	/**
+	 * The amount box's options for the user-priced versions it serves: sized
+	 * to the largest maximum (10 characters when any version has none), and
+	 * the range as its help text. Versions with different ranges are each
+	 * named in the help text.
+	 *
+	 * @param ProductVersion[] $user_versions
+	 */
+	public static function amount_box_options(array $user_versions, $prefill_price = ''): array {
+		$maxlength = 0;
+		$ranges = array();
+		foreach ($user_versions as $version) {
+			$max = $version->get('prv_max_price');
+			if ($max === NULL || $max === '') {
+				$maxlength = max($maxlength, 10);
+			} else {
+				$maxlength = max($maxlength, strlen(number_format((float)$max, 2, '.', '')));
+			}
+			$ranges[$version->get('prv_version_name')] = $version->price_range_text();
+		}
+		$options = ['maxlength' => $maxlength ?: 10, 'value' => $prefill_price];
+
+		$distinct = array_unique(array_values($ranges));
+		if (count($distinct) === 1) {
+			if ($distinct[0] !== '') {
+				$options['helptext'] = $distinct[0];
+			}
+		} else {
+			$parts = array();
+			foreach ($ranges as $name => $text) {
+				$parts[] = $name . ': ' . ($text !== '' ? lcfirst($text) : 'any amount');
+			}
+			$options['helptext'] = implode('. ', $parts);
+		}
+		return $options;
+	}
+
 	function output_product_form($formwriter, $user, $exclude_requirements=false, $product_version_id=NULL, $prefill_data=NULL) {
 		$settings = Globalvars::get_instance();
 		$currency_symbol = CurrencyHelper::symbol(strtolower($settings->get_setting('site_currency'))) ?? '$';
 
 		$versions = $this->get_product_versions();
+		$prefill_price = ($prefill_data && isset($prefill_data['user_price_override'])) ? $prefill_data['user_price_override'] : '';
 
 		if ($this->count_product_versions() == 1) {
 			$version = $versions->get(0);
+			$formwriter->hiddeninput('product_version', '', ['value' => $version->get('prv_product_version_id')]);
 
 			if($version->get('prv_price_type') == 'user'){
-				$prefill_price = ($prefill_data && isset($prefill_data['user_price_override'])) ? $prefill_data['user_price_override'] : '';
-				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['maxlength' => 5, 'value' => $prefill_price]);
-			}
-			else{
-				$formwriter->hiddeninput('product_version', '', ['value' => $version->get('prv_product_version_id')]);
+				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')',
+					self::amount_box_options(array($version), $prefill_price));
 			}
 		}
 		else if ($this->count_product_versions() > 1) {
+			$selected = NULL;
 			if($product_version_id){
 				$selected = $product_version_id;
 			}
@@ -802,14 +856,34 @@ public function get_requirement_info($output='text') {
 			}
 
 			$version_dropdown = array();
+			$user_versions = array();
+			$visibility_rules = array();
 			foreach ($versions as $version) {
-				$output_string = $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price');
+				if ($version->get('prv_price_type') == 'user') {
+					$output_string = $version->get('prv_version_name') . ' - you choose the amount';
+					$user_versions[] = $version;
+					$visibility_rules[$version->key] = ['show' => ['user_price_override'], 'hide' => []];
+				}
+				else {
+					$output_string = $version->get('prv_version_name') . ' - '.$currency_symbol . $version->get('prv_version_price') . $version->price_period_suffix();
+					$visibility_rules[$version->key] = ['show' => [], 'hide' => ['user_price_override']];
+				}
 				$version_dropdown[$version->key] = $output_string;
 			}
-			$formwriter->dropinput('product_version', 'Product', [
+			$dropdown_options = [
 				'options' => $version_dropdown,
 				'value' => $selected,
-			]);
+			];
+			if ($user_versions) {
+				// The amount box shows only while a user-priced version is picked.
+				$dropdown_options['visibility_rules'] = $visibility_rules;
+			}
+			$formwriter->dropinput('product_version', 'Product', $dropdown_options);
+
+			if ($user_versions) {
+				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')',
+					self::amount_box_options($user_versions, $prefill_price));
+			}
 		}
 
 		if(!$exclude_requirements){

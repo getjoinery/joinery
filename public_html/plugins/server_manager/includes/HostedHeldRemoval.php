@@ -30,6 +30,7 @@
  * Nothing here can stop the removal: the container is already gone. Each step
  * that fails says so in the job's notes and in the error log.
  *
+ * @version 1.2 - deletes the site's AI credit key; unspent bought credit ends with the site (specs/hosted_ai_credit.md)
  * @version 1.1 - cancels only a subscription this site's store sold (hosting_after_purchase B11)
  * @version 1.0
  */
@@ -50,6 +51,10 @@ class HostedHeldRemoval {
 		}
 		$notes = array_merge($notes, self::cancel_subscription($provision, $cancel));
 		$notes = array_merge($notes, self::close_mail($provision, $mail_client));
+		$ai = HostedAiCredit::remove_provision((int)$provision->key, 'The site was removed after its hosting ended.');
+		if ($ai['line'] !== '') {
+			$notes[] = $ai['line'];
+		}
 		$row = HostedSuspension::open_for($provision->key);
 		if ($row !== null) {
 			$row->set('hsu_unsuspend_time', gmdate('Y-m-d H:i:s'));

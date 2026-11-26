@@ -15,6 +15,7 @@
  * same subaccount (the password is never kept on this plane), so the answer
  * is always a working credential.
  *
+ * @version 1.1 - service ai: a bundle site with no agent collects its AI credit key (specs/hosted_ai_credit.md WP8)
  * @version 1.0
  */
 function services_enroll_logic(array $input): LogicResult {
@@ -43,11 +44,11 @@ function services_enroll_logic(array $input): LogicResult {
 function services_enroll_logic_descriptor(): array {
 	return array(
 		'auth' => array('min_user_permission' => 0),
-		'description'      => 'Enrol this site for one of the operator\'s services (mail or shelf, which is backup storage). Answers the tenant\'s state and, when entitled, what the site writes: SMTP send values and DNS records for mail, backup storage slug and prefix for backups.',
+		'description'      => 'Enrol this site for one of the operator\'s services (mail, shelf, which is backup storage, or ai, which hands over a fresh capped AI credit key). Answers the tenant\'s state and, when entitled, what the site writes: SMTP send values and DNS records for mail, backup storage slug and prefix for backups.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(
-			'service' => array('type' => 'string', 'required' => true, 'label' => 'Service: mail or shelf (backup storage)'),
+			'service' => array('type' => 'string', 'required' => true, 'label' => 'Service: mail, shelf (backup storage) or ai (AI credit key)'),
 			'host'    => array('type' => 'string', 'required' => true, 'label' => 'This site\'s hostname'),
 		),
 	);
