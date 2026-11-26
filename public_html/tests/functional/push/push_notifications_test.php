@@ -33,7 +33,7 @@
  *
  * Run: php tests/run.php test-db --filter=push_notifications
  *
- * @version 1.1
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../lib/harness.php');
@@ -103,7 +103,12 @@ $statuses = array();
 WebPushDriver::useHttpHandlerForTest(function ($request, $options) use (&$requests, &$statuses) {
 	$requests[] = $request;
 	$status = $statuses ? array_shift($statuses) : 201;
-	return \GuzzleHttp\Promise\Create::promiseFor(new \GuzzleHttp\Psr7\Response($status));
+	// A status may come with headers: array(302, array('Location' => ...)).
+	$headers = array();
+	if (is_array($status)) {
+		list($status, $headers) = $status;
+	}
+	return \GuzzleHttp\Promise\Create::promiseFor(new \GuzzleHttp\Psr7\Response($status, $headers));
 });
 harness_defer(function () { WebPushDriver::useHttpHandlerForTest(null); PushSender::clear_queue(); });
 
@@ -127,6 +132,43 @@ foreach (array($member, $other, $super) as $u) {
 }
 
 try {
+	// ------------------------------------------------------------------
+	section('The encryption matches RFC 8291');
+
+	// Appendix A of RFC 8291: fixed sender key and salt, no padding.
+	$rfc_body = WebPushDriver::encrypt('When I grow up, I want to be a watermelon',
+		$b64u_dec('BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4'),
+		$b64u_dec('BTBZMqHH6r4Tts7J_aSIgg'), 0,
+		$b64u_dec('yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw'),
+		$b64u_dec('DGv6ra1nlYgDCS1FRnbzlw'));
+	check($b64u($rfc_body) === 'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN',
+		'the RFC 8291 worked example comes out byte for byte', $b64u($rfc_body));
+	$threw = false;
+	try { WebPushDriver::encrypt(str_repeat('x', WebPushDriver::MAX_PAYLOAD + 1), $b64u_dec('BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4'), random_bytes(16), WebPushDriver::PAD_TO); }
+	catch (InvalidArgumentException $e) { $threw = true; }
+	check($threw, 'a message larger than one record is refused');
+	$threw = false;
+	try { WebPushDriver::encrypt('x', "\x04" . str_repeat("\x01", 64), random_bytes(16), WebPushDriver::PAD_TO); }
+	catch (InvalidArgumentException $e) { $threw = true; }
+	check($threw, 'a browser key that is not on the curve is refused');
+	check(WebPushDriver::MAX_PAYLOAD === 3993, 'the largest message is the one every push service must take (RFC 8291 section 4)');
+	$max_body = WebPushDriver::encrypt(str_repeat('x', WebPushDriver::MAX_PAYLOAD), $b64u_dec('BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4'), random_bytes(16), 0);
+	check(strlen($max_body) === 4096, 'and its body is exactly 4096 bytes', strlen($max_body) . ' bytes');
+	$threw = false;
+	try { WebPushDriver::encrypt('x', $b64u_dec('BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4'), random_bytes(16), 0, null, random_bytes(15)); }
+	catch (InvalidArgumentException $e) { $threw = true; }
+	check($threw, 'a fixed salt that is not 16 bytes is refused');
+
+	// The signature converter refuses anything but exactly two DER integers.
+	$to_raw = new ReflectionMethod('WebPushDriver', 'ecdsa_der_to_raw');
+	$good_der = "\x30\x06\x02\x01\x05\x02\x01\x07";
+	check($to_raw->invoke(null, $good_der) === str_pad("\x05", 32, "\0", STR_PAD_LEFT) . str_pad("\x07", 32, "\0", STR_PAD_LEFT), 'a DER signature becomes r || s');
+	foreach (array('truncated' => substr($good_der, 0, 5), 'cut inside a length' => "\x30\x06\x02", 'trailing bytes' => $good_der . "\x00", 'empty' => '') as $label => $bad) {
+		$threw = false;
+		try { $to_raw->invoke(null, $bad); } catch (RuntimeException $e) { $threw = true; }
+		check($threw, 'a ' . $label . ' signature is refused');
+	}
+
 	// ------------------------------------------------------------------
 	section('The site key pair');
 
@@ -165,6 +207,11 @@ try {
 		catch (InvalidArgumentException $e) { $threw = true; }
 		check($threw, 'refuses a malformed ' . $field);
 	}
+	// Right shape (0x04 then 64 bytes) but not a point on P-256.
+	$threw = false;
+	try { PushSender::register((int)$member->key, 'web', array_merge($browser['input'], array('p256dh' => $b64u("\x04" . str_repeat("\x01", 64))))); }
+	catch (InvalidArgumentException $e) { $threw = true; }
+	check($threw, 'refuses a browser key that is not on the curve');
 	foreach (array('https://updates.push.services.mozilla.com/wpush/v2/x', 'https://web.push.apple.com/x', 'https://wns2-par02p.notify.windows.com/w/?token=x') as $endpoint) {
 		check(WebPushDriver::is_push_service_url($endpoint), 'accepts ' . parse_url($endpoint, PHP_URL_HOST));
 	}
@@ -273,6 +320,16 @@ try {
 	PushSender::send(array((int)$member->key), array('title' => 't', 'body' => 'b'));
 	check($destinations_of($member->key) === array(), 'and is retired at ' . PushSender::MAX_FAILURES);
 
+	// A redirect is never followed: the allowlist is checked on the stored
+	// endpoint only, so a 3xx must not carry the POST somewhere else.
+	$redirected = PushSender::register((int)$member->key, 'web', $browser['input'], $device_token);
+	$requests = array();
+	$statuses = array(array(307, array('Location' => 'https://elsewhere.example/collect')));
+	$out = PushSender::send(array((int)$member->key), array('title' => 't', 'body' => 'b'));
+	check(count($requests) === 1 && ($out[(int)$redirected->key]['result'] ?? '') === PushDriver::RESULT_FAILED,
+		'a push service answering with a redirect is not followed, and the send fails', count($requests) . ' requests, ' . json_encode($out));
+	PushSender::retire_for_user((int)$member->key, 'test');
+
 	$gone = PushSender::register((int)$member->key, 'web', $browser['input'], $device_token);
 	$statuses = array(410);
 	$out = PushSender::send(array((int)$member->key), array('title' => 't', 'body' => 'b'));
@@ -303,6 +360,25 @@ try {
 	section('A re-minted key pair retires every browser');
 
 	check(count($destinations_of($member->key)) === 1, 'the member has a browser registered');
+
+	// A stored pair whose halves do not belong together turns push off; it
+	// must not reach the push services and count failures against browsers.
+	$pair_a = openssl_pkey_get_details(openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1')));
+	$pair_b = openssl_pkey_get_details(openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1')));
+	$mixed = array(
+		'public'  => $b64u("\x04" . str_pad($pair_b['ec']['x'], 32, "\0", STR_PAD_LEFT) . str_pad($pair_b['ec']['y'], 32, "\0", STR_PAD_LEFT)),
+		'private' => $b64u(str_pad($pair_a['ec']['d'], 32, "\0", STR_PAD_LEFT)),
+	);
+	set_setting_raw(WebPushDriver::KEYS_SETTING, (new SecretBox())->seal(WebPushDriver::KEYS_SETTING, json_encode($mixed)));
+	WebPushDriver::resetForTests();
+	check(WebPushDriver::public_key() === null && !PushSender::driver('web')->available(), 'a pair whose halves do not match is not usable');
+	$requests = array();
+	PushSender::send(array((int)$member->key), array('title' => 't', 'body' => 'b'));
+	$q = $db->prepare('SELECT MAX(psh_failure_count) FROM psh_push_destinations WHERE psh_usr_user_id = ?');
+	$q->execute(array((int)$member->key));
+	$failures = (int)$q->fetchColumn();
+	check($requests === array() && $failures === 0, 'and nothing is sent or counted against the browser', count($requests) . ' requests, ' . $failures . ' failures');
+
 	set_setting_raw(WebPushDriver::KEYS_SETTING, '');
 	WebPushDriver::resetForTests();
 	check(WebPushDriver::public_key() === null, 'with no pair, push says it cannot send');

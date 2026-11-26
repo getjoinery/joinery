@@ -17,7 +17,7 @@ demands — are defined once in [Account Security](account_security.md).
 
 Wraps [`web-auth/webauthn-lib`](https://github.com/web-auth/webauthn-lib)
 (pure-PHP, no Symfony framework pulled in), pinned to the **5.3** line —
-`composer.json` declares `^5.0`; the exact installed version is `web-auth/webauthn-lib:5.3.5`.
+`composer.json` declares `^5.0`; the exact installed version is `web-auth/webauthn-lib:5.3.17`.
 This is the only maintained PHP WebAuthn library with first-class PRF support
 (`Webauthn\AuthenticationExtensions\PseudoRandomFunctionInputExtensionBuilder`),
 which is the deciding feature for secret derivation. Reference its docs at

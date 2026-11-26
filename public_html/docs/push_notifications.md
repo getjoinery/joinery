@@ -20,7 +20,7 @@ iPhone and iPad Safari only allow push for a site added to the Home Screen and o
 |---|---|---|
 | Destinations | `data/push_destinations_class.php` (`psh_push_destinations`) | One row per place a member can be alerted: a browser (`web`), or a phone app (`ios`, `android`). `psh_endpoint` is unique; `psh_details` holds what differs by kind (a browser's `p256dh` key, `auth` secret and user agent). Not exposed through the REST API. |
 | Drivers | `includes/PushDriver.php` | One transport per kind: `register()` checks what a client sent, `send()` delivers a batch, `retired()` hears a destination go. `carriesText()` says whether readable text may travel through it. |
-| Browser driver | `includes/WebPushDriver.php` | Sends straight to the browser maker's push service with the site's own key pair (VAPID, `minishlink/web-push`), encrypted to the browser (RFC 8291). |
+| Browser driver | `includes/WebPushDriver.php` | Sends straight to the browser maker's push service with the site's own key pair (VAPID, RFC 8292), encrypted to the browser (RFC 8291), using PHP's own OpenSSL functions. |
 | Sender | `includes/PushSender.php` | Who gets what, the content rule, sending, and the one cleanup path. |
 | Service worker | `/service-worker.js` (served from the site root by a static route in `serve.php`) | Shows the notification and opens its link on click, focusing a tab already on the site. |
 | Page script | `assets/js/joinery-push.js`, rendered by `PushPanel::html()` | The box above. |

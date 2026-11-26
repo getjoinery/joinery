@@ -14,8 +14,7 @@
         "chillerlan/php-qrcode": "^5.0",
         "bytestream/horde-imap-client": "^2.34",
         "smalot/pdfparser": "^2.0",
-        "web-auth/webauthn-lib": "^5.0",
-        "minishlink/web-push": "^9.0"
+        "web-auth/webauthn-lib": "^5.0"
     },
     "config": {
         "platform": {
