@@ -3,6 +3,8 @@
 # quiet_check.sh - is anyone busy on this machine right now? ONE JSON object
 # on stdout, counts only.
 #
+# Version: 1.1 - a scheduled-task run is busy only past TASK_RUN_SECONDS: the task that asks
+#                runs one itself; the agents' own endpoints are never a person's visit or write
 # Version: 1.0 - the quiet_check observe word of specs/automatic_reboot_when_quiet.md
 #                WP1: the Reboot When Quiet task asks it before rebooting a machine
 #                that owes a reboot. The agent runs this file, verified against the
@@ -21,10 +23,12 @@
 #       signed_in   a site session carrying a signed-in user changed in the
 #                   window (PHP touches the file on every request)
 #       writes      a POST, PUT, PATCH or DELETE from a browser in the site's
-#                   access log in the window
+#                   access log in the window (the agents' /api/v1/agent/ calls
+#                   are machines, never counted)
 #       packages    dpkg or apt running
 #       installers  the host's installers or the data root script hold their lock
-#       site_work   a scheduled task run, a backup, a container replacement, an
+#       site_work   a scheduled task run over TASK_RUN_SECONDS (the Reboot When
+#                   Quiet task asks from one, every minute), a backup, a container replacement, an
 #                   update run or a data root run among the processes
 #       db_queries  a database query running over DB_LONG_SECONDS
 #       mail_sent   mail a person sent (an authenticated submission) in the window
@@ -43,6 +47,7 @@ export LC_ALL=C
 
 WINDOW_MINUTES=15
 DB_LONG_SECONDS=5
+TASK_RUN_SECONDS=120
 CMD_TIMEOUT=10
 TAIL_LINES=50000
 ROOT="${QUIET_CHECK_ROOT:-}"
@@ -106,8 +111,9 @@ else
                 if (c[1] == "127.0.0.1" || c[1] == "::1") next
                 ua = tolower($6)
                 if (index(ua, "mozilla/") == 0 || ua ~ bots) next
-                v++
                 split($2, r, " ")
+                if (index(r[2], "/api/v1/agent/") == 1) next
+                v++
                 if (r[1] == "POST" || r[1] == "PUT" || r[1] == "PATCH" || r[1] == "DELETE") w++
             }
             END { printf "%d %d\n", v, w }')
@@ -134,9 +140,16 @@ for lock in "${ROOT}"/run/joinery/host-installers.*.lock "${ROOT}/run/joinery/da
     (( $? != 75 )) || held=$((held + 1))
 done
 count installers "$held"
-WORK='process_scheduled_tasks\.php|run_backup\.php|upload_backup\.php|verify_backup\.php|build_backup_download\.php|recreate_site\.sh|site_refresh\.sh|rebase_site_container\.sh|install_security_updates\.sh|joinery_data_root\.sh'
+WORK='run_backup\.php|upload_backup\.php|verify_backup\.php|build_backup_download\.php|recreate_site\.sh|site_refresh\.sh|rebase_site_container\.sh|install_security_updates\.sh|joinery_data_root\.sh'
 n="$(pgrep -c -f "$WORK" 2>/dev/null)"
-count site_work "${n:-0}"
+# A scheduled-task run starts every minute and most end in seconds; one still
+# running past TASK_RUN_SECONDS is real work.
+long=0
+for pid in $(pgrep -f 'process_scheduled_tasks\.php' 2>/dev/null); do
+    age="$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
+    [[ "$age" =~ ^[0-9]+$ ]] && (( age > TASK_RUN_SECONDS )) && long=$((long + 1))
+done
+count site_work "$(( ${n:-0} + long ))"
 
 if [[ -d "${ROOT}/etc/postgresql" ]]; then
     n="$(run runuser -u postgres -- psql -XtAqc "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' AND pid <> pg_backend_pid() AND now() - query_start > interval '${DB_LONG_SECONDS} seconds'" < /dev/null)"

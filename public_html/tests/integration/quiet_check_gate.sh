@@ -45,7 +45,7 @@ R="$T/root"
 SITE=/var/www/html/demo
 mkdir -p "$R$SITE/logs" "$R/var/lib/php/sessions" "$R/run/joinery" "$T/bin"
 
-# Stand-ins for what reads the machine: who, pgrep, runuser.
+# Stand-ins for what reads the machine: who, pgrep, ps, runuser.
 cat > "$T/bin/who" <<STUB
 #!/bin/bash
 cat "$T/who" 2>/dev/null
@@ -53,7 +53,12 @@ STUB
 cat > "$T/bin/pgrep" <<STUB
 #!/bin/bash
 if [[ "\$1" == -x ]]; then [[ -f "$T/pkg" ]]; exit; fi
-n=\$(cat "$T/work" 2>/dev/null || echo 0); echo "\$n"; [[ "\$n" -gt 0 ]]
+if [[ "\$1" == -c ]]; then n=\$(cat "$T/work" 2>/dev/null || echo 0); echo "\$n"; [[ "\$n" -gt 0 ]]; exit; fi
+[[ -f "$T/taskpid" ]] && echo 4242
+STUB
+cat > "$T/bin/ps" <<STUB
+#!/bin/bash
+cat "$T/taskage" 2>/dev/null
 STUB
 cat > "$T/bin/runuser" <<STUB
 #!/bin/bash
@@ -91,10 +96,11 @@ UA='Mozilla/5.0 (X11; Linux x86_64) Firefox/140.0'
     printf '127.0.0.1 - - [%s] "POST /api HTTP/1.1" 200 0 900 "-" "%s"\n' "$now" "$UA"
     printf '203.0.113.7 - - [%s] "GET /health HTTP/1.1" 200 0 900 "-" "-"\n' "$now"
     printf '203.0.113.8 - - [%s] "POST /checkout HTTP/1.1" 200 0 900 "-" "%s"\n' "$old" "$UA"
+    printf '203.0.113.9 - - [%s] "POST /api/v1/agent/claim HTTP/1.1" 200 41 900 "-" "%s"\n' "$now" "$UA"
 } > "$R$SITE/logs/access.log"
 q "$SITE"
 chk "browser page views counted, never busy" "$(jv "$T/out" visits) $(jv "$T/out" quiet)" "2 true"
-chk "a bot's POST, loopback, the monitor and a POST 40 minutes ago are not writes" "$(jv "$T/out" writes)" "0"
+chk "a bot's POST, loopback, the monitor, an agent's call and a POST 40 minutes ago are not writes" "$(jv "$T/out" writes)" "0"
 printf '203.0.113.5 - - [%s] "POST /checkout HTTP/1.1" 200 0 900 "-" "%s"\n' "$now" "$UA" >> "$R$SITE/logs/access.log"
 q "$SITE"
 chk "a browser's POST now is busy" "$(jv "$T/out" writes) $(jv "$T/out" quiet) $(jv "$T/out" busy)" "1 false writes"
@@ -126,6 +132,11 @@ rm -f "$T/pkg"
 echo 2 > "$T/work"; q
 chk "a backup or task run is busy" "$(jv "$T/out" site_work) $(jv "$T/out" busy)" "2 site_work"
 rm -f "$T/work"
+touch "$T/taskpid"; echo 30 > "$T/taskage"; q
+chk "a scheduled-task run 30 seconds old (the asker's own) is not busy" "$(jv "$T/out" site_work) $(jv "$T/out" quiet)" "0 true"
+echo 300 > "$T/taskage"; q
+chk "one still running after five minutes is busy" "$(jv "$T/out" site_work) $(jv "$T/out" busy)" "1 site_work"
+rm -f "$T/taskpid" "$T/taskage"
 touch "$R/run/joinery/host-installers.x.lock"
 ( flock 9; exec sleep 30 ) 9> "$R/run/joinery/host-installers.x.lock" &
 holder=$!

@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.116 - the reboot waiting words find the hosted sites themselves (RebootWhenQuietRunner 1.1)
  * @version 1.115 - automatic reboot: why a machine owing a reboot waits, the last reboot marked automatic, and the When quiet / Nightly window only / Never setting (specs/automatic_reboot_when_quiet.md)
  * @version 1.114 - Errors (24 h): the site's error table counted by kind (check_status errors_24h, agent 1.127.0)
  * @version 1.113 - names the variables node_detail.php sets; the gateway, containers and SSL words are set on every path
@@ -1600,14 +1601,7 @@
 					. '</div>';
 				// What the Reboot When Quiet task is doing about it.
 				if (trim((string)$node->get('mgn_container_name')) === '') {
-					$rwq_containers = array();
-					$rwq_group = (int)$node->get('mgn_mgh_managed_host_id');
-					if ($rwq_group > 0) {
-						foreach (new MultiManagedNode(array('deleted' => false, 'mgn_mgh_managed_host_id' => $rwq_group)) as $rwq_n) {
-							if (trim((string)$rwq_n->get('mgn_container_name')) !== '') { $rwq_containers[] = (int)$rwq_n->key; }
-						}
-					}
-					echo '<div class="small text-muted">' . htmlspecialchars(ucfirst(RebootWhenQuietRunner::waiting_words($node, $rwq_containers))) . '.</div>';
+					echo '<div class="small text-muted">' . htmlspecialchars(ucfirst(RebootWhenQuietRunner::waiting_words($node))) . '.</div>';
 				}
 			} elseif ($hr['reboot_required'] === false) {
 				echo '<div><span class="badge bg-success">No reboot pending</span></div>';

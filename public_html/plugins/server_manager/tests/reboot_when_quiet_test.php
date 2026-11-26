@@ -145,4 +145,19 @@ $json = json_decode(file_get_contents(__DIR__ . '/../tasks/RebootWhenQuiet.json'
 check(is_array($json) && $json['default_frequency'] === 'every_run' && $json['activate_on_install'] === true, 'the task runs every cron run, on by default');
 check(in_array('quiet_check', ObserveWordAsk::WORDS, true), 'quiet_check can be asked from a session (ask_node)');
 
+section('Why a machine waits, on every page');
+
+// The words find the machine's hosted sites themselves: Fleet Security once
+// passed none, and called a machine whose sites could not answer ready.
+$wp = new ReflectionMethod('RebootWhenQuietRunner', 'waiting_words');
+check($wp->getNumberOfParameters() === 1, 'waiting_words takes the machine alone and finds the sites it hosts');
+$calls = array();
+foreach (array('views/admin/fleet_security.php', 'includes/node_detail_tabs/overview.php') as $f) {
+	preg_match_all('/waiting_words\(([^)]*)\)/', file_get_contents(__DIR__ . '/../' . $f), $m);
+	foreach ($m[1] as $args) { $calls[] = $f . ': ' . $args; }
+}
+check(count($calls) === 2, 'Fleet Security and the node page both say why a machine waits', implode(' | ', $calls));
+$src = file_get_contents(__DIR__ . '/../includes/RebootWhenQuietRunner.php');
+check(strpos($src, "a site it hosts (") !== false, 'a hosted site whose agent cannot answer is named, as tick() does not ask that machine');
+
 harness_finish();

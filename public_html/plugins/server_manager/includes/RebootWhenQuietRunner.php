@@ -30,6 +30,7 @@
  * 'automatic' => 'reboot_when_quiet' in its parameters. decide() is pure; the
  * test drives it with arrays.
  *
+ * @version 1.1 - waiting_words finds the machine's hosted sites itself (Fleet Security passed none) and names a hosted site whose agent cannot answer quiet_check, as tick() skips that machine
  * @version 1.0
  */
 class RebootWhenQuietRunner {
@@ -260,9 +261,11 @@ class RebootWhenQuietRunner {
 	/**
 	 * Why a machine that owes a reboot has not had it, in words, for the
 	 * pages: its switch, a refusal, the busy signals of its latest answer (or
-	 * a container's), or that it has not been asked yet.
+	 * a container's), or that it has not been asked yet. The site containers
+	 * it hosts are found here, so every page judges the same set tick() does.
 	 */
-	public static function waiting_words($node, array $container_ids = array()): string {
+	public static function waiting_words($node): string {
+		$container_ids = self::hosted_containers($node);
 		$mode = self::mode($node);
 		if ($mode === 'never') {
 			return 'set to never reboot automatically';
@@ -277,6 +280,17 @@ class RebootWhenQuietRunner {
 		if (!JobCommandBuilder::has_primitive($node, 'quiet_check')) {
 			return 'its agent is too old to say whether it is quiet; it reboots in the nightly window once it has owed one a day';
 		}
+		// tick() asks a machine only when every site it hosts can answer too.
+		foreach ($container_ids as $cid) {
+			try {
+				$c = new ManagedNode($cid, TRUE);
+			} catch (Exception $e) {
+				continue;
+			}
+			if (!JobCommandBuilder::has_primitive($c, 'quiet_check')) {
+				return 'a site it hosts (' . $c->get('mgn_name') . ') has an agent too old to say whether it is quiet; it reboots in the nightly window once it has owed one a day';
+			}
+		}
 		foreach (array_merge(array((int)$node->key), array_map('intval', $container_ids)) as $id) {
 			$job = self::latest_answer_job($id, 3600);
 			if ($job === null || (string)$job->get('mjb_status') !== 'completed') { continue; }
@@ -286,6 +300,19 @@ class RebootWhenQuietRunner {
 			}
 		}
 		return 'reboots by itself at the first quiet moment';
+	}
+
+	/** The ids of the site containers a machine hosts: its host group's nodes with a container name. */
+	public static function hosted_containers($node): array {
+		$group = (int)$node->get('mgn_mgh_managed_host_id');
+		if ($group <= 0 || trim((string)$node->get('mgn_container_name')) !== '') {
+			return array();
+		}
+		$ids = array();
+		foreach (new MultiManagedNode(array('deleted' => false, 'mgn_mgh_managed_host_id' => $group)) as $c) {
+			if (trim((string)$c->get('mgn_container_name')) !== '') { $ids[] = (int)$c->key; }
+		}
+		return $ids;
 	}
 }
 ?>
