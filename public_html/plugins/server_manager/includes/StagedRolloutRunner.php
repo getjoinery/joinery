@@ -30,6 +30,9 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.11 - a rollout halts before its next node once this plane serves a newer release than the one it was
+ *                started for: an apply takes whatever is served, so it would send out a release nobody chose to
+ *                deploy everywhere (0.8.663's rollout gave xandy 0.8.664)
  * @version 1.10 - stages: a stage's nodes go at once, one per machine, and the next stage waits for all of them;
  *                deploy to all managed nodes tests a release on the nodes marked mgn_rollout_first (or, with
  *                none marked, the first site) before the rest. A miss lets the applies under way finish and be
@@ -576,6 +579,24 @@ class StagedRolloutRunner {
 	}
 
 	/** Whether a step has failed and the rollout is only waiting for the applies under way. */
+	/**
+	 * Why a rollout must not start another node: this plane serves a newer
+	 * release than the one it was started for. A node's apply installs
+	 * whatever is served (apply_update names no version), so carrying on
+	 * would send that newer release to every node left, which was never
+	 * chosen. Null when the served release is the rollout's own.
+	 */
+	public static function newer_release_served(StagedRollout $rollout): ?string {
+		$release = (string)$rollout->get('srl_release');
+		$served = DeploymentHelper::servedVersion() ?: LibraryFunctions::get_joinery_version();
+		if (!preg_match('/^\d+\.\d+\.\d+$/', $release) || !preg_match('/^\d+\.\d+\.\d+$/', (string)$served)
+				|| version_compare($served, $release, '<=')) {
+			return null;
+		}
+		return $served . ' was published here after this rollout of ' . $release . ' started, and the nodes left would be '
+			. 'given ' . $served . ' instead. Start a rollout of ' . $served . ' to send it to them.';
+	}
+
 	private static function halting(StagedRollout $rollout): bool {
 		return $rollout->is_running() && (string)$rollout->get('srl_halt_reason') !== '';
 	}
@@ -601,6 +622,14 @@ class StagedRolloutRunner {
 		}
 
 		if (empty($step['job_id'])) {
+			$newer = self::newer_release_served($rollout);
+			if ($newer !== null) {
+				if (!self::halting($rollout)) {
+					$rollout->set('srl_halt_reason', $newer);
+					$rollout->save();
+				}
+				return;
+			}
 			$held = self::copy_hold($node);
 			if ($held !== null) {
 				if (($steps[$pos]['reason'] ?? '') !== $held) {

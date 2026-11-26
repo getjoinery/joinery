@@ -552,5 +552,28 @@ check((string)$ns->get('srl_status') === StagedRollout::STATUS_HALTED && $step_o
 	&& $step_of($ns, $r3)['verdict'] === 'skipped' && empty($step_of($ns, $r3)['job_id']),
 	'a test site that fails stops the rollout before the rest are touched', json_encode($ns->steps()));
 
+// ---------------------------------------------------------------------------
+section('A newer release published during a rollout stops it before the next node');
+
+// 0.8.663's rollout gave xandy 0.8.664 once 0.8.664 was published without
+// deploy to all: an apply installs whatever is served (2026-11-26).
+$n1 = $mk('newer1');
+$n2 = $mk('newer2');
+$nr = StagedRolloutRunner::start(array($n1->key, $n2->key), null);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $nr->key);
+check(StagedRolloutRunner::newer_release_served($nr) === null, 'while the plane serves the rollout\'s own release, nothing stops it');
+$parts = explode('.', $release);
+$older = $parts[0] . '.' . $parts[1] . '.' . max(0, (int)$parts[2] - 1);
+$nr->set('srl_release', $older);
+$nr->save();
+$finish($job_of($nr, $n1), 'completed', srl_apply(array('version_after' => $older)));
+StagedRolloutRunner::advance($nr); $nr->load();
+StagedRolloutRunner::advance($nr); $nr->load();
+check(strpos((string)$nr->get('srl_halt_reason'), $release . ' was published here after this rollout of ' . $older . ' started') !== false
+	&& empty($step_of($nr, $n2)['job_id']),
+	'a rollout of an older release halts, saying so, and the next node is not given the newer one', (string)$nr->get('srl_halt_reason') . ' ' . json_encode($nr->steps()));
+check((string)$nr->get('srl_status') === StagedRollout::STATUS_HALTED && $step_of($nr, $n2)['verdict'] === 'skipped',
+	'it ends halted with the node left skipped', json_encode($nr->steps()));
+
 
 harness_finish();
