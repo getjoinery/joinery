@@ -1,0 +1,39 @@
+{
+    "challenge": "<challenge>",
+    "extensions": {
+        "prf": [],
+        "credProps": true
+    },
+    "rp": {
+        "id": "<id>",
+        "name": "<name>"
+    },
+    "user": {
+        "id": "<id>",
+        "name": "<name>",
+        "displayName": "<displayName>"
+    },
+    "pubKeyCredParams": [
+        {
+            "type": "public-key",
+            "alg": -7
+        },
+        {
+            "type": "public-key",
+            "alg": -257
+        }
+    ],
+    "authenticatorSelection": {
+        "requireResidentKey": null,
+        "authenticatorAttachment": null,
+        "userVerification": "preferred",
+        "residentKey": "preferred"
+    },
+    "attestation": "none",
+    "excludeCredentials": [
+        {
+            "type": "public-key",
+            "id": "<id>"
+        }
+    ]
+}

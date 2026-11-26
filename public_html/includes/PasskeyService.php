@@ -21,6 +21,7 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
+ * @version 1.13 - verifyStepUp() requires user verification, as its options already ask
  * @version 1.12 - ceremony challenges, step-up markers and the sign counter save as the server's own writes (no owner; sign-in has no session user)
  * @version 1.11 - getDerivationOptions() can ask the same touch for a second secret (the root vault's)
  * @version 1.10
@@ -422,7 +423,10 @@ class PasskeyService {
 			throw new PasskeyException('This passkey does not belong to your account.');
 		}
 
-		$this->_checkAssertion($pk_credential, $passkey, $challenge);
+		// 'required', matching getStepUpOptions(): the options only ASK the
+		// browser for verification, and a response that skipped it must not
+		// confirm a sensitive action.
+		$this->_checkAssertion($pk_credential, $passkey, $challenge, 'required');
 
 		$this->_deleteCeremonyRows('stepup');
 		$marker = new PasskeyCeremony(NULL);

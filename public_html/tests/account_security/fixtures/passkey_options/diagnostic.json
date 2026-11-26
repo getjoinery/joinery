@@ -1,0 +1,19 @@
+{
+    "challenge": "<challenge>",
+    "timeout": 120000,
+    "extensions": {
+        "prf": {
+            "eval": {
+                "first": "yotTyftIHUSJyMitG330CbCFB86UWiWnvkqbiI4YZdo"
+            }
+        }
+    },
+    "rpId": "<rpId>",
+    "allowCredentials": [
+        {
+            "type": "public-key",
+            "id": "<id>"
+        }
+    ],
+    "userVerification": "preferred"
+}
