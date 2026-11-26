@@ -16,6 +16,7 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.11 - Made and a replaced withdrawal are read from the channel and the release's fixes, right on a mirror too (B8, B11)
  * @version 1.10 - a withdrawal a later build replaced is not listed (B8)
  * @version 1.9 - fixes waiting for a release upstream has not put out are listed apart, as nothing to do
  * @version 1.8 - Try again stays offered until a build above the withdrawn one exists
@@ -216,8 +217,9 @@ if ($pf_role !== 'none' || $pf_channel !== null) {
 		}
 		if ($pf_channel['lines']) {
 			echo '<div class="table-responsive"><table class="table table-sm mb-2"><thead><tr><th>Package</th><th>Our build</th><th>Fixes</th><th>Made</th><th></th></tr></thead><tbody>';
+			$pf_tree = PackageFixPublisher::readStamp(PathHelper::getSiteRoot() . '/' . PackageFixPublisher::SOURCE_SUBDIR);
 			foreach ($pf_channel['lines'] as $source => $l) {
-				$auto = (($pf['automatic'][$source]['version'] ?? null) === $l['version']);
+				$auto = PackageFixAuto::madeAutomatically($pf_tree, $source, (string)$l['version']);
 				$fid = 'withdraw-' . preg_replace('/[^a-z0-9]/', '-', $source);
 				echo '<tr><td>' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source)) . '</td><td class="small">' . $h($l['version']) . '</td>'
 					. '<td class="small">' . $h($l['cves']) . '</td><td class="small">' . ($auto ? 'automatically' : 'by a person') . '</td><td>';
@@ -234,7 +236,7 @@ if ($pf_role !== 'none' || $pf_channel !== null) {
 			echo '</tbody></table></div>';
 		}
 		foreach ($pf_channel['withdrawn'] as $source => $versions) {
-			if (PackageFixAuto::withdrawalSuperseded($pf, $source)) { continue; }
+			if (PackageFixAuto::withdrawalSuperseded($pf_channel, $source)) { continue; }
 			$why = '';
 			foreach (array_reverse((array)($pf['withdrawals'] ?? array())) as $w) {
 				if (($w['source'] ?? '') === $source) { $why = (string)($w['why'] ?? ''); break; }

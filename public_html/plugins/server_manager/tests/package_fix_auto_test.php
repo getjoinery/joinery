@@ -14,6 +14,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_auto_test.php
  *
+ * @version 1.7 - a replaced withdrawal is read from the channel; a line the release's fixes do not carry was made automatically
  * @version 1.6 - a withdrawal a later build replaced is behind it (B8)
  * @version 1.5 - a fix in a release upstream has not put out waits for it (B7)
  * @version 1.4 - a stuck CVE the watch no longer asks for leaves the record
@@ -422,11 +423,14 @@ check(!isset($r3['state']['automatic']['php8.5']) && ($r3['state']['attempts']['
 	&& strpos((string)($r3['state']['attempts']['php8.5 CVE-2026-115560']['reason'] ?? ''), 'already withdrawn') !== false,
 	'a build that comes out as the withdrawn version is not counted as built', json_encode($r3['state']['attempts'] ?? null));
 check(PackageFixAuto::withdrawnRevision($st, 'php8.5') === 2 && PackageFixAuto::withdrawnRevision($st, 'openssl') === 0, 'the highest withdrawn revision');
-$sup = array('withdrawn' => array('php8.5' => array('x+joinery2')));
-check(!PackageFixAuto::withdrawalSuperseded($sup, 'php8.5') && !PackageFixAuto::withdrawalSuperseded($sup, 'openssl'), 'a withdrawal with nothing built above it is still shown');
-check(!PackageFixAuto::withdrawalSuperseded($sup + array('wide_lines' => array('php8.5' => $line('x+joinery1'))), 'php8.5'), 'an older build on every server does not replace the withdrawal');
-check(PackageFixAuto::withdrawalSuperseded($sup + array('automatic' => array('php8.5' => $line('x+joinery3'))), 'php8.5'), 'a higher build in testing replaces the withdrawal');
-check(PackageFixAuto::withdrawalSuperseded($sup + array('wide_lines' => array('php8.5' => $line('x+joinery3'))), 'php8.5'), 'a higher build on every server replaces the withdrawal');
+$sup = array('withdrawn' => array('php8.5' => array('x+joinery2')), 'lines' => array());
+check(!PackageFixAuto::withdrawalSuperseded($sup, 'php8.5') && !PackageFixAuto::withdrawalSuperseded($sup, 'openssl'), 'a withdrawal with nothing offered above it is still shown');
+check(!PackageFixAuto::withdrawalSuperseded(array('lines' => array('php8.5' => $line('x+joinery1'))) + $sup, 'php8.5'), 'an older build in the channel does not replace the withdrawal');
+check(PackageFixAuto::withdrawalSuperseded(array('lines' => array('php8.5' => $line('x+joinery3'))) + $sup, 'php8.5'), 'a higher build in the channel replaces the withdrawal (a mirror reads the same)');
+$tree = array('openssl' => $line('3.5.5-1ubuntu3.7+joinery1'));
+check(!PackageFixAuto::madeAutomatically($tree, 'openssl', '3.5.5-1ubuntu3.7+joinery1') && PackageFixAuto::madeAutomatically($tree, 'openssl', '3.5.5-1ubuntu3.7+joinery2')
+	&& PackageFixAuto::madeAutomatically($tree, 'postgresql-18', '18.6+joinery3') && PackageFixAuto::madeAutomatically(null, 'openssl', 'x'),
+	'a line the release\'s own fixes carry was made by a person; any other by the runner');
 $r2 = PackageFixAuto::run($opts(array('now' => $now + 1200, 'state' => $r['state'], 'retry_requests' => array('php8.5' => '8.5.4-0ubuntu1.6+joinery9')) + $o3));
 check($builds === 1 && strpos($r2['message'], 'ignored a Try again') !== false, 'a Try again of a build that was never withdrawn is ignored', $r2['message']);
 

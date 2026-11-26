@@ -34,6 +34,8 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.15 - withdrawalSuperseded() reads the channel, so a site that mirrors it decides it too (B8);
+ *                madeAutomatically(): a line the release's own fixes/ACTIVE does not carry was built by the runner (B11)
  * @version 1.14 - withdrawalSuperseded(): a withdrawal a later build of the same package replaced is not shown (B8)
  * @version 1.13 - a fix in a release upstream has not tagged yet waits for it (status waiting_release, RETRY_GENERATION 3): it is
  *                looked for again daily and built once the release is out, never shown as needing a person (B7)
@@ -970,17 +972,24 @@ class PackageFixAuto {
 	}
 
 	/**
-	 * A source's withdrawal is behind it: a build above the highest withdrawn
-	 * revision is out (automatic, or on every server). The withdrawn versions
-	 * stay in the channel so machines keep refusing them; the page drops them.
+	 * A source's withdrawal is behind it: the channel offers a build of it above
+	 * the highest withdrawn revision. The withdrawn versions stay in the channel
+	 * so machines keep refusing them; the page stops listing them. Read from the
+	 * channel (PackageFixChannel::read()), which a mirror holds as the issuer does.
 	 */
-	public static function withdrawalSuperseded(array $state, string $source): bool {
-		$withdrawn = self::withdrawnRevision($state, $source);
+	public static function withdrawalSuperseded(array $channel, string $source): bool {
+		$withdrawn = self::withdrawnRevision(array('withdrawn' => (array)($channel['withdrawn'] ?? array())), $source);
 		if ($withdrawn === 0) { return false; }
-		foreach (array($state['automatic'] ?? array(), $state['wide_lines'] ?? array()) as $set) {
-			if (preg_match('/\+joinery(\d+)$/', (string)($set[$source]['version'] ?? ''), $m) && (int)$m[1] > $withdrawn) { return true; }
-		}
-		return false;
+		return preg_match('/\+joinery(\d+)$/', (string)($channel['lines'][$source]['version'] ?? ''), $m) === 1 && (int)$m[1] > $withdrawn;
+	}
+
+	/**
+	 * Whether a channel line was built by the runner: the release's own
+	 * fixes/ACTIVE (hand-built fixes, committed) does not carry that version.
+	 * $tree: PackageFixPublisher::readStamp() of the tree's fixes folder.
+	 */
+	public static function madeAutomatically(?array $tree, string $source, string $version): bool {
+		return (string)($tree[$source]['version'] ?? '') !== $version;
 	}
 
 	/** The project's own ids for a CVE (PHP's GHSA), from the watch's stored driver answers. */

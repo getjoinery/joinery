@@ -7,10 +7,16 @@
  *
  * Read from what the Watch Upstream Security Fixes task concluded
  * (UpstreamFixWatch). Raised on this management node's own node, as soon as
- * upstream's fix is out (Q2: no wait):
+ * upstream's fix is out (Q2: no wait), and only where the automatic runner
+ * issues the package fix channel (PackageFixAuto::role() 'issuer'): it is the
+ * one box that acts on it. A site that mirrors the channel, or takes it, passes
+ * on what that box builds, and nothing there can act.
  *
  *   - critical: a CVE rated critical or high (Q1) by the project, NVD or
- *     Ubuntu past triage;
+ *     Ubuntu past triage, that a person is needed for or that the runner has
+ *     not tried yet;
+ *   - warning: the same, when every one waits for upstream's release (the
+ *     runner builds it once it is out) or is built and on its way out;
  *   - warning: a CVE with no rating yet ("not rated yet": NVD often has no
  *     score in the first hours, and Ubuntu's day-one priority is a
  *     placeholder), or Ubuntu's tracker unread for six hours.
@@ -18,6 +24,8 @@
  * Clears when Ubuntu's tracker shows every CVE it named released on 26.04,
  * or an active recipe carries it.
  *
+ * @version 1.4 - raised only where the runner issues the channel; says what the runner is doing about each fix (waiting
+ *                for upstream's release, a person needed, not tried yet), and is a warning when nothing needs anyone (B9)
  * @version 1.3 - ImageMagick's name goes: it is not watched
  * @version 1.2 - quiet (IncidentSourceQuiet): it waits in the inbox, and the automatic runner emails what is new
  *                (specs/package_fixes_automatic.md WP5)
@@ -28,10 +36,9 @@ class IncidentSourceFixAheadOfUbuntu implements IncidentSourceQuiet {
 
 	const NAME = 'plane:fix_ahead_of_ubuntu';
 
-	/** What the automatic runner does about it, in the owner's words (specs/package_fixes_automatic.md WP9). */
-	const WHAT_HAPPENS = 'Our own build of each is made automatically and rolled out: the test servers first, then every server '
-		. 'once they have stayed healthy for some hours. An email comes only when a person is needed. '
-		. 'Fleet Security shows where each fix is.';
+	/** What the automatic runner does with a fix it has not tried yet. */
+	const WHAT_HAPPENS = 'Our own build is made automatically within ten minutes and rolled out: the test servers first, then every server '
+		. 'once they have stayed healthy for some hours. Fleet Security shows where each fix is.';
 
 	/** The names people know the source packages by. */
 	const NAMES = array('php' => 'PHP', 'postgresql' => 'PostgreSQL', 'openssl' => 'OpenSSL', 'apache2' => 'Apache',
@@ -92,14 +99,47 @@ class IncidentSourceFixAheadOfUbuntu implements IncidentSourceQuiet {
 	}
 
 	public function evaluate(ManagedNode $node, ?int $now = null): ?array {
-		if (!ReleaseLogWatch::isSelf($node)) {
+		if (!ReleaseLogWatch::isSelf($node) || PackageFixAuto::role() !== 'issuer') {
 			return null;
 		}
-		return self::from_state(UpstreamFixWatch::state(), $now ?? time());
+		return self::from_state(UpstreamFixWatch::state(), $now ?? time(), (array)(PackageFixAuto::state()['attempts'] ?? array()));
 	}
 
-	/** The incident the watch's stored state calls for, or null. Pure. */
-	public static function from_state(array $state, int $now): ?array {
+	/**
+	 * What the runner is doing about each fix to build, from its attempts
+	 * ('source CVE' => attempt): 'waiting' (for upstream's release), 'person',
+	 * 'built' (on its way out), 'untried'. Each group's lines are per package.
+	 */
+	public static function runner_groups(array $build, array $attempts): array {
+		$g = array('waiting' => array(), 'person' => array(), 'built' => array(), 'untried' => array());
+		foreach ($build as $u) {
+			$a = $attempts[$u['source'] . ' ' . $u['cve']] ?? null;
+			$st = is_array($a) ? (string)($a['status'] ?? '') : '';
+			if ($st === 'waiting_release') {
+				$label = self::package_name($u['source']) . ' ' . (string)($a['release'] ?? '');
+				$g['waiting'][$label][] = $u['cve'];
+			} elseif ($st === 'needs_person') {
+				$g['person'][self::package_name($u['source'])][] = $u['cve'];
+			} elseif ($st === 'built' || $st === 'carried') {
+				$g['built'][self::package_name($u['source'])][] = $u['cve'];
+			} else {
+				$g['untried'][self::package_name($u['source'])][] = $u['cve'];
+			}
+		}
+		return $g;
+	}
+
+	/** "OpenSSL 3.5.10: CVE-1, CVE-2" per package, five ids shown. */
+	private static function group_lines(array $by): string {
+		$out = array();
+		foreach ($by as $label => $ids) {
+			$out[] = trim($label) . ': ' . implode(', ', array_slice($ids, 0, 5)) . (count($ids) > 5 ? ', and ' . (count($ids) - 5) . ' more' : '');
+		}
+		return implode("\n", $out);
+	}
+
+	/** The incident the watch's stored state calls for, or null. Pure. $attempts: the runner's, 'source CVE' => attempt. */
+	public static function from_state(array $state, int $now, array $attempts = array()): ?array {
 		if (!$state) {
 			return null;
 		}
@@ -113,14 +153,29 @@ class IncidentSourceFixAheadOfUbuntu implements IncidentSourceQuiet {
 		};
 		if ($c['build']) {
 			$n = count($c['build']);
+			$g = self::runner_groups($c['build'], $attempts);
+			$happens = array();
+			if ($g['person']) {
+				$happens[] = 'A person is needed (Fleet Security says why):' . "\n" . self::group_lines($g['person']);
+			}
+			if ($g['untried']) {
+				$happens[] = 'Not tried yet. ' . self::WHAT_HAPPENS . "\n" . self::group_lines($g['untried']);
+			}
+			if ($g['waiting']) {
+				$happens[] = 'Waiting for upstream\'s release, then built automatically; nothing to do:' . "\n" . self::group_lines($g['waiting']);
+			}
+			if ($g['built']) {
+				$happens[] = 'Built, on its way to the servers:' . "\n" . self::group_lines($g['built']);
+			}
 			return array(
-				'title'    => $n . ' security fix' . ($n === 1 ? '' : 'es') . ' Ubuntu has not shipped yet: ' . self::title_list($c['build']),
-				'severity' => IncidentRecord::SEVERITY_CRITICAL,
+				'title'    => $n . ' security fix' . ($n === 1 ? '' : 'es') . ' Ubuntu has not shipped yet: ' . self::title_list($c['build'])
+					. ($g['person'] || $g['untried'] ? '' : ', nothing needed'),
+				'severity' => $g['person'] || $g['untried'] ? IncidentRecord::SEVERITY_CRITICAL : IncidentRecord::SEVERITY_WARNING,
 				'detail'   => array(
 					'What this is'  => 'These projects published security fixes that Ubuntu has not put in its 26.04 packages yet, '
 						. 'so every server still runs the unfixed versions.',
 					'Packages'      => implode("\n", self::package_lines($c['build'])),
-					'What happens'  => self::WHAT_HAPPENS,
+					'What happens'  => implode("\n\n", $happens),
 					'Not rated yet' => $c['unrated'] ? implode("\n", self::package_lines($c['unrated'])) : 'none',
 					'Each fix'      => implode("\n", array_map($line, array_slice($c['build'], 0, 30)))
 						. ($n > 30 ? "\n...and " . ($n - 30) . ' more' : ''),

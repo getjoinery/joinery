@@ -15,6 +15,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_watch_test.php
  *
+ * @version 1.4 - the incident says what the runner does about each fix, and is a warning when nothing needs anyone (B9)
  * @version 1.3 - a package no longer watched leaves the stored state
  * @version 1.2 - ImageMagick is not watched
  * @version 1.1 - OpenSSL's CVE records: its rating, and the fix commits they name, kept in the state
@@ -113,7 +114,25 @@ check(($inc['severity'] ?? '') === IncidentRecord::SEVERITY_CRITICAL && strpos($
 check(strpos($inc['detail']['Each fix'], 'CVE-2026-129289: PHP 8.5, critical (PHP\'s rating), fixed upstream in 8.2.36, 8.3.37, 8.4.28, 8.5.13; Ubuntu: needs-triage') !== false,
 	'it names each CVE, its rating and who gave it, upstream\'s fix and Ubuntu\'s status', $inc['detail']['Each fix']);
 check(strpos($inc['detail']['Packages'], 'PHP 8.5: 2 critical (CVE-2026-115560, CVE-2026-129289)') !== false, 'one plain line per package', $inc['detail']['Packages']);
-check(strpos($inc['detail']['What happens'], 'automatically') !== false, 'and says what happens next');
+check(strpos($inc['detail']['What happens'], 'Not tried yet') === 0 && strpos($inc['detail']['What happens'], 'PHP 8.5: CVE-2026-115560, CVE-2026-129289') !== false,
+	'with nothing from the runner yet: not tried yet, built automatically', $inc['detail']['What happens']);
+$att = array('php8.5 CVE-2026-115560' => array('status' => 'waiting_release', 'release' => '8.5.13'),
+	'php8.5 CVE-2026-129289' => array('status' => 'waiting_release', 'release' => '8.5.13'));
+$inc = IncidentSourceFixAheadOfUbuntu::from_state($state, $now, $att);
+check(($inc['severity'] ?? '') === IncidentRecord::SEVERITY_WARNING && substr($inc['title'], -16) === ', nothing needed'
+	&& strpos($inc['detail']['What happens'], "Waiting for upstream's release, then built automatically; nothing to do:\nPHP 8.5 8.5.13: CVE-2026-115560, CVE-2026-129289") === 0,
+	'every fix waits for upstream\'s release: a warning that says nothing is needed', json_encode($inc));
+$att['php8.5 CVE-2026-129289'] = array('status' => 'needs_person');
+$inc = IncidentSourceFixAheadOfUbuntu::from_state($state, $now, $att);
+check(($inc['severity'] ?? '') === IncidentRecord::SEVERITY_CRITICAL && strpos($inc['title'], 'nothing needed') === false
+	&& strpos($inc['detail']['What happens'], "A person is needed (Fleet Security says why):\nPHP 8.5: CVE-2026-129289") === 0
+	&& strpos($inc['detail']['What happens'], 'PHP 8.5 8.5.13: CVE-2026-115560') !== false,
+	'one needs a person: critical, each fix under what is happening to it', json_encode($inc));
+$att['php8.5 CVE-2026-129289'] = array('status' => 'built');
+$inc = IncidentSourceFixAheadOfUbuntu::from_state($state, $now, $att);
+check(($inc['severity'] ?? '') === IncidentRecord::SEVERITY_WARNING && strpos($inc['detail']['What happens'], "Built, on its way to the servers:\nPHP 8.5: CVE-2026-129289") !== false,
+	'one built and on its way, one waiting: a warning', json_encode($inc));
+$inc = IncidentSourceFixAheadOfUbuntu::from_state($state, $now);
 check(IncidentSourceFixAheadOfUbuntu::package_name('postgresql-18') === 'PostgreSQL 18' && IncidentSourceFixAheadOfUbuntu::package_name('glibc') === 'the C library (glibc)'
 	&& IncidentSourceFixAheadOfUbuntu::package_name('apache2') === 'Apache' && IncidentSourceFixAheadOfUbuntu::package_name('weird') === 'weird',
 	'packages go by the names people know them by');
