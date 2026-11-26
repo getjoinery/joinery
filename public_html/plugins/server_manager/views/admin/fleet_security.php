@@ -16,6 +16,9 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.12 - one answer first: whether anything needs a person, and what (FleetSecurityView::summary()); the fixes
+ *                Ubuntu has not shipped each with a plain status; every machine's row in short words, the detail folded;
+ *                the update run below, its last run folded
  * @version 1.11 - Made and a replaced withdrawal are read from the channel and the release's fixes, right on a mirror too (B8, B11)
  * @version 1.10 - a withdrawal a later build replaced is not listed (B8)
  * @version 1.9 - fixes waiting for a release upstream has not put out are listed apart, as nothing to do
@@ -103,8 +106,6 @@ $latest = FleetSecurityRun::latest();
 
 $now = time();
 $rows = FleetSecurityView::rows(FleetSecurityView::snapshots(), $now);
-$counts = array('red' => 0, 'amber' => 0, 'grey' => 0, 'green' => 0);
-foreach ($rows as $r) { $counts[$r['verdict']]++; }
 
 $tz = $session->get_timezone();
 $ago = function ($unix) use ($tz) {
@@ -123,32 +124,246 @@ $page->admin_header([
 
 
 $page->begin_box(array());
-?>
-<p>Every machine and site container, and whether it is patched. A machine looks for the security fixes it is waiting for
-every hour; a site container's operating system is its host's base image, whose fixes the host looks for. <strong>Red</strong>:
-old code is still serving, or a critical fix waits (PHP, Apache, OpenSSL, PostgreSQL). <strong>Amber</strong>:
-other fixes wait for the next run, a kernel fix waits for the night and then a reboot, a reboot is owed for over a day, no check has passed in two hours,
-a package run was left half done, or a service that does not serve the sites runs replaced code until it restarts.</p>
 
-<p>
-	<span class="badge bg-danger"><?php echo (int)$counts['red']; ?> red</span>
-	<span class="badge bg-warning"><?php echo (int)$counts['amber']; ?> amber</span>
-	<span class="badge bg-success"><?php echo (int)$counts['green']; ?> green</span>
-	<?php if ($counts['grey']): ?><span class="badge bg-secondary"><?php echo (int)$counts['grey']; ?> not reported</span><?php endif; ?>
-</p>
+$sum = FleetSecurityView::summary($rows);
+$node_link = function ($r) use ($h) {
+	return '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$r['id'] . '">' . $h($r['name']) . '</a>';
+};
+$names = function (array $list) use ($node_link) {
+	return implode(', ', array_map(function ($e) use ($node_link) { return $node_link($e[0]); }, $list));
+};
+
+// The runner's record and the channel: what the answer says of fixes Ubuntu has not shipped.
+$pf_role = PackageFixAuto::role();
+$pf_channel = PackageFixChannel::read(PackageFixChannel::dir(PathHelper::getSiteRoot()));
+$pf = ($pf_role !== 'none' || $pf_channel !== null) ? PackageFixAuto::state() : array();
+$pf_people = array();
+$pf_upstream = array();
+foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
+	$src = strtok($key, ' ');
+	$cve = substr($key, strlen($src) + 1);
+	if (($a['status'] ?? '') === 'needs_person') {
+		$pf_people[$src][] = array($cve, PackageFixAuto::plainReason((string)($a['step'] ?? ''), (string)($a['reason'] ?? '')), (string)($a['reason'] ?? ''));
+	} elseif (($a['status'] ?? '') === 'waiting_release') {
+		$pf_upstream[$src . ' ' . (string)($a['release'] ?? '')][] = $cve;
+	}
+}
+
+// --- The answer: is everything patched, and is anything mine to do ------------
+$tone = $sum['now'] || $pf_people ? 'danger' : (($sum['look'] || $sum['reboot']) ? 'warning' : 'success');
+if ($sum['now'] || $pf_people) {
+	$parts = array();
+	if ($sum['now']) { $parts[] = count($sum['now']) . ' machine' . (count($sum['now']) === 1 ? '' : 's'); }
+	if ($pf_people) { $parts[] = count($pf_people) . ' security fix build' . (count($pf_people) === 1 ? '' : 's'); }
+	$headline = implode(' and ', $parts) . ' need' . (count($sum['now']) + count($pf_people) === 1 ? 's' : '') . ' you.';
+} elseif ($sum['look']) {
+	$headline = count($sum['look']) . ' machine' . (count($sum['look']) === 1 ? '' : 's') . ' cannot be judged right now.';
+} else {
+	$headline = 'Every machine has its security fixes. Nothing needs you.';
+}
+// The theme's alert lays its children in a row: one child holds them all.
+echo '<div class="alert alert-' . $tone . ' mb-3"><div style="flex:1;">';
+echo '<div class="fw-semibold mb-1" style="font-size:1.15rem;">' . $h($headline) . '</div>';
+$facts = array($sum['up_to_date'] . ' of ' . ($sum['total'] - count($sum['unseen'])) . ' fully up to date');
+if ($sum['reboot']) { $facts[] = count($sum['reboot']) . ' owe' . (count($sum['reboot']) === 1 ? 's' : '') . ' a reboot'; }
+if ($sum['wait']) { $facts[] = count($sum['wait']) . ' finish' . (count($sum['wait']) === 1 ? 'es' : '') . ' tonight by themselves'; }
+echo '<div class="mb-2">' . $h(implode('; ', $facts)) . '.</div>';
+
+if ($sum['now']) {
+	echo '<div class="mt-2"><strong>Needs you now</strong> <span class="small">(open the machine; <em>Install security updates now</em> fixes most of these)</span><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+	foreach ($sum['now'] as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h(implode('; ', $e[1])) . '</li>'; }
+	echo '</ul></div>';
+}
+if ($pf_people) {
+	echo '<div class="mt-2"><strong>A security fix needs a person</strong> <span class="small">(Ubuntu has not shipped it and our automatic build could not be made; details below)</span><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+	foreach ($pf_people as $src => $list) {
+		echo '<li>' . $h(IncidentSourceFixAheadOfUbuntu::package_name($src)) . ': ' . count($list) . ' fix' . (count($list) === 1 ? '' : 'es') . '</li>';
+	}
+	echo '</ul></div>';
+}
+if ($sum['look']) {
+	echo '<div class="mt-2"><strong>Cannot be judged</strong> <span class="small">(usually settles by itself within the hour; open the machine if it stays)</span><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+	foreach ($sum['look'] as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h(implode('; ', $e[1])) . '</li>'; }
+	echo '</ul></div>';
+}
+if ($sum['reboot']) {
+	echo '<div class="mt-2"><strong>Reboot when convenient</strong>: ' . $names($sum['reboot'])
+		. '<div class="small">Their updates are installed. Some background services keep running the old code until the machine restarts; '
+		. 'nothing that serves your sites does. Each machine\'s page has a Reboot button.</div></div>';
+}
+if ($sum['wait']) {
+	echo '<div class="mt-2"><strong>Finishes by itself</strong>: ' . $names($sum['wait'])
+		. '<div class="small">Minor fixes waiting for tonight\'s automatic updates. Nothing to do.</div></div>';
+}
+if ($pf_upstream) {
+	echo '<div class="mt-2"><strong>Waiting for upstream</strong>: ' . $h(implode(', ', array_map(function ($k) {
+			$src = strtok($k, ' ');
+			return IncidentSourceFixAheadOfUbuntu::package_name($src) . ' ' . substr($k, strlen($src) + 1);
+		}, array_keys($pf_upstream))))
+		. '<div class="small">Fixed in a release the project has not put out yet. It is built and sent out automatically once it is out. Nothing to do.</div></div>';
+}
+if ($sum['unseen']) {
+	echo '<div class="mt-2 small text-muted">Not watched from here (no agent): ' . $names($sum['unseen']) . '.</div>';
+}
+echo '</div></div>';
+
+// --- Our own builds of fixes Ubuntu has not shipped ---------------------------
+if ($pf_role !== 'none' || $pf_channel !== null) {
+	echo '<h3 class="mt-4 mb-1" style="font-size:1.05rem;">Security fixes Ubuntu has not shipped yet</h3>';
+	echo '<p class="small text-muted mb-2">When a project we run fixes a serious hole before Ubuntu does, we build the fixed package ourselves. '
+		. 'It goes to the test servers first, then to every server once they have stayed healthy for ' . (int)PackageFixAuto::soakHours() . ' hours. '
+		. 'When Ubuntu ships the fix, servers go back to Ubuntu\'s package.'
+		. ($pf_role === 'mirror' ? ' This site passes on what its upstream has sent to every server.' : '') . '</p>';
+	$soaking = (array)($pf['soak']['sources'] ?? array());
+	$fix_rows = array();
+	if ($pf_channel !== null) {
+		$pf_tree = PackageFixPublisher::readStamp(PathHelper::getSiteRoot() . '/' . PackageFixPublisher::SOURCE_SUBDIR);
+		foreach ($pf_channel['lines'] as $source => $l) {
+			$testing = (isset($soaking[$source]) && $soaking[$source] === $l['version']) || !$pf_channel['wide'];
+			$fix_rows[] = array('source' => $source, 'cves' => preg_split('/\s+/', trim((string)$l['cves']), -1, PREG_SPLIT_NO_EMPTY),
+				'state' => $testing ? 'On the test servers' . (!empty($pf['soak']['started']) ? ' since ' . $ago((int)$pf['soak']['started']) : '') . '; every server next' : 'On every server',
+				'tone' => $testing ? 'info' : 'success', 'line' => $l,
+				'made' => PackageFixAuto::madeAutomatically($pf_tree, $source, (string)$l['version']) ? 'built automatically' : 'built by a person');
+		}
+	}
+	foreach ($pf_upstream as $k => $cves) {
+		$src = strtok($k, ' ');
+		$fix_rows[] = array('source' => $src, 'cves' => $cves, 'state' => 'Waiting for ' . IncidentSourceFixAheadOfUbuntu::package_name($src) . ' '
+			. substr($k, strlen($src) + 1) . ' to be released; built automatically then', 'tone' => 'secondary', 'line' => null, 'made' => '');
+	}
+	foreach ($pf_people as $src => $list) {
+		$fix_rows[] = array('source' => $src, 'cves' => array_column($list, 0), 'state' => 'A person is needed', 'tone' => 'danger', 'line' => null, 'made' => '', 'people' => $list);
+	}
+	if (!$fix_rows) {
+		echo '<div class="small mb-3">None: every serious fix the projects have published is in Ubuntu\'s own packages.</div>';
+	} else {
+		echo '<div class="table-responsive"><table class="table table-sm align-middle mb-2"><thead><tr><th>Package</th><th>Status</th><th>Fixes</th><th></th></tr></thead><tbody>';
+		foreach ($fix_rows as $fr) {
+			$n = count($fr['cves']);
+			echo '<tr><td>' . $h(IncidentSourceFixAheadOfUbuntu::package_name($fr['source']))
+				. ($fr['line'] ? '<br><small class="text-muted">' . $h($fr['line']['version']) . ', ' . $h($fr['made']) . '</small>' : '') . '</td>'
+				. '<td><span class="badge bg-' . $fr['tone'] . '">' . $h($fr['state']) . '</span>';
+			if (!empty($fr['people'])) {
+				$why = array();
+				foreach ($fr['people'] as $p) { $why[$p[1]][] = $p; }
+				foreach ($why as $reason => $ps) {
+					echo '<div class="small text-danger mt-1">' . $h($reason) . ' (' . count($ps) . ')';
+					echo ' <details class="d-inline"><summary class="d-inline">detail</summary><code class="small d-block">'
+						. $h(implode("\n", array_map(function ($p) { return $p[0] . ': ' . $p[2]; }, $ps))) . '</code></details></div>';
+				}
+			}
+			echo '</td><td class="small"><details><summary>' . $n . ' fix' . ($n === 1 ? '' : 'es') . '</summary>' . $h(implode(', ', $fr['cves'])) . '</details></td><td>';
+			if ($fr['line'] && $pf_role === 'issuer') {
+				$fid = 'withdraw-' . preg_replace('/[^a-z0-9]/', '-', $fr['source']);
+				echo '<form id="' . $fid . '" method="post" action="' . $self_url . '" class="m-0">' . SmAdminCsrf::field()
+					. '<input type="hidden" name="action" value="withdraw_fix"><input type="hidden" name="source" value="' . $h($fr['source']) . '">'
+					. '<input type="hidden" name="version" value="' . $h($fr['line']['version']) . '">'
+					. '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="' . $h('Withdraw ' . $fr['line']['version']
+						. '? Every machine holding it goes back to the build before it, and the fixes it carries are missing again until another build or Ubuntu brings them.')
+					. '" data-jy-submit="' . $fid . '">Withdraw</button></form>';
+			}
+			echo '</td></tr>';
+		}
+		echo '</tbody></table></div>';
+	}
+	if ($pf_channel !== null) {
+		foreach ($pf_channel['withdrawn'] as $source => $versions) {
+			if (PackageFixAuto::withdrawalSuperseded($pf_channel, $source)) { continue; }
+			$why = '';
+			foreach (array_reverse((array)($pf['withdrawals'] ?? array())) as $w) {
+				if (($w['source'] ?? '') === $source) { $why = (string)($w['why'] ?? ''); break; }
+			}
+			$last = (string)end($versions);
+			// Not offered while a press waits for the runner (a build above it hides the line).
+			$pending = json_decode((string)Globalvars::get_instance()->get_setting(PackageFixAuto::RETRY_SETTING), true);
+			$retry_asked = is_array($pending) && ($pending[$source] ?? null) === $last;
+			echo '<div class="small text-muted d-flex gap-2 align-items-center mb-2">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions))
+				. ($why !== '' ? ' (' . $h($why) . ')' : '');
+			if ($pf_role === 'issuer' && !$retry_asked) {
+				$fid = 'retry-' . preg_replace('/[^a-z0-9]/', '-', $source);
+				echo '<form id="' . $fid . '" method="post" action="' . $self_url . '" class="m-0">' . SmAdminCsrf::field()
+					. '<input type="hidden" name="action" value="retry_fix"><input type="hidden" name="source" value="' . $h($source) . '">'
+					. '<input type="hidden" name="version" value="' . $h($last) . '">'
+					. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="' . $h('Build '
+						. IncidentSourceFixAheadOfUbuntu::package_name($source) . ' again and send it to the test servers? Use this when the problem that pulled '
+						. $last . ' back had nothing to do with it.') . '" data-jy-submit="' . $fid . '">Try again</button></form>';
+			}
+			echo '</div>';
+		}
+	}
+	if (!empty($pf['last_run'])) {
+		echo '<div class="small text-muted mb-3">The automatic builder last ran ' . $h($ago((int)$pf['last_run'])) . ': ' . $h($pf['last_message'] ?? '') . '</div>';
+	}
+}
+
+// --- Every machine -------------------------------------------------------------
+// A row's word: the most a person is asked, of its issues' kinds.
+$word = array('now' => 'Needs you', 'look' => 'Cannot be judged', 'reboot' => 'Reboot owed', 'wait' => 'Finishes tonight', 'unseen' => 'Not seen');
+?>
+<h3 class="mt-4 mb-1" style="font-size:1.05rem;">Every machine and site</h3>
+<div class="table-responsive">
+<table class="table table-sm align-middle">
+	<thead><tr><th>Machine</th><th>Status</th><th>Checked for fixes</th><th>Updates last ran</th></tr></thead>
+	<tbody>
+	<?php foreach ($rows as $r):
+		$badge = array('red' => 'danger', 'amber' => 'warning', 'grey' => 'secondary', 'green' => 'success')[$r['verdict']];
+		$label = 'Up to date';
+		foreach ($word as $k => $w) {
+			if (in_array($k, array_column($r['issues'], 'kind'), true)) { $label = $w; break; }
+		} ?>
+		<tr>
+			<td><?php echo $node_link($r); ?>
+				<?php if ($r['kind'] === 'container'): ?><br><small class="text-muted">site on <?php echo $h($r['host_name'] !== '' ? $r['host_name'] : 'a host'); ?></small>
+				<?php elseif ($r['os'] !== ''): ?><br><small class="text-muted"><?php echo $h($r['os']); ?></small><?php endif; ?></td>
+			<td><span class="badge bg-<?php echo $badge; ?>"><?php echo $h($label); ?></span>
+				<?php if ($r['issues']): ?><div class="small<?php echo $r['verdict'] === 'red' ? ' text-danger' : ''; ?>"><?php echo $h(implode('; ', array_column($r['issues'], 'text'))); ?></div><?php endif; ?>
+				<?php if ($r['reasons'] || $r['package_fixes'] || $r['php']): ?><details class="small text-muted"><summary>detail</summary>
+					<?php foreach (array_merge($r['reasons'], $r['package_fixes']) as $line): ?><div><?php echo $h($line); ?></div><?php endforeach; ?>
+					<?php if ($r['php']): ?><div>PHP: <?php echo $h(implode(', ', $r['php'])); ?></div><?php endif; ?>
+					<?php if ($r['packages']): ?><div>Waiting: <?php echo $h(implode(', ', array_slice($r['packages'], 0, 40))); ?></div><?php endif; ?>
+				</details><?php endif; ?></td>
+			<td class="small"><?php echo $r['checked_at'] !== '' ? $h($ago(strtotime($r['checked_at']))) : '<span class="text-muted">never</span>'; ?></td>
+			<td class="small"><?php echo $h($ago($r['updated_at'])); ?></td>
+		</tr>
+	<?php endforeach; ?>
+	</tbody>
+</table>
+</div>
 
 <?php
-// The run: under way, or the last one.
+// --- Install security updates everywhere: the button, and the last run folded ---
+echo '<h3 class="mt-4 mb-1" style="font-size:1.05rem;">Install security updates now</h3>';
+echo '<p class="small text-muted mb-2">Every machine installs critical fixes within the hour and the rest each night by itself. '
+	. 'This installs everything waiting now, one machine at a time.</p>';
+if (!$latest || !$latest->is_running()) {
+	$plan = FleetSecurityRunner::plan();
+	$ask = 'Install the security updates each machine and site container would take at its next nightly run, now, one at a time ('
+		. count($plan['nodes']) . ' in all)? A service whose package is updated restarts for a few seconds, and PHP is reloaded without dropping a request.'
+		. ' A container host replaces its site containers on a fresh base, each site down about 12 seconds.'
+		. ' Nothing is rebooted. The run stops at the first failure.';
+	echo '<form id="fleetSecurityStart" method="post" action="' . $self_url . '" class="mb-2">' . SmAdminCsrf::field()
+		. '<input type="hidden" name="action" value="start_run">'
+		. '<button type="button" class="btn btn-sm btn-primary" data-jy-confirm="' . $h($ask) . '" data-jy-submit="fleetSecurityStart"'
+		. ($plan['nodes'] ? '' : ' disabled') . '>Install security updates everywhere</button>';
+	echo '</form>';
+	if ($plan['left_out']) {
+		echo '<details class="small text-muted mb-2"><summary>' . count($plan['left_out']) . ' left out of a run</summary><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+		foreach ($plan['left_out'] as $l) {
+			echo '<li><strong>' . $h($l['name']) . '</strong>: ' . $h($l['reason']) . '</li>';
+		}
+		echo '</ul></details>';
+	}
+}
 if ($latest) {
 	$st = (string)$latest->get('fsr_status');
 	$st_words = array('running' => 'under way', 'completed' => 'finished', 'halted' => 'stopped at a failure', 'stopped' => 'stopped by hand');
-	echo '<div class="border rounded p-3 mb-3">';
-	echo '<div><strong>Install security updates everywhere</strong>: ' . $h($st_words[$st] ?? $st)
-		. ' <span class="text-muted small">(started ' . $h(LibraryFunctions::time_ago((string)$latest->get('fsr_create_time'), $tz)) . ')</span></div>';
+	$open = $latest->is_running() || $st === 'halted';
+	echo '<details class="mb-2"' . ($open ? ' open' : '') . '><summary class="small">Last run: ' . $h($st_words[$st] ?? $st)
+		. ', started ' . $h(LibraryFunctions::time_ago((string)$latest->get('fsr_create_time'), $tz)) . '</summary>';
 	if ((string)$latest->get('fsr_halt_reason') !== '' && $st === 'halted') {
 		echo '<div class="text-danger small mt-1">' . $h($latest->get('fsr_halt_reason')) . '</div>';
 	}
-	echo '<div class="table-responsive"><table class="table table-sm mt-2 mb-0"><thead><tr><th>Node</th><th>State</th><th>Outcome</th><th>Changed</th><th>Reloaded</th><th>Note</th></tr></thead><tbody>';
+	echo '<div class="table-responsive"><table class="table table-sm mt-2 mb-0"><thead><tr><th>Machine</th><th>State</th><th>Outcome</th><th>Changed</th><th>Reloaded</th><th>Note</th></tr></thead><tbody>';
 	foreach ($latest->steps() as $s) {
 		$v = (string)($s['verdict'] ?? '');
 		$badge = array('pending' => 'secondary', 'running' => 'info', 'done' => 'success', 'failed' => 'danger', 'skipped' => 'warning')[$v] ?? 'secondary';
@@ -170,159 +385,7 @@ if ($latest) {
 			. '<input type="hidden" name="action" value="stop_run"><input type="hidden" name="run_id" value="' . (int)$latest->key . '">'
 			. '<button type="submit" class="btn btn-sm btn-outline-danger">Stop after the node in hand</button></form>';
 	}
-	echo '</div>';
+	echo '</details>';
 }
-
-if (!$latest || !$latest->is_running()) {
-	$plan = FleetSecurityRunner::plan();
-	$ask = 'Install the security updates each machine and site container would take at its next nightly run, now, one at a time ('
-		. count($plan['nodes']) . ' in all)? A service whose package is updated restarts for a few seconds, and PHP is reloaded without dropping a request.'
-		. ' A container host replaces its site containers on a fresh base, each site down about 12 seconds.'
-		. ' Nothing is rebooted. The run stops at the first failure.';
-	echo '<form id="fleetSecurityStart" method="post" action="' . $self_url . '" class="mb-3">' . SmAdminCsrf::field()
-		. '<input type="hidden" name="action" value="start_run">'
-		. '<button type="button" class="btn btn-sm btn-primary" data-jy-confirm="' . $h($ask) . '" data-jy-submit="fleetSecurityStart"'
-		. ($plan['nodes'] ? '' : ' disabled') . '>Install security updates everywhere</button>';
-	echo '</form>';
-	if ($plan['left_out']) {
-		echo '<details class="small text-muted mb-3"><summary style="cursor:pointer;">' . count($plan['left_out']) . ' left out of a run</summary><ul class="mb-0">';
-		foreach ($plan['left_out'] as $l) {
-			echo '<li><strong>' . $h($l['name']) . '</strong>: ' . $h($l['reason']) . '</li>';
-		}
-		echo '</ul></details>';
-	}
-}
-?>
-
-<?php
-// Security fixes ahead of Ubuntu: the channel this site issues or mirrors, and the runner's record.
-$pf_role = PackageFixAuto::role();
-$pf_channel = PackageFixChannel::read(PackageFixChannel::dir(PathHelper::getSiteRoot()));
-if ($pf_role !== 'none' || $pf_channel !== null) {
-	$pf = PackageFixAuto::state();
-	echo '<div class="border rounded p-3 mb-3"><div><strong>Security fixes ahead of Ubuntu</strong></div>';
-	echo '<p class="small text-muted mb-2">When a project we run ships a critical or high security fix Ubuntu has not, our own build is made '
-		. 'automatically, goes to the machines this site serves directly first, and to every machine once they have stayed healthy for '
-		. (int)PackageFixAuto::soakHours() . ' hours. ' . ($pf_role === 'mirror' ? 'This site passes on each set once its upstream sends it to every machine.' : '')
-		. ' Withdraw sends a build back: every machine holding it returns to the build before it.</p>';
-	if ($pf_channel === null) {
-		echo '<div class="small">No set has been issued yet; machines take the fixes their release names.</div>';
-	} else {
-		echo '<div class="small mb-2">Set ' . (int)$pf_channel['serial'] . ', ' . ($pf_channel['wide'] ? 'for every machine' : 'for the test machines first')
-			. ($pf_channel['issued'] !== '' ? ', issued ' . $h($ago(strtotime($pf_channel['issued']))) : '') . '.</div>';
-		if (!empty($pf['soak'])) {
-			echo '<div class="small mb-2">On the test machines since ' . $h($ago((int)$pf['soak']['started'])) . ': '
-				. $h(implode(', ', array_map(function ($s, $v) { return IncidentSourceFixAheadOfUbuntu::package_name($s) . ' ' . $v; },
-					array_keys($pf['soak']['sources']), $pf['soak']['sources']))) . '.</div>';
-		}
-		if ($pf_channel['lines']) {
-			echo '<div class="table-responsive"><table class="table table-sm mb-2"><thead><tr><th>Package</th><th>Our build</th><th>Fixes</th><th>Made</th><th></th></tr></thead><tbody>';
-			$pf_tree = PackageFixPublisher::readStamp(PathHelper::getSiteRoot() . '/' . PackageFixPublisher::SOURCE_SUBDIR);
-			foreach ($pf_channel['lines'] as $source => $l) {
-				$auto = PackageFixAuto::madeAutomatically($pf_tree, $source, (string)$l['version']);
-				$fid = 'withdraw-' . preg_replace('/[^a-z0-9]/', '-', $source);
-				echo '<tr><td>' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source)) . '</td><td class="small">' . $h($l['version']) . '</td>'
-					. '<td class="small">' . $h($l['cves']) . '</td><td class="small">' . ($auto ? 'automatically' : 'by a person') . '</td><td>';
-				if ($pf_role === 'issuer') {
-					echo '<form id="' . $fid . '" method="post" action="' . $self_url . '" class="m-0">' . SmAdminCsrf::field()
-						. '<input type="hidden" name="action" value="withdraw_fix"><input type="hidden" name="source" value="' . $h($source) . '">'
-						. '<input type="hidden" name="version" value="' . $h($l['version']) . '">'
-						. '<button type="button" class="btn btn-sm btn-outline-danger" data-jy-confirm="' . $h('Withdraw ' . $l['version']
-							. '? Every machine holding it goes back to the build before it, and the fixes it carries are missing again until another build or Ubuntu brings them.')
-						. '" data-jy-submit="' . $fid . '">Withdraw</button></form>';
-				}
-				echo '</td></tr>';
-			}
-			echo '</tbody></table></div>';
-		}
-		foreach ($pf_channel['withdrawn'] as $source => $versions) {
-			if (PackageFixAuto::withdrawalSuperseded($pf_channel, $source)) { continue; }
-			$why = '';
-			foreach (array_reverse((array)($pf['withdrawals'] ?? array())) as $w) {
-				if (($w['source'] ?? '') === $source) { $why = (string)($w['why'] ?? ''); break; }
-			}
-			$last = (string)end($versions);
-			// Not offered while a press waits for the runner (a build above it hides the line).
-			$pending = json_decode((string)Globalvars::get_instance()->get_setting(PackageFixAuto::RETRY_SETTING), true);
-			$retry_asked = is_array($pending) && ($pending[$source] ?? null) === $last;
-			echo '<div class="small text-muted d-flex gap-2 align-items-center">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions))
-				. ($why !== '' ? ' (' . $h($why) . ')' : '');
-			if ($pf_role === 'issuer' && !$retry_asked) {
-				$fid = 'retry-' . preg_replace('/[^a-z0-9]/', '-', $source);
-				echo '<form id="' . $fid . '" method="post" action="' . $self_url . '" class="m-0">' . SmAdminCsrf::field()
-					. '<input type="hidden" name="action" value="retry_fix"><input type="hidden" name="source" value="' . $h($source) . '">'
-					. '<input type="hidden" name="version" value="' . $h($last) . '">'
-					. '<button type="button" class="btn btn-sm btn-outline-secondary" data-jy-confirm="' . $h('Build '
-						. IncidentSourceFixAheadOfUbuntu::package_name($source) . ' again and send it to the test servers? Use this when the problem that pulled '
-						. $last . ' back had nothing to do with it.') . '" data-jy-submit="' . $fid . '">Try again</button></form>';
-			}
-			echo '</div>';
-		}
-	}
-	$pf_people = array();
-	foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
-		if (($a['status'] ?? '') === 'needs_person') {
-			$pf_people[] = array($key . ': ' . PackageFixAuto::plainReason((string)($a['step'] ?? ''), (string)($a['reason'] ?? '')), (string)($a['reason'] ?? ''));
-		}
-	}
-	// Fixed in a release upstream has not put out: nothing for anyone to do.
-	$pf_upstream = array();
-	foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
-		if (($a['status'] ?? '') === 'waiting_release') {
-			$src = strtok($key, ' ');
-			$pf_upstream[IncidentSourceFixAheadOfUbuntu::package_name($src) . ' ' . (string)($a['release'] ?? '')][] = substr($key, strlen($src) + 1);
-		}
-	}
-	if ($pf_upstream) {
-		echo '<div class="small text-muted mt-2"><strong>Waiting for upstream\'s release</strong> (built automatically once it is out; nothing to do)<ul class="mb-0">';
-		foreach ($pf_upstream as $what => $cves) {
-			echo '<li>' . $h($what) . ': ' . $h(implode(', ', $cves)) . '</li>';
-		}
-		echo '</ul></div>';
-	}
-	if ($pf_people) {
-		echo '<div class="small text-danger mt-2"><strong>A person is needed</strong><ul class="mb-0">';
-		foreach (array_slice($pf_people, 0, 40) as $p) {
-			echo '<li>' . $h($p[0]) . ($p[1] !== '' ? ' <details class="d-inline"><summary>detail</summary><code class="small">' . $h($p[1]) . '</code></details>' : '') . '</li>';
-		}
-		echo '</ul></div>';
-	}
-	if (!empty($pf['last_run'])) {
-		echo '<div class="small text-muted mt-2">Last run ' . $h($ago((int)$pf['last_run'])) . ': ' . $h($pf['last_message'] ?? '') . '</div>';
-	}
-	echo '</div>';
-}
-?>
-
-<div class="table-responsive">
-<table class="table table-sm align-middle">
-	<thead><tr>
-		<th></th><th>Node</th><th>OS</th><th>PHP</th><th>Code serving</th><th>Fixes waiting</th><th>Updates ran</th><th>Reboot</th>
-	</tr></thead>
-	<tbody>
-	<?php foreach ($rows as $r):
-		$badge = array('red' => 'danger', 'amber' => 'warning', 'grey' => 'secondary', 'green' => 'success')[$r['verdict']]; ?>
-		<tr>
-			<td><span class="badge bg-<?php echo $badge; ?>" title="<?php echo $h(implode('; ', $r['reasons'])); ?>">&bull;</span></td>
-			<td><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$r['id']; ?>"><?php echo $h($r['name']); ?></a>
-				<?php if ($r['kind'] === 'container'): ?><br><small class="text-muted">container<?php echo $r['host_name'] !== '' ? ' on ' . $h($r['host_name']) : ''; ?></small><?php endif; ?>
-				<?php if ($r['reasons'] && $r['verdict'] !== 'green'): ?><br><small class="<?php echo $r['verdict'] === 'red' ? 'text-danger' : 'text-muted'; ?>"><?php echo $h(implode('; ', $r['reasons'])); ?></small><?php endif; ?>
-				<?php foreach ($r['package_fixes'] as $pf_words): ?><br><small class="text-muted"><?php echo $h($pf_words); ?></small><?php endforeach; ?></td>
-			<td class="small"><?php echo $h($r['os']); ?></td>
-			<td class="small"><?php echo $h(implode(', ', $r['php'])); ?></td>
-			<td><?php if ($r['code'] === 'old'): ?><span class="badge bg-danger">old code</span>
-				<?php elseif ($r['code'] === 'current'): ?><span class="small text-muted">current</span>
-				<?php else: ?><span class="small text-muted">unknown</span><?php endif; ?></td>
-			<td class="small"><?php if ($r['pending'] === null): ?><span class="text-muted">not checked</span>
-				<?php else: ?><span title="<?php echo $h(implode(', ', array_slice($r['packages'], 0, 40))); ?>"><?php echo (int)$r['pending']; ?><?php echo $r['critical'] ? ' (' . count($r['critical']) . ' critical)' : ''; ?></span>
-				<?php if ($r['checked_at'] !== ''): ?><br><span class="text-muted"><?php echo $h($ago(strtotime($r['checked_at']))); ?></span><?php endif; ?><?php endif; ?></td>
-			<td class="small"><?php echo $h($ago($r['updated_at'])); ?></td>
-			<td class="small"><?php echo $r['reboot'] !== null ? 'owed' . ($r['reboot'] > 0 ? ' since ' . $h($ago($r['reboot'])) : '') : ''; ?></td>
-		</tr>
-	<?php endforeach; ?>
-	</tbody>
-</table>
-</div>
-<?php
 $page->end_box();
 $page->admin_footer();

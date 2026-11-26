@@ -202,6 +202,30 @@ check(array_column($rows, 'name') === array('a old', 'd night', 'site a', 'c sil
 		&& $rows[2]['host_name'] === 'dockerhost',
 	'rows: red, amber, grey, green, then by name; a container finds its host among the snapshots (the host itself is green: its base\'s fixes are its containers\' rows)', json_encode(array_column($rows, 'name')));
 
+// ---------------------------------------------------------------------------
+section('The page\'s answer: is anything a person\'s to do');
+
+// getjoinery 2026-11-26: five machines owing a reboot, background services on old code; a clean one; one with no agent.
+$reboot_hr = array_merge($clean_hr, array('reboot_required' => true, 'reboot_required_since' => $NOW - 3 * 86400,
+	'services_needing_restart' => array('source' => 'needrestart', 'services' => array('dbus.service', 'getty@tty1.service'))));
+$rows = FleetSecurityView::rows(array(
+	fs_machine(1, 'xandy', $reboot_hr), fs_machine(2, 'joinerydemo', $reboot_hr), fs_machine(3, 'clean', $clean_hr, $php_current),
+	array('id' => 9, 'name' => 'relay', 'container' => '', 'host_id' => null, 'host_report' => null, 'php' => null, 'agent' => false)), $NOW);
+$sum = FleetSecurityView::summary($rows);
+check($sum['total'] === 4 && $sum['up_to_date'] === 1 && count($sum['reboot']) === 2 && !$sum['now'] && !$sum['look'] && !$sum['wait'] && count($sum['unseen']) === 1,
+	'reboots owed only: nothing needs you, two owe a reboot, one up to date, one not watched', json_encode(array_map('count', array_filter($sum, 'is_array'))));
+check($sum['reboot'][0][1] === array('reboot owed since Oct 19', '2 background services on old code until a restart'),
+	'the reboot and the services it restarts are one thing to do, in short words', json_encode($sum['reboot'][0][1]));
+check($rows[0]['issues'][0]['kind'] === 'reboot' && $rows[0]['reasons'][0] === 'a reboot owed for over a day', 'the long reason stays for the detail');
+$rows = FleetSecurityView::rows(array(
+	fs_machine(1, 'old', $clean_hr, $php_old), fs_machine(5, 'night', array_merge($clean_hr, array('security_pending' => fs_pending(array(fs_pkg('curl', false)))))),
+	fs_machine(6, 'stale', array_merge($clean_hr, array('security_pending' => fs_pending(array(), 'ok', '2026-10-22T09:00:00Z'))))), $NOW);
+$sum = FleetSecurityView::summary($rows);
+check(array_column(array_column($sum['now'], 0), 'name') === array('old') && $sum['now'][0][1] === array('sites are served by old code (php-fpm8.5)')
+		&& array_column(array_column($sum['wait'], 0), 'name') === array('night') && $sum['wait'][0][1] === array('1 minor fix installs tonight')
+		&& array_column(array_column($sum['look'], 0), 'name') === array('stale') && $sum['up_to_date'] === 0,
+	'old code serving needs you; a minor fix finishes tonight; a check not passing cannot be judged', json_encode($sum));
+
 // One critical list on both sides.
 $sh = file_get_contents(PathHelper::getIncludePath('../maintenance_scripts/sysadmin_tools/security_check.sh'));
 check(preg_match('/\[\[ "\$name" =~ \^\(([^)]+)\) \]\]/', $sh, $m) === 1

@@ -189,7 +189,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | `/admin/server_manager` | **Dashboard** -- agent status, node cards with health dots, publish upgrade, recent jobs |
 | `/admin/server_manager/incidents` | **Incidents** -- every condition on every node that needs, or needed, a person; triage several at once (see *Incidents* below) |
 | `/admin/server_manager/incident?id=N` | **Incident** -- one incident: its state, its timeline, its evidence, triage and notes |
-| `/admin/server_manager/fleet_security` | **Fleet Security** -- every machine and site container and whether it is patched, red first; **Install security updates everywhere** (see *Fleet security* below) |
+| `/admin/server_manager/fleet_security` | **Fleet Security** -- whether anything needs a person, then every machine and site container and whether it is patched; **Install security updates everywhere** (see *Fleet security* below) |
 | `/admin/server_manager/machines` | **Machines** -- every machine we pay for: managed, servers in our cloud accounts no node runs on, and machines written down by hand (see *Machines* below) |
 | `/admin/server_manager/node_detail?mgn_managed_node_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
 | `/admin/server_manager/node_add` | **Add Node** -- the record a node's own join request is approved against |
@@ -679,7 +679,19 @@ A later join from the adopted server's address is checked with the provider like
 
 ## Fleet security
 
-`/admin/server_manager/fleet_security` shows every machine and site container and whether it is patched (`FleetSecurityView`), red rows first:
+`/admin/server_manager/fleet_security` answers one question first: does anything need a person? `FleetSecurityView::summary()` gathers each row's issues by what they ask, and the box at the top says how many machines are fully up to date and lists, by machine:
+
+- **Needs you now:** old code serving the sites, a critical fix not installed, a package fix of ours refused or not downloaded, a run left half done or stuck. Opening the machine and **Install security updates now** fixes most.
+- **A security fix needs a person:** a fix Ubuntu has not shipped whose automatic build could not be made (the runner's record, on the box that issues the channel).
+- **Cannot be judged:** a check for fixes not passing, a host not known, a changelog not read. Usually settles within the hour.
+- **Reboot when convenient:** updates are in; a reboot owed over a day, and background services on replaced code until a restart. Nothing serving the sites is among them (that is *needs you*).
+- **Finishes by itself:** minor fixes and a kernel fix waiting for tonight's updates.
+- **Waiting for upstream:** a fix in a release the project has not put out; built automatically once it is out.
+- Nodes with no agent are named as not watched from here.
+
+Below it, *Security fixes Ubuntu has not shipped yet* lists each package with a plain status (on the test servers, on every server, waiting for upstream's release, a person is needed, with why), its fixes folded; then every machine and site with a word (needs you, cannot be judged, reboot owed, finishes tonight, not seen, up to date), its issues in short words and the full reasons folded under *detail*; then **Install security updates everywhere**, its last run folded.
+
+Each row and its verdict (`FleetSecurityView`), red rows first:
 
 - A machine's row comes from its host report: its operating system, the security fixes its hourly check found waiting (`security_pending`), what still runs replaced code (`services_needing_restart`), when automatic updates last ran, a reboot owed, and each package fix of ours ahead of Ubuntu (`package_fixes`) in words: our build installed or waiting to install, handed back to Ubuntu's build, held because Ubuntu's build lacks a CVE, Ubuntu's build already newer, or refused by apt.
 - A site container's row comes from its own status check (its PHP, and whether its php-fpm runs the binary installed) and from its host's report.

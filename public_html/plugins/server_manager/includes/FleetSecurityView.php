@@ -33,6 +33,11 @@
  * Pure apart from snapshots(), which reads the nodes; rows() takes the
  * snapshots, so the test drives it with arrays.
  *
+ * Each reason is also an issue (row 'issues'): its level, what it asks of a
+ * person (KINDS), and a few plain words for the page; summary() gathers them
+ * into the page's one answer: is everything patched, and is anything mine to do.
+ *
+ * @version 1.8 - issues: each reason's kind (now, reboot, wait, look) and short words; summary() (the page's answer)
  * @version 1.7 - a package fix whose archive could not be downloaded says so, apart from apt refusing it (reviewer2 B9)
  * @version 1.6 - a machine's package fixes ahead of Ubuntu (host report package_fixes): each said in words, and one
  *                apt refused is red (specs/package_fixes_ahead_of_ubuntu.md WP6); one waiting to install is
@@ -70,6 +75,15 @@ class FleetSecurityView {
 	const RUN_STUCK_SECONDS = 7200;
 
 	const ORDER = array('red' => 0, 'amber' => 1, 'grey' => 2, 'green' => 3);
+
+	/**
+	 * What an issue asks of a person, in the order the page lists them:
+	 *   now     act: open the machine's page (Install security updates now, mostly)
+	 *   reboot  updates are in; a restart finishes them, when convenient
+	 *   wait    it fixes itself at the next run (tonight's, or the hour's)
+	 *   look    the page cannot tell: a check not passing, a host it does not know
+	 */
+	const KINDS = array('now', 'reboot', 'look', 'wait');
 
 	public static function is_critical_package(string $name): bool {
 		return (bool)preg_match(self::CRITICAL_PATTERN, $name);
@@ -189,7 +203,13 @@ class FleetSecurityView {
 		);
 		$red = array();
 		$amber = array();
+		$issues = array();
 		$known = false;
+		// One reason: its long words on the reason list, its short ones on the page.
+		$add = function (string $level, string $kind, string $long, string $short) use (&$red, &$amber, &$issues) {
+			if ($level === 'red') { $red[] = $long; } else { $amber[] = $long; }
+			$issues[] = array('level' => $level, 'kind' => $kind, 'text' => $short);
+		};
 
 		// The PHP it runs, and whether the code serving is the code installed.
 		$php = $s['php'];
@@ -223,7 +243,7 @@ class FleetSecurityView {
 				$since = $hr['reboot_required_since'] ?? null;
 				$row['reboot'] = is_int($since) ? $since : 0;
 				if (is_int($since) && $now - $since > self::REBOOT_GRACE_SECONDS) {
-					$amber[] = 'a reboot owed for over a day';
+					$add('amber', 'reboot', 'a reboot owed for over a day', 'reboot owed since ' . gmdate('M j', $since));
 				}
 			}
 			// What serves the sites on replaced code is old code serving;
@@ -240,9 +260,10 @@ class FleetSecurityView {
 					}
 				}
 				if ($others) {
-					$amber[] = count($others) . ' other service' . (count($others) === 1 ? ' runs' : 's run') . ' replaced code until '
+					$add('amber', 'reboot', count($others) . ' other service' . (count($others) === 1 ? ' runs' : 's run') . ' replaced code until '
 						. (count($others) === 1 ? 'it restarts' : 'they restart') . ' (' . implode(', ', array_slice($others, 0, 4))
-						. (count($others) > 4 ? ', and ' . (count($others) - 4) . ' more' : '') . ')';
+						. (count($others) > 4 ? ', and ' . (count($others) - 4) . ' more' : '') . ')',
+						count($others) . ' background service' . (count($others) === 1 ? '' : 's') . ' on old code until a restart');
 				}
 			}
 			// Our own builds ahead of Ubuntu: what each machine runs, in words.
@@ -254,15 +275,18 @@ class FleetSecurityView {
 				foreach ($pf['fixes'] as $f) {
 					$row['package_fixes'][] = self::package_fix_words($f);
 					if (!empty($f['fetch_failed'])) {
-						$red[] = 'our build of ' . $f['source'] . ' ' . $f['version'] . ' could not be downloaded';
+						$add('red', 'now', 'our build of ' . $f['source'] . ' ' . $f['version'] . ' could not be downloaded',
+							'our ' . $f['source'] . ' fix could not be downloaded');
 					} elseif ($f['source_refused']) {
-						$red[] = 'apt refused our build of ' . $f['source'] . ' ' . $f['version'];
+						$add('red', 'now', 'apt refused our build of ' . $f['source'] . ' ' . $f['version'], 'our ' . $f['source'] . ' fix was refused by apt');
 					}
 					// On an Ubuntu build newer than ours that lacks our fix: exposed.
 					if ($f['ahead_of_build'] !== null && $f['ubuntu_lacks'] !== null) {
-						$red[] = 'Ubuntu ' . $f['ahead_of_build'] . ' of ' . $f['source'] . ' is installed and lacks ' . implode(', ', $f['ubuntu_lacks']['cves']);
+						$add('red', 'now', 'Ubuntu ' . $f['ahead_of_build'] . ' of ' . $f['source'] . ' is installed and lacks ' . implode(', ', $f['ubuntu_lacks']['cves']),
+							'a newer Ubuntu ' . $f['source'] . ' replaced our fix and lacks ' . count($f['ubuntu_lacks']['cves']) . ' of its fixes');
 					} elseif ($f['unreadable'] !== null) {
-						$amber[] = 'Ubuntu ' . $f['unreadable'] . '\'s changelog for ' . $f['source'] . ' could not be read';
+						$add('amber', 'look', 'Ubuntu ' . $f['unreadable'] . '\'s changelog for ' . $f['source'] . ' could not be read',
+							'cannot tell whether Ubuntu\'s new ' . $f['source'] . ' carries our fixes');
 					}
 				}
 			}
@@ -282,10 +306,10 @@ class FleetSecurityView {
 				}
 				$ok = $sp['checked_ok_at'] !== '' ? strtotime($sp['checked_ok_at']) : false;
 				if ($ok === false || $now - $ok > self::STALE_CHECK_SECONDS) {
-					$amber[] = 'no check for fixes has passed in two hours';
+					$add('amber', 'look', 'no check for fixes has passed in two hours', 'its hourly check for fixes has not passed in two hours');
 				}
 			} else {
-				$amber[] = 'it does not look for security fixes yet';
+				$add('amber', 'look', 'it does not look for security fixes yet', 'it does not check for fixes yet');
 			}
 		} elseif ($is_container) {
 			// Its OS is its host's base image: the fixes the base waits for.
@@ -307,23 +331,25 @@ class FleetSecurityView {
 				}
 				$ok = $sr['checked_ok_at'] !== '' ? strtotime($sr['checked_ok_at']) : false;
 				if ($ok === false || $now - $ok > self::STALE_CHECK_SECONDS) {
-					$amber[] = 'its host\'s base has not been checked in two hours';
+					$add('amber', 'look', 'its host\'s base has not been checked in two hours', 'its host has not checked for fixes in two hours');
 				}
 			} elseif ($host === null) {
-				$amber[] = 'its host is not known here';
+				$add('amber', 'look', 'its host is not known here', 'its host is not known here');
 			} else {
-				$amber[] = 'its host does not replace its containers when a fix ships';
+				$add('amber', 'look', 'its host does not replace its containers when a fix ships', 'its host does not replace it when a fix ships');
 			}
 		}
 
 		if ($row['code'] === 'old') {
-			$red[] = 'old code is serving (' . implode(', ', array_unique($row['old_code'])) . ')';
+			$add('red', 'now', 'old code is serving (' . implode(', ', array_unique($row['old_code'])) . ')',
+				'sites are served by old code (' . implode(', ', array_slice(array_unique($row['old_code']), 0, 2)) . ')');
 		}
 		if ($row['critical']) {
-			$red[] = 'a critical fix waits (' . implode(', ', array_slice($row['critical'], 0, 4)) . ')';
+			$add('red', 'now', 'a critical fix waits (' . implode(', ', array_slice($row['critical'], 0, 4)) . ')',
+				'a critical fix is not installed (' . implode(', ', array_slice($row['critical'], 0, 2)) . ')');
 		}
 		if ($row['kernel']) {
-			$amber[] = 'a kernel fix waits for the night, then a reboot';
+			$add('amber', 'wait', 'a kernel fix waits for the night, then a reboot', 'a kernel fix installs tonight; a reboot after');
 		}
 		// A package run that died part way leaves packages half done, and
 		// nothing else says so until the next install finishes them. One
@@ -352,12 +378,14 @@ class FleetSecurityView {
 				} else {
 					$why = ($critical ? 'a critical fix was' : 'a package run was') . ' left half done ' . $what . ': Install security updates now finishes it';
 				}
-				if ($critical) { $red[] = $why; } else { $amber[] = $why; }
+				$add($critical ? 'red' : 'amber', 'now', $why, $unfinished['in_progress'] === true
+					? 'an update run may be stuck' : ($critical ? 'a critical fix was left half installed' : 'an update run was left half done'));
 			}
 		}
 		$others = ($row['pending'] ?? 0) - count($row['critical']) - count($row['kernel']);
 		if ($row['pending'] !== null && $others > 0) {
-			$amber[] = $others . ' other ' . ($others === 1 ? 'fix waits' : 'fixes wait') . ' for the next run';
+			$add('amber', 'wait', $others . ' other ' . ($others === 1 ? 'fix waits' : 'fixes wait') . ' for the next run',
+				$others . ' minor fix' . ($others === 1 ? ' installs' : 'es install') . ' tonight');
 		}
 
 		if ($red) {
@@ -368,12 +396,41 @@ class FleetSecurityView {
 			$row['verdict'] = 'green';
 		}
 		$row['reasons'] = array_merge($red, $amber);
+		usort($issues, function ($a, $b) { return ($a['level'] === 'red' ? 0 : 1) <=> ($b['level'] === 'red' ? 0 : 1); });
 		if (!$known && !$row['reasons']) {
 			// A node with no agent (the relay, the DNS servers: watched from
 			// here, never given one) never reports; it is not waiting (B27).
-			$row['reasons'][] = (($s['agent'] ?? true) === false) ? 'no agent reports from it, so its patching cannot be seen here' : 'nothing reported yet';
+			$no_agent = (($s['agent'] ?? true) === false);
+			$row['reasons'][] = $no_agent ? 'no agent reports from it, so its patching cannot be seen here' : 'nothing reported yet';
+			$issues[] = array('level' => 'grey', 'kind' => 'unseen', 'text' => $no_agent ? 'no agent, so it cannot be seen from here' : 'nothing reported yet');
 		}
+		$row['issues'] = $issues;
 		return $row;
+	}
+
+	/**
+	 * The page's answer, from the rows: how many are patched, and each kind of
+	 * issue with the rows it is on ('now' => [[row, [texts]], ...], ...),
+	 * 'unseen' for rows nothing reports from.
+	 */
+	public static function summary(array $rows): array {
+		$out = array('total' => count($rows), 'up_to_date' => 0, 'unseen' => array());
+		foreach (self::KINDS as $k) { $out[$k] = array(); }
+		foreach ($rows as $r) {
+			$by = array();
+			foreach ($r['issues'] as $i) {
+				$by[$i['kind']][] = $i['text'];
+			}
+			if (isset($by['unseen'])) {
+				$out['unseen'][] = array($r, $by['unseen']);
+				continue;
+			}
+			if (!$by) { $out['up_to_date']++; }
+			foreach (self::KINDS as $k) {
+				if (isset($by[$k])) { $out[$k][] = array($r, $by[$k]); }
+			}
+		}
+		return $out;
 	}
 }
 ?>
