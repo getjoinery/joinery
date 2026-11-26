@@ -19,6 +19,8 @@
  * publish job, or 'refused' with the reason. The AdvanceStagedRollouts task
  * advances it every run.
  *
+ * @version 1.3 - createPublishJob(): one publish at a time per node, under its own lock; a second press of Publish
+ *                (two jobs a second apart, 0.8.662) is refused while the first is queued or running
  * @version 1.2 - publishedHere(): whether this site already holds a version, the publisher's own refusal
  *                asked before a form offers to republish it
  * @version 1.1 - followUp() says where the publish it started stands (publish_status)
@@ -28,6 +30,9 @@
 class ApplyAndPublish {
 
 	const LOCK_KEY = 7720231022;
+
+	/** Held while a publish job is checked for and created: one at a time per plane. */
+	const PUBLISH_LOCK_KEY = 7720231126;
 
 	/** An apply older than this is no longer followed by its publish. */
 	const WINDOW_HOURS = 24;
@@ -58,7 +63,29 @@ class ApplyAndPublish {
 		if ($node->is_self() && $deploy_all) {
 			$params['deploy_all'] = true;
 		}
-		return ManagementJob::createFromBuild($node->key, 'publish_upgrade', $built, $params, $uid);
+		return self::createPublishJob($node, $built, $params, $uid);
+	}
+
+	/**
+	 * Create a publish job for $node unless one is already queued or running
+	 * there: a second press of Publish would only fail on the number the first
+	 * one takes. The check and the create share one lock, so two requests a
+	 * second apart cannot both pass. Every publish job is created here.
+	 */
+	public static function createPublishJob(ManagedNode $node, array $built, ?array $params, $uid): ManagementJob {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->query('SELECT pg_advisory_lock(' . self::PUBLISH_LOCK_KEY . ')');
+		try {
+			$jobs = new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' => 'publish_upgrade'));
+			foreach ($jobs as $running) {
+				if (in_array((string)$running->get('mjb_status'), self::FINISHED, true)) { continue; }
+				throw new Exception('A publish is already under way (job #' . (int)$running->key . '). '
+					. 'Its page says when it is done; publish again after that if you need another release.');
+			}
+			return ManagementJob::createFromBuild($node->key, 'publish_upgrade', $built, $params, $uid);
+		} finally {
+			$db->query('SELECT pg_advisory_unlock(' . self::PUBLISH_LOCK_KEY . ')');
+		}
 	}
 
 	/**

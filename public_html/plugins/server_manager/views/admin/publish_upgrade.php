@@ -12,6 +12,7 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.21 - the publish job is created by ApplyAndPublish::createPublishJob(): a second press while one runs is refused
  * @version 1.20 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.19 - a site that does not publish (SmPublishing) sees only the sentence saying so, and its POSTs do nothing
  * @version 1.18 - the archives on disk are counted whole: the releases this management node applied, which
@@ -202,6 +203,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 				throw new Exception('This release changes agent words that have not run on a real machine. Tick the box that says you are publishing them anyway, or record their live run first.');
 			}
 			$built = JobCommandBuilder::build_publish_upgrade($self, $params);
+			$job = ApplyAndPublish::createPublishJob($self, $built, $params, $session->get_user_id());
 		} catch (Exception $e) {
 			$session->save_message(new DisplayMessage(
 				$e->getMessage(), 'Cannot publish', $page_regex,
@@ -210,7 +212,6 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 			header('Location: /admin/server_manager/publish_upgrade');
 			exit;
 		}
-		$job = ManagementJob::createFromBuild($self->key, 'publish_upgrade', $built, $params, $session->get_user_id());
 		header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 		exit;
 	}

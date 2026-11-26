@@ -17,6 +17,7 @@
  * scheduled task's scan (advanceAll) never picks them up while the test
  * drives advance() directly.
  *
+ * @version 1.3 - one publish at a time: a second is refused while the first is queued (createPublishJob)
  * @version 1.2 - publishedHere(): a version already released here is not offered again
  * @version 1.1 - followUp() gives the started publish's own status
  * @version 1.0
@@ -102,9 +103,25 @@ check($publish->get('mjb_job_type') === 'publish_upgrade' && (int)$publish->get(
 check(ApplyAndPublish::advance($good) === false, 'an apply starts its publish once');
 check(($then['publish_status'] ?? '') !== '' && $then['publish_status'] === (string)$publish->get('mjb_status'),
 	'the apply job says where its publish stands', json_encode($then));
+// A second publish while this one is queued: Publish pressed twice (0.8.662).
+$again_params = array('release_notes' => '- Again', 'major' => 0, 'minor' => 8, 'patch' => 902);
+$threw = '';
+try {
+	$second = ApplyAndPublish::createPublishJob($node, JobCommandBuilder::build_publish_upgrade($node, $again_params), $again_params, null);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $second->key);
+} catch (Exception $e) {
+	$threw = $e->getMessage();
+}
+check(strpos($threw, 'already under way (job #' . (int)$publish->key . ')') !== false,
+	'a second publish is refused while the first is queued, naming it', $threw);
 $publish->set('mjb_status', 'completed');
 $publish->save();
 check((ApplyAndPublish::followUp($good)['publish_status'] ?? null) === 'completed', 'and follows it to completed');
+$after = ApplyAndPublish::createPublishJob($node, JobCommandBuilder::build_publish_upgrade($node, $again_params), $again_params, null);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $after->key);
+check($after->get('mjb_job_type') === 'publish_upgrade', 'once it has finished, the next publish is queued');
+$after->set('mjb_status', 'cancelled');
+$after->save();
 
 check(ApplyAndPublish::followUp($publish) === null, 'a publish job is followed by nothing');
 
