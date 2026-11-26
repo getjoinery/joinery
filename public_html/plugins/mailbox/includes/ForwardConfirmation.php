@@ -203,9 +203,10 @@ class ForwardConfirmation {
 		$c = self::requestContent($row, $token);
 		$queued = new QueuedEmail(NULL);
 		$queued->set('equ_from', (string)$settings->get_setting('defaultemail'));
-		$queued->set('equ_from_name', (string)($settings->get_setting('defaultemailname') ?: 'Inbound Email'));
+		$queued->set('equ_from_name', mb_substr((string)($settings->get_setting('defaultemailname') ?: 'Inbound Email'), 0, 70));
 		$queued->set('equ_to', (string)$row->get('ifd_destination'));
-		$queued->set('equ_to_name', (string)$row->get('ifd_destination'));
+		// The name column holds 70 characters; an address can be longer.
+		$queued->set('equ_to_name', mb_substr((string)$row->get('ifd_destination'), 0, 70));
 		$queued->set('equ_subject', mb_substr($c['subject'], 0, 128));
 		$queued->set('equ_body', $c['html']);
 		$queued->set('equ_status', QueuedEmail::READY_TO_SEND);

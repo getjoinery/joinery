@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 1.9 - queueForRetry() catches any Throwable, so a refused retry row is logged, never thrown at the sender
  * @version 1.8 - sendBatch() honours email_dry_run, as send() does (it sent a test's batch to the trap)
  * @version 1.7 - EmailSender::$remote: inside a sandboxed plugin's fence, send(), sendBatch() and template
  *   rendering are carried to the site, which runs them with this same class (specs/sandboxed_plugin_email.md)
@@ -1106,7 +1107,7 @@ class EmailSender {
 
             $count = count($message->getRecipients());
             $this->logEmailDebug("Queued $count recipient(s) for retry");
-        } catch (Exception $e) {
+        } catch (Throwable $e) {
             error_log("[EmailSender] Failed to queue email for retry: " . $e->getMessage());
         }
     }

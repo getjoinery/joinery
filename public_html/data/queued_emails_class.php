@@ -61,8 +61,8 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	public static $field_specifications = array(
 	    'equ_queued_email_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'equ_from_name' => array('type'=>'varchar(70)', 'required'=>true),
-	    'equ_from' => array('type'=>'varchar(64)', 'required'=>true),
-	    'equ_to' => array('type'=>'varchar(64)', 'required'=>true),
+	    'equ_from' => array('type'=>'varchar(254)', 'required'=>true),
+	    'equ_to' => array('type'=>'varchar(254)', 'required'=>true),
 	    'equ_to_name' => array('type'=>'varchar(70)', 'required'=>true),
 	    'equ_body' => array('type'=>'text', 'required'=>true),
 	    'equ_subject' => array('type'=>'varchar(128)', 'required'=>true),
@@ -148,7 +148,19 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 		$message->from($this->get('equ_from'), $this->get('equ_from_name'));
 
 		$sender = new EmailSender();
-		$result = $sender->send($message, $queue_on_failure);
+		try {
+			$result = $sender->send($message, $queue_on_failure);
+		} catch (Throwable $e) {
+			// A send that throws (a refused message, a provider error) must not
+			// leave the row Locked, where nothing ever looks at it again: it is
+			// an error, which the retry pass counts towards its limit.
+			DbConnector::transaction(function () {
+				$this->load();
+				$this->set('equ_status', self::ERROR_SENDING);
+				$this->save();
+			});
+			throw $e;
+		}
 
 		DbConnector::transaction(function () use ($result) {
 			$this->load();

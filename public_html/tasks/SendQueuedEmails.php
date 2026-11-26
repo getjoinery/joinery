@@ -7,6 +7,7 @@
  * intentionally-queued emails (e.g. notification emails queued by Notify).
  * Campaigns are the email_lists plugin's SendCampaigns task.
  *
+ * @version 2.5 - a send that throws leaves its row at Error sending (QueuedEmail::send), never Locked; any Throwable is caught per row, so one bad row never ends the batch
  * @version 2.4 - campaigns moved to the email_lists plugin's SendCampaigns task
  * @version 2.3 - sends waiting direct messages first
  * @version 2.2
@@ -57,8 +58,8 @@ class SendQueuedEmails implements ScheduledTaskInterface {
 
 				try {
 					$email->send(false);
-				} catch (Exception $e) {
-					// send() already sets ERROR_SENDING on failure
+				} catch (Throwable $e) {
+					// send() sets ERROR_SENDING on failure, and on a throw before rethrowing it
 				}
 
 				$email->load();
@@ -88,7 +89,7 @@ class SendQueuedEmails implements ScheduledTaskInterface {
 			foreach ($ready as $email) {
 				try {
 					$email->send(false);
-				} catch (Exception $e) {
+				} catch (Throwable $e) {
 					// send() sets ERROR_SENDING on failure; Pass 2 retries it next run.
 				}
 
