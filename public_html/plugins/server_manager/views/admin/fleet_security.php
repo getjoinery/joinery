@@ -16,6 +16,8 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.14 - the answer: one line per fact; security fixes counted as installed, not 'fully up to date' (a restart
+ *                owed or a minor update tonight is not a missing fix); why each restart waits folded
  * @version 1.13 - a machine owing a reboot is listed as rebooting by itself (RebootWhenQuietRunner: why it waits), or
  *                as one to reboot by hand when set to never or refused
  * @version 1.12 - one answer first: whether anything needs a person, and what (FleetSecurityView::summary()); the fixes
@@ -152,7 +154,10 @@ foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
 }
 
 // --- The answer: is everything patched, and is anything mine to do ------------
-$tone = $sum['now'] || $pf_people ? 'danger' : (($sum['look'] || $sum['reboot']) ? 'warning' : 'success');
+// One line per fact, and only the facts that apply. A restart still owed and a
+// minor update due tonight are handled by themselves: they never make the
+// answer amber, and the per-machine detail of why a restart waits is folded.
+$tone = $sum['now'] || $pf_people ? 'danger' : ($sum['look'] ? 'warning' : 'success');
 if ($sum['now'] || $pf_people) {
 	$parts = array();
 	if ($sum['now']) { $parts[] = count($sum['now']) . ' machine' . (count($sum['now']) === 1 ? '' : 's'); }
@@ -161,35 +166,48 @@ if ($sum['now'] || $pf_people) {
 } elseif ($sum['look']) {
 	$headline = count($sum['look']) . ' machine' . (count($sum['look']) === 1 ? '' : 's') . ' cannot be judged right now.';
 } else {
-	$headline = 'Every machine has its security fixes. Nothing needs you.';
+	$headline = 'Nothing needs you.';
 }
+$watched = $sum['total'] - count($sum['unseen']);
+// A machine that cannot be judged is not counted as missing a fix.
+$ids_of = function (array $list) { return array_map(function ($e) { return (int)$e[0]['id']; }, $list); };
+$missing = count(array_unique($ids_of($sum['now'])));
+$unjudged = count(array_diff(array_unique($ids_of($sum['look'])), $ids_of($sum['now'])));
+$patched = $watched - $missing - $unjudged;
+$list_style = 'padding-left:1.25rem;list-style:disc;';
 // The theme's alert lays its children in a row: one child holds them all.
 echo '<div class="alert alert-' . $tone . ' mb-3"><div style="flex:1;">';
-echo '<div class="fw-semibold mb-1" style="font-size:1.15rem;">' . $h($headline) . '</div>';
-$facts = array($sum['up_to_date'] . ' of ' . ($sum['total'] - count($sum['unseen'])) . ' fully up to date');
-if ($sum['reboot']) { $facts[] = count($sum['reboot']) . ' owe' . (count($sum['reboot']) === 1 ? 's' : '') . ' a reboot'; }
-if ($sum['wait']) { $facts[] = count($sum['wait']) . ' finish' . (count($sum['wait']) === 1 ? 'es' : '') . ' tonight by themselves'; }
-echo '<div class="mb-2">' . $h(implode('; ', $facts)) . '.</div>';
+echo '<div class="fw-semibold mb-2" style="font-size:1.15rem;">' . $h($headline) . '</div>';
+echo '<ul class="mb-0" style="' . $list_style . '">';
 
+// The machines that cannot be judged have their own line; counted here only
+// against those that can.
+$judged = $watched - $unjudged;
+if ($judged > 0) {
+	$fixes_line = $patched === $judged
+		? 'Security fixes installed on ' . ($unjudged ? 'every machine that can be judged (' . $judged . ')' : 'all ' . $judged . ' machine' . ($judged === 1 ? '' : 's')) . '.'
+		: 'Security fixes installed on ' . $patched . ' of ' . $judged . ' machine' . ($judged === 1 ? '' : 's') . ($unjudged ? ' that can be judged' : '') . '.';
+	echo '<li>' . $h($fixes_line) . '</li>';
+}
 if ($sum['now']) {
-	echo '<div class="mt-2"><strong>Needs you now</strong> <span class="small">(open the machine; <em>Install security updates now</em> fixes most of these)</span><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
-	foreach ($sum['now'] as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h(implode('; ', $e[1])) . '</li>'; }
-	echo '</ul></div>';
+	echo '<li><strong>Needs you:</strong> ';
+	echo implode('; ', array_map(function ($e) use ($node_link, $h) { return $node_link($e[0]) . ' (' . $h(implode('; ', $e[1])) . ')'; }, $sum['now']));
+	echo '. Open the machine; <em>Install security updates now</em> fixes most of these.</li>';
 }
 if ($pf_people) {
-	echo '<div class="mt-2"><strong>A security fix needs a person</strong> <span class="small">(Ubuntu has not shipped it and our automatic build could not be made; details below)</span><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
-	foreach ($pf_people as $src => $list) {
-		echo '<li>' . $h(IncidentSourceFixAheadOfUbuntu::package_name($src)) . ': ' . count($list) . ' fix' . (count($list) === 1 ? '' : 'es') . '</li>';
-	}
-	echo '</ul></div>';
+	echo '<li><strong>A fix needs a person:</strong> ' . $h(implode(', ', array_map(function ($src, $list) {
+			return IncidentSourceFixAheadOfUbuntu::package_name($src) . ' (' . count($list) . ')';
+		}, array_keys($pf_people), $pf_people)))
+		. '. Ubuntu has not shipped it and our automatic build could not be made; details below.</li>';
 }
 if ($sum['look']) {
-	echo '<div class="mt-2"><strong>Cannot be judged</strong> <span class="small">(usually settles by itself within the hour; open the machine if it stays)</span><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
-	foreach ($sum['look'] as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h(implode('; ', $e[1])) . '</li>'; }
-	echo '</ul></div>';
+	// Under the headline that already says so, the machines alone.
+	echo '<li>' . (($sum['now'] || $pf_people) ? '<strong>Cannot be judged right now:</strong> ' : '');
+	echo implode('; ', array_map(function ($e) use ($node_link, $h) { return $node_link($e[0]) . ' (' . $h(implode('; ', $e[1])) . ')'; }, $sum['look']));
+	echo '. This usually settles within the hour.</li>';
 }
 if ($sum['reboot']) {
-	// Each reboots by itself (RebootWhenQuietRunner) unless set to never or refused.
+	// Each restarts by itself (RebootWhenQuietRunner) unless set to never or refused.
 	$by_itself = array();
 	$by_hand = array();
 	foreach ($sum['reboot'] as $e) {
@@ -202,29 +220,29 @@ if ($sum['reboot']) {
 		}
 	}
 	if ($by_itself) {
-		echo '<div class="mt-2"><strong>Reboots by itself</strong><ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
+		echo '<li>Restart' . (count($by_itself) === 1 ? 's' : '') . ' by ' . (count($by_itself) === 1 ? 'itself' : 'themselves')
+			. ' to finish installed updates (when nobody is using ' . (count($by_itself) === 1 ? 'it' : 'them') . ', or 04:00-05:00 UTC): '
+			. $names($by_itself) . '.'
+			. '<details class="small"><summary>Why each is still waiting</summary><ul class="mb-0" style="' . $list_style . '">';
 		foreach ($by_itself as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h($e[1]) . '</li>'; }
-		echo '</ul><div class="small">Their updates are installed; a restart finishes them. Some background services run the old code until then; '
-			. 'nothing that serves your sites does. Nothing to do.</div></div>';
+		echo '</ul></details></li>';
 	}
 	if ($by_hand) {
-		echo '<div class="mt-2"><strong>Reboot when convenient</strong> <span class="small">(each machine\'s page has a Reboot button)</span>'
-			. '<ul class="mb-0" style="padding-left:1.25rem;list-style:disc;">';
-		foreach ($by_hand as $e) { echo '<li>' . $node_link($e[0]) . ': ' . $h($e[1]) . '</li>'; }
-		echo '</ul></div>';
+		echo '<li><strong>Restart when convenient</strong> (the machine\'s page has a Reboot button): ';
+		echo implode('; ', array_map(function ($e) use ($node_link, $h) { return $node_link($e[0]) . ' (' . $h($e[1]) . ')'; }, $by_hand));
+		echo '.</li>';
 	}
 }
 if ($sum['wait']) {
-	echo '<div class="mt-2"><strong>Finishes by itself</strong>: ' . $names($sum['wait'])
-		. '<div class="small">Minor fixes waiting for tonight\'s automatic updates. Nothing to do.</div></div>';
+	echo '<li>Minor updates install tonight on ' . (count($sum['wait']) === $watched ? 'every machine' : $names($sum['wait'])) . '.</li>';
 }
 if ($pf_upstream) {
-	echo '<div class="mt-2"><strong>Waiting for upstream</strong>: ' . $h(implode(', ', array_map(function ($k) {
+	echo '<li>Waiting for a release upstream has not put out yet, then built and sent out automatically: ' . $h(implode(', ', array_map(function ($k) {
 			$src = strtok($k, ' ');
 			return IncidentSourceFixAheadOfUbuntu::package_name($src) . ' ' . substr($k, strlen($src) + 1);
-		}, array_keys($pf_upstream))))
-		. '<div class="small">Fixed in a release the project has not put out yet. It is built and sent out automatically once it is out. Nothing to do.</div></div>';
+		}, array_keys($pf_upstream)))) . '.</li>';
 }
+echo '</ul>';
 if ($sum['unseen']) {
 	echo '<div class="mt-2 small text-muted">Not watched from here (no agent): ' . $names($sum['unseen']) . '.</div>';
 }
