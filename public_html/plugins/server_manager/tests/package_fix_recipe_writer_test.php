@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_recipe_writer_test.php
  *
+ * @version 1.3 - a fix in a release upstream has not tagged yet waits
  * @version 1.2 - an unchanged recipe at a withdrawn revision is written again above it
  * @version 1.1 - the fix commits upstream's advisory names reach the finder
  * @version 1.0
@@ -186,11 +187,23 @@ check(isset($r['failed']['CVE-2026-1002']), 'why the patch failed is still said'
 $r = PackageFixRecipeWriter::write('postgresql-18', array('CVE-2026-2001' => array('fixed_in' => '18.2')), $opts(array('ubuntu_version' => '18.1-1')));
 check($r['status'] === 'failed' && !is_dir($auto . '/postgresql-18') && strpos($r['reason'], 'publishes no signed release') !== false, 'no signed release: failed, nothing written', json_encode($r));
 check(strpos($r['failed']['CVE-2026-2001'] ?? '', 'no upstream commit') !== false, 'with the finder\'s reason per CVE');
+$unreleased = function ($source, $cve, $ctx) {
+	return array('commits' => array(), 'reason' => "php8.5's upstream has no tag php-8.5.14 for the fixed release 8.5.14", 'fixed_version' => '', 'unreleased' => '8.5.14');
+};
+$r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1009' => array('fixed_in' => '8.5.14')), $opts(array('auto_dir' => $scratch . '/auto_wait1', 'finder' => $unreleased)));
+check($r['status'] === 'waiting' && $r['waiting'] === array('CVE-2026-1009' => '8.5.14') && !is_dir($scratch . '/auto_wait1/php8.5')
+	&& strpos($r['reason'], 'in 8.5.14, which it has not released yet') !== false,
+	'a fix in a release upstream has not tagged: waiting for it, nothing written, no rebuild on a release that is not out', json_encode($r));
+$mixed = function ($source, $cve, $ctx) use ($finder, $unreleased) { return $cve === 'CVE-2026-1009' ? $unreleased($source, $cve, $ctx) : $finder($source, $cve, $ctx); };
+$r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1001' => array('fixed_in' => '8.5.13'), 'CVE-2026-1009' => array('fixed_in' => '8.5.14')),
+	$opts(array('auto_dir' => $scratch . '/auto_wait2', 'finder' => $mixed)));
+check($r['status'] === 'written' && $r['fallback'] === null && in_array('CVE-2026-1001', $r['carried'], true) && ($r['waiting']['CVE-2026-1009'] ?? '') === '8.5.14',
+	'beside one that applies: the recipe carries it, and the other is said to wait', json_encode($r));
 
 section('Refusals');
 
 $r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1001' => array()), $opts(array('auto_dir' => $scratch . '/auto3', 'provider' => function () { return array('error' => 'apt could not fetch it'); })));
-check($r['status'] === 'failed' && ($r['failed']['CVE-2026-1001'] ?? '') === 'apt could not fetch it' && !is_dir($scratch . '/auto3/php8.5'), 'no Ubuntu source: failed, with apt\'s reason', json_encode($r));
+check($r['status'] === 'failed' && ($r['failed']['CVE-2026-1001'] ?? '') === 'apt could not fetch it' && !is_dir($scratch . '/auto_wait1/php8.5'), 'no Ubuntu source: failed, with apt\'s reason', json_encode($r));
 $r = PackageFixRecipeWriter::write('php8.5', array('nope' => array()), $opts());
 check($r['status'] === 'failed', 'a key that is not a CVE id is refused');
 $r = PackageFixRecipeWriter::write('php8.5', array('CVE-2026-1001' => array()), $opts(array('ubuntu_version' => 'x y')));

@@ -23,6 +23,7 @@
  * Runs as root under the automatic runner (WP9); nothing here writes outside
  * the clone directory.
  *
+ * @version 1.4 - 'unreleased': the fixed release upstream names has no tag yet, so it is not out (owner B7)
  * @version 1.3 - the fix commits a project's advisory names (ctx commits: OpenSSL's CVE records) are used
  *                where they are in the range, under the same signed-tag rule; the message search stays
  *                for the rest
@@ -54,12 +55,13 @@ class UpstreamFixFinder {
 	 *                   tests only: git_dir (a repository searched as is: no clone, no fetch),
 	 *                   upstreams_file (in place of fixes/UPSTREAMS)
 	 * @return array{commits: list<array{sha:string, url:string, subject:string, patch:string}>, reason:string,
-	 *               fixed_version:string, range:string}
+	 *               fixed_version:string, range:string, unreleased:string}
 	 *         reason is '' when a commit was found; fixed_version is the release the
-	 *         range ends at ('' when it ends at a branch head or none was found)
+	 *         range ends at ('' when it ends at a branch head or none was found);
+	 *         unreleased is the fixed release when upstream has not tagged it yet
 	 */
 	public static function find(string $source, string $cve, array $ctx): array {
-		$out = array('commits' => array(), 'reason' => '', 'fixed_version' => '', 'range' => '');
+		$out = array('commits' => array(), 'reason' => '', 'fixed_version' => '', 'range' => '', 'unreleased' => '');
 		$fail = function ($why) use (&$out) { $out['reason'] = $why; return $out; };
 		if (!preg_match('/^CVE-\d{4}-\d{4,}$/', $cve)) {
 			return $fail("'{$cve}' is not a CVE id");
@@ -130,6 +132,7 @@ class UpstreamFixFinder {
 			}
 		}
 		if ($end === '') {
+			if ($fixed !== '') { $out['unreleased'] = $fixed; }
 			return $fail($fixed !== ''
 				? "{$source}'s upstream has no tag " . self::expand($up['tag'], $fixed) . " for the fixed release {$fixed}"
 				: "{$source}'s upstream has released nothing newer than {$base} on its " . implode('.', array_slice(self::parts($base), 0, $line)) . ' line');

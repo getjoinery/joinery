@@ -14,6 +14,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/package_fix_auto_test.php
  *
+ * @version 1.5 - a fix in a release upstream has not put out waits for it (B7)
  * @version 1.4 - a stuck CVE the watch no longer asks for leaves the record
  * @version 1.3 - a Try again never ends on the withdrawn build
  * @version 1.2 - a stopped attempt is tried again when the advisory's commits change, and daily
@@ -439,5 +440,30 @@ check(isset($r['state']['attempts']['php8.5 CVE-2026-115560']) && isset($r['stat
 	'one the watch still lists stays, and a built one is never dropped', json_encode(array_keys($r['state']['attempts'])));
 $r = PackageFixAuto::run($opts(array('now' => $now, 'state' => $st, 'watch_state' => array())));
 check(isset($r['state']['attempts']['imagemagick CVE-2026-116149']), 'with no watch state read, nothing is dropped');
+
+
+section('A fix in a release upstream has not put out waits for it, and is built once it is out (B7)');
+
+$sent = array(); $issued = array(); $channel = array(); $nodes = array();
+$builds = 0;
+$wait_write = function ($source, $want) { return array('status' => 'waiting', 'failed' => array('CVE-2026-115560' => "no tag php-8.5.13 for the fixed release 8.5.13"),
+	'waiting' => array('CVE-2026-115560' => '8.5.13'), 'reason' => "php8.5's upstream fixes it in 8.5.13, which it has not released yet"); };
+$count_build = function () use ($line, &$builds) { $builds++; return $line('8.5.4-0ubuntu1.6+joinery2'); };
+$r = PackageFixAuto::run($opts(array('now' => $now, 'state' => array(), 'write' => $wait_write, 'build' => $count_build)));
+$a = $r['state']['attempts']['php8.5 CVE-2026-115560'] ?? array();
+check(($a['status'] ?? '') === 'waiting_release' && ($a['release'] ?? '') === '8.5.13' && $builds === 0,
+	'recorded as waiting for 8.5.13, with no build tried', json_encode($a));
+$b = $sent[0][1] ?? array();
+check(count($sent) === 1 && $b['kind'] === 'found' && strpos($b['title'], 'PHP 8.5 waits for upstream\'s 8.5.13') !== false
+	&& strpos($b['body'], 'which upstream has not released yet. We build it automatically once it is out') !== false
+	&& strpos($b['body'], 'Waiting for upstream\'s release, then built automatically: PHP 8.5 8.5.13 (1 fix)') !== false
+	&& strpos($b['body'], 'a person') === false && strpos($b['body'], 'Waiting for a person') === false,
+	'one email: waiting, nothing to do, never a person', json_encode($b));
+$r2 = PackageFixAuto::run($opts(array('now' => $now + 86400, 'state' => $r['state'], 'write' => $wait_write, 'build' => $count_build)));
+check(count($sent) === 1 && ($r2['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'waiting_release',
+	'looked for again the next day, still waiting: no second email', json_encode($sent));
+$r3 = PackageFixAuto::run($opts(array('now' => $now + 2 * 86400, 'state' => $r2['state'], 'build' => $count_build)));
+check($builds === 1 && ($r3['state']['attempts']['php8.5 CVE-2026-115560']['status'] ?? '') === 'built' && count($sent) === 2
+	&& strpos($sent[1][1]['body'], 'Done automatically') !== false, 'once the release is out, it is built and an email says so', json_encode($r3['state']['attempts']));
 
 harness_finish();

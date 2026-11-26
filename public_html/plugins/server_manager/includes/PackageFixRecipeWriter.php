@@ -25,6 +25,8 @@
  *     last automatic one; nothing is written when the recipe would come out
  *     as it already is.
  *
+ * @version 1.5 - a CVE whose fixed release upstream has not tagged yet is 'waiting' (with that release), and
+ *                when nothing else can be carried the writer stops as waiting, not rebuilding on a release that is not out
  * @version 1.4 - an automatic recipe whose revision was withdrawn is never left as it is: it is written again above
  *                withdrawn_revision (live on dev, 2026-11-24: a Try again rebuilt the withdrawn +joinery2)
  * @version 1.3 - each find is handed the fix commits upstream's advisory names (a CVE's 'commits', else
@@ -103,8 +105,10 @@ class PackageFixRecipeWriter {
 	 *                     finder fn(source, cve, ctx): UpstreamFixFinder::find()'s answer,
 	 *                     finder_ctx (merged into each find's ctx), watch_state (in place of the stored one)
 	 * @return array{status:string, dir:string, version:string, revision:int, carried:list<string>,
-	 *               failed:array<string,string>, fallback:?string, reason:string}
-	 *         status: written | unchanged | failed. carried: every CVE the recipe carries
+	 *               failed:array<string,string>, fallback:?string, reason:string, waiting:array<string,string>}
+	 *         status: written | unchanged | failed | waiting (nothing could be carried, and upstream's
+	 *         fixed release is not out yet: reason says which). waiting: each failed CVE whose
+	 *         fixed release upstream has not tagged yet, and that release. carried: every CVE the recipe carries
 	 *         (a person's kept ones too). failed: each CVE asked for that no patch carries, and
 	 *         why (still listed when the upstream release carries it: fallback = 'upstream_release').
 	 *         reason: when status is failed, why, in plain words.
@@ -112,7 +116,7 @@ class PackageFixRecipeWriter {
 	public static function write(string $source, array $cves, array $opts): array {
 		$auto_root = rtrim((string)($opts['auto_dir'] ?? self::AUTO_DIR), '/');
 		$dir = $auto_root . '/' . $source;
-		$res = array('status' => 'failed', 'dir' => $dir, 'version' => '', 'revision' => 0, 'carried' => array(), 'failed' => array(), 'fallback' => null, 'reason' => '');
+		$res = array('status' => 'failed', 'dir' => $dir, 'version' => '', 'revision' => 0, 'carried' => array(), 'failed' => array(), 'fallback' => null, 'reason' => '', 'waiting' => array());
 		$fail_all = function (array $list, string $why) use (&$res) {
 			foreach ($list as $cve) { $res['failed'][$cve] = $why; }
 			$res['reason'] = $why;
@@ -228,6 +232,7 @@ class PackageFixRecipeWriter {
 				$fixed_versions[$cve] = $fv;
 				if (!$found['commits']) {
 					$res['failed'][$cve] = $found['reason'] !== '' ? $found['reason'] : 'no upstream commit found';
+					if ((string)($found['unreleased'] ?? '') !== '') { $res['waiting'][$cve] = (string)$found['unreleased']; }
 					continue;
 				}
 				$origins = array_column($patches, 2);
@@ -268,6 +273,14 @@ class PackageFixRecipeWriter {
 				$fv = $fixed_versions[$cve] ?? '';
 				if ($fv === '') { $v = ''; break; }
 				if ($v === '' || version_compare($fv, $v) > 0) { $v = $fv; }
+			}
+			// A fix in a release upstream has not tagged yet: nothing to rebuild on until it is out.
+			if (array_intersect($new, array_keys($res['waiting']))) {
+				$rel = $v;
+				foreach ($res['waiting'] as $wv) { if ($rel === '' || version_compare($wv, $rel) > 0) { $rel = $wv; } }
+				$res['status'] = 'waiting';
+				$res['reason'] = $source . '\'s upstream fixes ' . (count($new) === 1 ? 'it' : 'them') . ' in ' . $rel . ', which it has not released yet';
+				return $res;
 			}
 			if ($v === '' || $up === null || $up['release_url'] === '' || $up['sig_url'] === '') {
 				$res['reason'] = 'no upstream fix applies to Ubuntu\'s ' . $ubuntu . ', and ' . ($v === ''

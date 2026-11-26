@@ -34,6 +34,8 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.13 - a fix in a release upstream has not tagged yet waits for it (status waiting_release, RETRY_GENERATION 3): it is
+ *                looked for again daily and built once the release is out, never shown as needing a person (B7)
  * @version 1.12 - a stuck CVE the watch no longer asks for is dropped from the record, so the page lists only what waits
  * @version 1.11 - the email lists five CVE ids and a count of the rest, and its subject names each package's outcome
  *                (built and testing, built with some left for a person, or a person needed)
@@ -101,7 +103,7 @@ class PackageFixAuto {
 	const SIGNAL_ROLLED_OUT = 'package_fix.rolled_out';
 	const LINK = '/admin/server_manager/fleet_security';
 	/** Raise when a change to the runner itself should retry every stopped attempt. */
-	const RETRY_GENERATION = 2;
+	const RETRY_GENERATION = 3;
 
 	public static function state(): array {
 		return PackageFixChannel::readStateFile(self::STATE_FILE);
@@ -238,7 +240,7 @@ class PackageFixAuto {
 			$asked = array();
 			foreach ($c['build'] as $u) { $asked[$u['source'] . ' ' . $u['cve']] = true; }
 			foreach ($state['attempts'] as $k => $a) {
-				if (($a['status'] ?? '') === 'needs_person' && !isset($asked[$k])) {
+				if (in_array($a['status'] ?? '', array('needs_person', 'waiting_release'), true) && !isset($asked[$k])) {
 					unset($state['attempts'][$k]);
 					$said[] = 'dropped ' . $k . ': the watch no longer asks for it';
 				}
@@ -261,7 +263,7 @@ class PackageFixAuto {
 			$inputs[$u['source']] = $inputs[$u['source']] ?? self::retryInputs($site, $u['source'], $opts,
 				array_values(array_filter($c['build'], function ($x) use ($u) { return $x['source'] === $u['source']; })), $watch, $now);
 			$a = $state['attempts'][$u['source'] . ' ' . $u['cve']] ?? null;
-			if ($a === null || (($a['status'] ?? '') === 'needs_person' && (string)($a['inputs'] ?? '') !== $inputs[$u['source']])) {
+			if ($a === null || (in_array($a['status'] ?? '', array('needs_person', 'waiting_release'), true) && (string)($a['inputs'] ?? '') !== $inputs[$u['source']])) {
 				$by_source[$u['source']][$u['cve']] = $u;
 			}
 		}
@@ -273,6 +275,16 @@ class PackageFixAuto {
 		// attempt, after the attempt, so it never says "handled" and then
 		// "a person is needed" a minute later.
 		foreach ($news as $source => $n) {
+			// Waiting for upstream's release is told once, and again only when what waits changes.
+			if (($n['outcome'] ?? '') === 'waiting' || !empty($n['waiting'])) {
+				$wkey = 'waiting ' . $source . ' ' . implode(',', self::sorted(array_keys((array)$n['waiting'])));
+				$has_new = (bool)array_filter($new, function ($u) use ($source) { return $u['source'] === $source; });
+				if (($n['outcome'] ?? '') === 'waiting' && empty($n['left']) && isset($state['notified'][$wkey]) && !$has_new) {
+					unset($news[$source]);
+					continue;
+				}
+				$state['notified'][$wkey] = $now;
+			}
 			if (($n['outcome'] ?? '') === 'needs_person') {
 				$key = 'needs_person ' . $source . ' ' . $n['step'] . ' ' . implode(',', self::sorted($n['cves']));
 				$has_new = (bool)array_filter($new, function ($u) use ($source) { return $u['source'] === $source; });
@@ -416,6 +428,25 @@ class PackageFixAuto {
 			} catch (\Throwable $e) {
 				throw new PackageFixAutoStop('finding the fix', $e->getMessage());
 			}
+			// Upstream fixes it in a release it has not put out: nothing to build
+			// yet; looked for again daily (retryInputs), built once it is out.
+			if (($w['status'] ?? '') === 'waiting') {
+				$waiting = array_intersect_key((array)($w['waiting'] ?? array()), $cves);
+				$left = array();
+				foreach (array_keys($cves) as $cve) {
+					if (isset($waiting[$cve])) {
+						$state['attempts'][$source . ' ' . $cve] = array('status' => 'waiting_release', 'step' => 'waiting for upstream\'s release',
+							'reason' => 'upstream fixes it in ' . $waiting[$cve] . ', which it has not released yet', 'release' => $waiting[$cve], 'at' => $now, 'inputs' => $inputs);
+					} else {
+						$why = (string)($w['failed'][$cve] ?? 'no upstream commit found');
+						$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now, 'inputs' => $inputs);
+						$left[$cve] = $why;
+					}
+				}
+				$news[$source] = array('outcome' => 'waiting', 'cves' => array_keys($waiting), 'waiting' => $waiting, 'left' => $left);
+				$said[] = $source . ': waiting for upstream\'s ' . implode(', ', array_unique(array_values($waiting)));
+				return $state;
+			}
 			if (($w['status'] ?? '') === 'failed') {
 				$reasons = array();
 				foreach ((array)($w['failed'] ?? array()) as $cve => $why) { $reasons[] = $cve . ': ' . $why; }
@@ -462,14 +493,20 @@ class PackageFixAuto {
 			// upstream's fixed release, the release carries every one.
 			// One email for the package, listing each fix it could not carry.
 			$left = array();
+			$waiting = array();
 			foreach (($w['fallback'] ?? null) === 'upstream_release' ? array() : (array)($w['failed'] ?? array()) as $cve => $why) {
-				if (isset($cves[$cve])) {
+				if (!isset($cves[$cve])) { continue; }
+				if (isset($w['waiting'][$cve])) {
+					$state['attempts'][$source . ' ' . $cve] = array('status' => 'waiting_release', 'step' => 'waiting for upstream\'s release',
+						'reason' => 'upstream fixes it in ' . $w['waiting'][$cve] . ', which it has not released yet', 'release' => (string)$w['waiting'][$cve], 'at' => $now, 'inputs' => $inputs);
+					$waiting[$cve] = (string)$w['waiting'][$cve];
+				} else {
 					$state['attempts'][$source . ' ' . $cve] = array('status' => 'needs_person', 'step' => 'finding the fix', 'reason' => $why, 'at' => $now, 'inputs' => $inputs);
 					$left[$cve] = $why;
 				}
 			}
-			$news[$source] = array('outcome' => 'built', 'cves' => array_values(array_diff(array_keys($cves), array_keys($left))),
-				'version' => (string)$line['version'], 'left' => $left);
+			$news[$source] = array('outcome' => 'built', 'cves' => array_values(array_diff(array_keys($cves), array_keys($left), array_keys($waiting))),
+				'version' => (string)$line['version'], 'left' => $left, 'waiting' => $waiting);
 			$said[] = 'built ' . $source . ' ' . $line['version'];
 		} catch (PackageFixAutoStop $e) {
 			$state = $mark($state, 'needs_person', $e->step, $e->getMessage());
@@ -694,6 +731,19 @@ class PackageFixAuto {
 						. ' A person is needed for ' . (count($left) === 1 ? 'that one' : 'those') . ': ask a Claude session "build the package fix for '
 						. $source . ', ' . implode(' ', $left) . '".';
 				}
+				if (!empty($n['waiting'])) {
+					$lines[] = self::waitingLine($n['waiting']);
+				}
+			} elseif ($outcome === 'waiting') {
+				$waits = (array)($n['waiting'] ?? self::waitingOf($state, $source));
+				$lines[] = self::waitingLine($waits) . ' Until then every server keeps Ubuntu\'s ' . $name . '.';
+				if (!empty($n['left'])) {
+					$stuck[] = $name;
+					$left = self::sorted(array_keys($n['left']));
+					$lines[] = 'Not covered by that release: ' . self::cveList($left) . '. ' . ucfirst(self::plainReason('finding the fix', implode('; ', $n['left']))) . '.'
+						. ' A person is needed for ' . (count($left) === 1 ? 'that one' : 'those') . ': ask a Claude session "build the package fix for '
+						. $source . ', ' . implode(' ', $left) . '".';
+				}
 			} elseif ($outcome === 'carried') {
 				$lines[] = 'Already covered: a fix built by hand carries it. Nothing to do.';
 			} elseif ($outcome === 'needs_person') {
@@ -739,12 +789,27 @@ class PackageFixAuto {
 				}
 			}
 		}
+		$upstream = array();
+		foreach ((array)($state['attempts'] ?? array()) as $k => $a) {
+			if (isset($open[$k]) && ($a['status'] ?? '') === 'waiting_release') {
+				$upstream[$open[$k]][(string)($a['release'] ?? '')] = ($upstream[$open[$k]][(string)($a['release'] ?? '')] ?? 0) + 1;
+			}
+		}
 		if ($everywhere) { $stand[] = '- On every server, our own build: ' . implode(', ', $everywhere); }
 		if ($testing) { $stand[] = '- On the test servers now: ' . implode(', ', array_values($testing)); }
 		if ($waiting) {
 			ksort($waiting);
 			$stand[] = '- Waiting for a person: ' . implode(', ', array_map(function ($s, $c) use ($name_of) { return $name_of($s) . ' (' . self::fixCount($c) . ')'; },
 				array_keys($waiting), $waiting));
+		}
+
+		if ($upstream) {
+			ksort($upstream);
+			$u_parts = array();
+			foreach ($upstream as $s => $rels) {
+				foreach ($rels as $rel => $count) { $u_parts[] = $name_of($s) . ' ' . $rel . ' (' . self::fixCount($count) . ')'; }
+			}
+			$stand[] = '- Waiting for upstream\'s release, then built automatically: ' . implode(', ', $u_parts);
 		}
 
 		$parts = array();
@@ -758,6 +823,9 @@ class PackageFixAuto {
 				$parts[] = $name . ' built, testing now';
 			} elseif ($outcome === 'needs_person') {
 				$parts[] = 'a person is needed for ' . $name;
+			} elseif ($outcome === 'waiting') {
+				$rels = array_values(array_unique(array_values((array)($n['waiting'] ?? self::waitingOf($state, $source)))));
+				$parts[] = $name . ' waits for upstream\'s ' . implode(', ', $rels) . (!empty($n['left']) ? ', ' . count($n['left']) . ' need a person' : '');
 			} elseif ($outcome === 'carried') {
 				$parts[] = $name . ' already covered';
 			} else {
@@ -820,9 +888,32 @@ class PackageFixAuto {
 			if (strpos($k, $source . ' ') === 0) {
 				$out = (string)($a['status'] ?? '');
 				if ($out === 'needs_person') { return $out; }
+				if ($out === 'waiting_release') { $out = 'waiting'; }
 			}
 		}
 		return $out;
+	}
+
+	/** CVE => release, for a source's attempts that wait for upstream's release. */
+	private static function waitingOf(array $state, string $source): array {
+		$out = array();
+		foreach ((array)($state['attempts'] ?? array()) as $k => $a) {
+			if (strpos($k, $source . ' ') === 0 && ($a['status'] ?? '') === 'waiting_release') { $out[substr($k, strlen($source) + 1)] = (string)($a['release'] ?? ''); }
+		}
+		return $out;
+	}
+
+	/** The plain line for fixes waiting on a release upstream has not put out. */
+	private static function waitingLine(array $waiting): string {
+		$by = array();
+		foreach ($waiting as $cve => $rel) { $by[$rel][] = $cve; }
+		ksort($by);
+		$out = array();
+		foreach ($by as $rel => $cves) {
+			$out[] = 'Waiting for upstream: ' . self::cveList(self::sorted($cves)) . ' ' . (count($cves) === 1 ? 'is' : 'are') . ' fixed in ' . $rel
+				. ', which upstream has not released yet. We build it automatically once it is out, and an email says so. Nothing to do.';
+		}
+		return implode(' ', $out);
 	}
 
 	/** At most five CVE ids, then how many more. */

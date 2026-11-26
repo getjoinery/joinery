@@ -16,6 +16,7 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.9 - fixes waiting for a release upstream has not put out are listed apart, as nothing to do
  * @version 1.8 - Try again stays offered until a build above the withdrawn one exists
  * @version 1.7 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.6 - Try again on a withdrawn fix build (server_manager_package_fix_retry) and why it was withdrawn; each
@@ -260,6 +261,21 @@ if ($pf_role !== 'none' || $pf_channel !== null) {
 		if (($a['status'] ?? '') === 'needs_person') {
 			$pf_people[] = array($key . ': ' . PackageFixAuto::plainReason((string)($a['step'] ?? ''), (string)($a['reason'] ?? '')), (string)($a['reason'] ?? ''));
 		}
+	}
+	// Fixed in a release upstream has not put out: nothing for anyone to do.
+	$pf_upstream = array();
+	foreach ((array)($pf['attempts'] ?? array()) as $key => $a) {
+		if (($a['status'] ?? '') === 'waiting_release') {
+			$src = strtok($key, ' ');
+			$pf_upstream[IncidentSourceFixAheadOfUbuntu::package_name($src) . ' ' . (string)($a['release'] ?? '')][] = substr($key, strlen($src) + 1);
+		}
+	}
+	if ($pf_upstream) {
+		echo '<div class="small text-muted mt-2"><strong>Waiting for upstream\'s release</strong> (built automatically once it is out; nothing to do)<ul class="mb-0">';
+		foreach ($pf_upstream as $what => $cves) {
+			echo '<li>' . $h($what) . ': ' . $h(implode(', ', $cves)) . '</li>';
+		}
+		echo '</ul></div>';
 	}
 	if ($pf_people) {
 		echo '<div class="small text-danger mt-2"><strong>A person is needed</strong><ul class="mb-0">';

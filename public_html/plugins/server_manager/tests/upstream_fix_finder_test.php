@@ -18,6 +18,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/upstream_fix_finder_test.php
  *
+ * @version 1.3 - a fixed release with no tag is 'unreleased'
  * @version 1.2 - ImageMagick's driver and line go: the platform does not run it
  * @version 1.1 - commits an advisory names; the OpenSSL and ImageMagick drivers
  * @version 1.0
@@ -152,6 +153,7 @@ $r = UpstreamFixFinder::find('php8.5', 'CVE-2026-1111', $ctx(array('base_upstrea
 check($r['commits'] === array() && strpos($r['reason'], 'no tag php-8.5.3') !== false, 'no tag for the base: a reason', $r['reason']);
 $r = UpstreamFixFinder::find('php8.5', 'CVE-2026-1111', $ctx(array('fixed_in' => '8.5.99')));
 check($r['commits'] === array() && strpos($r['reason'], 'no tag php-8.5.99') !== false, 'no tag for the fixed release: a reason', $r['reason']);
+check(($r['unreleased'] ?? '') === '8.5.99', 'and that release is said to be not out yet', json_encode($r));
 $r = UpstreamFixFinder::find('glibc', 'CVE-2026-5555', $ctx(array('base_upstream' => '2.43')));
 check($r['range'] === 'glibc-2.43..refs/heads/release/2.43/master' && $r['commits'] === array() && strpos($r['reason'], 'branch head') !== false,
 	'a line with no point release ends at a branch head, which no one signs: not used automatically (owner R-Q1 b)', $r['range'] . ' ' . $r['reason']);
