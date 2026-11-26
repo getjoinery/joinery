@@ -158,6 +158,7 @@ foreach (array('views/admin/fleet_security.php', 'includes/node_detail_tabs/over
 }
 check(count($calls) === 2, 'Fleet Security and the node page both say why a machine waits', implode(' | ', $calls));
 $src = file_get_contents(__DIR__ . '/../includes/RebootWhenQuietRunner.php');
+check(strpos($src, "new MultiManagedHost(array('mgh_mgn_managed_node_id'") !== false, 'the sites a machine hosts are found through the host group naming it, as tick() pairs them (the machine itself carries no group)');
 check(strpos($src, "a site it hosts (") !== false, 'a hosted site whose agent cannot answer is named, as tick() does not ask that machine');
 
 harness_finish();

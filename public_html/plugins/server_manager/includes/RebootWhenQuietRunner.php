@@ -30,6 +30,7 @@
  * 'automatic' => 'reboot_when_quiet' in its parameters. decide() is pure; the
  * test drives it with arrays.
  *
+ * @version 1.2 - hosted_containers finds a machine's sites through the host group naming it (mgh_mgn_managed_node_id), as tick() does
  * @version 1.1 - waiting_words finds the machine's hosted sites itself (Fleet Security passed none) and names a hosted site whose agent cannot answer quiet_check, as tick() skips that machine
  * @version 1.0
  */
@@ -302,17 +303,22 @@ class RebootWhenQuietRunner {
 		return 'reboots by itself at the first quiet moment';
 	}
 
-	/** The ids of the site containers a machine hosts: its host group's nodes with a container name. */
+	/**
+	 * The ids of the site containers a machine hosts, as tick() pairs them: the
+	 * containers of every host group whose host machine (mgh_mgn_managed_node_id)
+	 * it is. The host machine itself need not carry the group's id.
+	 */
 	public static function hosted_containers($node): array {
-		$group = (int)$node->get('mgn_mgh_managed_host_id');
-		if ($group <= 0 || trim((string)$node->get('mgn_container_name')) !== '') {
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
 			return array();
 		}
 		$ids = array();
-		foreach (new MultiManagedNode(array('deleted' => false, 'mgn_mgh_managed_host_id' => $group)) as $c) {
-			if (trim((string)$c->get('mgn_container_name')) !== '') { $ids[] = (int)$c->key; }
+		foreach (new MultiManagedHost(array('mgh_mgn_managed_node_id' => (int)$node->key, 'deleted' => false)) as $host) {
+			foreach (new MultiManagedNode(array('deleted' => false, 'mgn_mgh_managed_host_id' => (int)$host->key)) as $c) {
+				if (trim((string)$c->get('mgn_container_name')) !== '') { $ids[] = (int)$c->key; }
+			}
 		}
-		return $ids;
+		return array_values(array_unique($ids));
 	}
 }
 ?>
