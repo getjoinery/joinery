@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.12 - plane:security_fix_pending measures a wait to the machine's last look, not the plane's clock
  * @version 1.11 - plane:backups_stopped waits two days, not a week, for a new node with no recovery key
  * @version 1.10 - plane:site_refresh: a host running site containers with no nightly timer on (fleet_security_patching WP4)
  * @version 1.9 - plane:site_refresh: a site left down by a container replacement (critical), one rolled back, a
@@ -253,6 +254,19 @@ $v = $sfp->evaluate($node, $now);
 check($v !== null && $v['severity'] === 'critical' && strpos($v['detail']['Waiting'], 'php8.3-fpm 2 (waiting since 2026-10-22T12:30:00Z)') === 0
 	&& strpos($v['detail']['What'], 'installed at once at 2026-10-22T13:20:00Z: failed') !== false,
 	'a critical fix waiting an hour and a half: critical, with the at-once install\'s outcome', json_encode($v));
+// getjoinery 2026-11-26: the report was sent at the look that first saw the fix, before the at-once
+// install took it a minute later; the plane read that report for an hour, until the next one.
+$set(array('mgn_last_host_report' => $sp(array($pkg('apache2', true, '2026-10-22T12:50:00Z')),
+	array('checked_at' => '2026-10-22T12:50:00Z', 'checked_ok_at' => '2026-10-22T12:50:00Z', 'at_once_at' => '2026-10-21T03:00:00Z'))));
+check($sfp->evaluate($node, $now) === null, 'a report from the look that first saw a critical fix, read 70 minutes later: nothing (the wait runs to the look)');
+$set(array('mgn_last_host_report' => $sp(array($pkg('apache2', true, '2026-10-22T12:58:00Z')))));
+$v = $sfp->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'critical' && $v['title'] === '1 critical security fix was still not installed at the next hourly check',
+	'the next hourly look, 52 minutes on (the timer spreads over 15), still sees it: critical', json_encode($v));
+$set(array('mgn_last_host_report' => $sp(array($pkg('apache2', true, '2026-10-22T13:20:00Z')))));
+check($sfp->evaluate($node, $now) === null, 'seen 30 minutes before the last look: nothing yet');
+$set(array('mgn_last_host_report' => $sp(array($pkg('curl', false, '2026-10-21T11:55:00Z')))));
+check($sfp->evaluate($node, $now) === null, 'any fix: just under 26 hours to the last look, just over to the plane\'s clock: nothing yet');
 $set(array('mgn_last_host_report' => $sp(array($pkg('linux-image-6.8.0-90-generic', true, '2026-10-22T11:00:00Z')))));
 check($sfp->evaluate($node, $now) === null, 'the kernel, waiting three hours: nothing (the night installs it; nothing acts sooner)');
 $set(array('mgn_last_host_report' => $sp(array($pkg('linux-image-6.8.0-90-generic', true, '2026-10-19T00:00:00Z')))));
@@ -504,7 +518,7 @@ $set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32))));
 $v = $ud->evaluate($node);
 check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'held') !== false
 	&& strpos($v['detail']['What to do'], 'lift --all') !== false, 'Held: critical, and the lift is root\'s', json_encode($v));
-foreach (array('down', 'previous', 'unlocked') as $state) {
+foreach (array('down', 'previous', 'unlocked', 'swap_refused') as $state) {
 	$set(array('mgn_agent_unseal_daemon' => $state));
 	$v = $ud->evaluate($node);
 	check(($v['severity'] ?? '') === 'warning' && ($v['detail']['State'] ?? '') === $state, "'{$state}': a warning");

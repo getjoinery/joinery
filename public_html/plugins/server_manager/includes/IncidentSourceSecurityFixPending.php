@@ -8,17 +8,26 @@
  * PostgreSQL) and every other fix at night, so a fix only waits by
  * something going wrong. This raises, most serious first:
  *
- *   - a critical fix (not the kernel) seen waiting over an hour: the at-once
- *     install did not take it (critical);
- *   - any fix seen waiting over a day, the kernel's included: the nightly
+ *   - a critical fix (not the kernel) still waiting at the next hourly look:
+ *     the at-once install did not take it (critical);
+ *   - any fix still waiting a day after it was first seen, the kernel's
+ *     included: the nightly
  *     updates did not take it (a full /boot is the classic kernel case); the
  *     reboot after a kernel fix is a person's choice, and its wait shows on
  *     the node page and the fleet page, not here (warning);
  *   - no check for fixes has passed in three hours on a machine whose hourly
  *     check is on (warning).
  *
+ * A wait runs from when the machine first saw the fix to when it last looked
+ * (the report's checked_at), never to when the plane reads the report: a
+ * report sent between seeing a fix and installing it at once is read for an
+ * hour, until the next report, though the fix was installed a minute later.
+ * A machine that stops looking is the third case.
+ *
  * Clears when a report shows none of these.
  *
+ * @version 1.2 - a wait is measured to the machine's last look, not to the plane's clock: a report sent between
+ *                seeing a critical fix and installing it raised a false critical an hour later (getjoinery 11-26)
  * @version 1.1 - a kernel package still waiting after a day is a nightly run that failed, and counts (reviewer2 G3)
  * @version 1.0
  */
@@ -26,8 +35,12 @@ class IncidentSourceSecurityFixPending implements IncidentSource {
 
 	const NAME = 'plane:security_fix_pending';
 
-	/** A critical fix may wait this long: the hourly check, then its at-once install. */
-	const CRITICAL_SECONDS = 3600;
+	/**
+	 * A critical fix still waiting at a look this long after it was first seen
+	 * was missed by the at-once install: the next hourly look (hourly, spread
+	 * over 15 minutes, so 45 to 75 minutes on).
+	 */
+	const CRITICAL_SECONDS = 2400;
 
 	/** Any fix may wait this long: the nightly updates, and their spread. */
 	const ANY_SECONDS = 93600;
@@ -60,15 +73,18 @@ class IncidentSourceSecurityFixPending implements IncidentSource {
 			return null;
 		}
 		$now = $now ?? time();
+		// The machine's last look; an older report without one is read at the plane's clock.
+		$look = $r['checked_at'] !== '' ? strtotime($r['checked_at']) : false;
+		$look = $look !== false ? min($look, $now) : $now;
 		$critical = array();
 		$old = array();
 		foreach ($r['packages'] as $p) {
 			$seen = $p['first_seen'] !== '' ? strtotime($p['first_seen']) : false;
 			if ($seen === false) { continue; }
 			$kernel = (bool)preg_match('/^linux-(image|modules)/', $p['package']);
-			if ($p['critical'] && !$kernel && $now - $seen > self::CRITICAL_SECONDS) {
+			if ($p['critical'] && !$kernel && $look - $seen > self::CRITICAL_SECONDS) {
 				$critical[] = $p['package'] . ' ' . $p['candidate'] . ' (waiting since ' . $p['first_seen'] . ')';
-			} elseif ($now - $seen > self::ANY_SECONDS) {
+			} elseif ($look - $seen > self::ANY_SECONDS) {
 				$old[] = $p['package'] . ' ' . $p['candidate'] . ' (waiting since ' . $p['first_seen'] . ')';
 			}
 		}
@@ -77,7 +93,7 @@ class IncidentSourceSecurityFixPending implements IncidentSource {
 			: 'The hourly check has not installed anything at once.';
 		if ($critical) {
 			return array(
-				'title'    => count($critical) . ' critical security fix' . (count($critical) === 1 ? '' : 'es') . ' waited over an hour and ' . (count($critical) === 1 ? 'is' : 'are') . ' not installed',
+				'title'    => count($critical) . ' critical security fix' . (count($critical) === 1 ? ' was' : 'es were') . ' still not installed at the next hourly check',
 				'severity' => IncidentRecord::SEVERITY_CRITICAL,
 				'detail'   => array(
 					'Waiting' => implode('; ', array_slice($critical, 0, 10)),
