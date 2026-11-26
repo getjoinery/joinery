@@ -13,6 +13,7 @@
  * A page asks refuse_post() before its handlers run. An action not named for
  * its page needs 10, so a new one is refused until it is placed.
  *
+ * @version 1.18 - quiet_check (Diagnostics: is anyone busy on the machine) is a look: 7
  * @version 1.17 - auto_reboot (node page switch: when the Reboot When Quiet task may reboot the machine) is level 10, as Reboot
  * @version 1.16 - fleet_security retry_fix (Try again on a withdrawn package fix build) is level 8, as Withdraw
  * @version 1.15 - retry_hosted_mail (node page) and retry_provision (board) are level 10 (hosting_after_purchase E2, O1)
@@ -40,7 +41,7 @@ final class SmActionLevels {
 			'check_status' => 7, 'refresh_status' => 7, 'install_report' => 7, 'host_report' => 7, 'site_log' => 7, 'site_log_count' => 7,
 			'log_table_tail' => 7, 'unit_journal' => 7, 'site_converger' => 7, 'disk_usage' => 7, 'largest_files' => 7, 'listening_sockets' => 7,
 			'site_state_report' => 7, 'container_inventory' => 7, 'mailbox_status' => 7, 'relay_status' => 7, 'file_head' => 7,
-			'schema_probe' => 7, 'page_probe' => 7, 'net_health' => 7, 'web_workers' => 7, 'edge_vs_origin' => 7,
+			'schema_probe' => 7, 'page_probe' => 7, 'net_health' => 7, 'web_workers' => 7, 'quiet_check' => 7, 'edge_vs_origin' => 7,
 			// Changes (8)
 			'host_converge' => 8, 'install_security_updates' => 8, 'refresh_site_containers' => 8,
 			'reset_failed_unit' => 8, 'restart_unit' => 8, 'unban_address' => 8, 'mail_test_send' => 8, 'restart_container' => 8, 'hold_container' => 8,

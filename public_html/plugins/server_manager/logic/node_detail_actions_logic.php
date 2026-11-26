@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.100 - quiet_check: is anyone busy on the machine, asked from the Diagnostics tab
  * @version 1.99 - auto_reboot: when the Reboot When Quiet task may reboot this machine (specs/automatic_reboot_when_quiet.md WP4)
  * @version 1.98 - log_table_tail passes kind (the error table's kinds)
  * @version 1.97 - retry_hosted_mail: a failed hosted email setup starts again (hosting_after_purchase E2)
@@ -267,6 +268,7 @@ class NodeDetailActions {
 		'page_probe'               => 'diagnostics',
 		'net_health'               => 'diagnostics',
 		'web_workers'              => 'diagnostics',
+		'quiet_check'              => 'diagnostics',
 		'edge_vs_origin'           => 'diagnostics',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
@@ -642,6 +644,7 @@ class NodeDetailActions {
 			case 'refresh_site_containers':
 			case 'net_health':
 			case 'web_workers':
+			case 'quiet_check':
 			case 'reboot_machine':
 			case 'disable_root_login': {
 				$builder = 'build_' . $action;

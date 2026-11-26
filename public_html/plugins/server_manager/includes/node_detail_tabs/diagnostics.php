@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.12 - The machine: Anyone busy (quiet_check), what the Reboot When Quiet task asks before a reboot
  * @version 1.11 - Logs: the error table among the log tables, and Script policy refusals (7 days) (agent 1.127.0)
  * @version 1.10 - The machine: Mailbox (mailbox_status), the spam-learning counts and the site's mail domains
  * @version 1.9 - Compare edge and direct is data-jy-busy (no inline handler)
@@ -40,7 +41,7 @@
 <?php foreach (['nodeActionDiskUsage' => 'disk_usage', 'nodeActionLargestFiles' => 'largest_files', 'nodeActionListeningSockets' => 'listening_sockets',
 	'nodeActionContainerInventory' => 'container_inventory', 'nodeActionSpamLearning' => 'mailbox_status', 'nodeActionRelayStatus' => 'relay_status',
 	'nodeActionSiteStateReport' => 'site_state_report', 'nodeActionNetHealth' => 'net_health',
-	'nodeActionWebWorkers' => 'web_workers'] as $form_id => $form_action) { ?>
+	'nodeActionWebWorkers' => 'web_workers', 'nodeActionQuietCheck' => 'quiet_check'] as $form_id => $form_action) { ?>
 <form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="<?php echo $form_action; ?>">
 	<?php echo SmAdminCsrf::field(); ?>
@@ -103,6 +104,9 @@ if (JobCommandBuilder::has_primitive($node, 'net_health') && !$diag_on_container
 }
 if (JobCommandBuilder::has_primitive($node, 'web_workers')) {
 	$machine_qs[] = array('nodeActionWebWorkers', 'Web workers', 'Whether Apache and PHP have free workers now, and how often PHP ran out in the last day.');
+}
+if (JobCommandBuilder::has_primitive($node, 'quiet_check')) {
+	$machine_qs[] = array('nodeActionQuietCheck', 'Anyone busy', 'Whether anyone is using the machine or its site now: logins, signed-in visitors, forms sent, installs, backups, long queries, mail sent. What the automatic reboot asks first; counts only.');
 }
 if (JobCommandBuilder::has_primitive($node, 'site_state_report')) {
 	$machine_qs[] = array('nodeActionSiteStateReport', 'Site state records', 'What the machine records about its sites being quiet or copies: each record\'s name, size and time.');

@@ -8,6 +8,7 @@
  *
  * @version 1.47 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.46 - site_log host_converger: a host that logs the converger to the journal says so and points at unit_journal
+ * @version 1.46 - quiet_check: quiet or busy, what said busy, and each signal's count
  * @version 1.45 - unban_address: the jail, the address and whether a ban was lifted
  * @version 1.44 - web_workers: the modules Apache loads, and whether HTTP/2 is among them
  * @version 1.43 - log_table_tail: an error read names the kind it was narrowed to
@@ -833,6 +834,23 @@ if ($result) {
 			}
 		}
 		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'quiet_check' && !empty($result_data['read'])) {
+		// Whether anyone is busy on the machine: what the Reboot When Quiet task asks first.
+		echo '<div class="card mb-3"><div class="card-header"><strong>Anyone busy</strong> <small class="text-muted">— the last 15 minutes; counts only</small></div>';
+		echo '<div class="card-body"><p class="mb-2"><strong>' . htmlspecialchars($result_data['quiet']
+			? 'Nobody is busy: an automatic reboot may go ahead.'
+			: 'Busy: ' . JobResultProcessor::quiet_check_words($result_data) . '.') . '</strong></p>';
+		$label = ['logins' => 'Logged in to the machine', 'signed_in' => 'Signed-in visitors', 'visits' => 'Page views (never busy)',
+			'writes' => 'Forms sent from a browser', 'packages' => 'Package installs', 'installers' => 'Installers running',
+			'site_work' => 'Backups and task runs', 'db_queries' => 'Database queries over 5 seconds', 'mail_sent' => 'Mail a person sent'];
+		echo '<table class="table table-sm mb-0"><tbody>';
+		foreach ($label as $k => $words) {
+			$v = $result_data[$k] ?? 'unknown';
+			$shown_v = is_int($v) ? (string)$v : ($v === 'not_reported' ? 'does not apply here' : 'could not be read');
+			echo '<tr><th>' . htmlspecialchars($words) . '</th><td>' . htmlspecialchars($shown_v) . '</td></tr>';
+		}
+		echo '</tbody></table></div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'web_workers' && !empty($result_data['read'])) {
 		// Whether the web tier is out of workers (agent 1.93.0).
