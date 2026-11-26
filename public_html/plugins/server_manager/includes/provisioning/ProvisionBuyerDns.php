@@ -26,6 +26,7 @@
  * the buyer is shown the plane's records and the site is not asked again
  * every few minutes for ever.
  *
+ * @version 1.5 - a starter host's own row has no buyer list: it is no site (it was asked every pass, and refused)
  * @version 1.4 - a site whose mailbox plugin is off (mailbox_inactive) is answered for too, not re-asked every 5 minutes
  * @version 1.3 - a site with its own mail server keeps its SPF record and its own signing key beside our sending records (walkthrough finding 174)
  * @version 1.2 - an MX, the site's own or our relay's, is held back where the domain already receives email elsewhere
@@ -81,6 +82,12 @@ class ProvisionBuyerDns {
 	 */
 	public static function applies($provision): bool {
 		if ($provision->is_pre_payment() || trim((string)$provision->get('cvp_domain')) === '') {
+			return false;
+		}
+		// A starter host's row is a bare machine with no site and no buyer:
+		// its name is the host's own, and there is no site to ask what its
+		// domain needs (its agent, in host mode, has no such word).
+		if ($provision->get('cvp_starter_host')) {
 			return false;
 		}
 		if (!$provision->is_operator_hosted() && ManagedSiteDraft::plan_of($provision) !== 'own_linode') {

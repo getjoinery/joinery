@@ -68,6 +68,10 @@ section('The list is held until it is whole');
 DnsResolver::setBackend(new FakeDnsBackend(array()));
 check(ProvisionBuyerDns::applies($provision) && !ProvisionBuyerDns::listed($provision),
 	'a built site on its buyer\'s own domain has a list, not shown yet');
+$provision->set('cvp_starter_host', true);
+check(!ProvisionBuyerDns::applies($provision) && ProvisionBuyerDns::listed($provision),
+	'a starter host\'s own row has no list: it is a machine with no site to ask');
+$provision->set('cvp_starter_host', false);
 check(profile_sites_dns_plan($provision) === null && profile_sites_dns_record($provision) === null
 	&& profile_sites_mail_records($provision) === array() && profile_sites_dmarc_record($provision) === null
 	&& profile_sites_aaaa_record($provision) === null,
