@@ -34,6 +34,7 @@
  * write decides what root signs. A person's Withdraw is the one request read
  * from the database, and only a build the set offers can be withdrawn.
  *
+ * @version 1.14 - withdrawalSuperseded(): a withdrawal a later build of the same package replaced is not shown (B8)
  * @version 1.13 - a fix in a release upstream has not tagged yet waits for it (status waiting_release, RETRY_GENERATION 3): it is
  *                looked for again daily and built once the release is out, never shown as needing a person (B7)
  * @version 1.12 - a stuck CVE the watch no longer asks for is dropped from the record, so the page lists only what waits
@@ -966,6 +967,20 @@ class PackageFixAuto {
 			if (preg_match('/\+joinery(\d+)$/', (string)$v, $m)) { $max = max($max, (int)$m[1]); }
 		}
 		return $max;
+	}
+
+	/**
+	 * A source's withdrawal is behind it: a build above the highest withdrawn
+	 * revision is out (automatic, or on every server). The withdrawn versions
+	 * stay in the channel so machines keep refusing them; the page drops them.
+	 */
+	public static function withdrawalSuperseded(array $state, string $source): bool {
+		$withdrawn = self::withdrawnRevision($state, $source);
+		if ($withdrawn === 0) { return false; }
+		foreach (array($state['automatic'] ?? array(), $state['wide_lines'] ?? array()) as $set) {
+			if (preg_match('/\+joinery(\d+)$/', (string)($set[$source]['version'] ?? ''), $m) && (int)$m[1] > $withdrawn) { return true; }
+		}
+		return false;
 	}
 
 	/** The project's own ids for a CVE (PHP's GHSA), from the watch's stored driver answers. */

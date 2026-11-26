@@ -16,6 +16,7 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.10 - a withdrawal a later build replaced is not listed (B8)
  * @version 1.9 - fixes waiting for a release upstream has not put out are listed apart, as nothing to do
  * @version 1.8 - Try again stays offered until a build above the withdrawn one exists
  * @version 1.7 - saved messages are shown once, by the admin header (they were shown twice)
@@ -233,15 +234,15 @@ if ($pf_role !== 'none' || $pf_channel !== null) {
 			echo '</tbody></table></div>';
 		}
 		foreach ($pf_channel['withdrawn'] as $source => $versions) {
+			if (PackageFixAuto::withdrawalSuperseded($pf, $source)) { continue; }
 			$why = '';
 			foreach (array_reverse((array)($pf['withdrawals'] ?? array())) as $w) {
 				if (($w['source'] ?? '') === $source) { $why = (string)($w['why'] ?? ''); break; }
 			}
 			$last = (string)end($versions);
-			// Offered until a build above the withdrawn one exists, or while a press waits for the runner.
+			// Not offered while a press waits for the runner (a build above it hides the line).
 			$pending = json_decode((string)Globalvars::get_instance()->get_setting(PackageFixAuto::RETRY_SETTING), true);
-			$auto_rev = preg_match('/\+joinery(\d+)$/', (string)($pf['automatic'][$source]['version'] ?? ''), $am) ? (int)$am[1] : 0;
-			$retry_asked = (is_array($pending) && ($pending[$source] ?? null) === $last) || $auto_rev > PackageFixAuto::withdrawnRevision($pf, $source);
+			$retry_asked = is_array($pending) && ($pending[$source] ?? null) === $last;
 			echo '<div class="small text-muted d-flex gap-2 align-items-center">Withdrawn: ' . $h(IncidentSourceFixAheadOfUbuntu::package_name($source) . ' ' . implode(', ', $versions))
 				. ($why !== '' ? ' (' . $h($why) . ')' : '');
 			if ($pf_role === 'issuer' && !$retry_asked) {
