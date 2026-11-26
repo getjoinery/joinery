@@ -48,6 +48,8 @@
  * site reads and never runs: refresh() reads them with the model files, and
  * storePending() keeps them on the row in the same write.
  *
+ * @version 2.2 - dropTables() removes the delete rules naming its tables before it drops them, so no delete
+ *               meets a rule for a table already gone
  * @version 2.1 - refresh() and storePending() read and keep the plugin's action descriptors too
  *                (SandboxActions, spec sandboxed_plugin_api_actions)
  * @version 2.0 - models from the plugin's own model files, read never run, and stored on its row; classes built from
@@ -411,13 +413,22 @@ class SandboxModels {
 		foreach ($recorded as $table => $pkey) {
 			$tables[(string)$table] = (string)$pkey;
 		}
-		$dropped = array();
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$owned = '~^sbx_' . preg_quote($plugin, '~') . '__[a-z0-9_]+$~D';
+		$tables = array_filter($tables, function ($pkey, $table) use ($owned) {
+			return preg_match($owned, (string)$table) && preg_match('~^[a-z0-9_]+$~D', $pkey);
+		}, ARRAY_FILTER_USE_BOTH);
+		// The delete rules that name a table go before it does: a delete of a
+		// user counts rows in every rule's table, so a rule left naming a
+		// dropped table refuses every delete of its source until it is gone.
+		if ($tables) {
+			$names = array_map('strval', array_keys($tables));
+			$marks = implode(',', array_fill(0, count($names), '?'));
+			$dblink->prepare('DELETE FROM del_deletion_rules WHERE del_source_table IN (' . $marks . ') OR del_target_table IN (' . $marks . ')')
+				->execute(array_merge($names, $names));
+		}
+		$dropped = array();
 		foreach ($tables as $table => $pkey) {
-			if (!preg_match($owned, $table) || !preg_match('~^[a-z0-9_]+$~D', $pkey)) {
-				continue;
-			}
 			$dblink->exec('DROP TABLE IF EXISTS ' . $table . ' CASCADE');
 			// The id sequence is made without OWNED BY, so CASCADE leaves it.
 			$dblink->exec('DROP SEQUENCE IF EXISTS ' . $table . '_' . $pkey . '_seq');

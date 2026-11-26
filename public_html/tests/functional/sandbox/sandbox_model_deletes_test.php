@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php db --filter=sandbox_model_deletes
  *
+ * @version 1.3 - dropping its tables leaves no delete rule naming them, before any prune
  * @version 1.2 - a prevent between its own models that a user's delete reaches waits on an approval (reviewer1 R6)
  * @version 1.1 - only a blocking link in force (reviewer1 R3)
  * @version 1.0
@@ -230,6 +231,21 @@ try {
 	$plugins_page = (string)file_get_contents(PathHelper::getIncludePath('adm/admin_plugins.php'));
 	check(strpos($plugins_page, "SandboxBlockingRows::links(\$plugin['name'])") !== false && SandboxBlockingRows::links($name) !== array(),
 		'names the page while there is a link to show');
+
+	section('Its tables dropped');
+	// No prune after: the rules must already be gone when the tables go, or a
+	// user's delete in between counts rows in a table that is not there.
+	$dropped = SandboxModels::dropTables($name);
+	check(in_array($hold::$tablename, $dropped, true), 'The tables are dropped', json_encode($dropped));
+	check($rule($hold, 'qmh_usr_user_id') === null && $rule($task, 'qmt_usr_user_id') === null && $rule($tasknote, 'qmn_qmt_task_id') === null,
+		'and no delete rule names them, without a prune');
+	$later = make_user('SbxDelLater', 0);
+	try {
+		$later->permanent_delete();
+		check(!(new User((int)$later->key, TRUE))->key, 'A user deletes after');
+	} catch (Throwable $e) {
+		check(false, 'A user deletes after', $e->getMessage());
+	}
 } catch (Throwable $e) {
 	check(false, 'Unexpected ' . get_class($e), $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
 }
