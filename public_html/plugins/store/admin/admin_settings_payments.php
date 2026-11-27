@@ -199,7 +199,7 @@
 						try {
 							// Use StripeHelper's validated client - no direct initialization needed
 							$account = $stripe_helper_test->get_stripe_client()->accounts->retrieve();
-							echo '<p style="color: green;"><strong>✓ Live API Connection:</strong> Successfully connected to Stripe</p>';
+							echo '<p style="color: green;"><strong>✓ Test API Connection:</strong> Successfully connected to Stripe</p>';
 							echo '<p><strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '</p>';
 							echo '<p><strong>Account Type:</strong> ' . htmlspecialchars($account->type) . '</p>';
 							echo '<p><strong>Country:</strong> ' . htmlspecialchars($account->country) . '</p>';
