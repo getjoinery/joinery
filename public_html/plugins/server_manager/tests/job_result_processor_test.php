@@ -340,6 +340,32 @@ foreach (new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 1) as $newest)
 }
 check(DeploymentHelper::servedVersion() === $want, 'servedVersion() is the release ?serve-upgrade offers', DeploymentHelper::servedVersion() . ' vs ' . $want);
 
+// An apply is judged against what was served when the node started it: a
+// release published while it ran is not what it fetched (0.8.664 published
+// during a rollout of 0.8.663 failed nodes that had correctly installed 0.8.663).
+$rows = array();
+foreach (new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 2) as $u) {
+	$rows[] = array($u->get('upg_major_version') . '.' . $u->get('upg_minor_version') . '.' . $u->get('upg_patch_version'),
+		(string)$u->get('upg_create_time'));
+}
+if (count($rows) === 2 && $want !== '' && $rows[1][1] < $rows[0][1]) {
+	check(DeploymentHelper::servedVersion($rows[1][1]) === $rows[1][0],
+		'servedVersion(a moment) is the release served then', DeploymentHelper::servedVersion($rows[1][1]) . ' vs ' . $rows[1][0]);
+	$job = new ManagementJob(NULL);
+	$job->set('mjb_create_time', $rows[1][1]);
+	$job->set('mjb_started_time', $rows[1][1]);
+	check(JobResultProcessor::apply_target($job) === $rows[1][0],
+		'an apply started before the newest release was published is judged against the one served then',
+		JobResultProcessor::apply_target($job) . ' vs ' . $rows[1][0]);
+	$job->set('mjb_started_time', $rows[0][1]);
+	check(JobResultProcessor::apply_target($job) === $want, 'an apply started after it is judged against the newest');
+	$job = new ManagementJob(NULL);
+	$job->set('mjb_started_time', '2000-01-01 00:00:00');
+	check(JobResultProcessor::apply_target($job) === $want, 'a start before any release falls back to what is served now');
+} else {
+	check(true, 'fewer than two releases with distinct times here; the moment checks are skipped');
+}
+
 // ---------------------------------------------------------------------------
 section('End to end');
 

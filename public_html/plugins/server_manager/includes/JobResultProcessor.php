@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.152 - an apply_update is judged against the release served when the node started it, not one
+ *                 published while it ran (which the node never fetched)
  * @version 1.151 - hosted_ai_settings: the AI credit key is blanked from the job row once the node answers
  * @version 1.150 - the ready email to a store on this site goes on the outbox with EmailSender::queue(), about its provision
  * @version 1.149 - quiet_check results: whether anyone is busy, each signal a count or unknown (specs/automatic_reboot_when_quiet.md)
@@ -1628,9 +1630,11 @@ class JobResultProcessor {
 		}
 
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-		// What the node was offered: the release this management node serves,
-		// which a release applied here but not yet published here is not.
-		$target = DeploymentHelper::servedVersion() ?: LibraryFunctions::get_joinery_version();
+		// What the node was offered: the release this management node served
+		// when the node started the job (it fetched that one; a release
+		// published while it ran is not what it was sent), which a release
+		// applied here but not yet published here is not.
+		$target = self::apply_target($job);
 
 		$result = [
 			'probed'         => true,
@@ -1661,6 +1665,18 @@ class JobResultProcessor {
 		}
 
 		self::record_apply_update_result($job, $result);
+	}
+
+	/**
+	 * The release an apply_update was sent: what this management node served
+	 * when the node started it (queued, for a job with no start time), else
+	 * what it serves now, else the version it runs.
+	 */
+	public static function apply_target($job): string {
+		$at = (string)($job->get('mjb_started_time') ?: $job->get('mjb_create_time'));
+		return DeploymentHelper::servedVersion($at !== '' ? $at : null)
+			?: DeploymentHelper::servedVersion()
+			?: LibraryFunctions::get_joinery_version();
 	}
 
 	/**

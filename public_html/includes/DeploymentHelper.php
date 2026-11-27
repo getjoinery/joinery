@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.17 - servedVersion() takes a moment: the release served then, which a node that started its
+ *                 upgrade then installs even when a newer one is published before it finishes
  * @version 1.16 - isUpgradeServer(): an active Server Manager makes a site an upgrade server only once it has
  *                 published a release; before that only the upgrade_server_active setting does
  * @version 1.15 - the dead sparse-fetch, preserve-across-deploy and createBackup functions are gone: no caller
@@ -141,12 +143,23 @@ class DeploymentHelper {
      * A release is applied here and published from here as two separate steps,
      * so this can be older than the version the site itself runs. A node that
      * upgrades from here installs THIS, not the running version.
+     *
+     * $at (a UTC time as stored) asks what was served then: the newest release
+     * published at or before it. A node that began upgrading then fetched that
+     * one, whatever was published while it ran.
      */
-    public static function servedVersion(): string {
+    public static function servedVersion(?string $at = null): string {
         if (!self::isUpgradeServer()) return '';
         try {
-            $q = DbConnector::get_instance()->get_db_link()->query(
-                'SELECT upg_major_version, upg_minor_version, upg_patch_version FROM upg_upgrades ORDER BY upg_upgrade_id DESC LIMIT 1');
+            $db = DbConnector::get_instance()->get_db_link();
+            if ($at !== null && $at !== '') {
+                $q = $db->prepare('SELECT upg_major_version, upg_minor_version, upg_patch_version FROM upg_upgrades '
+                    . 'WHERE upg_create_time <= ? ORDER BY upg_upgrade_id DESC LIMIT 1');
+                $q->execute([$at]);
+            } else {
+                $q = $db->query(
+                    'SELECT upg_major_version, upg_minor_version, upg_patch_version FROM upg_upgrades ORDER BY upg_upgrade_id DESC LIMIT 1');
+            }
             $row = $q ? $q->fetch(PDO::FETCH_NUM) : false;
             return $row ? implode('.', array_map('strval', $row)) : '';
         } catch (Throwable $e) {
