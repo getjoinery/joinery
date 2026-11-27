@@ -169,6 +169,23 @@ check(strpos($site_init_src, '"$RESET_TOOL" $RESET_ARGS >/dev/null') === false
 // fallback names a login that does not exist, so the file is written then too.
 check(strpos($site_init_src, 'if [ "$ADMIN_PASSWORD_SUPPLIED" = false ] || [ -n "$ADMIN_EMAIL_REFUSED" ]; then') !== false,
 	'a refused address writes the credentials file, naming the address that signs in, whoever chose the password');
+// And the summary believes the file: with the refusal recorded there, the
+// address asked for (JOINERY_ADMIN_EMAIL) is not printed as the sign-in address
+// (live check 2026-11-27: 'Email: x@joinerytest.com' under a refused address).
+if (preg_match('/^print_admin_login\(\) \{.*?^\}\n/ms', $install_src, $m)) {
+	$tmp = harness_scratch_dir('installer_contract_admin_login');
+	file_put_contents($tmp . '/fn.sh', "YELLOW=; NC=; BLUE=; RED=; GREEN=\nprint_services_outcome() { :; }\n" . $m[0]);
+	file_put_contents($tmp . '/admin_credentials.txt', "Joinery admin login for s\n\nUsername: admin\n\nThe password is the one supplied at install time.\n"
+		. "The address asked for was not set (a@example.invalid: refused); change it on the account's profile.\n");
+	$out = (string)shell_exec('JOINERY_ADMIN_EMAIL=a@example.invalid bash -c ' . escapeshellarg('. ' . $tmp . '/fn.sh; print_admin_login ' . $tmp . '/admin_credentials.txt') . ' 2>&1');
+	check(strpos($out, 'Email:') === false && strpos($out, 'was not set') !== false,
+		'a refused admin address is said as refused in the summary, not printed as the sign-in address', $out);
+	unlink($tmp . '/admin_credentials.txt');
+	$out = (string)shell_exec('JOINERY_ADMIN_EMAIL=a@example.invalid bash -c ' . escapeshellarg('. ' . $tmp . '/fn.sh; print_admin_login ' . $tmp . '/admin_credentials.txt') . ' 2>&1');
+	check(strpos($out, 'Email:    a@example.invalid') !== false, 'an accepted address with no credentials file is still named', $out);
+} else {
+	check(false, 'print_admin_login is found in install.sh');
+}
 
 // fix_permissions.sh sweeps the whole site root — 770 www-data:user1 in
 // production, 777 in dev. Without an explicit re-pin the credentials file

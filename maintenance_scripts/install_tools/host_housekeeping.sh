@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.48 - 10d2 loads _tree_trust.sh itself: on a box holding the release signing key sck_developer_tree
+#                answered before loading it, the owner lookup failed silently and the developer's map line went
 # Version: 1.47 - root signs in to PostgreSQL by peer (section 10d2, _pg_admin.sh, specs/postgres_superuser_peer_auth.md):
 #                the joinery_admin map, the local postgres line switched once no site still signs in as postgres,
 #                then the role's password cleared and db_admin.php and the root password record removed
@@ -1522,7 +1524,11 @@ if [[ -f "${PG_PEER_HELPER}" ]] && compgen -G "${FS_ROOT}/etc/postgresql/*/main/
     # A developer's box: the account its tree belongs to signs in as postgres
     # too, as it already may through sudo. Never root, the web server's user or
     # a system account, and never inside a container.
-    if [[ "${IN_CONTAINER}" == 0 ]] && { sck_developer_tree; }; then
+    # _tree_trust.sh is loaded here, not left to sck_developer_tree: on the
+    # publishing box that answers from the signing key before it loads it.
+    if [[ "${IN_CONTAINER}" == 0 && -f "${SCRIPT_DIR}/_tree_trust.sh" ]] && { sck_developer_tree; }; then
+        # shellcheck source=_tree_trust.sh
+        . "${SCRIPT_DIR}/_tree_trust.sh"
         pg_owner="$(joinery_tree_owner_record "${SITE_ROOT}" 2>/dev/null || true)"
         pg_map_account_ok "${pg_owner}" && pg_map_account="${pg_owner}"
     fi

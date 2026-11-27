@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.60 - The closing summary names the admin address only when the site set it: a refused one is
+#               said as refused (from the credentials file), not printed as the sign-in address
 #VERSION 3.59 - A deferred certificate's lines name http://DOMAIN/https-status and joinery-https-check, and the
 #               ports a firewall in front of the server must allow
 #VERSION 3.58 - No postgres password (specs/postgres_superuser_peer_auth.md): root signs in as postgres over the
@@ -1104,13 +1106,20 @@ print_admin_login() {
     local email=""
 
     password=$($reader "$cred_path" 2>/dev/null | grep '^Password: ' | cut -d' ' -f2- || true)
+    local refused=""
     email=$($reader "$cred_path" 2>/dev/null | grep '^Email: ' | cut -d' ' -f2- | sed 's/^ *//' || true)
-    [ -n "$email" ] || email="${JOINERY_ADMIN_EMAIL:-}"
+    refused=$($reader "$cred_path" 2>/dev/null | grep '^The address asked for was not set' || true)
+    # The address asked for is the account's only when the site did not refuse it
+    # (_site_init.sh records a refusal in the credentials file).
+    [ -n "$email" ] || [ -n "$refused" ] || email="${JOINERY_ADMIN_EMAIL:-}"
 
     echo "Admin login:"
     echo -e "  Username: ${YELLOW}admin${NC}"
     if [ -n "$email" ]; then
         echo -e "  Email:    ${YELLOW}${email}${NC}"
+    fi
+    if [ -n "$refused" ]; then
+        echo -e "  ${YELLOW}${refused}${NC}"
     fi
     if [ -n "$password" ]; then
         # The password already lives in the credentials file, so printing it

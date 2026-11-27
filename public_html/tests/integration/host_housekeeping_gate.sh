@@ -620,6 +620,19 @@ JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-empty-site" >/dev/null 2
 chk "a config naming postgres with no password holds nothing back" \
     "$(awk '$1=="local" && $3=="postgres" {print $4}' "$PG/etc/postgresql/16/main/pg_hba.conf")" "peer"
 
+# The developer's map line, on a box where sck_developer_tree answers before
+# loading _tree_trust.sh (the publishing box, by its signing key): 10d2 must
+# load the owner lookup itself, or the account is empty and the line goes.
+mkdir -p "$T/pg-dev-tools"
+printf 'joinery_tree_owner_record() { echo "%s"; }\n' "$(id -un)" > "$T/pg-dev-tools/_tree_trust.sh"
+PGDEV="$(sed -n '/^    pg_map_account=""$/,/^    pg_held=/p' "$SCRIPT" | sed '$d')"
+dev_acct="$( unset -f joinery_tree_owner_record 2>/dev/null
+    SCRIPT_DIR="$T/pg-dev-tools"; SITE_ROOT="$T/pg-dev-site"; IN_CONTAINER=0
+    sck_developer_tree() { return 0; }
+    pg_map_account_ok() { [ -n "$1" ]; }
+    eval "$PGDEV"; echo "${pg_map_account}" )"
+chk "10d2 finds the developer's account though sck_developer_tree did not load the lookup" "$dev_acct" "$(id -un)"
+
 PG="$T/pg-ctr"; mkpg "$PG" '*' 'local   all             postgres                                md5\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::1/128                 md5\n# joinery-local-only: declared in config/postgres_access.conf\nhost    scrolldaddy     scrolldaddy_reader 192.168.206.21/32       md5\n'
 touch "$PG/.dockerenv"; mkdir -p "$PG/proc/net" "$T/pg-ctr-site/config"
 printf 'Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\neth0\t00000000\t010011AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n' > "$PG/proc/net/route"

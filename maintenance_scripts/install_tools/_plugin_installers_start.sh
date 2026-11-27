@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.63 - the --when-changed hash covers each site config's database user lines: a site given its own
+#                 role (site_db_role.sh) converges within the minute, so root's peer sign-in follows at once
+#                 rather than at the daily run (specs/postgres_superuser_peer_auth.md)
 # Version: 2.62 - every tick runs _remove_refused_packages.sh before the declared packages: an extension the
 #                 deployed code refuses (ImageMagick) comes off the machine (specs/imagemagick_package_removal.md WP2)
 # Version: 2.61 - reconcile_composer leaves the root request kinds: a plugin ships its libraries in its own
@@ -1843,6 +1846,11 @@ converge_hash() {
         # A sandboxed plugin's manifest: one arriving or leaving is a change.
         for m in "${PUBLIC_HTML}"/plugins/*/manifest.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
+        # Which database user each site here signs in as: a site moved off
+        # postgres (site_db_role.sh) is what lets host housekeeping switch root
+        # to peer sign-in (_pg_admin.sh), so that edit converges within the
+        # minute. The user lines only, never a password.
+        grep -h "settings\['dbusername" /var/www/html/*/config/Globalvars_site.php 2>/dev/null
     } | sha256sum | cut -d' ' -f1
 }
 
