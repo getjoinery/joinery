@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.118 - the SSL Setup card stays away when the machine reports a CA-signed certificate for the site's name, so an unmonitored node with HTTPS is not told it has none
  * @version 1.117 - AI credit: the site's state, spend, free usage, bought credit and cap, with Retry AI setup and Add credit (specs/hosted_ai_credit.md)
  * @version 1.116 - the reboot waiting words find the hosted sites themselves (RebootWhenQuietRunner 1.1)
  * @version 1.115 - automatic reboot: why a machine owing a reboot waits, the last reboot marked automatic, and the When quiet / Nightly window only / Never setting (specs/automatic_reboot_when_quiet.md)
@@ -2937,7 +2938,22 @@
 		&& !filter_var($ssl_card_domain, FILTER_VALIDATE_IP)
 		&& $ssl_card_domain !== 'localhost';
 
-	if ($is_fqdn && $ssl_card_state !== 'active' && $node->is_operational() && !$node->get('mgn_cert_expiry_ts')) {
+	// The machine's own report counts as much as the wire probe: a node that is
+	// not monitored is never probed, and its site may serve a CA-signed
+	// certificate all the same (the Status box's Certificates line shows it).
+	$site_cert_served = false;
+	if ($is_fqdn && $hr && is_array($hr['served_certificates'] ?? null)) {
+		foreach ($hr['served_certificates'] as $c) {
+			if (strtolower((string)($c['domain'] ?? '')) === strtolower($ssl_card_domain)
+					&& empty($c['self_signed']) && (int)($c['days_left'] ?? -1) >= 0) {
+				$site_cert_served = true;
+				break;
+			}
+		}
+	}
+
+	if ($is_fqdn && $ssl_card_state !== 'active' && $node->is_operational() && !$node->get('mgn_cert_expiry_ts')
+			&& !$site_cert_served) {
 		$host_ip     = $node->get('mgn_host');
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 		try {

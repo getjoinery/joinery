@@ -149,7 +149,7 @@ Go to `/admin/server_manager/node_add` (or click **Add Node** on the dashboard).
 
 #### From the node
 
-A site this management node did not install is enrolled from the node's own **Admin → System → Management Node** page: the admin there enters this management node's URL, the node's agent generates a keypair and asks to join, and the request appears on the node's API keys tab here for approval after a fingerprint comparison. Add the node's record below first so the join has something to be approved against. The plane never needs a shell on someone else's machine — there is no discovery scan (see `specs/ssh_single_bootstrap.md`).
+A site this management node did not install is enrolled from the node's own **Admin → System → Management Node** page: the admin there enters this management node's URL, the node's agent generates a keypair and asks to join, and the request appears in the dashboard's **Agents asking to join** panel here for approval after a fingerprint comparison; approving it creates the node's record (see [Join approval](#join-approval)). The plane never needs a shell on someone else's machine — there is no discovery scan (see `specs/ssh_single_bootstrap.md`).
 
 #### A machine this management node provisioned
 
