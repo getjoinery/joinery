@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.3 - With the certificate deferred, the summary says not to sign in until https works, names
+#              /https-status and joinery-https-check, and that a Linode Cloud Firewall must allow 80 and 443
 #VERSION 2.2 - The backup provider is any in StorageProvider's catalogue (the deploy form
 #              offers those that need at most a region).
 #VERSION 2.1 - The closing summary says root SSH login is off (install.sh server's default), that Lish still
@@ -463,6 +465,12 @@ case "$DNS_OUTCOME" in
         echo "DNS: ${DNS_OUTCOME#written: }"
         ;;
 esac
+if [ -n "$DOMAIN" ] && [ -f "/etc/joinery/ssl-retry/${DOMAIN}.conf" ]; then
+    echo "No certificate yet: sign in only once https://$DOMAIN works. What it is waiting for:"
+    echo "  http://$DOMAIN/https-status   (or sudo joinery-https-check in Lish)"
+    echo "A Linode Cloud Firewall must allow inbound TCP 80 and 443 for the certificate to arrive."
+    echo ""
+fi
 echo "Sign in at: ${SITE_HOST}/login"
 echo "Email:      $ADMIN_EMAIL"
 echo "Password:   the one you entered on the deploy form"

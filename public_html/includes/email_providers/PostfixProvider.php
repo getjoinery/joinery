@@ -8,6 +8,7 @@
  * envelope recipient. Setup checks and DNS records are sourced from the
  * existing InboundEmailSetupCheck engine.
  *
+ * @version 1.2 - an unset mail hostname falls back to the site's own name (webDir), which already points here, not mail.<domain> (B10)
  * @version 1.1 - the DKIM record is read from the directory rspamd signs from
  * @version 1.0
  */
@@ -55,7 +56,12 @@ class PostfixProvider implements InboundEmailProvider {
         $public_ip = trim((string)$settings->get_setting('mailbox_public_ip'));
 
         if ($mail_hostname === '') {
-            $mail_hostname = 'mail.' . $domain;
+            // Unset: the site's own name, which already points here and has a
+            // certificate. mail.<domain> would need an address record of its
+            // own that nothing here tells the owner to add.
+            $web = preg_replace('#^https?://#', '', rtrim(trim((string)$settings->get_setting('webDir')), '/'));
+            $web = strtolower((string)preg_replace('/[:\/].*$/', '', (string)$web));
+            $mail_hostname = (strpos($web, '.') !== false && !filter_var($web, FILTER_VALIDATE_IP)) ? $web : 'mail.' . $domain;
         }
         $ip_value = $public_ip !== '' ? $public_ip : 'YOUR_SERVER_IP';
 

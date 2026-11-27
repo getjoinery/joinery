@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # manage_domain.sh - change the domain a Joinery site answers to, after the install
+# VERSION: 2.2 - The site's mail hostname follows the domain (reconcile_site.sh 1.5.0); when it moves, the host
+#                installers run so the mail server answers under the new name (B10)
 # VERSION: 2.1 - colours only on a terminal: captured output carries no escape codes
 # VERSION: 2.0 - a domain is set the way install.sh sets one (B7): the vhost is the
 #                template's render (_vhost_install.sh), at the one path
@@ -259,6 +261,17 @@ settle_site_identity() {
     changes="$(printf '%s\n' "$out" | sed -n 's/^RECONCILE_SET //p')"
     if [ -n "$changes" ]; then
         printf '%s\n' "$changes" | while IFS= read -r line; do print_success "Site settings: ${line}"; done
+        # The mail server takes its name from mailbox_mail_hostname when its
+        # installer runs (install_email.sh aligns Postfix's myhostname), so it
+        # runs now rather than at the next release.
+        if [ "$kind" = "baremetal" ] && printf '%s\n' "$changes" | grep -q '^mailbox_mail_hostname '; then
+            local installers="/var/www/html/${sitename}/maintenance_scripts/install_tools/_plugin_installers_start.sh"
+            if [ -f "$installers" ] && bash "$installers" "$sitename" > /dev/null 2>&1; then
+                print_success "The mail server now answers as ${domain}"
+            else
+                print_warning "The mail server keeps its old name until its installer next runs: sudo bash ${installers} ${sitename}"
+            fi
+        fi
     else
         print_info "Site settings already name ${domain}"
     fi

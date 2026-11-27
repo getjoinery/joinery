@@ -29,6 +29,17 @@
         <h3>Login to your Account</h3>
 
         <?php
+        // Before the site's first certificate: a password typed here would
+        // cross the internet unprotected. Local file reads only; the reasons
+        // are on /https-status.
+        require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
+        if (!LibraryFunctions::isSecure() && setup_https_waiting_for_certificate()) { ?>
+            <div class="jy-auth-note">
+                <p><strong>This site is not on a secure connection yet.</strong> A password typed here would be sent unprotected. <a href="/https-status">See what is holding it up</a>.</p>
+            </div>
+        <?php } ?>
+
+        <?php
         echo $page->render_messages('loginbox');
 
         $formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);

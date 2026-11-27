@@ -60,7 +60,13 @@ See: docs/installation.md > Create a site
 
 Your domain's DNS probably did not point at the server during the install. The install still finishes, and the site serves plain HTTP until a certificate exists.
 
-You do not need to do anything. The install leaves a timer, `joinery-ssl-retry@{domain}`, that fetches the certificate as soon as the domain points at the server. To fetch it right away once DNS is correct:
+Usually you do not need to do anything. The install leaves a timer, `joinery-ssl-retry@{domain}`, that fetches the certificate as soon as the domain points at the server. To see what it is waiting for, open `http://{domain}/https-status` (no sign-in) or run `sudo joinery-https-check` in the server's console. The usual causes:
+
+- The name also answers with another server's address (a leftover A record, or an AAAA record a mail or DNS host added). Remove it.
+- The name points at another server entirely, and the site belongs at another name: point that name here and move the site with `manage_domain.sh set {sitename} home.{domain}`.
+- A firewall in front of the server, such as a Linode Cloud Firewall, blocks ports 80 and 443. Allow them inbound.
+
+To fetch it right away once DNS is correct:
 
 ```bash
 sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com

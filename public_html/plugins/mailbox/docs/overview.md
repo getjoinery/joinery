@@ -238,7 +238,7 @@ What belongs to the whole mail server rather than one mailbox lives on the
 public IP — and the **health checks**: every layer (Postfix/pipe transport/domain
 map/rspamd/Spamhaus/port 25, mail identity, plugin config, end-to-end), then
 Domain DNS grouped by domain, a domain with nothing to act on folded to one line.
-Set the mail hostname here once; everything else is autodetected. The inbound
+A bare-metal install sets the mail hostname to the site's own domain unless `install.sh site --mail-hostname=NAME` names another, so the MX record points at a name that already resolves here and whose certificate the mail server uses; `reconcile_site.sh` (run by `manage_domain.sh set` and by restores) moves it with the domain when it was unset or the old name, and `manage_domain.sh` re-runs the host installers so Postfix answers under it. A name of its own (`mail.example.com`) is set here and kept. Everything else is autodetected. The inbound
 **provider** picker (`mailbox_provider`) is on the Settings tab. A check row's
 one-click fix works the same on either tab (`includes/setup_fix_actions.php`),
 and both tabs draw rows through `includes/setup_check_render.php`.

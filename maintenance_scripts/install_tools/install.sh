@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.59 - A deferred certificate's lines name http://DOMAIN/https-status and joinery-https-check, and the
+#               ports a firewall in front of the server must allow
 #VERSION 3.58 - No postgres password (specs/postgres_superuser_peer_auth.md): root signs in as postgres over the
 #               socket by peer through the joinery_admin map in pg_ident.conf, and server leaves the role with no
 #               password. Neither server nor site asks for, generates, records or passes one; --password-file,
@@ -1438,6 +1440,7 @@ arm_ssl_retry_unless_issued() {
     ca_cert_in_place "$domain" && return 0
     if install_ssl_retry_timer "$domain" "$2"; then
         print_info "A retry timer asks every five minutes whether ${domain} reaches this box, and issues its certificate when it does."
+        print_info "What it is waiting for: http://${domain}/https-status, or sudo joinery-https-check (a firewall in front of this server must allow 80 and 443)."
     else
         print_warning "No retry timer could be armed for ${domain}: run setup_ssl.sh ${domain} again once ${domain} reaches this box."
     fi
@@ -1473,6 +1476,7 @@ note_ssl_deferred_if_missing() {
     fi
     if [ "$SSL_RETRY_ARMED" -eq 1 ]; then
         print_info "No certificate yet for ${domain}. A retry timer asks every five minutes whether the name reaches this box and issues one when it does."
+        print_info "What it is waiting for: http://${domain}/https-status, or sudo joinery-https-check (a firewall in front of this server must allow 80 and 443)."
     else
         # The path a human runs by hand: the first candidate that exists now,
         # else the site's own copy.

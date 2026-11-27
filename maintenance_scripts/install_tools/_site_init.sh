@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.29 - With no --mail-hostname, a bare-metal site with its own mail server receives at its own domain
+#                 (mailbox_mail_hostname = DOMAIN), so the MX record has a name to point at (B10)
 # VERSION: 3.28 - No postgres password: root signs in as postgres by peer (_pg_admin.sh,
 #                 specs/postgres_superuser_peer_auth.md). The PASSWORD positional and JOINERY_DB_PASSWORD
 #                 are accepted and not used; a machine not yet switched over signs in with the password it had.
@@ -750,6 +752,18 @@ INSERT INTO stg_settings (stg_name, stg_value)
   SELECT 'mailbox_mail_hostname', :'host' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname');
 SQL
     log "This site's mail server receives at $JOINERY_MAIL_HOSTNAME"
+# With no name given, a bare-metal site's mail server receives at the site's
+# own domain: an MX record names it, and the certificate the site already has
+# covers the mail server's encrypted connections. A container, a site with no
+# mail server of its own, and an address that is not a domain get none.
+elif [ "$DOCKER_MODE" != true ] && [ "${JOINERY_NO_MAIL_SERVER:-}" != "1" ] \
+        && [[ "$DOMAIN" == *.* && ! "$DOMAIN" =~ ^[0-9.]+$ && "$DOMAIN" != *:* ]]; then
+    psql -U postgres -d "$SITENAME" -q -v host="$(printf '%s' "$DOMAIN" | tr 'A-Z' 'a-z')" 2>/dev/null <<'SQL' || true
+UPDATE stg_settings SET stg_value = :'host' WHERE stg_name = 'mailbox_mail_hostname' AND coalesce(stg_value, '') = '';
+INSERT INTO stg_settings (stg_name, stg_value)
+  SELECT 'mailbox_mail_hostname', :'host' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname');
+SQL
+    log "This site's mail server receives at $DOMAIN"
 fi
 
 # Where this site buys email and backup storage (install.sh site

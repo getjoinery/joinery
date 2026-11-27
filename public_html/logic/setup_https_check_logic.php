@@ -23,7 +23,11 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * face correctly refuses cleartext with 426 — so the page cannot fetch its
  * own diagnosis. The API action remains for secure contexts.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - The diagnosis names every address the name answers with that is not this server's
+ *   (stray), reads the certificate retry's last tick (/etc/joinery/ssl-retry/DOMAIN.status), and
+ *   setup_https_findings() turns it into plain findings, one list for the wizard step, the public
+ *   /https-status page and joinery-https-check. setup_https_diagnose_cached() serves the public page.
  * @changelog 1.3 - setup_https_ipv6_plan(): the AAAA record a connected site lacks, which setup_https_dns_plan()
  *   offers once the name points here
  * @version 1.2
@@ -93,6 +97,16 @@ function setup_https_diagnose(): array {
 	// root-only, which is fine — nothing in it is needed here.
 	$retry_armed = @file_exists('/etc/joinery/ssl-retry/' . $domain . '.conf');
 
+	// 4. Every address the name answers with that is not this server's: a
+	// name that answers with two servers sends part of its traffic, and the
+	// certificate authority, to the other one.
+	$stray = array();
+	foreach (array_merge($dns_a, $dns_aaaa) as $addr) {
+		if ($addr !== $server_ip4 && $addr !== $server_ip6) {
+			$stray[] = $addr;
+		}
+	}
+
 	return array(
 		'applicable'   => true,
 		'domain'       => $domain,
@@ -107,7 +121,148 @@ function setup_https_diagnose(): array {
 		'dns_match'    => $dns_match,
 		'points_elsewhere' => $points_elsewhere,
 		'retry_armed'  => $retry_armed,
+		'stray'        => $stray,
+		'retry'        => setup_https_retry_status($domain),
 	);
+}
+
+/**
+ * The certificate retry's last tick for $domain (arm_ssl_retry.sh writes it,
+ * world-readable): checked (epoch, 0 when never), state (not_reached,
+ * edge_strict, edge_no_site, requesting, failed, issued, or '' when there is
+ * no record) and detail (the certificate authority's reason on a failure).
+ */
+function setup_https_retry_status(string $domain): array {
+	$out = array('checked' => 0, 'state' => '', 'detail' => '');
+	if (!preg_match('/^[a-z0-9.-]+$/', $domain)) {
+		return $out;
+	}
+	$raw = @file_get_contents('/etc/joinery/ssl-retry/' . $domain . '.status');
+	if (!is_string($raw)) {
+		return $out;
+	}
+	foreach (explode("\n", $raw) as $line) {
+		if (preg_match('/^(CHECKED|STATE|DETAIL)=(.*)$/', $line, $m)) {
+			$key = strtolower($m[1]);
+			$out[$key] = $key === 'checked' ? (int)$m[2] : trim($m[2]);
+		}
+	}
+	return $out;
+}
+
+/**
+ * Whether this server is still waiting for the site's first certificate: the
+ * retry is armed, or its last tick did not end in one. Local file reads only,
+ * so the sign-in page can ask on every view.
+ */
+function setup_https_waiting_for_certificate(): bool {
+	$domain = setup_https_site_domain();
+	if ($domain === '' || $domain === 'localhost' || filter_var($domain, FILTER_VALIDATE_IP)) {
+		return false;
+	}
+	if (@file_exists('/etc/joinery/ssl-retry/' . $domain . '.conf')) {
+		return true;
+	}
+	$r = setup_https_retry_status($domain);
+	return $r['state'] !== '' && $r['state'] !== 'issued';
+}
+
+/**
+ * The diagnosis for the public /https-status page, reused for 60 seconds: the
+ * page needs no sign-in, and each fresh diagnosis makes outside lookups, so
+ * nobody can make the server repeat them on every request.
+ */
+function setup_https_diagnose_cached(int $ttl = 60): array {
+	$domain = setup_https_site_domain();
+	$file = rtrim(sys_get_temp_dir(), '/') . '/joinery_https_status_' . md5($domain) . '.json';
+	$st = @stat($file);
+	// A certificate attempt since the cached answer makes it stale at once.
+	$tick = preg_match('/^[a-z0-9.-]+$/', $domain) ? (int)@filemtime('/etc/joinery/ssl-retry/' . $domain . '.status') : 0;
+	if ($st && $st['mtime'] > time() - $ttl && $tick <= $st['mtime']) {
+		$cached = json_decode((string)@file_get_contents($file), true);
+		if (is_array($cached)) {
+			return $cached;
+		}
+	}
+	$d = setup_https_diagnose();
+	@file_put_contents($file . '.' . getmypid(), json_encode($d));
+	@rename($file . '.' . getmypid(), $file);
+	return $d;
+}
+
+/**
+ * The diagnosis as plain findings, in the order to read them: each is
+ * array('kind' => ok|problem|waiting, 'text' => plain words). Shared by the
+ * wizard step, the public page and joinery-https-check, so all three say the
+ * same thing. Nothing here names a command: the console adds the exact one.
+ */
+function setup_https_findings(array $d): array {
+	$f = array();
+	if (empty($d['applicable'])) {
+		$f[] = array('kind' => 'problem', 'text' => 'This site has no web address of its own (it answers at an IP address), so no certificate can be issued for it. Give it a domain name first.');
+		return $f;
+	}
+	$domain = (string)$d['domain'];
+	if (!empty($d['https_ready'])) {
+		$f[] = array('kind' => 'ok', 'text' => 'The connection to ' . $domain . ' is secure.');
+		return $f;
+	}
+	$here = array_values(array_filter(array((string)($d['server_ip4'] ?? ''), (string)($d['server_ip6'] ?? ''))));
+	$here_text = $here ? implode(' and ', $here) : 'this server';
+	// What to type: an A record takes the IPv4 address; an AAAA record the IPv6.
+	$ip4 = (string)($d['server_ip4'] ?? '');
+	$ip6 = (string)($d['server_ip6'] ?? '');
+	$record_text = $ip4 !== '' ? 'an A record pointing at ' . $ip4 . ($ip6 !== '' ? ' (and, if you like, an AAAA record pointing at ' . $ip6 . ')' : '')
+		: ($ip6 !== '' ? 'an AAAA record pointing at ' . $ip6 : 'a record pointing at this server');
+	$answers = array_merge((array)($d['dns_a'] ?? array()), (array)($d['dns_aaaa'] ?? array()));
+	$stray = (array)($d['stray'] ?? array());
+	if (!$answers) {
+		$f[] = array('kind' => 'problem', 'text' => $domain . ' has no address record yet. Where the name\'s DNS is managed, add ' . $record_text . ' for ' . $domain . '.');
+	} elseif (empty($d['dns_match'])) {
+		$f[] = array('kind' => 'problem', 'text' => $domain . ' points at another server (' . implode(', ', $stray) . '), not at this one (' . $here_text . '). Either change it to ' . $record_text
+			. ', or, if the site belongs at a different name (such as home.' . $domain . '), point that name here and move the site to it.');
+	} else {
+		$f[] = array('kind' => 'ok', 'text' => $domain . ' points at this server (' . $here_text . ').');
+		if ($stray) {
+			$f[] = array('kind' => 'problem', 'text' => $domain . ' also points at ' . implode(', ', $stray) . ', which is not this server. Remove ' . (count($stray) > 1 ? 'those records' : 'that record')
+				. ': visitors, and the certificate authority, are sent there part of the time (always, for an IPv6 address).');
+		}
+	}
+	$r = (array)($d['retry'] ?? array());
+	$state = (string)($r['state'] ?? '');
+	$when = !empty($r['checked']) ? setup_https_ago((int)$r['checked']) : '';
+	if ($state === 'failed') {
+		$reason = (string)($r['detail'] ?? '');
+		$f[] = array('kind' => 'problem', 'text' => 'The last certificate attempt' . ($when ? ' (' . $when . ')' : '') . ' failed'
+			. ($reason !== '' ? ': ' . rtrim($reason, '. ') . '.' : '.')
+			. (stripos($reason, 'firewall') !== false || stripos($reason, 'timeout') !== false
+				? ' A firewall in front of the server (a cloud provider\'s, such as a Linode Cloud Firewall) must allow incoming connections on ports 80 and 443.' : ''));
+	} elseif ($state === 'edge_strict') {
+		$f[] = array('kind' => 'problem', 'text' => 'The name goes through a proxy (such as Cloudflare) set to Full (Strict). Set it to Full until the first certificate is in place.');
+	} elseif ($state === 'edge_no_site') {
+		$f[] = array('kind' => 'problem', 'text' => 'The name goes through a proxy (such as Cloudflare), but the proxy\'s secure connection does not reach this server.');
+	} elseif ($state === 'requesting') {
+		$f[] = array('kind' => 'waiting', 'text' => 'A certificate is being requested now.');
+	} elseif ($state === 'not_reached' && !empty($d['dns_match']) && !$stray) {
+		$f[] = array('kind' => 'waiting', 'text' => 'The last check' . ($when ? ' (' . $when . ')' : '') . ' could not reach this server through ' . $domain . ' yet; DNS changes can take a while to spread.');
+	}
+	if (!empty($d['retry_armed'])) {
+		$f[] = array('kind' => 'waiting', 'text' => 'The server tries again every five minutes and gets the certificate by itself once the name reaches it.');
+	} elseif ($state !== 'issued') {
+		$f[] = array('kind' => 'problem', 'text' => 'This server is not waiting for a certificate for ' . $domain . '. Its owner can ask for one again with setup_ssl.sh.');
+	}
+	return $f;
+}
+
+function setup_https_ago(int $epoch): string {
+	$s = max(0, time() - $epoch);
+	if ($s < 90) {
+		return 'just now';
+	}
+	if ($s < 5400) {
+		return round($s / 60) . ' minutes ago';
+	}
+	return round($s / 3600) . ' hours ago';
 }
 
 /**

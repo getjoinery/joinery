@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # arm_ssl_retry.sh - watch for the name to reach this box, then issue the certificate on its own
+# Version: 1.3.0 - Each tick writes /etc/joinery/ssl-retry/DOMAIN.status (world-readable: CHECKED, STATE, DETAIL),
+#                  which the site's /https-status page, the setup wizard and joinery-https-check read; a failed
+#                  attempt's DETAIL is Let's Encrypt's own reason. Arming also installs /usr/local/sbin/joinery-https-check
 # Version: 1.2.2 - Each tick first mints the site's placeholder when it has no certificate at all
 #                  (install.sh ensure_placeholder_cert); a 525 no longer names a render_vhost.sh
 #                  a container host does not have (B110).
@@ -98,7 +101,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 if [ "$DISARM" = true ]; then
-    rm -f "/etc/joinery/ssl-retry/${DOMAIN}.conf"
+    rm -f "/etc/joinery/ssl-retry/${DOMAIN}.conf" "/etc/joinery/ssl-retry/${DOMAIN}.status"
     systemctl disable "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
     systemctl stop --no-block "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
     echo "SSL_RETRY_DISARMED $DOMAIN"
@@ -108,6 +111,9 @@ fi
 [ -n "$SETUP_SSL" ] || { echo "--setup-ssl PATH[:PATH...] is required when arming." >&2; exit 1; }
 
 mkdir -p /etc/joinery/ssl-retry
+# The status files are read by the site (www-data), so the folder is open to
+# read; each conf stays 600.
+chmod 755 /etc/joinery/ssl-retry
 cat > "/etc/joinery/ssl-retry/${DOMAIN}.conf" <<EOF
 # Written when a certificate was deferred. Read by /usr/local/sbin/joinery-ssl-retry.
 # Removing this file stops the retries.
@@ -149,8 +155,20 @@ if [ -z "$RUN_SSL" ]; then
     exit 0
 fi
 
+# What the last tick found, for the site's /https-status page, the setup wizard
+# and joinery-https-check: CHECKED (epoch), STATE, DETAIL (one line). Public by
+# design: nothing in it is more than DNS and the certificate authority say.
+STATUS="/etc/joinery/ssl-retry/${DOMAIN}.status"
+status() {  # STATE DETAIL
+    local detail
+    detail="$(printf '%s' "${2:-}" | tr -d '\000-\037' | cut -c1-400)"
+    ( umask 022; printf 'CHECKED=%s\nSTATE=%s\nDETAIL=%s\n' "$(date +%s)" "$1" "$detail" > "${STATUS}.tmp" ) \
+        && chmod 644 "${STATUS}.tmp" && mv -f "${STATUS}.tmp" "$STATUS"
+}
+
 give_up() {
     echo "$1"
+    status issued "$1"
     rm -f "$CONF"
     systemctl disable "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
     systemctl stop --no-block "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
@@ -200,22 +218,53 @@ name_reaches_here "$DOMAIN" || reach=$?
 case "$reach" in
     0) ;;
     2)  echo "$DOMAIN reaches an edge that is on Full (Strict) and refuses the placeholder certificate this box presents. Set the edge to Full until the first certificate lands — waiting."
+        status edge_strict ""
         exit 0 ;;
     3)  echo "$DOMAIN reaches an edge, but the edge's https hop reached no site here (above) — waiting."
+        status edge_no_site ""
         exit 0 ;;
-    *)  echo "$DOMAIN does not reach this box yet — waiting."
+    *)  echo "$DOMAIN does not reach this box yet — waiting. joinery-https-check says why."
+        status not_reached ""
         exit 0 ;;
 esac
 
 echo "$DOMAIN now reaches here (${REACH_STATE:-?}). Requesting a certificate."
-bash "$RUN_SSL" "$DOMAIN" || echo "setup_ssl.sh returned non-zero; will try again."
+status requesting ""
+ssl_out="$(bash "$RUN_SSL" "$DOMAIN" 2>&1)" || echo "setup_ssl.sh returned non-zero; will try again."
+printf '%s\n' "$ssl_out"
 
 have_real_cert && give_up "Certificate issued for $DOMAIN. Retry timer disabled."
 
+# The certificate authority's own reason, which sees the server from outside:
+# a firewall in front of the box shows here and nowhere else.
+reason="$(printf '%s\n' "$ssl_out" | grep -m1 -E '^[[:space:]]*Detail:' | sed -E 's/^[[:space:]]*Detail:[[:space:]]*//')"
+[ -n "$reason" ] || reason="$(printf '%s\n' "$ssl_out" | grep -m1 -iE 'too many|rate limit|CAA|unauthorized|timeout|connection refused' )"
+status failed "$reason"
 echo "Still no CA-issued certificate for $DOMAIN — will try again."
 exit 0
 RETRY_EOF
 chmod 755 /usr/local/sbin/joinery-ssl-retry
+
+# joinery-https-check: why a site has no certificate yet, from the console.
+cat > /usr/local/sbin/joinery-https-check <<'CHECK_EOF'
+#!/usr/bin/env bash
+# joinery-https-check [SITENAME] - why this server's site has no secure
+# connection yet: what its name points at, and what the last certificate
+# attempt ran into. Written by arm_ssl_retry.sh.
+site="${1:-}"
+if [ -z "$site" ]; then
+    mapfile -t sites < <(for c in /var/www/html/*/config/Globalvars_site.php; do [ -f "$c" ] && basename "$(dirname "$(dirname "$c")")"; done)
+    case "${#sites[@]}" in
+        0) echo "No site on this machine. In a container host, run it inside the site's container." >&2; exit 1 ;;
+        1) site="${sites[0]}" ;;
+        *) echo "Name the site: joinery-https-check SITENAME (one of: ${sites[*]})" >&2; exit 1 ;;
+    esac
+fi
+tool="/var/www/html/${site}/maintenance_scripts/sysadmin_tools/https_check.php"
+[ -f "$tool" ] || { echo "No site '${site}' with https_check.php here." >&2; exit 1; }
+exec php "$tool" "$site"
+CHECK_EOF
+chmod 755 /usr/local/sbin/joinery-https-check
 
 cat > /etc/systemd/system/joinery-ssl-retry@.service <<'EOF'
 [Unit]

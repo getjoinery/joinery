@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.5.0 - mailbox_mail_hostname follows the domain when it was the old name or unset, on a site with a
+#                  mail server of its own (B10)
 # Version: 1.4.1 - colours only on a terminal: captured output carries no escape codes
 # Version: 1.4.0 - the pages the static page cache saved before the restore are deleted (its index, which
 #                  holds whether the cache is on, is kept): a copy's next restore served the pages saved
@@ -391,6 +393,26 @@ if command -v psql > /dev/null 2>&1 && [ -n "$DB_NAME" ]; then
             note_change "webDir ${DB_DOMAIN} -> ${DOMAIN} (stg_settings)"
         else
             print_warning "Could not update webDir in stg_settings."
+        fi
+    fi
+
+    # The name this site's own mail server receives at (mailbox_mail_hostname)
+    # follows the site's name when it was the old one, or was never set: an MX
+    # record then names the site's domain, whose certificate the mail server
+    # uses too. A name of its own (mail.example.com) is kept, and a site with
+    # no mail server of its own (local_mail_server none, or a site container,
+    # which never has one) is left alone.
+    if [[ "$DOMAIN" == *.* && ! "$DOMAIN" =~ ^[0-9.]+$ && "$DOMAIN" != *:* ]] \
+            && [ "$(config_value local_mail_server)" != "none" ] && [ ! -e /.dockerenv ] && [ ! -e /run/.containerenv ]; then
+        MAIL_HOST=$(psql -U "${DB_USER:-postgres}" -d "$DB_NAME" -tAc \
+            "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname'" 2>/dev/null | head -1 | tr -d '[:space:]')
+        if [ "$MAIL_HOST" != "$DOMAIN" ] && { [ -z "$MAIL_HOST" ] || [ "$MAIL_HOST" = "$DB_DOMAIN" ] || [ "$MAIL_HOST" = "$OLD_DOMAIN" ]; }; then
+            if printf '%s\n' "UPDATE stg_settings SET stg_value = :'host' WHERE stg_name = 'mailbox_mail_hostname';" \
+                    | psql -U "${DB_USER:-postgres}" -d "$DB_NAME" -q -v host="$DOMAIN" > /dev/null 2>&1; then
+                note_change "mailbox_mail_hostname ${MAIL_HOST:-(unset)} -> ${DOMAIN} (stg_settings)"
+            else
+                print_warning "Could not update mailbox_mail_hostname in stg_settings."
+            fi
         fi
     fi
     unset PGPASSWORD

@@ -63,6 +63,10 @@ The deploy form asks for as little as it can — every field is a chance for som
 
 The form declares no SSH key field, and the install places no key and creates no account: root keeps the password the deployer set in Linode, for Linode's web console (Lish). Root SSH login is off (see [Root SSH login](#root-ssh-login)). Region, plan and firewall are the deployer's own Create-form choices; a StackScript cannot preset or hide them, and every field it declares is shown.
 
+**A Linode Cloud Firewall must let the site in.** One chosen on the Create form, or added later, has to allow inbound TCP 80 and 443 (and 25 to receive mail). With 80 closed, Let's Encrypt cannot reach the server, so the certificate never arrives and nobody can open the site; the site's `/https-status` page and `sudo joinery-https-check` show the certificate authority's "timeout during connect" when this is the cause.
+
+**The domain field is the name the site is reached at.** It must point at this Linode. The site's mail server receives at the same name, so an MX record for it names it too (an MX record names a host, never an address). A bare domain that already serves something else (a mail host's web page, a parked page) needs a name of its own, such as `home.example.com`; a site installed under the wrong name is moved with `manage_domain.sh set SITE NEWNAME` (see [Domain Management](#domain-management)).
+
 Neither optional service is a condition of the install. The StackScript only passes these fields on: `_site_init.sh` does the work, so a hand-run `install.sh site` takes the same inputs (see "Services set up at install" below).
 
 Nothing is asked that can be worked out. The site name comes from the domain (or the instance ID); the install is always bare-metal, one site per instance.
@@ -676,7 +680,17 @@ sudo systemctl list-timers 'joinery-ssl-retry@*'      # is one pending
 sudo journalctl -fu joinery-ssl-retry@mysite.example.com   # what it is seeing
 ```
 
-Its state is a single file per domain at `/etc/joinery/ssl-retry/{domain}.conf`. Delete it to stop the retries.
+Its state is a single file per domain at `/etc/joinery/ssl-retry/{domain}.conf`. Delete it to stop the retries. Each run also writes `/etc/joinery/ssl-retry/{domain}.status`, readable by the site: when it last looked, what it found (`not_reached`, `edge_strict`, `edge_no_site`, `requesting`, `failed`, `issued`), and on a failure the certificate authority's own reason, which sees the server from outside and so shows a firewall in front of it.
+
+#### Why there is no certificate yet
+
+Three views give the same findings (`setup_https_findings()` in `logic/setup_https_check_logic.php`): every address the name answers with that is not this server, a name that points at another server entirely, and the last certificate attempt's reason.
+
+- **`/https-status`** on the site, over plain HTTP, with no sign-in: everything on it is public already (DNS, whether there is a certificate). Its diagnosis is reused for a minute, so it cannot be used to make the server repeat its outside lookups. The sign-in page links it while the server waits for a certificate, since a password typed there would travel unprotected.
+- **The setup wizard's Secure connection step**, for the signed-in owner, with the `manage_domain.sh` command for this site when the name points elsewhere.
+- **`sudo joinery-https-check [SITENAME]`** in the server's console (installed when the retry is armed), adding the exact commands and the retry's journal lines.
+
+A check made from the server itself cannot see a firewall in front of it (the server reaches its own address without leaving the machine), which is why the certificate authority's reason is the one that matters there.
 
 ### Skip SSL
 

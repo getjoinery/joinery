@@ -5,7 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
- * covers: [maintenance_scripts/sysadmin_tools/manage_domain.sh, maintenance_scripts/sysadmin_tools/reconcile_site.sh, maintenance_scripts/sysadmin_tools/virtualhost_update_script.sh, maintenance_scripts/install_tools/_vhost_install.sh, maintenance_scripts/install_tools/_vhost_render.sh, maintenance_scripts/install_tools/default_proxy_vhost.conf, maintenance_scripts/install_tools/default_virtualhost.conf]
+ * covers: [maintenance_scripts/sysadmin_tools/manage_domain.sh, maintenance_scripts/sysadmin_tools/reconcile_site.sh, maintenance_scripts/sysadmin_tools/virtualhost_update_script.sh, maintenance_scripts/install_tools/_vhost_install.sh, maintenance_scripts/install_tools/_vhost_render.sh, maintenance_scripts/install_tools/default_proxy_vhost.conf, maintenance_scripts/install_tools/default_virtualhost.conf, maintenance_scripts/install_tools/_site_init.sh, public_html/includes/email_providers/PostfixProvider.php]
  */
 /**
  * A domain set after the install is set the way the install sets one (B7).
@@ -98,5 +98,23 @@ check(strpos($proxy, 'ServerName md2.example.org') !== false, 'the proxy render 
 check(preg_match('#ProxyPass\s+/\s+http://127\.0\.0\.1:8123/#', $proxy) === 1, 'and forwards to the container\'s port');
 check(strpos($proxy, 'RequestHeader append X-Forwarded-For') !== false, 'and appends to X-Forwarded-For');
 check(strpos($proxy, '{{') === false, 'with no placeholder left unfilled');
+
+section('The mail hostname follows the site\'s name (B10)');
+$init = (string)file_get_contents($scripts . '/install_tools/_site_init.sh');
+check(preg_match('/elif \[ "\$DOCKER_MODE" != true \] && \[ "\$\{JOINERY_NO_MAIL_SERVER:-\}" != "1" \]/', $init) === 1
+	&& strpos($init, 'log "This site\'s mail server receives at $DOMAIN"') !== false,
+	'with no --mail-hostname, a bare-metal site with its own mail server receives at its own domain');
+$rec = (string)file_get_contents($scripts . '/sysadmin_tools/reconcile_site.sh');
+check(strpos($rec, 'note_change "mailbox_mail_hostname ${MAIL_HOST:-(unset)} -> ${DOMAIN} (stg_settings)"') !== false
+	&& strpos($rec, '[ -z "$MAIL_HOST" ] || [ "$MAIL_HOST" = "$DB_DOMAIN" ] || [ "$MAIL_HOST" = "$OLD_DOMAIN" ]') !== false,
+	'reconcile moves it only when it was unset or the old name: a mail name of its own is kept');
+check(strpos($rec, '[ "$(config_value local_mail_server)" != "none" ] && [ ! -e /.dockerenv ]') !== false,
+	'and never on a site with no mail server of its own, or in a container');
+check(strpos($rec, "-v host=\"\$DOMAIN\"") !== false, 'the name reaches SQL as a psql variable');
+$md = (string)file_get_contents($scripts . '/sysadmin_tools/manage_domain.sh');
+check(strpos($md, "grep -q '^mailbox_mail_hostname '") !== false && strpos($md, '_plugin_installers_start.sh') !== false,
+	'manage_domain.sh runs the host installers when the mail hostname moves, so Postfix answers under it');
+$pf = (string)file_get_contents(PathHelper::getBasePath() . 'includes/email_providers/PostfixProvider.php');
+check(strpos($pf, "get_setting('webDir')") !== false, 'an unset mail hostname falls back to the site\'s own name in the DNS list');
 
 harness_finish();

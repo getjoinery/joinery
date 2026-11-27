@@ -13,7 +13,10 @@
  * API is. Plain words only; the one term of art allowed is "A record", named
  * because that is the label they must find at their registrar.
  *
- * @version 1.4
+ * @version 1.6
+ * @changelog 1.6 - A name that also points at another server, and the last certificate attempt's own reason (a
+ *                  firewall, a rate limit), are said when the name points here (setup_https_findings); a site
+ *                  that belongs at another name is moved there with manage_domain.sh, named with this site's own
  * @changelog 1.5 - The add-it-yourself lines send the owner to where the domain's DNS is managed, not where it is
  *                  registered: the two differ when DNS is hosted elsewhere (a mail host's DNS, for one)
  * @changelog 1.4 - Once the connection is secure the step shows only the optional IPv6 record (AAAA), with
@@ -92,8 +95,11 @@ if (LibraryFunctions::isSecure()) {
 			at <?php echo htmlspecialchars($points_at); ?>. Something is being served there today, and
 			pointing the name at this server (<?php echo htmlspecialchars($server_ip); ?>) would replace it.
 			If that is a website you are keeping, this server wants a name of its own, such as
-			<strong>home.<?php echo htmlspecialchars($d['domain']); ?></strong> — whoever set the server up
-			can reinstall it under that name. If it is something you are done with, sign in wherever the
+			<strong>home.<?php echo htmlspecialchars($d['domain']); ?></strong>: add an <strong>A record</strong>
+			for that name pointing at <?php echo htmlspecialchars($server_ip); ?>, then whoever manages the
+			server moves the site to it in the server's console:
+			<code>sudo <?php echo htmlspecialchars(dirname(PathHelper::getBasePath())); ?>/maintenance_scripts/sysadmin_tools/manage_domain.sh set <?php echo htmlspecialchars(basename(dirname(PathHelper::getBasePath()))); ?> home.<?php echo htmlspecialchars($d['domain']); ?></code>.
+			If it is something you are done with, sign in wherever the
 			name's DNS is managed and change its <strong>A record</strong> to
 			<strong><?php echo htmlspecialchars($server_ip); ?></strong>.</p>
 <?php } elseif ($server_ip !== '') { ?>
@@ -132,6 +138,14 @@ if (LibraryFunctions::isSecure()) {
 			few minutes; if this keeps happening, whoever manages the server should
 			take a look.</p>
 <?php } ?>
+<?php } elseif (array_filter(setup_https_findings($d), function ($x) { return $x['kind'] === 'problem'; })) { ?>
+		<p><strong>Your web address points at this server, but something is in the way:</strong></p>
+		<ul>
+<?php foreach (setup_https_findings($d) as $x) { if ($x['kind'] !== 'problem') { continue; } ?>
+			<li><?php echo htmlspecialchars($x['text']); ?></li>
+<?php } ?>
+		</ul>
+		<p>The server tries again every five minutes; press "Check again" once it is fixed.</p>
 <?php } elseif (!empty($d['retry_armed'])) { ?>
 		<p><strong>Almost there — your web address points at this server.</strong>
 			The server is switching the secure connection on by itself; that usually takes
