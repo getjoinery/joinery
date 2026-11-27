@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.27 - The site config is never given the postgres superuser password: it is written with an empty one
+#                 and site_db_role.sh points it at the site's own role. A run that stopped between the two left the
+#                 superuser password readable by the web server. A kept config is no longer given this run's
+#                 password either (_set_site_config_password.php is gone): site_db_role.sh connects with this
+#                 run's PGPASSWORD and rewrites the pair, so a stale password there is never used (3.18's B65)
 # VERSION: 3.26 - JOINERY_ADMIN_FIRST_NAME / _LAST_NAME / _TIMEZONE name the admin account for its owner
 # VERSION: 3.26 - JOINERY_SERVICES_URL (install.sh site --services-url) writes services_url: where the site buys email
 #                 and backup storage; JOINERY_MAIL_HOSTNAME (--mail-hostname) writes mailbox_mail_hostname
@@ -359,22 +364,11 @@ create_config_file() {
     if [ -f "$SITE_ROOT/config/Globalvars_site.php" ]; then
         log "Config already exists at $SITE_ROOT/config/Globalvars_site.php - leaving it."
         log "  (it carries this site's secret_box_key; regenerating it would orphan every encrypted secret)"
-        # Its database password may be stale: a first run that stopped part way
-        # wrote the password it was given. When this run's password reaches the
-        # database, that one goes in, and nothing else in the file changes.
-        if [ -n "$PASSWORD" ] && PGPASSWORD="$PASSWORD" psql -U postgres -d postgres -tAc 'SELECT 1' >/dev/null 2>&1; then
-            local pw_result
-            if ! pw_result=$(JOINERY_CFG_PASSWORD="$PASSWORD" \
-                    php "${SCRIPT_DIR}/_set_site_config_password.php" "$SITE_ROOT/config/Globalvars_site.php"); then
-                log_error "Could not put this run's database password into $SITE_ROOT/config/Globalvars_site.php"
-                exit 1
-            fi
-            if [ "$pw_result" = "updated" ]; then
-                log "  Its database password did not match this run's; set it to this run's."
-            fi
-        else
-            log "  This run's database password could not be checked against PostgreSQL; the config's is left as it is."
-        fi
+        # Its database pair is not repaired here. site_db_role.sh, below, connects
+        # with this run's postgres password and points the file at the site's own
+        # role, so whatever an earlier run left in it is never what the site uses.
+        # This run's password is the superuser's and never goes into a file the
+        # web server can read.
         return 0
     fi
 
@@ -401,7 +395,6 @@ create_config_file() {
           JOINERY_CFG_DOMAIN="$DOMAIN" \
           JOINERY_CFG_DEPLOY_ENV="$DEPLOY_ENV" \
           JOINERY_CFG_LOCAL_MAIL_SERVER="$LOCAL_MAIL_SERVER" \
-          JOINERY_CFG_PASSWORD="$PASSWORD" \
           JOINERY_CFG_SECRET_BOX_KEY="$SECRET_BOX_KEY" \
           php "${SCRIPT_DIR}/_write_site_config.php" "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"); then
         log_error "Failed to write $SITE_ROOT/config/Globalvars_site.php"

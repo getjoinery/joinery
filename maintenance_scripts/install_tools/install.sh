@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.55 - server records the postgres password whatever its source (prompt, --password-file,
+#               POSTGRES_PASSWORD, generated), after PostgreSQL holds it, so a bare-metal site adopts it.
+#               Only a generated one was recorded, so `server` run at a keyboard and then `site` failed at
+#               createdb with password authentication failed.
 #VERSION 3.54 - site --services-url=URL: where this site buys email and backup storage (services_url), set by a
 #               management node that sells them, so its owner is sent to the store that built the site.
 #               site --mail-hostname=NAME: the name the site's own mail server receives at (mailbox_mail_hostname),
@@ -3916,18 +3920,7 @@ do_server_setup() {
             # (`site --password-file`, and the server_manager install job).
             POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
             POSTGRES_PASSWORD_GENERATED=1
-            local pw_record="$POSTGRES_PASSWORD_RECORD"
-            if (umask 077 && printf '%s\n' "$POSTGRES_PASSWORD" > "$pw_record") 2>/dev/null; then
-                chmod 600 "$pw_record" 2>/dev/null || true
-                POSTGRES_PASSWORD_RECORDED=1
-                print_info "Auto-generated the postgres password and wrote it to $pw_record (mode 600)."
-            else
-                # Recording it is how an unattended caller gets it back, so a
-                # failure to write is worth saying out loud rather than leaving
-                # the operator to discover the file is absent later.
-                print_warning "Auto-generated the postgres password but could not write $pw_record."
-                print_warning "It is printed in this run's summary and nowhere else — save it now."
-            fi
+            print_info "Auto-generated the postgres password; it is recorded once PostgreSQL holds it."
         else
             print_info "PostgreSQL password not set."
             echo -n "Please enter a password for PostgreSQL postgres user: "
@@ -4458,6 +4451,28 @@ EOF
         service_reload postgresql
 
         print_success "PostgreSQL postgres user password set successfully"
+
+        # Record the password the role now holds, whatever its source: typed at
+        # the prompt, read from --password-file, POSTGRES_PASSWORD, or generated.
+        # A bare-metal `install.sh site` with no password of its own adopts this
+        # record; without it, site generates a fresh one the role has never held
+        # and createdb fails on authentication — the documented
+        # `install.sh server && install.sh site` run at a keyboard did exactly
+        # that, because only a generated password used to be recorded.
+        if (umask 077 && printf '%s\n' "$POSTGRES_PASSWORD" > "$POSTGRES_PASSWORD_RECORD") 2>/dev/null; then
+            chmod 600 "$POSTGRES_PASSWORD_RECORD" 2>/dev/null || true
+            POSTGRES_PASSWORD_RECORDED=1
+            print_info "Recorded the postgres password at $POSTGRES_PASSWORD_RECORD (mode 600) for 'install.sh site'."
+        else
+            # Recording it is how an unattended caller gets it back, so a
+            # failure to write is worth saying out loud rather than leaving
+            # the operator to discover the file is absent later.
+            print_warning "Could not write $POSTGRES_PASSWORD_RECORD."
+            print_warning "Pass the postgres password to 'install.sh site' with --password-file."
+            if [ "$POSTGRES_PASSWORD_GENERATED" -eq 1 ]; then
+                print_warning "It was generated, so it is printed in this run's summary and nowhere else — save it now."
+            fi
+        fi
     else
         print_info "Skipping postgres user password (--skip-postgres-password)"
     fi
@@ -4598,7 +4613,7 @@ EOF
     echo ""
     print_warning "=== NEXT STEPS ==="
     print_info "1. Create sites using: ./install.sh site SITENAME DOMAIN"
-    print_info "   (the database password is generated for you; --password-file to choose one)"
+    print_info "   (on this box it uses the recorded postgres password; --password-file to give another)"
     # Say where the password is, not what it is. This summary is the last thing
     # an unattended install writes to its log, and installer logs get tailed,
     # shipped and pasted — a password printed here outlives the terminal it was

@@ -3010,8 +3010,11 @@ check(strpos($site_init_now, '_write_site_config.php') !== false,
 check(!preg_match('/sed[^\n]*PASSWORD/', $site_init_now),
 	'_site_init.sh never passes the password through sed',
 	'a sed replacement needs its own escaping and the result still has to parse as PHP');
-check(strpos($site_init_now, 'JOINERY_CFG_PASSWORD="$PASSWORD"') !== false,
-	'the password reaches the config writer in the environment, not argv');
+// B3 (11-27): the config is readable by the web server, and the only database
+// password a site init holds is the postgres superuser's. It never goes there;
+// site_db_role.sh points the config at the site's own role.
+check(strpos($site_init_now, 'JOINERY_CFG_PASSWORD') === false,
+	'_site_init.sh hands no database password to the config writer');
 
 // The ALTER USER statement: on stdin, as a SQL literal with quotes doubled,
 // never inside a shell string that su -c would parse a second time.
@@ -3075,9 +3078,9 @@ if (is_file($cfg_tmp)) {
 		$loaded = $loader->load($cfg_tmp);
 	}
 }
-check(isset($loaded['dbpassword']) && $loaded['dbpassword'] === $awful,
-	'a password of every once-forbidden character round-trips byte for byte',
-	isset($loaded['dbpassword']) ? 'got: ' . $loaded['dbpassword'] : 'no dbpassword loaded');
+check(isset($loaded['dbpassword']) && $loaded['dbpassword'] === '' && strpos((string)@file_get_contents($cfg_tmp), $awful) === false,
+	'a password handed to the config writer never lands in the config (it is the superuser\'s)',
+	isset($loaded['dbpassword']) ? 'dbpassword is ' . ($loaded['dbpassword'] === '' ? 'empty' : 'set') : 'no dbpassword loaded');
 check(isset($loaded['dbname']) && $loaded['dbname'] === 'demo' && isset($loaded['webDir']) && $loaded['webDir'] === 'demo.example.com'
 	&& isset($loaded['deployment_environment']) && $loaded['deployment_environment'] === 'baremetal',
 	'the plain placeholders are filled');
@@ -3090,38 +3093,11 @@ exec($cmd, $again, $again_rc);
 check($again_rc !== 0 && isset($loaded['secret_box_key']) && strpos((string)file_get_contents($cfg_tmp), $loaded['secret_box_key']) !== false,
 	'the config writer refuses to overwrite an existing config');
 
-// B65: a config kept from a run that stopped part way holds that run's
-// password. The next run puts its own in, run for real, and nothing else moves.
-$pw_setter = $site_root . '/maintenance_scripts/install_tools/_set_site_config_password.php';
-check(is_file($pw_setter), '_set_site_config_password.php ships with the install tools');
-check(strpos($site_init_now, '_set_site_config_password.php') !== false
-	&& strpos($site_init_now, "PGPASSWORD=\"\$PASSWORD\" psql -U postgres -d postgres -tAc 'SELECT 1'") !== false,
-	'_site_init.sh corrects a kept config only with a password that reaches the database');
-$set_pw = function (string $pw) use ($pw_setter, $cfg_tmp) {
-	$out = array(); $rc = 1;
-	exec('JOINERY_CFG_PASSWORD=' . escapeshellarg($pw) . ' php ' . escapeshellarg($pw_setter) . ' ' . escapeshellarg($cfg_tmp) . ' 2>&1', $out, $rc);
-	return array($rc, trim(implode(' ', $out)));
-};
-if (is_file($cfg_tmp)) {
-	$before = (string)file_get_contents($cfg_tmp);
-	$fresh = $awful . 'NEW';
-	[$rc, $said] = $set_pw($fresh);
-	$after = (string)file_get_contents($cfg_tmp);
-	$reloaded = (new class { public $settings = array(); public function load($f) { include $f; return $this->settings; } })->load($cfg_tmp);
-	check($rc === 0 && $said === 'updated' && ($reloaded['dbpassword'] ?? null) === $fresh,
-		'a stale database password in a kept config is replaced byte for byte', $said);
-	check(($reloaded['secret_box_key'] ?? null) === $env['JOINERY_CFG_SECRET_BOX_KEY']
-		&& ($reloaded['dbpassword_test'] ?? 'x') === ($loaded['dbpassword_test'] ?? 'y')
-		&& str_replace(var_export($fresh, true), var_export($awful, true), $after) === $before,
-		'and every other byte, the secret_box_key and dbpassword_test included, is as it was');
-	[$rc, $said] = $set_pw($fresh);
-	check($rc === 0 && $said === 'same' && (string)file_get_contents($cfg_tmp) === $after, 'the same password leaves the file alone', $said);
-	file_put_contents($cfg_tmp, str_replace("\$this->settings['dbusername'] = 'postgres';", "\$this->settings['dbusername'] = 'siteuser';", $after));
-	$other = (string)file_get_contents($cfg_tmp);
-	[$rc, $said] = $set_pw('other');
-	check($rc === 0 && strpos($said, 'skipped') === 0 && (string)file_get_contents($cfg_tmp) === $other,
-		'a config that connects as another user is not touched', $said);
-}
+// A kept config is not given this run's password either: site_db_role.sh
+// connects with PGPASSWORD and rewrites the pair itself.
+check(strpos($site_init_now, '/_set_site_config_password.php"') === false
+	&& !is_file($site_root . '/maintenance_scripts/install_tools/_set_site_config_password.php'),
+	'a kept config is never handed the postgres password');
 @unlink($cfg_tmp);
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,9 @@
 /**
  * _write_site_config.php - Fill default_Globalvars_site.php for one site.
  *
+ * VERSION: 1.2 - Writes no database password. The config is readable by the web server, and the only
+ *                password in hand here is the postgres superuser's; site_db_role.sh fills in the site's own
+ *                role and password, so a run that stops before it leaves an empty password, not the superuser's
  * VERSION: 1.1 - JOINERY_CFG_LOCAL_MAIL_SERVER fills local_mail_server ('' or none): a server installed with no
  *                mail server of its own says so in its config, where the mail installer reads it
  * VERSION: 1.0
@@ -9,19 +12,22 @@
  * Usage (internal, called by _site_init.sh):
  *
  *   JOINERY_CFG_SITENAME=NAME JOINERY_CFG_DOMAIN=DOMAIN JOINERY_CFG_DEPLOY_ENV=docker|baremetal \
- *   JOINERY_CFG_PASSWORD=... JOINERY_CFG_SECRET_BOX_KEY=... \
+ *   JOINERY_CFG_SECRET_BOX_KEY=... \
  *       php _write_site_config.php TEMPLATE OUTPUT
  *
  * Every value arrives in the environment. argv is readable by every account
  * on the machine through ps for as long as the process runs, and this file
- * writes the database password and the secret-at-rest key.
+ * writes the secret-at-rest key.
  *
- * The two secrets are emitted with var_export(), which produces a correct PHP
- * string literal for any string at all — quotes, backslashes, dollar signs,
- * spaces, line breaks. That is the whole reason this is PHP and not sed: a
- * sed replacement needs its own escaping for / & \ and newlines, and what it
- * produces still has to parse as PHP, so a password had to avoid the union of
- * both alphabets' special characters. A PHP writer has one alphabet, its own.
+ * The secret is emitted with var_export(), which produces a correct PHP string
+ * literal for any string at all. That is why this is PHP and not sed: a sed
+ * replacement needs its own escaping, and what it produces still has to parse
+ * as PHP. A PHP writer has one alphabet, its own.
+ *
+ * The database pair is left as the template has it (postgres, empty password).
+ * This file is readable by the web server, and the only database password this
+ * run holds is the postgres superuser's, so it never goes here. site_db_role.sh,
+ * the next step that touches this file, points it at the site's own role.
  *
  * The site name, domain and deployment environment are plain substitutions:
  * _site_init.sh derives or validates them, and none is a free-form value.
@@ -59,7 +65,6 @@ $env = static function (string $name): string {
 $sitename   = $env('JOINERY_CFG_SITENAME');
 $domain     = $env('JOINERY_CFG_DOMAIN');
 $deploy_env = $env('JOINERY_CFG_DEPLOY_ENV');
-$password   = $env('JOINERY_CFG_PASSWORD');
 $secret_key = $env('JOINERY_CFG_SECRET_BOX_KEY');
 // Optional, and one of two words: '' (a bare-metal server has its own mail
 // server) or 'none' (install.sh --no-mail-server).
@@ -70,7 +75,7 @@ if ($local_mail !== '' && $local_mail !== 'none') {
 }
 
 foreach (['JOINERY_CFG_SITENAME' => $sitename, 'JOINERY_CFG_DOMAIN' => $domain,
-          'JOINERY_CFG_DEPLOY_ENV' => $deploy_env, 'JOINERY_CFG_PASSWORD' => $password,
+          'JOINERY_CFG_DEPLOY_ENV' => $deploy_env,
           'JOINERY_CFG_SECRET_BOX_KEY' => $secret_key] as $name => $value) {
     if ($value === '') {
         fwrite(STDERR, "{$name} is empty\n");
@@ -95,20 +100,14 @@ if ($src === false) {
     exit(1);
 }
 
-$password_line = "\$this->settings['dbpassword'] = '';";
-if (strpos($src, $password_line) === false) {
-    fwrite(STDERR, "template has no dbpassword line to fill\n");
-    exit(1);
-}
 if (strpos($src, "'{{SECRET_BOX_KEY}}'") === false) {
     fwrite(STDERR, "template has no secret_box_key placeholder to fill\n");
     exit(1);
 }
 
 $out = str_replace(
-    ['{{SITE_NAME}}', '{{DOMAIN_NAME}}', '{{DEPLOYMENT_ENVIRONMENT}}', '{{LOCAL_MAIL_SERVER}}', "'{{SECRET_BOX_KEY}}'", $password_line],
-    [$sitename, $domain, $deploy_env, $local_mail, var_export($secret_key, true),
-     "\$this->settings['dbpassword'] = " . var_export($password, true) . ';'],
+    ['{{SITE_NAME}}', '{{DOMAIN_NAME}}', '{{DEPLOYMENT_ENVIRONMENT}}', '{{LOCAL_MAIL_SERVER}}', "'{{SECRET_BOX_KEY}}'"],
+    [$sitename, $domain, $deploy_env, $local_mail, var_export($secret_key, true)],
     $src
 );
 
