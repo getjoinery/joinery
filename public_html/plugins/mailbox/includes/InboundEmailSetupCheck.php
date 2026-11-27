@@ -31,6 +31,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.78 - the SRS row shows only when something forwards mail (or SRS is on), and names what forwards
  * @version 1.77 - the hostname and verification rows' fix is Run mail setup again (a root request) where the
  *                 root actor runs, instead of a root command (B11)
  * @version 1.76 - a subdomain with no DMARC record of its own plans one from its parent domain's, and keeps a strict shape the parent asks for
@@ -2980,17 +2981,25 @@ class InboundEmailSetupCheck {
 				'', array('text' => 'Turn it on with the "Enable inbound email" button below, or in Settings.',
 				          'action' => array('action' => 'enable_plugin')));
 
+		// SRS only touches mail this site forwards on to another address. With
+		// nothing forwarding it has no work, so an SRS that is off is not worth a
+		// row at all; one that is on still shows, since a half-set one (no
+		// secret) breaks the bounces of mail forwarded earlier.
 		$srsOn = ((string)$this->settings->get_setting('mailbox_srs_enabled') === '1');
 		$srsSecret = trim((string)$this->settings->get_setting('mailbox_srs_secret'));
 		$srsLabel = 'SRS (Sender Rewriting Scheme)';
-		$srsWhat = 'SRS rewrites the envelope sender of forwarded mail so it still passes SPF '
-			. 'at the final destination — without it, forwarded mail is often rejected or marked as spam.';
+		$forwarding = $this->forwardingInUse();
+		$srsWhat = 'Only needed when this site forwards mail on to another address. SRS rewrites the envelope '
+			. 'sender of forwarded mail so it still passes SPF at the final destination; without it, forwarded '
+			. 'mail is often rejected or marked as spam.';
 		if (!$srsOn) {
-			$out[] = $this->r('plugin.srs_secret', '', 'plugin', $srsLabel, self::RECOMMENDED, self::WARN,
-				'SRS is turned off.',
-				$srsWhat . ' Enabling it is recommended whenever the forwarding feature is used.',
-				array('text' => 'Press the button below — it turns SRS on and generates a signing secret in one step.',
-				      'action' => array('action' => 'enable_srs', 'label' => 'Enable SRS')));
+			if ($forwarding) {
+				$out[] = $this->r('plugin.srs_secret', '', 'plugin', $srsLabel, self::RECOMMENDED, self::WARN,
+					'Mail is forwarded (' . implode('; ', $forwarding) . '), and SRS is off.',
+					$srsWhat,
+					array('text' => 'Press the button below. It turns SRS on and makes its signing secret in one step.',
+					      'action' => array('action' => 'enable_srs', 'label' => 'Enable SRS')));
+			}
 		} elseif ($srsSecret === '') {
 			$out[] = $this->r('plugin.srs_secret', '', 'plugin', $srsLabel, self::REQUIRED, self::FAIL,
 				'SRS is on but no signing secret is set — SRS addresses cannot be signed.',
@@ -4567,6 +4576,40 @@ class InboundEmailSetupCheck {
 		}
 		return $this->r('host.transport', '', 'host', $label, self::REQUIRED, self::PASS,
 			'The joinery pipe transport runs the inbound email handler.');
+	}
+
+	/**
+	 * What forwards mail on to another address: mailboxes set to forward, a
+	 * domain's catch-all set to forward, and filters with a Forward to action.
+	 * Each entry is a short phrase ('2 mailboxes'); empty when nothing does.
+	 * Counted only where it is switched on and not deleted.
+	 */
+	private function forwardingInUse(): array {
+		$found = array();
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$counts = array(
+				'mailbox' => "SELECT count(*) FROM iea_inbound_email_aliases
+					WHERE iea_delete_time IS NULL AND iea_is_enabled = true
+					AND iea_delivery_mode IN ('forward', 'forward_and_store')
+					AND coalesce(trim(iea_destinations), '') <> ''",
+				'catch-all' => "SELECT count(*) FROM ied_inbound_email_domains
+					WHERE ied_delete_time IS NULL AND ied_is_enabled = true
+					AND ied_catch_all_mode = 'forward' AND coalesce(trim(ied_catch_all_address), '') <> ''",
+				'filter' => "SELECT count(*) FROM ief_inbound_email_filters
+					WHERE ief_delete_time IS NULL AND ief_is_enabled = true
+					AND coalesce(trim(ief_action_forward_to), '') <> ''",
+			);
+			foreach ($counts as $noun => $sql) {
+				$n = (int)$db->query($sql)->fetchColumn();
+				if ($n > 0) {
+					$found[] = $n . ' ' . $noun . ($n === 1 ? '' : ($noun === 'mailbox' ? 'es' : 's'));
+				}
+			}
+		} catch (\Throwable $e) {
+			// A table not there yet (before update_database): nothing forwards.
+		}
+		return $found;
 	}
 
 	/**

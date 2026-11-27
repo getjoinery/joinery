@@ -876,7 +876,7 @@ live on the **Server** tab.
 | `mailbox_enabled` | `0` | Master switch |
 | `mailbox_mail_hostname` | (empty) | FQDN of this mail server — MX target, HELO, PTR (set on the Server tab) |
 | `mailbox_public_ip` | (empty) | Optional public-IP override; empty = autodetect |
-| `mailbox_srs_enabled` | `0` | SRS envelope rewriting (recommended) |
+| `mailbox_srs_enabled` | `0` | SRS envelope rewriting for forwarded mail; the Server tab asks for it only once something forwards (a forwarding mailbox, a forwarding catch-all, or a filter with Forward to) |
 | `mailbox_srs_secret` | (empty) | Required before SRS can be enabled |
 | `mailbox_forwarding_max_destinations` | `10` | Max destinations per alias |
 | `mailbox_forwarding_rate_limit_per_alias` | `50` | Per-alias limit per window |
