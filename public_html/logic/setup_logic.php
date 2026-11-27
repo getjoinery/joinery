@@ -6,6 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.21 - the sign-in security step is passkey only: authenticator codes are set up from the security page
  * @version 2.20 - a failed SMTP test send to a server that never answered says the host may block the port
  *                (SmtpProvider::unansweredPortNote) instead of asking to check the credentials
  * @version 2.19 - the Secure connection step is diagnosed when done too, for the IPv6 record (https_ipv6_box)
@@ -715,35 +716,6 @@ function setup_logic(array $input): LogicResult {
 		return LogicResult::redirect('/setup?step=mail_send');
 	}
 
-	// TOTP enrollment forwards to the security page's own logic — one
-	// ceremony, two mounts. Only the fields the wizard renders are pulled
-	// from its result. force_render_step keeps the step's partial on screen
-	// after success: the backup codes are shown once and must not be skipped
-	// just because the step went green.
-	$totp_forward = array();
-	$force_render_step = '';
-	if ($action === 'start_enable' || $action === 'confirm_enable') {
-		require_once(PathHelper::getThemeFilePath('security_logic.php', 'logic'));
-		$sec = security_logic($input);
-		if ($sec->redirect) {
-			return $sec;
-		}
-		$totp_forward = array(
-			'totp_setup_in_progress' => !empty($sec->data['setup_in_progress']),
-			'totp_secret'            => (string)($sec->data['secret'] ?? ''),
-			'totp_qr_uri'            => (string)($sec->data['qr_uri'] ?? ''),
-			'totp_backup_codes'      => is_array($sec->data['backup_codes'] ?? null) ? $sec->data['backup_codes'] : array(),
-			'totp_just_enabled'      => !empty($sec->data['just_enabled']),
-		);
-		if ($action === 'confirm_enable' && empty($sec->data['just_enabled'])) {
-			$error = "That code didn't match — check your authenticator app and try again.";
-		}
-		if (!empty($sec->data['just_enabled'])) {
-			$force_render_step = 'signin_security';
-			SetupSteps::invalidateSessionCache();
-		}
-	}
-
 	// Live statuses for every step in scope, plus the steps that are green
 	// only because the viewer answered "not now" — those still render their
 	// controls, so the choice can be changed in place.
@@ -827,7 +799,7 @@ function setup_logic(array $input): LogicResult {
 		}
 	}
 
-	return LogicResult::render(array_merge(array(
+	return LogicResult::render(array(
 		'session' => $session,
 		'settings' => $settings,
 		'viewer' => $viewer,
@@ -840,13 +812,12 @@ function setup_logic(array $input): LogicResult {
 		'total' => count($keys),
 		'error' => $error,
 		'heartbeat_warning' => $heartbeat_warning,
-		'force_render_step' => $force_render_step,
 		'calendar_import_summary' => $calendar_import_summary,
 		'calendar_level_saved'    => $calendar_level_saved,
 		'https_diagnosis' => $https_diagnosis,
 		'https_dns_box' => $https_dns_box,
 		'https_ipv6_box' => $https_ipv6_box,
-	), $totp_forward));
+	));
 }
 
 /** The key of the step after $after_key in flow order, or 'done'. */

@@ -1,35 +1,9 @@
 /*
- * The sign-in security step: the shown-once backup codes, and adding a passkey (includes/setup_steps/signin_security.php).
+ * The sign-in security step: adding a passkey (includes/setup_steps/signin_security.php).
  * Loaded by views/setup.php for this step.
  *
- * @version 1.0
+ * @version 1.1 - passkey only: the backup-codes screen is gone with the authenticator app
  */
-// The shown-once backup codes, and the gate on Continue.
-(function () {
-	var codesEl = document.getElementById('setup-totp-codes');
-	if (!codesEl) { return; }
-	var codes = codesEl.textContent;
-	var saved = document.getElementById('setup-codes-saved');
-	var cont = document.getElementById('setup-codes-continue');
-	cont.style.pointerEvents = 'none'; cont.style.opacity = '0.5';
-	saved.addEventListener('change', function () {
-		var on = saved.checked;
-		cont.style.pointerEvents = on ? '' : 'none';
-		cont.style.opacity = on ? '' : '0.5';
-		cont.setAttribute('aria-disabled', on ? 'false' : 'true');
-	});
-	document.getElementById('setup-codes-copy').addEventListener('click', function () {
-		navigator.clipboard.writeText(codes);
-	});
-	document.getElementById('setup-codes-download').addEventListener('click', function () {
-		var a = document.createElement('a');
-		a.href = URL.createObjectURL(new Blob([codes], { type: 'text/plain' }));
-		a.download = 'backup-codes.txt';
-		a.click();
-		URL.revokeObjectURL(a.href);
-	});
-})();
-
 document.addEventListener('DOMContentLoaded', function () {
 	var btn = document.getElementById('setup-pk-add');
 	var hint = document.getElementById('setup-pk-hint');
@@ -39,8 +13,8 @@ document.addEventListener('DOMContentLoaded', function () {
 		var pwRow = document.getElementById('setup-pk-password-row');
 		if (pwRow) { pwRow.style.display = 'none'; }
 		hint.textContent = window.isSecureContext
-			? 'This browser does not support passkeys — use the authenticator app below.'
-			: 'Passkeys only work on the secure version of the site — finish the "Secure connection" step first, or use the authenticator app below.';
+			? 'This browser does not support passkeys. Try another browser, or set up an authenticator app from your security page.'
+			: 'Passkeys only work on the secure version of the site — finish the "Secure connection" step first.';
 		return;
 	}
 	btn.addEventListener('click', async function () {

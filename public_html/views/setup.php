@@ -162,9 +162,8 @@
 <?php $page->render_support_help_slot('div', 'setup-help', 'setup:' . $current_key, 'Ask for help with this step'); ?>
 
 <?php
-		$force_render = ($page_vars['force_render_step'] ?? '') === $current_key;
 		$was_declined = !empty($declined[$current_key]);
-		$is_green = ($statuses[$current_key] === SetupSteps::STATUS_GREEN && !$force_render && !$was_declined);
+		$is_green = ($statuses[$current_key] === SetupSteps::STATUS_GREEN && !$was_declined);
 		if ($is_green) {
 ?>
 			<div class="setup-done-row">
@@ -214,9 +213,7 @@
 <?php } else { ?>
 				<span></span>
 <?php } ?>
-<?php if ($force_render) { ?>
-				<span></span><!-- shown-once screen: the partial supplies its own gated continue -->
-<?php } elseif ($statuses[$current_key] === SetupSteps::STATUS_GREEN) { ?>
+<?php if ($statuses[$current_key] === SetupSteps::STATUS_GREEN) { ?>
 				<a class="btn btn-primary" href="/setup?step=<?php echo urlencode($next_key); ?>">Continue &rarr;</a>
 <?php } else { ?>
 				<a class="setup-skip" href="/setup?step=<?php echo urlencode($next_key); ?>">Skip for now &rarr;</a>

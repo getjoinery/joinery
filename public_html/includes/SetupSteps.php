@@ -36,6 +36,7 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.35 - the Sign-in security step copy no longer offers an authenticator app: the wizard is passkey only
  * @version 1.34 - /admin/admin_management_node, where a management node sends the admin to connect this site, is left alone too
  * @version 1.33 - /services_connected, the return from the wizard's Connect button, is left alone by the login interrupt
  * @version 1.32 - the email links (/verify-email, /login?act_code=, /recovery-verify) are left alone by the login
@@ -803,7 +804,7 @@ class SetupSteps {
 			'title' => 'Sign-in security',
 			'scope' => 'user',
 			'order' => 10,
-			'copy'  => 'A passkey lets you sign in with your fingerprint or security key, and protects your account even if your password leaks. Add one now — codes from an authenticator app work as the fallback.',
+			'copy'  => 'A passkey lets you sign in with your fingerprint or security key, and protects your account even if your password leaks. Add one now.',
 			'render_file' => 'includes/setup_steps/signin_security.php',
 			'render_when_done' => true,
 			'home_url' => '/profile/security',
