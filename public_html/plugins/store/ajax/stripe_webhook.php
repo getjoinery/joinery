@@ -37,6 +37,22 @@ try {
     exit();
 }
 
+// A test-mode event (livemode false) arriving at a live site is about
+// something on Stripe's test side, a superadmin's test purchase: it is handled
+// there, with the test keys, whatever this request's own side is.
+if (empty($event->livemode) && !TestMode::active()) {
+    TestMode::on_test_side(function () use ($event) {
+        _stripe_webhook_handle($event, new StripeHelper());
+    });
+} else {
+    _stripe_webhook_handle($event, $stripe_helper);
+}
+
+/**
+ * Handle one verified event: record it once, act on it, log it, answer 200.
+ * $stripe_helper is on the side the event came from.
+ */
+function _stripe_webhook_handle($event, $stripe_helper) {
 // The event is Stripe's, verified above: no person is behind what it writes
 // (orders, subscriptions, the log), so every write from here on is the
 // server's own (spec declared_permissions 3.2).
@@ -47,7 +63,7 @@ $event_id = $event->id ?? null;
 if ($event_id && WebhookLog::isDuplicate($event_id)) {
     error_log("Stripe webhook: duplicate event $event_id, skipping");
     http_response_code(200);
-    exit();
+    return;
 }
 
 $event_type = $event->type;
@@ -426,6 +442,7 @@ WebhookLog::logEvent(
 );
 
 http_response_code(200);
+}
 
 /**
  * A Stripe subscription has ended: record it on its line, tell whatever

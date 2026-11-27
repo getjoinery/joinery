@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.6.54",
+    "version": "1.6.55",
     "bootstrap": "includes/bootstrap.php",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, Apple/Google mobile billing, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
@@ -434,12 +434,12 @@
             "group": "stripe",
             "label": "Stripe secret key",
             "validation": {
-                "pattern": "#^sk_(live|test)_[a-zA-Z0-9]{24,}$#",
+                "pattern": "#^(sk|rk)_(live|test)_[a-zA-Z0-9]{24,}$#",
                 "messages": {
-                    "pattern": "Must start with sk_live_ or sk_test_ (not pk_)"
+                    "pattern": "Must start with sk_live_, rk_live_, sk_test_ or rk_test_. Not the publishable key (pk_), and not an organization key (sk_org_): use this account's own key from its Developers > API keys page."
                 }
             },
-            "helptext": "Starts with sk_live_ or sk_test_. Not the publishable key."
+            "helptext": "This Stripe account's secret key (sk_live_) or a restricted key (rk_live_). Not the publishable key, and not an organization key."
         },
         {
             "name": "stripe_api_pkey_test",
@@ -449,21 +449,41 @@
             "group": "stripe",
             "label": "Test Stripe secret key",
             "validation": {
-                "pattern": "#^sk_(live|test)_[a-zA-Z0-9]{24,}$#",
+                "pattern": "#^(sk|rk)_(live|test)_[a-zA-Z0-9]{24,}$#",
                 "messages": {
-                    "pattern": "Must start with sk_live_ or sk_test_ (not pk_)"
+                    "pattern": "Must start with sk_test_ or rk_test_. Not the publishable key (pk_), and not an organization key (sk_org_): use this account's own test key."
                 }
             },
-            "helptext": "Starts with sk_test_."
+            "helptext": "This Stripe account's test secret key (sk_test_) or a restricted test key (rk_test_)."
         },
         {
             "name": "stripe_endpoint_secret",
             "default": "",
+            "validation": {
+                "pattern": "#^whsec_[a-zA-Z0-9]{20,}$#",
+                "messages": {
+                    "pattern": "Must start with whsec_: the endpoint's Signing secret from Stripe (Developers > Webhooks > the endpoint > Signing secret), not its URL or an API key."
+                }
+            },
             "legacy_core": true,
             "secret": true,
             "group": "stripe",
             "label": "Stripe Endpoint Secret",
-            "helptext": "Signing secret for the Stripe webhook, from the Stripe dashboard."
+            "helptext": "Signing secret (whsec_) of the webhook endpoint in the live Stripe account, from the Stripe dashboard. A dev or test site whose Stripe is all test mode puts its one endpoint's secret here."
+        },
+        {
+            "name": "store_stripe_endpoint_secret_test",
+            "default": "",
+            "validation": {
+                "pattern": "#^whsec_[a-zA-Z0-9]{20,}$#",
+                "messages": {
+                    "pattern": "Must start with whsec_: the endpoint's Signing secret from Stripe (Developers > Webhooks > the endpoint > Signing secret), not its URL or an API key."
+                }
+            },
+            "secret": true,
+            "group": "stripe",
+            "label": "Test Stripe Endpoint Secret",
+            "helptext": "Signing secret (whsec_) of the webhook endpoint made with the Stripe dashboard in test mode. A live site that takes superadmin test purchases needs it, or their webhooks are refused."
         },
         {
             "name": "store_stripe_portal_configuration_live",

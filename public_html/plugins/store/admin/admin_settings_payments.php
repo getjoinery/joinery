@@ -204,7 +204,7 @@
 							echo '<p><strong>Account Type:</strong> ' . htmlspecialchars($account->type) . '</p>';
 							echo '<p><strong>Country:</strong> ' . htmlspecialchars($account->country) . '</p>';
 						} catch (Exception $e) {
-							echo '<p style="color: red;"><strong>✗ Live API Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
+							echo '<p style="color: red;"><strong>✗ Test API Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
 						}
 					} else {
 						echo '<p style="color: orange;"><strong>⚠ Configuration:</strong> Stripe keys not configured</p>';
@@ -256,7 +256,7 @@
 		echo '<h5>Stripe Webhook Settings</h5>';
 		SettingsFieldRenderer::renderGroup($formwriter, 'stripe', array(
 			'source' => 'store',
-			'only'   => array('stripe_endpoint_secret'),
+			'only'   => array('stripe_endpoint_secret', 'store_stripe_endpoint_secret_test'),
 		));
 		echo '</div>';
 		echo '<div class="col-md-6">';

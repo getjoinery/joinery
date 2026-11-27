@@ -184,7 +184,7 @@ $must_be_secret = array(
 	'dns_filtering_dns_api_key', 'dns_filtering_dns_secondary_api_key',
 	'joinery_ai_anthropic_api_key', 'joinery_ai_local_api_key', 'joinery_ai_fireworks_api_key',
 	'joinery_ai_brave_search_api_key', 'joinery_ai_market_data_api_key',
-	'stripe_api_pkey', 'stripe_api_pkey_test', 'stripe_endpoint_secret',
+	'stripe_api_pkey', 'stripe_api_pkey_test', 'stripe_endpoint_secret', 'store_stripe_endpoint_secret_test',
 	'paypal_api_secret', 'paypal_api_secret_test',
 	'server_manager_getjoinery_api_secret_key',
 );

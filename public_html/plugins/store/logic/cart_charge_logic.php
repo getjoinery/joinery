@@ -1849,7 +1849,8 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		return $payment_refused("Something went wrong processing your order. Please try again.", false);
 	}
 	if($return !== null){
-		return _cart_charge_paid_not_completed('gateway return ' . $return['lock_ref'] . ' threw before it completed');
+		return _cart_charge_paid_not_completed('gateway return ' . $return['lock_ref'] . ' threw before it completed: '
+			. $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
 	}
 	$support_email = $settings->get_setting('defaultemail');
 	return _checkout_error("Something went wrong processing your order. Please try again" . ($support_email ? " or contact us at $support_email" : "") . ".");

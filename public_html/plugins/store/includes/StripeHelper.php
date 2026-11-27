@@ -140,7 +140,7 @@ class StripeHelper {
 
 	/**
 	 * PRIVATE: Get validated secret key for server-side use
-	 * @return string Validated secret key (sk_)
+	 * @return string Validated secret key (sk_ or restricted rk_)
 	 * @throws StripeHelperException if key is invalid or wrong type
 	 */
 	private function get_stripe_private_key() {
@@ -150,11 +150,21 @@ class StripeHelper {
 		
 		$prefix = $this->test_mode ? 'test' : 'live';
 		
-		// Validate it's a secret key
-		if (strpos($this->api_secret_key, "sk_{$prefix}_") !== 0) {
+		// An organization key (sk_org_) acts on every account in the Stripe
+		// organization and needs each request to name its account; the store
+		// uses one account's own key.
+		if (strpos($this->api_secret_key, 'sk_org_') === 0) {
 			throw new StripeHelperException(
-				"Invalid Stripe secret key. Expected key starting with sk_{$prefix}_ but got: " . 
-				substr($this->api_secret_key, 0, 10) . "..."
+				"The Stripe secret key is an organization key (sk_org_). Use this account's own secret key "
+				. "(sk_{$prefix}_) or a restricted key (rk_{$prefix}_) from the account's Developers > API keys page."
+			);
+		}
+
+		// A secret key, or a restricted one, for this mode
+		if (strpos($this->api_secret_key, "sk_{$prefix}_") !== 0 && strpos($this->api_secret_key, "rk_{$prefix}_") !== 0) {
+			throw new StripeHelperException(
+				"Invalid Stripe secret key. Expected key starting with sk_{$prefix}_ or rk_{$prefix}_ but got: " .
+				substr($this->api_secret_key, 0, 7) . "..."
 			);
 		}
 		
@@ -170,27 +180,32 @@ class StripeHelper {
 	}
 
 	/**
-	 * PRIVATE: Get validated webhook endpoint secret
-	 * @return string Validated webhook endpoint secret (whsec_)
-	 * @throws StripeHelperException if secret is invalid or not configured
+	 * PRIVATE: the webhook signing secrets this site holds, the live one first.
+	 * Stripe signs a test-mode endpoint and a live one with different secrets;
+	 * a live site that takes test purchases holds both.
+	 * @return string[] whsec_ secrets
+	 * @throws StripeHelperException if none is set or one is malformed
 	 */
-	private function get_webhook_endpoint_secret() {
+	private function get_webhook_endpoint_secrets() {
 		$settings = Globalvars::get_instance();
-		$endpoint_secret = $settings->get_setting('stripe_endpoint_secret');
-		
-		if (empty($endpoint_secret)) {
+		$secrets = array();
+		foreach (array('stripe_endpoint_secret', 'store_stripe_endpoint_secret_test') as $name) {
+			$secret = (string)$settings->get_setting($name);
+			if ($secret === '') {
+				continue;
+			}
+			if (strpos($secret, 'whsec_') !== 0) {
+				throw new StripeHelperException(
+					"Invalid Stripe webhook endpoint secret format in $name. Expected key starting with whsec_ but got: " .
+					substr($secret, 0, 6) . "..."
+				);
+			}
+			$secrets[] = $secret;
+		}
+		if (!$secrets) {
 			throw new StripeHelperException("Stripe webhook endpoint secret is not configured");
 		}
-		
-		// Validate endpoint secret format (should start with whsec_)
-		if (strpos($endpoint_secret, 'whsec_') !== 0) {
-			throw new StripeHelperException(
-				"Invalid Stripe webhook endpoint secret format. Expected key starting with whsec_ but got: " .
-				substr($endpoint_secret, 0, 10) . "..."
-			);
-		}
-		
-		return $endpoint_secret;
+		return $secrets;
 	}
 
 	/**
@@ -1882,9 +1897,16 @@ class StripeHelper {
 			throw new \Stripe\Exception\SignatureVerificationException("Missing Stripe signature header");
 		}
 		
-		// Get validated endpoint secret and process webhook
-		$endpoint_secret = $this->get_webhook_endpoint_secret();
-		return \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
+		// The event verifies against whichever endpoint's secret signed it.
+		$last = null;
+		foreach ($this->get_webhook_endpoint_secrets() as $endpoint_secret) {
+			try {
+				return \Stripe\Webhook::constructEvent($payload, $sig_header, $endpoint_secret);
+			} catch (\Stripe\Exception\SignatureVerificationException $e) {
+				$last = $e;
+			}
+		}
+		throw $last;
 	}
 
 }

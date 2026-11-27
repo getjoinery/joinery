@@ -236,7 +236,11 @@ $cart = ShoppingCart::current();
 $cart->clear_cart();
 $cart->add_item($widget, array('product_version' => $widget->get_product_versions(TRUE)->get(0)->key,
 	'full_name_first' => 'Sw', 'full_name_last' => 'Buyer', 'email' => $subscriber->get('usr_email')));
-$cart->record_payment($sess_a, 'stripe_checkout');
+// The checkout's billing form names who pays, as the real checkout does before recording.
+$cart->determine_billing_user(array('billing_first_name' => 'Sw', 'billing_last_name' => 'Buyer',
+	'billing_email' => $subscriber->get('usr_email')), false);
+// The checkout's own POST makes this write inside rule_checked_write() (cart_charge_logic.php); so does the test.
+SystemBase::rule_checked_write(function () use ($cart, $sess_a) { $cart->record_payment($sess_a, 'stripe_checkout'); });
 $cart->clear_cart();
 $_SESSION = array();
 GatewayPaymentRecord::$session_id_stand_in = null;
@@ -321,7 +325,8 @@ check(count(sw_order_ids_for_session($sess_c)) === 1, 'the replay created no sec
 // --- a session the buyer's return already completed gets no second order ---
 
 $sess_d = 'cs_test_sw_' . $run_id . '_d';
-SystemBase::server_initiated_write(function () use ($sess_d, $subscriber) {
+// A completed order has its lines (Order::is_fulfilled()), as the return leaves it.
+SystemBase::server_initiated_write(function () use ($sess_d, $subscriber, $widget_id) {
 	$returned = new Order(NULL);
 	$returned->set('ord_usr_user_id', $subscriber->key);
 	$returned->set('ord_total_cost', 20);
@@ -329,6 +334,13 @@ SystemBase::server_initiated_write(function () use ($sess_d, $subscriber) {
 	$returned->set('ord_status', Order::STATUS_PAID);
 	$returned->prepare();
 	$returned->save();
+	$line = new OrderItem(NULL);
+	$line->set('odi_ord_order_id', $returned->key);
+	$line->set('odi_pro_product_id', $widget_id);
+	$line->set('odi_usr_user_id', $subscriber->key);
+	$line->set('odi_price', 20);
+	$line->save();
+	harness_register_row('odi_order_items', 'odi_order_item_id', $line->key);
 });
 foreach (sw_order_ids_for_session($sess_d) as $oid) {
 	harness_register_row('ord_orders', 'ord_order_id', $oid);
