@@ -38,7 +38,7 @@ if ($domain_id === 0 || !isset($domains[$domain_id])) {
 $page = new AdminPage();
 $page->admin_header(
 	array(
-		'menu-id' => 'incoming',
+		'menu-id' => 'mailbox-reader',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
 			'Reports' => '',

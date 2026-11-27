@@ -12,7 +12,7 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 $page = new AdminPage();
 $page->admin_header(
 array(
-	'menu-id'=> 'all-events',
+	'menu-id'=> 'events-list',
 	'page_title' => 'Edit Event',
 	'readable_title' => 'Edit Event',
 	'breadcrumbs' => $breadcrumbs,

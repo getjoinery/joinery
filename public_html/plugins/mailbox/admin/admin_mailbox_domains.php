@@ -66,7 +66,7 @@ if (!empty($edit_domain)) {
 }
 $page->admin_header(
 	array(
-		'menu-id' => 'incoming',
+		'menu-id' => 'mailbox-reader',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
 			'Domains' => '',

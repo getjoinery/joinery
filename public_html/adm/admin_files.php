@@ -113,7 +113,7 @@
 	$page = new AdminPage();
 	$page->admin_header(
 	array(
-		'menu-id'=> 'files',
+		'menu-id'=> 'files-parent',
 		'page_title' => 'Files',
 		'readable_title' => 'Files',
 		'breadcrumbs' => array(

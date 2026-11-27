@@ -16,7 +16,7 @@
 	$page = new AdminPage();
 	$page->admin_header(
 	array(
-		'menu-id'=> 'coupons',
+		'menu-id'=> 'coupon-codes',
 		'page_title' => 'Coupon Codes',
 		'readable_title' => 'Coupon Codes',
 		'breadcrumbs' => array(

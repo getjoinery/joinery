@@ -27,7 +27,7 @@ extract($page_vars);
 
 $page = new AdminPage();
 $page->admin_header(array(
-	'menu-id' => 'incoming',
+	'menu-id' => 'mailbox-reader',
 	'breadcrumbs' => array(
 		'Server Manager' => '/admin/server_manager',
 		'Relay Fleet' => '',

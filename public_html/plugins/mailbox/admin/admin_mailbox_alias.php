@@ -26,7 +26,7 @@ $is_edit = ($alias->key) ? true : false;
 $page = new AdminPage();
 $page->admin_header(
 	array(
-		'menu-id' => 'incoming',
+		'menu-id' => 'mailbox-reader',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
 			($is_edit ? 'Edit Alias' : 'New Alias') => '',

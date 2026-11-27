@@ -22,7 +22,7 @@ $filter_status = LibraryFunctions::fetch_variable('status', '', 0, '');
 $page = new AdminPage();
 $page->admin_header(
 	array(
-		'menu-id' => 'incoming',
+		'menu-id' => 'mailbox-reader',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
 			'Logs' => '',

@@ -31,7 +31,7 @@ $show_html = isset($_GET['view']) && $_GET['view'] === 'html';
 $page = new AdminPage();
 $page->admin_header(
 	array(
-		'menu-id' => 'incoming',
+		'menu-id' => 'mailbox-reader',
 		'breadcrumbs' => array(
 			'Inbound Email' => '/plugins/mailbox/admin/admin_mailbox',
 			'Mailbox' => '/profile/mailbox/mailbox',

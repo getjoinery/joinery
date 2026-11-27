@@ -26,7 +26,7 @@ $filter_domain = LibraryFunctions::fetch_variable('domain_id', '', 0, '');
 $page = new AdminPage();
 $page->admin_header(
 	array(
-		'menu-id' => 'incoming',
+		'menu-id' => 'mailbox-reader',
 		'breadcrumbs' => array(
 			'Inbound Email' => '',
 		),

@@ -14,7 +14,7 @@
 		require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 		$page = new AdminPage();
 		$page->admin_header(array(
-			'menu-id' => 'files',
+			'menu-id' => 'files-parent',
 			'page_title' => 'File upload',
 			'readable_title' => 'File upload',
 			'session' => SessionControl::get_instance(),

@@ -15,7 +15,7 @@ $is_edit = ($tier && $tier->key);
 $page_title = $is_edit ? 'Edit Subscription Tier' : 'Create Subscription Tier';
 
 $page->admin_header(array(
-    'menu-id' => 'subscription-tier-edit',
+    'menu-id' => 'subscription-tiers',
     'page_title' => $page_title,
     'readable_title' => $page_title,
     'breadcrumbs' => array(
