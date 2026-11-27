@@ -64,7 +64,13 @@
             "base_url": "https://api.trustedrouter.com/v1",
             "api_key_setting": "joinery_ai_hosted_api_key",
             "trust": "trusted",
-            "trust_note": "AI credit your hosting includes, served through TrustedRouter. Every request is sent with zero-retention routing forced on, so it is refused rather than sent to any model host that keeps or trains on the text. The text leaves your hardware, but not to a general cloud.",
+            "trust_note": "AI credit your hosting includes, served through TrustedRouter. Every request is sent at the site's chosen privacy level: zero retention, which routes only to model hosts that have agreed to keep no copy, or confidential, which routes only to sealed hardware the host itself cannot read. A request no route can meet is refused, never sent somewhere that keeps the text. The text leaves your hardware, but not to a general cloud.",
+            "privacy_setting": "joinery_ai_hosted_privacy",
+            "privacy_levels": {
+                "zero_retention": {"provider": {"zdr": true, "sort": "price"}},
+                "confidential": {"provider": {"min_privacy": "confidential"}}
+            },
+            "_privacy_note": "The levels are the choices of the joinery_ai_hosted_privacy setting, whose plugin.json declaration holds their names and the sentence each owner reads. The first level here is the default. Each level's provider fields go on every request (TrustedRouterProvider), and a model's cost_by_privacy gives its price at that level, so the cost figures match what the credit is charged. Zero retention sorts by price: TrustedRouter's own pick among zero-retention routes cost about six times the cheapest (live check 2026-11-27).",
             "_models_note": "One model. Its prices are TrustedRouter's, their 5.5% included, so the cost figures match what the site's credit is charged. Adding a model is one entry here, after its provider's data terms are checked.",
             "models": [
                 {
@@ -76,6 +82,11 @@
                     "context": 128000,
                     "attachments": {"vision": false, "document": false},
                     "cost": {"input": 0.026375, "output": 0.07385, "cache_read": 0.026375},
+                    "cost_by_privacy": {
+                        "zero_retention": {"input": 0.026375, "output": 0.07385, "cache_read": 0.026375},
+                        "confidential": {"input": 0.2432, "output": 0.7902, "cache_read": 0.2432}
+                    },
+                    "_cost_note": "TrustedRouter's prices, their 5.5% included: zero retention at its cheapest route (Greenference), confidential at its one route (Privatemode). A fallback to a dearer zero-retention route is charged at that route's price, which the cap counts.",
                     "defaults": {"temperature": 0.6, "top_p": 0.95, "max_output_tokens": 16000},
                     "_thinking_note": "It reasons on every call, at its highest effort unless told. thinking: always makes work that asks for no reasoning run at low, the least it accepts, so low is what it gets unless a recipe asks for more."
                 }

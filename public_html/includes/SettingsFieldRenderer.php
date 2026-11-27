@@ -12,6 +12,7 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
+ * @version 1.12 - type radio: choices with a sentence under each (option_descriptions)
  * @version 1.11 - a select whose stored value is none of its choices is drawn at its declared default, not its first choice
  * @version 1.10 - type user: the chosen user is labelled as user_search labels it
  * @version 1.9 - type user: the user search picker (user_search), showing the chosen user by name
@@ -377,6 +378,31 @@ class SettingsFieldRenderer {
 				}
 				$field['value'] = $value;
 				$form->dropinput($name, $label, $field);
+				return;
+
+			case 'radio':
+				// The same rules as a select, drawn as choices with a sentence
+				// under each (option_descriptions), for a choice whose options
+				// each need saying what they mean.
+				$choices = SettingsDeclarations::resolveOptions($declaration);
+				foreach ($skip_options as $choice) {
+					unset($choices[$choice]);
+				}
+				foreach ($option_labels as $choice => $choice_label) {
+					if (isset($choices[$choice])) $choices[$choice] = $choice_label;
+				}
+				$field['options'] = $choices;
+				$descriptions = isset($declaration['option_descriptions']) && is_array($declaration['option_descriptions'])
+					? array_intersect_key($declaration['option_descriptions'], $choices) : array();
+				if ($descriptions) {
+					$field['descriptions'] = $descriptions;
+				}
+				if (!array_key_exists((string)$value, $choices)
+					&& isset($declaration['default']) && array_key_exists((string)$declaration['default'], $choices)) {
+					$value = (string)$declaration['default'];
+				}
+				$field['value'] = $value;
+				$form->radioinput($name, $label, $field);
 				return;
 
 			case 'textarea':

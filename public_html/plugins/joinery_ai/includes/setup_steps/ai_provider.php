@@ -7,6 +7,9 @@
  * actually reach for.
  * Included by views/setup.php with $page, $settings, $next_key in scope.
  *
+ * @version 1.6
+ * @changelog 1.6 - a site whose hosting includes AI credit is asked its privacy level first, each level with its
+ *                  one-sentence guarantee from ai_endpoints.json (specs/implemented/hosted_ai_credit.md)
  * @version 1.5
  * @changelog 1.5 - on a server that cannot run a model (hosted, or under 4 GB) with nothing set up, neither choice is
  *                  pre-selected, and own-machine says it means another machine (walkthrough Q26)
@@ -45,6 +48,42 @@ if ($setup_ai_small && $setup_ai_nothing_set) {
 
 <?php if (!empty($_GET['saved'])) { ?>
 	<div class="jy-alert jy-alert-info">Saved. Press "Test it" to prove the assistant answers.</div>
+<?php } ?>
+
+<?php
+// AI credit included with the hosting: nothing to set up, one question to
+// answer. Its own form, so saving it touches no other field. The levels are
+// the catalog's; their names and guarantees are the setting's declaration.
+$setup_ai_hosted = (string)$settings->get_setting('joinery_ai_hosted_api_key') !== '';
+$setup_ai_levels = $setup_ai_hosted ? AiEndpointRegistry::privacyLevels('hosted') : array();
+if ($setup_ai_levels) {
+	$setup_ai_level = AiEndpointRegistry::privacyLevel('hosted');
+	$setup_ai_privacy_form = $page->getFormWriter('setup-ai-privacy', array('action' => '/setup', 'method' => 'POST'));
+	$setup_ai_privacy_form->begin_form();
+	$setup_ai_privacy_form->hiddeninput('action', '', array('value' => 'step_settings_save'));
+	$setup_ai_privacy_form->hiddeninput('step', '', array('value' => 'ai_provider'));
+	$setup_ai_privacy_form->hiddeninput('step_key', '', array('value' => 'ai_provider'));
+?>
+	<fieldset class="jy-fieldset">
+		<legend>Your hosting includes AI credit</legend>
+		<p>The assistant is ready to use with nothing to set up. Choose how private its requests are; you can change this later on the Joinery AI settings page.</p>
+<?php
+	// Drawn by SettingsFieldRenderer from the setting's declaration, which
+	// holds each level's name and the sentence on what it guarantees.
+	SettingsFieldRenderer::renderGroup($setup_ai_privacy_form, 'provider', array(
+		'source' => 'joinery_ai',
+		'only' => array('joinery_ai_hosted_privacy'),
+		'values' => array('joinery_ai_hosted_privacy' => $setup_ai_level !== null ? $setup_ai_level['key'] : ''),
+	));
+?>
+	</fieldset>
+	<div class="jy-mt-2">
+		<?php echo $setup_ai_privacy_form->submitbutton('btn_ai_privacy_save', 'Save', array('class' => 'btn btn-primary')); ?>
+	</div>
+<?php
+	$setup_ai_privacy_form->end_form();
+?>
+	<h4 class="jy-mt-3">Or use your own AI as well</h4>
 <?php } ?>
 
 <?php

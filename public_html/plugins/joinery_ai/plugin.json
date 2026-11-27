@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.26.36",
+    "version": "0.26.37",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -177,6 +177,22 @@
             "secret": true,
             "managed": true,
             "helptext": "The AI credit key for a site whose hosting includes AI credit. Written by utils/hosted_ai_settings.php from the hosting operator's management node, never typed in; empty means the hosted endpoint is not available."
+        },
+        {
+            "name": "joinery_ai_hosted_privacy",
+            "default": "",
+            "group": "provider",
+            "label": "Privacy of the AI credit included with your hosting",
+            "type": "radio",
+            "options": {
+                "zero_retention": "Zero retention (standard)",
+                "confidential": "Confidential"
+            },
+            "option_descriptions": {
+                "zero_retention": "Your prompts are sent encrypted and our provider agrees not to save your prompts or the replies (about 3 cents per 100 prompts).",
+                "confidential": "Your prompts are sent encrypted and processed only inside sealed hardware that even the company running the model cannot read (about 30 cents per 100 prompts)."
+            },
+            "helptext": "Applies only to AI credit your hosting includes. Until one is chosen, zero retention applies. Prices are for a typical chat message, paid from the site's AI credit."
         },
         {
             "name": "joinery_ai_brave_search_api_key",

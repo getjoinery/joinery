@@ -85,7 +85,7 @@ before declarations are loadable.
 | `default` | Seed value. Always a string — `"0"`/`"1"` for booleans, `"42"` for numbers. |
 | `group` | Which box the field renders in. Pages request groups by name. Ungrouped core fields fall into `general`; ungrouped plugin fields fall into a group named after the plugin. |
 | `label` | Field label. Required for anything renderable. |
-| `type` | `text`, `number`, `checkbox`, `select`, `password`, `textarea`, `color`, `user`. Drives the FormWriter call. |
+| `type` | `text`, `number`, `checkbox`, `select`, `radio`, `password`, `textarea`, `color`, `user`. Drives the FormWriter call. A `radio` takes `options` like a `select` and may add `option_descriptions` (choice => one sentence shown under it). |
 | `options` | Literal `value: label` map, for `select`. |
 | `options_from` | `Class::method` returning a `value: label` map, for options that are discovered rather than fixed. |
 | `options_include` | Path to the file defining that class, when it is not one of the always-loaded core classes. |

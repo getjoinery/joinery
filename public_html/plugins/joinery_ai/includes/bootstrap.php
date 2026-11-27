@@ -19,6 +19,7 @@
  * @version 1.6 - ai_pipeline runs in the long lane (VaultDeferredWork § Two lanes)
  * @version 1.5 - the reseal callback covers RecipeRun and AiQueuedAction: a rotation left
  *   every run and queued action on the old key
+ * @version 1.5 - the AI assistant step asks a site with hosted AI credit its privacy level (joinery_ai_hosted_privacy)
  * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.3
  * @changelog 1.3 - registers the ai_provider setup wizard step
@@ -149,9 +150,19 @@ SetupSteps::register('ai_provider', array(
         'joinery_ai_local_model',
         'joinery_ai_anthropic_api_key',
         'joinery_ai_fireworks_api_key',
+        'joinery_ai_hosted_privacy',
     ),
     'status' => function (?User $viewer): string {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+        // A site whose hosting includes AI credit has AI from its first day,
+        // so the step's one question there is the privacy level: it is open
+        // until the owner has picked one, or said not now (zero retention
+        // applies either way until they choose).
+        $settings = Globalvars::get_instance();
+        if ((string)$settings->get_setting('joinery_ai_hosted_api_key') !== ''
+                && trim((string)$settings->get_setting('joinery_ai_hosted_privacy')) === '') {
+            return SetupSteps::hasDecision('ai_provider', NULL) ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+        }
         try {
             if (count(LlmProviderFactory::allModels()) > 0) {
                 return SetupSteps::STATUS_GREEN;

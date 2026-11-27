@@ -28,6 +28,7 @@
  *   vault_gated  Writing it requires an open vault unlock window.
  *   managed      Machine-written. Never rendered on a form.
  *
+ * @version 1.6 - type radio, with option_descriptions: a sentence under each choice
  * @version 1.5 - clearsPages ["/"] clears every cached page (a setting that changes a header every page sends)
  * @version 1.4 - type user: a user id, chosen with the user search picker
  * @version 1.3 - a sandboxed plugin's manifest settings are declarations too (SandboxSettings)
@@ -303,7 +304,7 @@ class SettingsDeclarations {
 	 */
 	public static function schemaErrors(): array {
 		$errors = array();
-		$valid_types = array('text', 'number', 'checkbox', 'select', 'password', 'textarea', 'color', 'user');
+		$valid_types = array('text', 'number', 'checkbox', 'select', 'radio', 'password', 'textarea', 'color', 'user');
 
 		foreach (self::all() as $name => $d) {
 			$where = "{$d['_source']}:{$name}";
@@ -324,11 +325,24 @@ class SettingsDeclarations {
 				$errors[] = "{$where}: label must be a string.";
 			}
 
-			if (($d['type'] ?? '') === 'select') {
+			if (in_array($d['type'] ?? '', array('select', 'radio'), true)) {
 				$has_literal = isset($d['options']) && is_array($d['options']) && $d['options'] !== array();
 				$has_source  = !empty($d['options_from']);
 				if (!$has_literal && !$has_source) {
-					$errors[] = "{$where}: a select must declare options or options_from.";
+					$errors[] = "{$where}: a {$d['type']} must declare options or options_from.";
+				}
+			}
+			// A radio may say a sentence under each choice; each one names a
+			// declared choice, so a renamed choice cannot leave its sentence behind.
+			if (isset($d['option_descriptions'])) {
+				if (($d['type'] ?? '') !== 'radio' || !is_array($d['option_descriptions'])) {
+					$errors[] = "{$where}: option_descriptions is an object of choice => sentence, on a radio only.";
+				} elseif (isset($d['options']) && is_array($d['options'])) {
+					foreach (array_keys($d['option_descriptions']) as $choice) {
+						if (!array_key_exists($choice, $d['options'])) {
+							$errors[] = "{$where}: option_descriptions names '{$choice}', which is not one of its options.";
+						}
+					}
 				}
 			}
 

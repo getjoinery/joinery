@@ -23,7 +23,14 @@ class AiCatalogException extends Exception {}
  * the same lookup and cannot disagree. That property is what the sealed-mail
  * gate rests on.
  *
+ * An endpoint may offer PRIVACY LEVELS (privacy_levels, chosen by the setting
+ * named in privacy_setting; the first is the default). The chosen level's
+ * provider fields go on every request, and a model's cost_by_privacy gives
+ * its price at that level, so cost figures follow the choice.
+ *
  * See specs/joinery_ai_model_capability_resolution.md §1, §3a, §3b.
+ *
+ * @version 1.1 - privacy levels: privacyLevel(), privacyLevels(), and a model's cost at the chosen level
  */
 class AiEndpointRegistry {
 
@@ -254,6 +261,42 @@ class AiEndpointRegistry {
         return self::catalog()[$id] ?? null;
     }
 
+    /**
+     * An endpoint's privacy levels, key => ['label', 'description', 'provider'],
+     * in declared order (the first is the default); empty when it offers none.
+     * The words people read live in the privacy setting's declaration; label
+     * and description here are empty unless the catalog states them.
+     */
+    public static function privacyLevels(string $endpoint_key): array {
+        $e = self::endpoint($endpoint_key);
+        $levels = ($e !== null && isset($e['privacy_levels']) && is_array($e['privacy_levels'])) ? $e['privacy_levels'] : [];
+        $out = [];
+        foreach ($levels as $key => $level) {
+            if (!is_array($level)) continue;
+            $out[(string)$key] = [
+                'label'       => (string)($level['label'] ?? $key),
+                'description' => (string)($level['description'] ?? ''),
+                'provider'    => isset($level['provider']) && is_array($level['provider']) ? $level['provider'] : [],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * The level this site has chosen for an endpoint, with its key, or null
+     * when the endpoint offers none. A setting that is empty or names no level
+     * is the first (the default), so a site that never chose gets the default.
+     */
+    public static function privacyLevel(string $endpoint_key): ?array {
+        $levels = self::privacyLevels($endpoint_key);
+        if (!$levels) return null;
+        $e = self::endpoint($endpoint_key);
+        $setting = (string)($e['privacy_setting'] ?? '');
+        $chosen = $setting === '' ? '' : trim((string)Globalvars::get_instance()->get_setting($setting));
+        $key = isset($levels[$chosen]) ? $chosen : (string)array_key_first($levels);
+        return ['key' => $key] + $levels[$key];
+    }
+
     /** Does an id name a model some endpoint declares, configured or not? Used
      *  to tell "your pin is unavailable today" from "your pin is nonsense". */
     public static function isDeclared(string $id): bool {
@@ -335,6 +378,15 @@ class AiEndpointRegistry {
         return $out ?: AiModelRequirement::DEFAULT_EFFORT_LEVELS;
     }
 
+    /** A model's price, at the endpoint's chosen privacy level when it prices them. */
+    private static function declaredCost(array $m, array $e): array {
+        $base = isset($m['cost']) && is_array($m['cost']) ? $m['cost'] : [];
+        if (!isset($m['cost_by_privacy']) || !is_array($m['cost_by_privacy'])) return $base;
+        $level = self::privacyLevel((string)$e['key']);
+        $by = $level !== null ? ($m['cost_by_privacy'][$level['key']] ?? null) : null;
+        return is_array($by) ? $by : $base;
+    }
+
     /** A declared catalog entry, filled out with its endpoint's facts. */
     private static function normalizeDeclared(array $m, array $e): array {
         return [
@@ -359,7 +411,7 @@ class AiEndpointRegistry {
                 'vision'   => (bool)($m['attachments']['vision'] ?? false),
                 'document' => (bool)($m['attachments']['document'] ?? false),
             ],
-            'cost'        => isset($m['cost']) && is_array($m['cost']) ? $m['cost'] : [],
+            'cost'        => self::declaredCost($m, $e),
             'defaults'    => isset($m['defaults']) && is_array($m['defaults']) ? $m['defaults'] : [],
             'retired'     => (bool)($m['retired'] ?? false),
             'basis'       => 'declared',

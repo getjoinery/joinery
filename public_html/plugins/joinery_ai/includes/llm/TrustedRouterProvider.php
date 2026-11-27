@@ -9,16 +9,27 @@ use GuzzleHttp\Client;
  *
  * TrustedRouter is an OpenAI-compatible router, so this rides
  * OpenAiCompatibleProvider's wire translation. What it adds is one rule:
- * every request carries "provider": {"zdr": true}, which tells the router to
- * use only routes that retain nothing. A model with no such route is refused
- * rather than sent somewhere that keeps the text — which is what lets the
- * endpoint be graded `trusted` in ai_endpoints.json.
+ * every request carries the provider fields of the site's chosen privacy
+ * level (ai_endpoints.json privacy_levels, setting joinery_ai_hosted_privacy):
+ *
+ *   zero_retention  {"zdr": true, "sort": "price"}: only routes that have
+ *                   agreed to keep nothing, the cheapest first, the others
+ *                   as fallbacks. Without the sort TrustedRouter's own pick
+ *                   cost about six times the cheapest.
+ *   confidential    {"min_privacy": "confidential"}: only sealed hardware
+ *                   the host itself cannot read.
+ *
+ * Whatever the level says, "zdr": true is sent too, so zero retention is
+ * never left off. A request no route can meet
+ * is refused rather than sent somewhere that keeps the text, which is what
+ * lets the endpoint be graded `trusted`.
  *
  * The key is the site's own capped key, written by utils/hosted_ai_settings.php
  * from the hosting operator's management node. When the cap is reached the
  * router answers 402; LlmProviderException reads that as api_billing and, by
  * this provider's label, words it as the site's AI credit being used up.
  *
+ * @version 1.1 - the site's chosen privacy level's routing (zero retention, cheapest first; or confidential)
  * @version 1.0
  */
 class TrustedRouterProvider extends OpenAiCompatibleProvider {
@@ -59,9 +70,15 @@ class TrustedRouterProvider extends OpenAiCompatibleProvider {
         return 0;
     }
 
-    /** Zero-retention routing on every request, never optional. */
+    /** The chosen privacy level's routing on every request; zero retention never optional. */
     protected function applyProviderFields(array &$request): void {
         $provider = isset($request['provider']) && is_array($request['provider']) ? $request['provider'] : [];
+        $level = AiEndpointRegistry::privacyLevel('hosted');
+        foreach ($level !== null ? $level['provider'] : [] as $field => $value) {
+            $provider[$field] = $value;
+        }
+        // Confidential already requires zero retention at TrustedRouter; it is
+        // sent anyway, so no level can ever leave it off.
         $provider['zdr'] = true;
         $request['provider'] = $provider;
     }

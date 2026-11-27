@@ -815,11 +815,8 @@ An OpenAI-dialect model bills a cached input token at half its `input` rate unle
 A site whose hosting includes AI credit has the `hosted` endpoint: label "AI credit
 (included with your hosting)", dialect `openai`, the literal base URL
 `https://api.trustedrouter.com/v1`, its key in `joinery_ai_hosted_api_key`, trust
-`trusted`. It serves one model, GLM 5.3 Flash (`z-ai/glm-5.3-flash`), graded `capable`
-and priced at TrustedRouter's rates with their fee included ($0.026375 per million tokens
-in, cached input the same, $0.07385 out), so the chat's and the run history's cost
-figures match what the credit is charged. The model always reasons; work that asks for
-no reasoning runs it at `low`.
+`trusted`. It serves one model, GLM 5.3 Flash (`z-ai/glm-5.3-flash`), graded `capable`.
+The model always reasons; work that asks for no reasoning runs it at `low`.
 
 - **The key is the hosting operator's to write.** `joinery_ai_hosted_api_key` is a
   managed secret: never on a settings form, sealed at rest. The management node writes it
@@ -830,12 +827,24 @@ no reasoning runs it at `low`.
   plugin is on disk), and the key is used once the plugin is switched on.
 - **With no key the endpoint is not available**, like any endpoint, so a site that is not
   hosted with AI credit never sees it.
-- **Zero-retention routing on every request.** `TrustedRouterProvider` adds
-  `"provider": {"zdr": true}` to every request it builds (the
-  `applyProviderFields()` seam), so a model with no zero-retention route is refused
-  rather than sent somewhere that keeps the text. That is what the `trusted` grade rests
-  on; a Private chat still needs the member's consent raised to `trusted`, as with
-  Fireworks.
+- **Two privacy levels, the site owner's choice** (`joinery_ai_hosted_privacy`, a radio
+  whose declaration holds each level's name and the one sentence on what it guarantees;
+  asked in the setup wizard's AI assistant step and changeable on the plugin's settings
+  page):
+
+  | Level | Sent on every request | Priced at ($/M in, out) |
+  |---|---|---|
+  | Zero retention (standard, and the default until chosen) | `"provider": {"zdr": true, "sort": "price"}`: only routes that have agreed to keep no copy, cheapest first, the others as fallbacks | 0.026375, 0.07385 |
+  | Confidential | `"provider": {"min_privacy": "confidential", "zdr": true}`: only sealed hardware the host itself cannot read | 0.2432, 0.7902 |
+
+  The levels and their provider fields are the endpoint's `privacy_levels` in
+  `ai_endpoints.json`; the model's `cost_by_privacy` gives its price at each, so the
+  chat's and the run history's cost figures follow the choice. Prices are TrustedRouter's,
+  their fee included; cached input costs the same as new input.
+  `TrustedRouterProvider` applies the chosen level (the `applyProviderFields()` seam),
+  so a request no route can meet is refused rather than sent somewhere that keeps the
+  text. That is what the `trusted` grade rests on; a Private chat still needs the member's
+  consent raised to `trusted`, as with Fireworks.
 - **Out of credit.** The router answers 402 when the site's credit is spent, which
   classifies as `api_billing`. Because the message carries the hosted provider label
   (`Hosted AI credit 4xx: …`), the words say the site's AI credit is used up and point at
@@ -848,7 +857,7 @@ no reasoning runs it at `low`.
 | Class | Meaning | Example |
 |---|---|---|
 | `local` | the bytes never leave hardware the operator controls | Ollama on this box or their own LAN host |
-| `trusted` | leaves the box to a named vendor under terms the operator accepted | Fireworks (contractual no-train on open-model traffic); the hosted AI credit endpoint (zero-retention routing forced on every request) |
+| `trusted` | leaves the box to a named vendor under terms the operator accepted | Fireworks (contractual no-train on open-model traffic); the hosted AI credit endpoint (zero retention or confidential routing on every request) |
 | `cloud` | a general vendor on ordinary terms | Anthropic |
 
 One value answers three questions that used to be asked separately: whether the

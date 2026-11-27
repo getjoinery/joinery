@@ -13,6 +13,7 @@
  *  - utils/hosted_ai_settings.php sets the key, clears it on an empty push,
  *    refuses a malformed one, and never prints the key;
  *  - every request TrustedRouterProvider builds carries provider.zdr = true
+ *  - the owner's privacy level sets the routing and the price (zero retention, cheapest first; or confidential)
  *    (no network: a mocked HTTP client records what was sent);
  *  - a 402 from it classifies as api_billing and is worded as the site's AI
  *    credit being used up, on the chat (operator and member) and on a
@@ -72,8 +73,8 @@ check(($endpoint['label'] ?? '') === 'AI credit (included with your hosting)'
 	&& ($endpoint['api_key_setting'] ?? '') === HOSTED_AI_KEY_SETTING
 	&& ($endpoint['trust'] ?? '') === 'trusted',
 	'label, dialect, literal base URL, key setting and trust as specified', json_encode($endpoint));
-check(stripos((string)($endpoint['trust_note'] ?? ''), 'zero-retention') !== false,
-	'its trust note names the zero-retention routing');
+check(stripos((string)($endpoint['trust_note'] ?? ''), 'zero retention') !== false && stripos((string)($endpoint['trust_note'] ?? ''), 'confidential') !== false,
+	'its trust note names both privacy levels');
 $declared = AiEndpointRegistry::modelsFor('hosted');
 check(array_keys($declared) === [JAI_HOSTED_MODEL], 'it serves exactly GLM 5.3 Flash', json_encode(array_keys($declared)));
 
@@ -167,6 +168,56 @@ $plain_stack->push(Middleware::history($plain_sent));
 (new OpenAiCompatibleProvider('http://mock/v1', 'm', '', 30, new Client(['handler' => $plain_stack])))->createMessage($base);
 $plain_body = json_decode((string)$plain_sent[0]['request']->getBody(), true);
 check(!array_key_exists('provider', $plain_body), 'a plain OpenAI-compatible host is sent no provider field');
+
+// ===========================================================================
+section('The privacy level the owner picks: its routing and its price');
+// ===========================================================================
+
+jai_push('{"api_key":"' . $fake . '"}');
+$level_sent = [];
+$level_stack = HandlerStack::create(new MockHandler([
+	new Response(200, ['Content-Type' => 'text/event-stream'], Utils::streamFor($sse)),
+	new Response(200, ['Content-Type' => 'text/event-stream'], Utils::streamFor($sse)),
+	new Response(200, ['Content-Type' => 'text/event-stream'], Utils::streamFor($sse)),
+]));
+$level_stack->push(Middleware::history($level_sent));
+$level_tr = new TrustedRouterProvider('test-key', TrustedRouterProvider::DEFAULT_BASE_URL,
+	JAI_HOSTED_MODEL, 30, new Client(['handler' => $level_stack]));
+$one_million = ['input_tokens' => 1000000, 'output_tokens' => 1000000];
+
+foreach (array(
+	'' => array('not chosen yet', array('zdr' => true, 'sort' => 'price'), 0.026375 + 0.07385),
+	'zero_retention' => array('zero retention', array('zdr' => true, 'sort' => 'price'), 0.026375 + 0.07385),
+	'confidential' => array('confidential', array('min_privacy' => 'confidential', 'zdr' => true), 0.2432 + 0.7902),
+) as $value => $expect) {
+	list($what, $fields, $price) = $expect;
+	harness_set_setting_mem('joinery_ai_hosted_privacy', $value);
+	AiEndpointRegistry::clearCache();
+	$level_tr->createMessage($base);
+	$body = json_decode((string)end($level_sent)['request']->getBody(), true);
+	$sent_fields = (array)($body['provider'] ?? array());
+	ksort($sent_fields);
+	ksort($fields);
+	check($sent_fields === $fields, "$what: the request asks for " . json_encode($fields), json_encode($body['provider'] ?? null));
+	$cost = AiModelResolution::costFor(JAI_HOSTED_MODEL, $one_million);
+	check(abs($cost - $price) < 1e-9, "$what: a million tokens each way is costed at that level's price", (string)$cost);
+}
+harness_set_setting_mem('joinery_ai_hosted_privacy', 'nonsense');
+AiEndpointRegistry::clearCache();
+check(AiEndpointRegistry::privacyLevel('hosted')['key'] === 'zero_retention', 'a value naming no level is the default');
+
+$declaration = SettingsDeclarations::get('joinery_ai_hosted_privacy');
+$levels = array_keys(AiEndpointRegistry::privacyLevels('hosted'));
+check($declaration !== null && ($declaration['type'] ?? '') === 'radio'
+	&& array_keys((array)$declaration['options']) === $levels
+	&& array_keys((array)($declaration['option_descriptions'] ?? array())) === $levels,
+	'the setting offers exactly the catalog\'s levels, each with its sentence', json_encode($declaration['options'] ?? null));
+check(!array_filter(SettingsDeclarations::schemaErrors(), function ($e) { return strpos($e, 'joinery_ai_hosted_privacy') !== false; }),
+	'and its declaration is well formed');
+
+harness_set_setting_mem('joinery_ai_hosted_privacy', '');
+jai_push('{"api_key":""}');
+AiEndpointRegistry::clearCache();
 
 // ===========================================================================
 section('Out of credit: a 402 is api_billing, in the hosted words');

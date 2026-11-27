@@ -423,8 +423,11 @@ a reason; money permission).
 
 **What TrustedRouter learns.** Model, tokens, cost and timing per key, with the
 key named and tagged by provision or tenant id. No domain or buyer identity is
-sent. Requests are routed only to providers that keep no copy of prompts
-(`provider.zdr`); see the Joinery AI overview, *Hosted AI credit*.
+sent. The site owner picks the privacy level in the setup wizard: zero retention
+(providers that have agreed to keep no copy, cheapest first) or confidential (sealed
+hardware the provider cannot read, about ten times the price). The level and its
+price are the site's own; this node's cap counts whatever the requests cost. See the
+Joinery AI overview, *Hosted AI credit*.
 
 ## The billing clock, and what happens when a payment fails
 
