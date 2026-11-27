@@ -31,6 +31,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.77 - the hostname and verification rows' fix is Run mail setup again (a root request) where the
+ *                 root actor runs, instead of a root command (B11)
  * @version 1.76 - a subdomain with no DMARC record of its own plans one from its parent domain's, and keeps a strict shape the parent asks for
  * @version 1.75 - a read-only check says it did not ask the provider for DKIM records, not that its API failed
  * @version 1.74 - the Finish send protection link is InboundEmailDomain::send_protection_setup_url()
@@ -4567,7 +4569,19 @@ class InboundEmailSetupCheck {
 			'The joinery pipe transport runs the inbound email handler.');
 	}
 
+	/**
+	 * The mail setup (install_email.sh) puts Postfix and rspamd right, Postfix's
+	 * name from the Mail hostname setting included. Where this machine's root
+	 * actor runs, that is one press (a root request, the Plugins page's Run
+	 * setup again); with none, it is the root command.
+	 */
 	private function installerFix() {
+		if (RootRequest::actorState() !== 'absent') {
+			return array(
+				'text' => 'Run this server\'s mail setup again. It takes about a minute.',
+				'action' => array('action' => 'run_mail_setup', 'label' => 'Run mail setup again'),
+			);
+		}
 		return array(
 			'text' => 'Run the base mail installer on the server as root.',
 			'command' => 'sudo bash ' . PathHelper::getIncludePath('plugins/mailbox/provisioning/install_email.sh'),
@@ -4575,6 +4589,13 @@ class InboundEmailSetupCheck {
 	}
 
 	private function hostnameFix() {
+		if ($this->mailHostname !== '' && RootRequest::actorState() !== 'absent') {
+			return array(
+				'text' => 'Run this server\'s mail setup again: it gives the mail server the name ' . $this->mailHostname
+					. '. It takes about a minute.',
+				'action' => array('action' => 'run_mail_setup', 'label' => 'Run mail setup again'),
+			);
+		}
 		$target = $this->mailHostname !== '' ? $this->mailHostname : 'mail.example.com';
 		return array(
 			'text' => 'Set the Postfix HELO hostname on the server as root.',

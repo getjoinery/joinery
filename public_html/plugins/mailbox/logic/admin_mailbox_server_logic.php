@@ -13,6 +13,7 @@
  * hostname / public IP, and the one-click fixes a check row carries
  * (setup_fix_actions.php). Each redirects so the next render reads fresh state.
  *
+ * @version 1.1 - saving a new mail hostname runs the mail setup again (B11), so the mail server takes the name
  * @version 1.0
  */
 function admin_mailbox_server_logic(array $input): LogicResult {
@@ -41,10 +42,23 @@ function admin_mailbox_server_logic(array $input): LogicResult {
 
 	// This server's mail identity.
 	if (isset($posted['mail_hostname']) || isset($posted['public_ip'])) {
-		mailbox_setup_write_setting('mailbox_mail_hostname', strtolower(trim($posted['mail_hostname'] ?? '')));
+		$old_hostname = strtolower(trim((string)$settings->get_setting('mailbox_mail_hostname')));
+		$new_hostname = strtolower(trim($posted['mail_hostname'] ?? ''));
+		mailbox_setup_write_setting('mailbox_mail_hostname', $new_hostname);
 		mailbox_setup_write_setting('mailbox_public_ip', trim($posted['public_ip'] ?? ''));
+		// The mail server takes its name from this setting when its setup
+		// runs, so a new name starts that run now instead of waiting for the
+		// daily pass.
+		$saved = 'Mail identity saved.';
+		if ($new_hostname !== '' && $new_hostname !== $old_hostname) {
+			$queued = mailbox_queue_mail_setup((int)$session->get_user_id());
+			if ($queued['ok']) {
+				$saved .= ' The mail server takes the new name in about a minute.'
+					. ($queued['warning'] !== '' ? ' ' . $queued['warning'] : '');
+			}
+		}
 		$session->save_message(new DisplayMessage(
-			'Mail identity saved.', 'Saved', '~/plugins/mailbox/admin/~',
+			$saved, 'Saved', '~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 		return LogicResult::redirect($base . '#mail-identity');

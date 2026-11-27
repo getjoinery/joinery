@@ -8,6 +8,8 @@
  * the POST here first. Each fix writes through a model or the settings table
  * and redirects, so the next render reads fresh state.
  *
+ * @version 1.5 - run_mail_setup: the hostname and verification rows run this site's mail setup again as a root
+ *                request, the Plugins page's Run setup again for Mailbox (B11)
  * @version 1.4 - verify_sending_domain: ask the outbound provider to check a sending domain's records again
  * @version 1.3 - make_local_key: Make a signing key on the DKIM row, through joinery-dkim-add
  * @version 1.2 - register_sending_domain: the Register button on a hosted domain's provider DKIM row
@@ -254,7 +256,44 @@ function mailbox_setup_fix_action(array $posted, $session, string $redirect_url)
 		return LogicResult::redirect($redirect_url);
 	}
 
+	if ($action === 'run_mail_setup') {
+		$queued = mailbox_queue_mail_setup((int)$session->get_user_id());
+		if ($queued['ok']) {
+			$announce('The mail server is being set up again. It takes about a minute; check again after that.'
+				. ($queued['warning'] !== '' ? ' ' . $queued['warning'] : ''), 'Started');
+		} else {
+			$announce($queued['message'], 'Error');
+		}
+		return LogicResult::redirect($redirect_url);
+	}
+
 	return null;
+}
+
+/**
+ * Run this site's mail setup (install_email.sh, the Mailbox host installer)
+ * again as root, through the same root request as the Plugins page's Run
+ * setup again. It is what carries the Mail hostname setting to the mail
+ * server itself (Postfix's own name, the name its verdicts are stamped under,
+ * the certificate it offers). A second call while one is queued or running
+ * returns that one.
+ *
+ * @return array{ok:bool, message:string, warning:string}
+ */
+function mailbox_queue_mail_setup(?int $user_id): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
+	if (!mailbox_site_has_mail_server()) {
+		return array('ok' => false, 'message' => 'This site has no mail server of its own to set up.', 'warning' => '');
+	}
+	if (!PluginProvisioning::hasHostInstaller('mailbox')) {
+		return array('ok' => false, 'message' => 'Mailbox has no server setup to run here.', 'warning' => '');
+	}
+	try {
+		RootRequest::submit('run_plugin_installer', array('plugin' => 'mailbox'), $user_id);
+	} catch (\Throwable $e) {
+		return array('ok' => false, 'message' => 'Could not start the mail server setup: ' . $e->getMessage(), 'warning' => '');
+	}
+	return array('ok' => true, 'message' => '', 'warning' => RootRequest::actorWarning());
 }
 
 /**

@@ -2,6 +2,8 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.34 - an empty mailbox_mail_hostname takes the site's own domain (webDir) on a site receiving
+#                directly, as a new site's does (B12): a site installed before that default kept an empty one
 # Version: 2.33 - the Postfix role is managed as postgres with root signing in by peer (_pg_admin.sh,
 #                specs/postgres_superuser_peer_auth.md); db_admin.php is not read
 # Version: 2.32 - the relay helper converge names joinery-dkim-add too (comment only).
@@ -742,6 +744,29 @@ fi
 # disagree every message reads "unverified". Read the setting from the DB (the
 # Setup tab writes it); with none set, whatever myhostname already is stands.
 AUTHSERV_ID="$(db_psql -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+# Never set, it takes the site's own domain, as a new site's does
+# (_site_init.sh): an MX record then has a name to point at, and the
+# certificate the site already has covers the mail server's connections. A
+# site fronted by a relay is left alone (the relay is its mail identity), and
+# so is an address that is not a domain.
+if [[ -z "${AUTHSERV_ID}" ]]; then
+    SITE_DOMAIN="$(read_site_setting webDir | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
+    SITE_DOMAIN="${SITE_DOMAIN%%/*}"
+    RECEIVE_MODE="$(db_psql -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_receive_mode'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    RELAY_ROWS="$(db_psql -c "SELECT count(*) FROM mrl_mailbox_relays WHERE mrl_delete_time IS NULL" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    if [[ "${SITE_DOMAIN}" =~ ^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$ && "${SITE_DOMAIN}" == *.* && ! "${SITE_DOMAIN}" =~ ^[0-9.]+$ ]] \
+            && [[ "${RECEIVE_MODE}" != "relay" && "${RELAY_ROWS:-0}" == "0" ]]; then
+        if db_psql -v host="${SITE_DOMAIN}" >/dev/null 2>&1 <<'SQL'
+UPDATE stg_settings SET stg_value = :'host' WHERE stg_name = 'mailbox_mail_hostname' AND coalesce(stg_value, '') = '';
+INSERT INTO stg_settings (stg_name, stg_value)
+  SELECT 'mailbox_mail_hostname', :'host' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname');
+SQL
+        then
+            AUTHSERV_ID="${SITE_DOMAIN}"
+            echo "mailbox_mail_hostname was unset: set to the site's domain, ${SITE_DOMAIN}"
+        fi
+    fi
+fi
 if [[ -z "${AUTHSERV_ID}" ]]; then
     AUTHSERV_ID="$(postconf -h myhostname 2>/dev/null | tr -d '[:space:]' || true)"
     echo "rspamd: mailbox_mail_hostname is unset — verdicts are stamped under myhostname '${AUTHSERV_ID}'." >&2

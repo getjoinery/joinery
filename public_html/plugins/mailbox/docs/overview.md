@@ -238,7 +238,7 @@ What belongs to the whole mail server rather than one mailbox lives on the
 public IP — and the **health checks**: every layer (Postfix/pipe transport/domain
 map/rspamd/Spamhaus/port 25, mail identity, plugin config, end-to-end), then
 Domain DNS grouped by domain, a domain with nothing to act on folded to one line.
-A bare-metal install sets the mail hostname to the site's own domain unless `install.sh site --mail-hostname=NAME` names another, so the MX record points at a name that already resolves here and whose certificate the mail server uses; `reconcile_site.sh` (run by `manage_domain.sh set` and by restores) moves it with the domain when it was unset or the old name, and `manage_domain.sh` re-runs the host installers so Postfix answers under it. A name of its own (`mail.example.com`) is set here and kept. Everything else is autodetected. The inbound
+A bare-metal install sets the mail hostname to the site's own domain unless `install.sh site --mail-hostname=NAME` names another, so the MX record points at a name that already resolves here and whose certificate the mail server uses; `reconcile_site.sh` (run by `manage_domain.sh set` and by restores) moves it with the domain when it was unset or the old name, and `manage_domain.sh` re-runs the host installers so Postfix answers under it. A name of its own (`mail.example.com`) is set here and kept. `install_email.sh` gives an empty mail hostname the site's own domain (`webDir`) on a site receiving directly, with no relay, so a site installed without one gets it at its next setup run. Saving a new name here runs the mail setup again as a root request (`run_plugin_installer` for `mailbox`, the Plugins page's **Run setup again**), and Postfix answers under the new name about a minute later. Everything else is autodetected. The inbound
 **provider** picker (`mailbox_provider`) is on the Settings tab. A check row's
 one-click fix works the same on either tab (`includes/setup_fix_actions.php`),
 and both tabs draw rows through `includes/setup_check_render.php`.
@@ -506,7 +506,7 @@ question is whether the relay's stamps are arriving.
 - **WARN** — the selected provider has no inbound verification path at all,
   **or** the provider is Postfix but verification is broken (rspamd stopped,
   not in `smtpd_milters`, unreachable on its port, or Postfix naming itself
-  something other than the mail hostname). Fix: run `install_email.sh`, then send a test
+  something other than the mail hostname). Fix: **Run mail setup again** on the row (a root request that runs `install_email.sh`; the root command where this machine has no root actor), then send a test
   message to confirm an `Authentication-Results` header appears.
 - **WARN (fronted)** — mail is arriving from the relay but none of it carries a
   verdict. The relay is delivering while its stamps are being refused, which is
