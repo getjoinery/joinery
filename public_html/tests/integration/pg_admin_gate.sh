@@ -105,7 +105,10 @@ F="$T/gate"; mkfs "$F" scram-sha-256; mksite "$F" s1 joinery_s1 pw
 chk "a site on its own role does not hold the line" "$(pg_peer_gate_holds "$F" >/dev/null && echo open || echo held)" "open"
 mkdir -p "$F/var/www/html/s2/config"; printf "<?php\n\$this->settings['dbusername'] = getenv('X');\n" > "$F/var/www/html/s2/config/Globalvars_site.php"
 chk "a database user that is not a plain literal holds it" "$(pg_peer_gate_holds "$F" | grep -c s2/config)" "1"
-rm -rf "$F/var/www/html/s2"; mksite "$F" s3 joinery_s3 pw; chmod 000 "$F/var/www/html/s3/config/Globalvars_site.php"
+rm -rf "$F/var/www/html/s2"
+mkdir -p "$F/var/www/html/staging/config"; printf "<?php\n\$this->settings['webDir'] = 'http://test.example.com';\n" > "$F/var/www/html/staging/config/Globalvars_site.php"
+chk "a config with no database pair at all (a release-staging tree) does not hold it" "$(pg_peer_gate_holds "$F" >/dev/null && echo open || echo held)" "open"
+rm -rf "$F/var/www/html/staging"; mksite "$F" s3 joinery_s3 pw; chmod 000 "$F/var/www/html/s3/config/Globalvars_site.php"
 if [ ! -r "$F/var/www/html/s3/config/Globalvars_site.php" ]; then
     chk "an unreadable config holds it" "$(pg_peer_gate_holds "$F" | grep -c s3/config)" "1"
 fi

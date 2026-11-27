@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # _pg_admin.sh - root reaches PostgreSQL as postgres by who it is (sourced).
 #
+# VERSION: 1.2 - a config with no database pair at all (dev's release-staging tree) does not hold the line
 # VERSION: 1.1 - reviewer2 build review: the gate holds on a config it cannot read (F26); held sites are given
 #                their role where the peer line is already in force (F24); the account filter and the settle
 #                step are functions here, so they are tested (F25)
@@ -117,9 +118,10 @@ pg_peer_gate_holds() {  # FS_ROOT
     for cfg in "$fs"/var/www/html/*/config/Globalvars_site.php; do
         [[ -e "$cfg" ]] || continue
         # A config whose answer cannot be read holds the line: unreadable, or
-        # no database user read from it (php missing or failing, a value that
-        # is not a plain literal).
-        if [[ ! -r "$cfg" || -z "$(_pg_admin_value "$cfg" dbusername)" ]]; then
+        # one that names a database user this cannot read (php missing or
+        # failing, a value that is not a plain literal). A config with no
+        # database pair at all (a release-staging tree) signs in as nobody.
+        if [[ ! -r "$cfg" ]] || { grep -q "settings\['dbusername'\]" "$cfg" && [[ -z "$(_pg_admin_value "$cfg" dbusername)" ]]; }; then
             echo "$cfg"
             held=1
             continue
