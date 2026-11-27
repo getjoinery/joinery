@@ -9120,6 +9120,15 @@ fn apply_export(entry: &mut Entry, file: &Value) {
     if let Some(c) = file.get("head_change_id").and_then(Value::as_i64) {
         entry.head_change_id = c;
     }
+    // Whether the server holds this file in its trash is the server's to
+    // state too. An upload rescues an edit as a new file when the server
+    // deleted the old one (an edit beats a delete), and the record then
+    // names the new file, which is live. Had the record kept the old file's
+    // deletion, it would read the new file as gone on the server from the
+    // moment it was made.
+    if let Some(deleted) = file.get("deleted").and_then(Value::as_bool) {
+        entry.remote_deleted = deleted;
+    }
 }
 
 /// The SHA-256 of what a handle reads, from its start, in the form

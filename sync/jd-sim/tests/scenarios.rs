@@ -28817,3 +28817,43 @@ fn a_move_parked_on_its_way_never_agrees_its_scratch_name() {
         );
     }
 }
+
+#[test]
+fn an_edit_rescued_from_a_delete_as_a_new_file_is_not_recorded_as_deleted() {
+    // An edit beats a delete: a file the server trashed while this device
+    // edited it goes up again as a new file, and the record takes the new
+    // file's id. The upload's answer describes that file as live; the record
+    // kept the old file's deletion instead, so until the next pass read the
+    // change feed this device held its own new file as gone on the server.
+    // A look taken then bound nothing to it, and a delete the user made
+    // before the next pass was charged to nobody (killplat-mac-hfs 81401).
+    let world = World::new(9_861, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    laptop.fs.user_write("notes.txt", b"before");
+    assert!(world.settle().is_some());
+
+    desktop.fs.user_remove("notes.txt");
+    world.pass(desktop);
+    laptop.fs.user_write("notes.txt", b"edited while the desktop deleted it");
+    world.pass(laptop);
+
+    let want = jd_sim::sha256_hex(b"edited while the desktop deleted it");
+    let rescued = world
+        .server
+        .files()
+        .into_iter()
+        .find(|f| !f.trashed && f.sha256 == want)
+        .expect("the edit went up again as a new file");
+    let record = laptop
+        .store
+        .get_entry(jd_core::model::EntityId::file(rescued.id))
+        .unwrap()
+        .expect("the laptop's record took the new file's id");
+    assert!(
+        !record.remote_deleted,
+        "the record of file {} says the server deleted it, and the server holds it live",
+        rescued.id
+    );
+    assert!(world.settle().is_some());
+}

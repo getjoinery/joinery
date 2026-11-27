@@ -8762,3 +8762,23 @@ fn frozen_a_keyless_guests_file_carried_out_of_the_vault_is_held_and_said_seed()
         );
     }
 }
+
+/// killplat-mac-hfs 81401: the Mac trashes a file the disk has edited, and the
+/// disk sends its edit up again as a new file. Its record took the new file's
+/// id but kept the old one's deletion, so the look after that upload bound the
+/// live file to nothing, and the disk user's delete of it before the next pass
+/// was charged to no one.
+#[test]
+fn frozen_an_edit_rescued_as_a_new_file_is_not_held_as_deleted_seed() {
+    never_fires(&["no_file_trashed_without_a_delete_that_reached_it"], || {
+        workload_core(
+            81_401,
+            40,
+            &[("mac", Platform::MacOs), ("disk", Platform::Decomposing)],
+            false,
+            Vault::None,
+            true,
+            Names::Ordinary,
+        );
+    });
+}
