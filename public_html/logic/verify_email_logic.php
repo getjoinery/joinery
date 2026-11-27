@@ -19,6 +19,9 @@
  * scanner fetching it cannot verify the address, or confirm what verifying it
  * confirms (account.email_verified, method activation), on the person's behalf.
  *
+ * @version 1.2 - A verified member lands on core pages, never a content page a site may not have (a fresh
+ *                install has no /page/verify-email-confirm, and /page/ needs Pages on): signed in, their profile
+ *                with "Your email address is verified."; not signed in, the sign-in page's email_verified line
  * @version 1.1 - a link mailed a short while ago signs the member in and lands them where they belong
  * @version 1.0
  */
@@ -61,7 +64,12 @@ function verify_email_logic(array $input): LogicResult {
 		if (!$activated_user->get('usr_password')) {
 			return LogicResult::redirect('/password-set');
 		}
-		return LogicResult::redirect($then === 'profile' ? '/profile' : ($landing ?: '/page/verify-email-confirm'));
+		if ($then !== 'profile' && $landing !== '') {
+			return LogicResult::redirect($landing);
+		}
+		$session->save_message(new DisplayMessage('Your email address is verified.', 'Email verified', '/^\/profile/',
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'profilebox', TRUE));
+		return LogicResult::redirect('/profile');
 	}
 
 	// Not signed in and no password yet: sign them in so they can set one.
@@ -104,6 +112,6 @@ function verify_email_logic(array $input): LogicResult {
 	if ($landing !== '') {
 		return LogicResult::redirect('/login?msgtext=email_verified&return=' . rawurlencode($landing));
 	}
-	return LogicResult::redirect('/page/verify-email-confirm');
+	return LogicResult::redirect('/login?msgtext=email_verified');
 }
 ?>

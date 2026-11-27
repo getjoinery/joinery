@@ -202,9 +202,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		if ($returnurl && SessionControl::is_safe_return($returnurl)) {
 			return LogicResult::redirect($returnurl);
-		} else {
-			return LogicResult::redirect('/page/register-thanks');
 		}
+		// A core page, never a content page a site may not have (a fresh
+		// install has no /page/register-thanks, and /page/ needs Pages on).
+		$session->save_message(new DisplayMessage(EmailSender::canSendMail()
+				? 'Welcome! We sent you an email with a link to confirm your address; open it when you can (check your spam folder if it is not there in a few minutes).'
+				: 'Welcome! Your account is ready.',
+			'Account created', '/^\/profile/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'profilebox', TRUE));
+		return LogicResult::redirect('/profile');
 
 	}
 	else {

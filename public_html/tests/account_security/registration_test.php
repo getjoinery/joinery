@@ -365,8 +365,8 @@ $made = User::GetByEmail($good_email);
 check($made && $made->get('usr_timezone') === 'Europe/Lisbon',
 	'the time zone chosen on the form is the account\'s',
 	'zone: ' . var_export($made ? $made->get('usr_timezone') : null, true));
-check($res->redirect === '/page/register-thanks',
-	'registration redirects to the thanks page',
+check($res->redirect === '/profile',
+	'registration lands on the new member\'s profile (a core page; a fresh site has no thanks page)',
 	'redirect: ' . var_export($res->redirect, true));
 
 // A visitor sent to sign in by a page that needs a member (/login?return=…)

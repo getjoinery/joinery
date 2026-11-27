@@ -136,8 +136,8 @@ list($u5, $c5) = $unverified('ActBtnOld');
 $age($c5);
 $_SESSION = array();
 $res = harness_call_logic('logic/verify_email_logic.php', 'verify_email_logic', array('act_code' => $c5), 'POST');
-check($is_verified($u5) && empty($_SESSION['usr_user_id']) && $res->redirect === '/page/verify-email-confirm',
-	'an older link verifies and signs nobody in', var_export($res->redirect, true));
+check($is_verified($u5) && empty($_SESSION['usr_user_id']) && $res->redirect === '/login?msgtext=email_verified',
+	'an older link verifies, signs nobody in, and lands on the sign-in page saying so (never a content page a fresh site lacks)', var_export($res->redirect, true));
 check(Activation::checkTempCode($c5, Activation::EMAIL_VERIFY), 'and its code is not spent');
 
 $claimed = 0;
