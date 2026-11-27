@@ -16,6 +16,8 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
+ * @version 1.7 - the AI assistant step stays drawn once done (render_when_done), so its Test button and Saved
+ *   line show after a save and a hosted site can change its privacy level there
  * @version 1.6 - ai_pipeline runs in the long lane (VaultDeferredWork § Two lanes)
  * @version 1.5 - the reseal callback covers RecipeRun and AiQueuedAction: a rotation left
  *   every run and queued action on the old key
@@ -140,6 +142,9 @@ SetupSteps::register('ai_provider', array(
     'copy'  => 'Joinery can use an AI assistant to triage mail, draft replies, and manage your calendar — running on your own machine if you have one, so nothing leaves your network. This is optional; everything works without it.',
     'render_file' => 'plugins/joinery_ai/includes/setup_steps/ai_provider.php',
     'home_url' => '/admin/admin_settings_plugins?plugin=joinery_ai',
+    // Drawn when done too: its Test button is most use once something is set
+    // up, and a hosted site's privacy level stays changeable here.
+    'render_when_done' => true,
     'dismiss_line' => 'No AI assistant is configured (optional).',
     'decision' => 'site',
     // The wizard writes these through the generic step_settings_save handler;

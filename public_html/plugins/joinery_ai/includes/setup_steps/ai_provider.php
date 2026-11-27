@@ -5,8 +5,10 @@
  * generic step_settings_save handler; the Test button calls
  * joinery_ai/test_connection, which probes whatever endpoint this install would
  * actually reach for.
- * Included by views/setup.php with $page, $settings, $next_key in scope.
+ * Included by views/setup.php with $page, $settings, $next_key and $is_green in scope.
  *
+ * @version 1.7
+ * @changelog 1.7 - drawn once the step is done too (render_when_done); the Not now button shows only while it is not
  * @version 1.6
  * @changelog 1.6 - a site whose hosting includes AI credit is asked its privacy level first, each level with its
  *                  one-sentence guarantee from ai_endpoints.json (specs/implemented/hosted_ai_credit.md)
@@ -164,8 +166,10 @@ $setup_ai_form->end_form();
 <?php require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/test_connection_button.php')); ?>
 	</div>
 
+<?php if (empty($is_green)) { // a finished step has nothing to decline ?>
 	<form method="POST" action="/setup" class="jy-mt-3">
 		<input type="hidden" name="action" value="decline_step">
 		<input type="hidden" name="step_key" value="ai_provider">
 		<button type="submit" class="btn btn-secondary">Not now — everything works without it</button>
 	</form>
+<?php } ?>
