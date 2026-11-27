@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.57 - site at a keyboard requires the admin password (asked again on a wrong answer) and asks for an optional
+#               admin email: sign-in then takes the address or admin. Keys typed ahead are discarded first, so an
+#               Enter left by a one-key yes/no question (the server step's root-login one) answers neither
 #VERSION 3.56 - site at a keyboard asks for the admin password (empty generates one, as before): a chosen
 #               password is not written to admin_credentials.txt and not replaced at first sign-in
 #VERSION 3.55 - server records the postgres password whatever its source (prompt, --password-file,
@@ -5021,38 +5024,71 @@ do_site_create() {
         unset stdin_password
     fi
 
-    # At a keyboard, the owner chooses the admin password. A password only the
-    # machine knows has to be written to config/admin_credentials.txt and
-    # replaced at first sign-in, and the person at the keyboard has to find the
-    # file first. Unattended runs (-y, no terminal) keep generating one: nobody
-    # is there to ask. A kept site (its config is already here) is not asked,
-    # since _site_init.sh sets the password only on a new database.
+    # At a keyboard, the admin account may also be given its owner's address:
+    # sign-in then takes it or the username admin, and password reset has
+    # somewhere to send once the site can mail. Same conditions as the
+    # password question below; --admin-email or JOINERY_ADMIN_EMAIL answers it.
+    if [ "$DORMANT" != true ] && [ -z "$ADMIN_EMAIL" ] && [ -z "${JOINERY_ADMIN_EMAIL:-}" ] \
+        && [ "$ASSUME_YES" -eq 0 ] && [ -t 0 ] \
+        && [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then
+        local admin_email_typed=""
+        # Keys typed ahead are not answers to this. A yes/no question that
+        # reads one key (the server step's root-login question) leaves the
+        # Enter pressed after it waiting, and in 'install.sh server && install.sh
+        # site' that Enter would answer here, skipping the address, or shift
+        # every answer after it by one.
+        while IFS= read -r -t 0.2 _; do :; done
+        echo ""
+        echo -n "Admin email address (you can sign in with it or with 'admin'; leave empty to skip): "
+        IFS= read -r admin_email_typed || true
+        admin_email_typed="$(printf '%s' "$admin_email_typed" | tr -d '[:space:]')"
+        if [ -n "$admin_email_typed" ]; then
+            if [[ ! "$admin_email_typed" =~ ^[^@]+@[^@]+\.[^@]+$ ]]; then
+                print_error "'$admin_email_typed' is not an email address."
+                exit 1
+            fi
+            ADMIN_EMAIL="$admin_email_typed"
+        fi
+    fi
+
+    # At a keyboard, the owner chooses the admin password, and must: a password
+    # only the machine knows has to be written to config/admin_credentials.txt
+    # and replaced at first sign-in, and the person at the keyboard has to find
+    # that file first. Unattended runs (-y, no terminal) keep generating one:
+    # nobody is there to ask, and the script that ran it reads the file. A kept
+    # site (its config is already here) is not asked, since _site_init.sh sets
+    # the password only on a new database. A wrong answer is asked again.
     if [ "$DORMANT" != true ] && [ -z "${JOINERY_ADMIN_PASSWORD:-}" ] \
         && [ "$ASSUME_YES" -eq 0 ] && [ -t 0 ] \
         && [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then
-        local admin_pw="" admin_pw_confirm=""
+        local admin_pw="" admin_pw_confirm="" admin_pw_try=0
+        while IFS= read -r -t 0.2 _; do :; done
         echo ""
-        echo "Choose the password for this site's admin account (username: admin)."
-        echo "Leave it empty to have one generated and written to the site's config/admin_credentials.txt."
-        echo -n "Admin password: "
-        IFS= read -rs admin_pw || true
-        echo ""
-        if [ -n "$admin_pw" ]; then
-            if [ "${#admin_pw}" -lt 8 ]; then
-                print_error "The admin password must be at least 8 characters."
+        echo "Choose the password for this site's admin account (username: admin, at least 8 characters)."
+        while [ -z "${JOINERY_ADMIN_PASSWORD:-}" ]; do
+            admin_pw_try=$((admin_pw_try + 1))
+            if [ "$admin_pw_try" -gt 3 ]; then
+                print_error "No admin password was chosen. Please run the command again."
                 exit 1
+            fi
+            echo -n "Admin password: "
+            IFS= read -rs admin_pw || true
+            echo ""
+            if [ "${#admin_pw}" -lt 8 ]; then
+                echo "  The password must be at least 8 characters."
+                continue
             fi
             echo -n "Confirm admin password: "
             IFS= read -rs admin_pw_confirm || true
             echo ""
             if [ "$admin_pw" != "$admin_pw_confirm" ]; then
-                print_error "The admin passwords do not match. Please run the command again."
-                exit 1
+                echo "  The two passwords do not match."
+                continue
             fi
             JOINERY_ADMIN_PASSWORD="$admin_pw"
             export JOINERY_ADMIN_PASSWORD
-        fi
-        unset admin_pw admin_pw_confirm
+        done
+        unset admin_pw admin_pw_confirm admin_pw_try
     fi
 
     # A dormant install is the target of a site copy (specs/site_copy.md): a
