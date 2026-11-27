@@ -12,6 +12,8 @@ require_once(PathHelper::getIncludePath('data/mail_send_outcomes_class.php'));
  * test-mode guards, Joinery Direct first, then the injected transport or the
  * configured service with its fallback.
  *
+ * @version 2.1 - canSendMail(): a sender address that may send and a configured provider, the one question the
+ *                sign-in and password reset pages ask before offering a mailed reset
  * @version 2.0 - the outbox (specs/email_outbox.md): every recorded email has its row in equ_queued_emails,
  *   written before it is sent and settled after; deliver() holds Direct and the transports; queue(),
  *   sendTemplateOnce(), forgetOnce(), onceKeys() and the $capture test hook; a failed email is retried with
@@ -333,6 +335,16 @@ class EmailSender {
     }
 
     // ── Eligibility ─────────────────────────────────────────────────────
+
+    /**
+     * Whether this site can send its own mail at all: a sender address send()
+     * accepts and a provider that is configured. A fresh install answers no
+     * until its email step is done. Pages that offer something only a mail can
+     * deliver (a password reset link) ask this first.
+     */
+    public static function canSendMail(): bool {
+        return self::transactionalSendBlocker() === null && self::detectServiceType() !== 'none';
+    }
 
     /**
      * Why $from cannot carry ambient/transactional mail right now, or null

@@ -1,4 +1,6 @@
 #!/bin/bash
+#VERSION 2.3 - The sending key field names the providers a key sets up, and says a blank field leaves the choice
+#              for later or for SMTP
 #VERSION 2.2 - Blank email and backup fields say the setup wizard offers getjoinery's
 #              email service and backup storage, now that they can be bought.
 #VERSION 2.1 - The bucket is any provider that needs at most a region: a provider
@@ -78,7 +80,7 @@
 # <UDF name="JOINERY_ADMIN_PASSWORD" label="Admin password" example="Choose a strong password" />
 # <UDF name="JOINERY_DOMAIN" label="Your domain" example="example.com" />
 # <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token with the Domains Read/Write scope (only if your DNS is at Linode)" default="" optional="true" />
-# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="Email sending API key, e.g. from SMTP2GO or Mailgun (optional: blank means the setup wizard asks, and offers getjoinery's email service)" default="" optional="true" />
+# <UDF name="JOINERY_MAIL_API_KEY_PASSWORD" label="Email sending API key from SMTP2GO, Mailgun, SendGrid, Resend, Brevo or Postmark (optional: leave blank to choose later or to use SMTP)" default="" optional="true" />
 # <UDF name="JOINERY_BACKUP_BUCKET" label="Bucket for backups (optional: blank means the setup wizard asks, and offers getjoinery backup storage)" default="" optional="true" />
 # <UDF name="JOINERY_BACKUP_PROVIDER" label="Where that bucket is: b2 = Backblaze B2, linode = Linode Object Storage, s3 = Amazon S3, wasabi, digitalocean = Spaces, hetzner" oneOf="b2,linode,s3,wasabi,digitalocean,hetzner" default="b2" optional="true" />
 # <UDF name="JOINERY_BACKUP_REGION" label="The bucket's region, e.g. us-east-1 (not needed for Backblaze)" default="" optional="true" />

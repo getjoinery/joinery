@@ -33,6 +33,9 @@
         <?php else: ?>
 
             <h3>Reset Password</h3>
+            <?php if (empty($page_vars['can_mail'])): ?>
+            <p class="text-muted jy-auth-lead">This site cannot send email yet, so a reset link cannot be sent. Reset with your authenticator app or passkey, or ask an administrator.</p>
+            <?php else: ?>
             <p class="text-muted jy-auth-lead">Enter your email or username and we'll send a link to reset your password to the account's email.</p>
 
             <?php
@@ -45,6 +48,7 @@
             $formwriter->end_form(); ?>
 
             <div class="jy-auth-hint jy-mt-2">If your login email is one of your own hosted mailboxes, the link also goes to your verified recovery address.</div>
+            <?php endif; ?>
 
             <?php $passkeys_enabled = $page_vars['settings']->get_setting('passkeys_enabled'); ?>
             <?php if ($passkeys_enabled): ?>

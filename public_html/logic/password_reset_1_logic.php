@@ -19,7 +19,13 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// Sending the reset is the form's button (POST). A link carrying ?email= is
 	// a GET any site can make a browser follow, mailing someone a reset unasked;
 	// opening the page with one only shows the form.
-	if (LibraryFunctions::isFormSubmission() && (isset($input['email']) || isset($input['usr_email']))){
+	// A site that cannot send mail yet (a fresh install before its email step)
+	// cannot deliver a reset link, so the page says so instead of offering one.
+	// A fact about the site, not an account: it reveals no account.
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+	$page_vars['can_mail'] = EmailSender::canSendMail();
+
+	if ($page_vars['can_mail'] && LibraryFunctions::isFormSubmission() && (isset($input['email']) || isset($input['usr_email']))){
 
 		// Rate limiting: block after too many password reset requests from this IP
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));

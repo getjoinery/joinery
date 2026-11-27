@@ -6,6 +6,8 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.20 - a failed SMTP test send to a server that never answered says the host may block the port
+ *                (SmtpProvider::unansweredPortNote) instead of asking to check the credentials
  * @version 2.19 - the Secure connection step is diagnosed when done too, for the IPv6 record (https_ipv6_box)
  * @version 2.18 - both ways out (Finish later, Go to your site) return to the page the login interrupt took the
  *                 person from (SetupSteps::takeDestination), else /admin, /profile or / as before
@@ -686,6 +688,13 @@ function setup_logic(array $input): LogicResult {
 			}
 			if ($ok) {
 				return LogicResult::redirect('/setup?step=mail_send&sent=1');
+			}
+			if ($error === '' && (string)$settings->get_setting('email_service') === SmtpProvider::getKey()) {
+				$port_note = SmtpProvider::unansweredPortNote((string)$settings->get_setting('smtp_host'),
+					(int)($settings->get_setting('smtp_port') ?: 25));
+				if ($port_note !== null) {
+					$error = 'The test send failed. ' . $port_note;
+				}
 			}
 			if ($error === '') {
 				$error = 'The test send failed — check the provider credentials and try again.';

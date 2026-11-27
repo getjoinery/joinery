@@ -12,6 +12,8 @@
  * forwarding relay. The EmailMessage→PHPMailer mapping lives once in
  * SmtpMailer::applyMessage().
  *
+ * @version 1.8 - unansweredPortNote(): a failed connection to a server that never answered says the host may block
+ *                outgoing mail ports, the one case a credential is not the cause
  * @version 1.7 - getSpfMechanism(): a host at SMTP2GO answers as the SMTP2GO provider does (walkthrough finding 175)
  * @version 1.6 - send() notes its signing to MailSendOutcome: signed (selector, d=), or handed on to
  *   the SMTP host it submits to, or unsigned with the signer's reason
@@ -45,6 +47,32 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay, SendReceipt
 
     public static function getKey(): string {
         return 'smtp';
+    }
+
+    /**
+     * One sentence for a failed SMTP connection when nothing answered at all,
+     * or null. A server that refuses or rejects the login answers; a port the
+     * machine's host blocks for outgoing mail drops the packets and the
+     * connection waits out its timeout. That case is the one where checking
+     * the credentials is the wrong advice, so it is told apart by one short
+     * probe, and only after a failure.
+     */
+    public static function unansweredPortNote(string $host, int $port): ?string {
+        if ($host === '' || $port <= 0) {
+            return null;
+        }
+        $errno = 0;
+        $errstr = '';
+        $sock = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, 8);
+        if ($sock !== false) {
+            fclose($sock);
+            return null;
+        }
+        // 110 ETIMEDOUT; a timeout with no errno reports errno 0 and says so in errstr.
+        if ($errno !== 110 && stripos($errstr, 'timed out') === false) {
+            return null;
+        }
+        return 'Nothing answered on port ' . $port . '. Your server\'s host may block outgoing mail ports; ask its support to open port ' . $port . '.';
     }
 
     public static function getLabel(): string {
@@ -138,6 +166,10 @@ class SmtpProvider implements EmailServiceProvider, RawMessageRelay, SendReceipt
                 ];
             } else {
                 $error_info = $mailer->ErrorInfo ?: 'Connection or authentication failed';
+                $port_note = self::unansweredPortNote((string)$host, $port_int);
+                if ($port_note !== null) {
+                    $error_info .= ' ' . $port_note;
+                }
                 return [
                     'success' => false,
                     'label' => 'Connection Failed',

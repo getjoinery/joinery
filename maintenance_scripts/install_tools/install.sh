@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.56 - site at a keyboard asks for the admin password (empty generates one, as before): a chosen
+#               password is not written to admin_credentials.txt and not replaced at first sign-in
 #VERSION 3.55 - server records the postgres password whatever its source (prompt, --password-file,
 #               POSTGRES_PASSWORD, generated), after PostgreSQL holds it, so a bare-metal site adopts it.
 #               Only a generated one was recorded, so `server` run at a keyboard and then `site` failed at
@@ -5017,6 +5019,40 @@ do_site_create() {
         JOINERY_ADMIN_PASSWORD_SHOWN=1
         export JOINERY_ADMIN_PASSWORD JOINERY_ADMIN_PASSWORD_SHOWN
         unset stdin_password
+    fi
+
+    # At a keyboard, the owner chooses the admin password. A password only the
+    # machine knows has to be written to config/admin_credentials.txt and
+    # replaced at first sign-in, and the person at the keyboard has to find the
+    # file first. Unattended runs (-y, no terminal) keep generating one: nobody
+    # is there to ask. A kept site (its config is already here) is not asked,
+    # since _site_init.sh sets the password only on a new database.
+    if [ "$DORMANT" != true ] && [ -z "${JOINERY_ADMIN_PASSWORD:-}" ] \
+        && [ "$ASSUME_YES" -eq 0 ] && [ -t 0 ] \
+        && [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then
+        local admin_pw="" admin_pw_confirm=""
+        echo ""
+        echo "Choose the password for this site's admin account (username: admin)."
+        echo "Leave it empty to have one generated and written to the site's config/admin_credentials.txt."
+        echo -n "Admin password: "
+        IFS= read -rs admin_pw || true
+        echo ""
+        if [ -n "$admin_pw" ]; then
+            if [ "${#admin_pw}" -lt 8 ]; then
+                print_error "The admin password must be at least 8 characters."
+                exit 1
+            fi
+            echo -n "Confirm admin password: "
+            IFS= read -rs admin_pw_confirm || true
+            echo ""
+            if [ "$admin_pw" != "$admin_pw_confirm" ]; then
+                print_error "The admin passwords do not match. Please run the command again."
+                exit 1
+            fi
+            JOINERY_ADMIN_PASSWORD="$admin_pw"
+            export JOINERY_ADMIN_PASSWORD
+        fi
+        unset admin_pw admin_pw_confirm
     fi
 
     # A dormant install is the target of a site copy (specs/site_copy.md): a

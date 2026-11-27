@@ -14,6 +14,8 @@
  * because that is the label they must find at their registrar.
  *
  * @version 1.4
+ * @changelog 1.5 - The add-it-yourself lines send the owner to where the domain's DNS is managed, not where it is
+ *                  registered: the two differ when DNS is hosted elsewhere (a mail host's DNS, for one)
  * @changelog 1.4 - Once the connection is secure the step shows only the optional IPv6 record (AAAA), with
  *   the publish box where the domain's DNS host has a driver.
  * @version 1.3
@@ -49,7 +51,7 @@ if (LibraryFunctions::isSecure()) {
 		} else {
 			echo '<p>';
 		}
-		echo 'where your web address is registered, add an <strong>AAAA record</strong> for <strong>'
+		echo 'where your web address\'s DNS is managed, add an <strong>AAAA record</strong> for <strong>'
 			. htmlspecialchars((string)$d['domain']) . '</strong> pointing at <strong>'
 			. htmlspecialchars((string)$d['server_ip6']) . '</strong>.</p></div>';
 	}
@@ -111,8 +113,8 @@ if (LibraryFunctions::isSecure()) {
 				. ', open ' . htmlspecialchars($d['domain']) . ', and add an <strong>A record</strong> pointing at <strong>'
 				. htmlspecialchars($server_ip) . '</strong>.</p>';
 		} else {
-			echo '<p>Sign in wherever your web address is registered (GoDaddy, Namecheap, Cloudflare, and so on), '
-				. 'find its DNS settings, and add an <strong>A record</strong> for <strong>' . htmlspecialchars($d['domain'])
+			echo '<p>Sign in where your web address\'s DNS is managed (usually where you bought it: GoDaddy, Namecheap, '
+				. 'Cloudflare, and so on), find its DNS settings, and add an <strong>A record</strong> for <strong>' . htmlspecialchars($d['domain'])
 				. '</strong> pointing at <strong>' . htmlspecialchars($server_ip) . '</strong>.</p>';
 		}
 ?>
