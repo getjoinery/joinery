@@ -62,6 +62,7 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
+ * @version 1.14.0 - a page with the remember-me cookie but no session cookie starts its session so the sign-in restores; a disabled or deleted session user is refused 403 with the reason
  * @version 1.13.1 - an unknown public key (no row, null) is the 400 it always meant, not a PHP warning
  * @version 1.13.0 - requestCredentialClass(): browser, device or app, so a consumer (the mail read budget) meters by
  *   credential class without naming the kinds
@@ -374,7 +375,12 @@ class ApiAuth {
 	 */
 	private static function authenticateBrowserSession(array $headers) {
 		// No session cookie → plain anonymous keyless request; fail as always.
-		if (empty($_COOKIE[session_name()])) {
+		// Except a page of ours whose browser lost its session cookie but kept
+		// the remember-me cookie: starting the session restores the sign-in
+		// from it, the token check below then answers 403 with the mirror
+		// cookie re-synced, and the transport retries with the fresh token.
+		$csrf_sent = isset($headers['x_joinery_csrf']) && (string)$headers['x_joinery_csrf'] !== '';
+		if (empty($_COOKIE[session_name()]) && !($csrf_sent && !empty($_COOKIE['tt']))) {
 			self::no_credential('Missing public/secret key headers');
 		}
 
@@ -419,15 +425,17 @@ class ApiAuth {
 		try {
 			$api_user = new User($user_id, TRUE);
 		} catch (Exception $e) {
-			self::auth_failure(400, 'Unable to find the session user', 'Unable to find the api user');
+			self::auth_failure(403, 'Unable to find the session user', 'This account no longer exists');
 		}
 
 		if (!$api_user->key || $api_user->get('usr_delete_time')) {
-			self::auth_failure(400, 'Session user has been deleted', 'API user has been deleted');
+			self::auth_failure(403, 'Session user has been deleted', 'This account has been deleted');
 		}
 
 		if (!$api_user->actions_allowed()) {
-			self::auth_failure(401, 'Session user is disabled', 'This account is disabled');
+			// 403, not 401: this is a known person refused, not a session gone,
+			// so the page shows the reason instead of offering a sign-in.
+			self::auth_failure(403, 'Session user is disabled', 'This account is disabled');
 		}
 
 		RequestLogger::set_api_key_type('browser');

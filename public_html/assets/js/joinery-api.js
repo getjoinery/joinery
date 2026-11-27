@@ -38,6 +38,20 @@
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
+ * Signed out: a page rendered for a signed-in visitor (it carries the
+ * joinery-api-csrf meta tag) whose call is still refused 401 after the
+ * stale-token retry, or refused 400 AuthenticationError because no session
+ * cookie arrived at all (a browser restart dropped it), has lost its session
+ * for good. The rejection says so
+ * (err.signedOut, and a message saying to sign in again), and the page shows
+ * one notice at the top with a Sign in again link back to this page, so no
+ * caller has to tell "signed out" apart from "something broke".
+ *
+ * @version 1.7.2 - the signed-out notice dispatches 'joinery:signed-out' (pollers stop on it) and its link
+ *   leaves any frame the page is in
+ * @version 1.7.1 - the no-credential 400 from a signed-in page (its session cookie gone) is signed out too
+ * @version 1.7.0 - a signed-in page's final 401 says the visitor was signed out and shows one Sign in again
+ *   notice linking back to the page (signedOut)
  * @version 1.6.0 - an answer whose request ended this session's vault window (X-Joinery-Vault: locked,
  *   VaultUnlock::lock()) dispatches 'joinery:vault-locked', so the lock chip and the browser-held vaults
  *   lock at once instead of at the presence beacon's next beat
@@ -117,6 +131,17 @@
 					err.data = (env && env.data) || {};
 					err.validationErrors = env && env.validation_errors;
 					err.errorRef = (env && env.error_ref) || null;
+					// 401: the server knows the session ended. 400 with an
+					// AuthenticationError: no session cookie arrived at all (a
+					// browser restart dropped it while this tab stayed open), the
+					// server's no-credential answer. From a signed-in page both mean
+					// the visitor is signed out.
+					if ((r.status === 401 || (r.status === 400 && err.errorType === 'AuthenticationError'))
+							&& wasSignedIn()) {
+						err.signedOut = true;
+						err.message = 'You have been signed out. Sign in again to continue.';
+						showSignedOutNotice();
+					}
 					throw err;
 				}
 				return (env && env.data !== undefined) ? env.data : env;
@@ -140,6 +165,41 @@
 		return 'The server answered with a web page instead of a result (' + status + '). Reload the page and try again.';
 	}
 
+	// Whether this page was rendered for a signed-in visitor: only then is the
+	// meta tag emitted (PublicPageBase::public_header()).
+	function wasSignedIn() {
+		return !!document.querySelector('meta[name="joinery-api-csrf"]');
+	}
+
+	// One notice per page, at the top, with the way back in. Styled through
+	// the element's own style properties so it shows on every theme.
+	var signedOutShown = false;
+	function showSignedOutNotice() {
+		if (signedOutShown || !document.body || /^\/login(\/|$)/.test(location.pathname)) return;
+		signedOutShown = true;
+		var bar = document.createElement('div');
+		bar.className = 'jy-signed-out-notice';
+		bar.setAttribute('role', 'alert');
+		var st = bar.style;
+		st.position = 'fixed'; st.top = '0'; st.left = '0'; st.right = '0'; st.zIndex = '10000';
+		st.padding = '.75rem 1rem'; st.background = '#fffbeb'; st.color = '#78350f';
+		st.borderBottom = '1px solid #fcd34d'; st.fontSize = '.95rem'; st.textAlign = 'center';
+		bar.appendChild(document.createTextNode('You have been signed out. '));
+		var a = document.createElement('a');
+		a.href = signInUrl();
+		a.textContent = 'Sign in again';
+		a.target = '_top';   // an admin preview frame must not hold the sign-in page
+		a.style.fontWeight = '600';
+		bar.appendChild(a);
+		document.body.appendChild(bar);
+		// Anything polling on this page (the vault presence beat) stops: every
+		// further call would be refused the same way.
+		document.dispatchEvent(new CustomEvent('joinery:signed-out'));
+	}
+	function signInUrl() {
+		return '/login?return=' + encodeURIComponent(location.pathname + location.search + location.hash);
+	}
+
 	// A "Report a problem" link for a rejected call, or null.
 	function reportLink(err) {
 		var ref = err && err.errorRef;
@@ -151,5 +211,6 @@
 		return a;
 	}
 
-	window.joineryApi = { post: post, postForm: postForm, csrf: csrf, reportLink: reportLink, notJsonMessage: notJsonMessage };
+	window.joineryApi = { post: post, postForm: postForm, csrf: csrf, reportLink: reportLink, notJsonMessage: notJsonMessage,
+		signInUrl: signInUrl };
 })();

@@ -72,6 +72,7 @@
  * the slice track's background chain it keeps going in a hidden tab, and stops
  * with the beacon. Its answers dispatch 'joinery:vault-work-done' too.
  *
+ * @version 1.9 - stops on 'joinery:signed-out', so a signed-out tab stops beating
  * @version 1.8
  * @changelog 1.8 - the long lane's own track (specs/ai_recipes_own_request.md)
  * @changelog 1.7 - foreground runs (specs/sealed_mail_after_unlock.md); drainNow()
@@ -268,6 +269,9 @@
 	// anywhere on the page ends the beacon.
 	document.addEventListener('joinery:vault-unlocked', start);
 	document.addEventListener('joinery:vault-locked', stop);
+	// Signed out (joinery-api.js): every beat would be refused, and each refusal
+	// is a logged request, for as long as the tab stays open.
+	document.addEventListener('joinery:signed-out', stop);
 
 	window.JoineryVaultPresence = { start: start, stop: stop, drainNow: drainNow };
 

@@ -1,5 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
+ * @version 3.7 - a list read refused because the visitor was signed out says so (joinery-api.js signedOut)
  * @version 3.6 - Open in editor's copy is typed for every format the editor opens (.doc, .xls, .ppt, templates); a
  *   filename's trailing space no longer hides the button
  * @version 3.5 - an end-to-end attachment's text preview is read on this device (MailboxFortress.attachmentText) and its
@@ -1468,7 +1469,8 @@
 				var prior = listEl.querySelector('.mbx-list-refresh-error');
 				if (prior) { prior.remove(); }
 				var notice = errorRow(
-					'Could not refresh this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
+					(err && err.signedOut) ? err.message
+						: 'Could not refresh this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
 					function () { refreshThreads(); }, err);
 				notice.classList.add('mbx-list-refresh-error');
 				listEl.insertBefore(notice, listEl.firstChild);
@@ -1477,7 +1479,8 @@
 			}
 			if (reset) { listEl.innerHTML = ''; }
 			listEl.appendChild(errorRow(
-				'Could not load this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
+				(err && err.signedOut) ? err.message
+					: 'Could not load this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
 				function () { listLoad(reset, soft); }, err));
 			$('#mbx-more').hidden = true;
 			syncSelectionUI();

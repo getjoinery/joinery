@@ -40,6 +40,7 @@
  * browser-held vault is open. It follows 'joinery:vault-scope-unlocked' /
  * 'joinery:vault-scope-locked' for those.
  *
+ * @version 2.5 - a signed-out unlock goes to sign-in with a return to this page (joineryApi.signInUrl)
  * @version 2.4 - v1 retired (v1_key_retirement WP2): no rotation_required answer to handle
  * @version 2.3 - a vault that owes a key rotation still opens its root from the same touch, so the
  *   rotation can run (specs/post_quantum_sealing.md R7)
@@ -184,11 +185,12 @@
 			}
 			return true;
 		} catch (e) {
-			if (e && e.status === 401) {
+			if (e && (e.signedOut || e.status === 401)) {
 				// The session is gone (idle past expiry, no remember-me) — the
 				// transport's stale-token retry already ran, so this denial is
-				// real. Unlocking needs a signed-in session; go get one.
-				window.location.href = '/login';
+				// real. Unlocking needs a signed-in session; go get one, and come
+				// back here after it.
+				window.location.href = joineryApi.signInUrl();
 				return false;
 			}
 			JoineryModal.alert(e.message || 'Could not unlock your vault.');
