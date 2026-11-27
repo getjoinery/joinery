@@ -26,6 +26,7 @@
  * the page on load; it is idempotent, and each state is saved before the next
  * is entered, so a crash between two calls resumes where it stood.
  *
+ * @version 1.4 - its own advisory lock key: it shared ApplyAndPublish's, so each silently skipped while the other ran
  * @version 1.3 - a container host replaces its site containers once, as its Refresh now, in place of an install in each
  *                (Q7); its containers are patched in place only where the host does not replace them
  * @version 1.2 - a node whose agent moved away is not part of the plan, not even as left out
@@ -62,7 +63,7 @@ class FleetSecurityRunner {
 	const JOB_WAIT_MINUTES = 70;
 
 	/** The advisory lock every mover takes: the task tick and the page load never race. */
-	const LOCK_KEY = 7720231022;
+	const LOCK_KEY = 7720231127;
 
 	private static function lock(): bool {
 		$db = DbConnector::get_instance()->get_db_link();

@@ -161,4 +161,21 @@ $src = file_get_contents(__DIR__ . '/../includes/RebootWhenQuietRunner.php');
 check(strpos($src, "new MultiManagedHost(array('mgh_mgn_managed_node_id'") !== false, 'the sites a machine hosts are found through the host group naming it, as tick() pairs them (the machine itself carries no group)');
 check(strpos($src, "a site it hosts (") !== false, 'a hosted site whose agent cannot answer is named, as tick() does not ask that machine');
 
+// Two ticks 4 s apart queued joinerydemo's reboot twice (11-26): the first job
+// had not run yet, so nothing counted as under way. A queued reboot holds the
+// rest, and a tick decides under its own lock.
+check(strpos($src, 'in_array($last[\'status\'], array(\'pending\', \'queued\', \'running\'), true)) { $awaited = true; }') !== false,
+	'a reboot job queued and not yet run counts as a reboot under way');
+check(strpos($src, "pg_try_advisory_lock(' . self::LOCK_KEY") !== false && strpos($src, 'return self::tick_locked(') !== false,
+	'a tick decides only while it holds the lock');
+// Every advisory lock key in the plugin is its own: FleetSecurityRunner shared
+// ApplyAndPublish's, so each skipped its pass while the other held it.
+$keys = array();
+foreach (glob(__DIR__ . '/../includes/*.php') as $f) {
+	preg_match_all('/const (\w*LOCK_KEY) = (\d+);/', file_get_contents($f), $m, PREG_SET_ORDER);
+	foreach ($m as $k) { $keys[$k[2]][] = basename($f) . ' ' . $k[1]; }
+}
+$shared = array_filter($keys, function ($v) { return count($v) > 1; });
+check(count($keys) > 3 && !$shared, 'no two lock constants in server_manager share a key', json_encode($shared));
+
 harness_finish();

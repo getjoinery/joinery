@@ -30,6 +30,8 @@
  * 'automatic' => 'reboot_when_quiet' in its parameters. decide() is pure; the
  * test drives it with arrays.
  *
+ * @version 1.3 - a reboot job queued and not yet run counts as one under way, and a tick holds an advisory lock:
+ *                 two ticks 4 s apart queued joinerydemo's reboot twice, and could have started two machines
  * @version 1.2 - hosted_containers finds a machine's sites through the host group naming it (mgh_mgn_managed_node_id), as tick() does
  * @version 1.1 - waiting_words finds the machine's hosted sites itself (Fleet Security passed none) and names a hosted site whose agent cannot answer quiet_check, as tick() skips that machine
  * @version 1.0
@@ -58,6 +60,9 @@ class RebootWhenQuietRunner {
 	const WINDOW_HOUR = 4;
 
 	const MODES = array('quiet', 'window', 'never');
+
+	/** Held while a tick decides: two ticks at once would each start a reboot. */
+	const LOCK_KEY = 7720231128;
 
 	/**
 	 * What to do now. Pure.
@@ -135,7 +140,18 @@ class RebootWhenQuietRunner {
 	 * reboot. Returns a line for the task's message.
 	 */
 	public static function tick(?int $now = null): string {
-		$now = $now ?? time();
+		$db = DbConnector::get_instance()->get_db_link();
+		if (!(bool)$db->query('SELECT pg_try_advisory_lock(' . self::LOCK_KEY . ')')->fetchColumn()) {
+			return 'Another pass is deciding; this one left it to that.';
+		}
+		try {
+			return self::tick_locked($now ?? time());
+		} finally {
+			$db->query('SELECT pg_advisory_unlock(' . self::LOCK_KEY . ')');
+		}
+	}
+
+	private static function tick_locked(int $now): string {
 		$nodes = array();
 		$host_of_group = array();
 		foreach (new MultiManagedNode(array('deleted' => false), array('mgn_managed_node_id' => 'ASC')) as $n) {
@@ -169,6 +185,9 @@ class RebootWhenQuietRunner {
 			if (trim((string)$n->get('mgn_container_name')) !== '') { continue; }
 			if (JobResultProcessor::reboot_awaited($n)) { $awaited = true; }
 			$last = JobResultProcessor::last_reboot($n);
+			// Queued and not yet run counts too: the machine has not said it
+			// scheduled the reboot, but it will.
+			if ($last !== null && in_array($last['status'], array('pending', 'queued', 'running'), true)) { $awaited = true; }
 			if ($last !== null && !empty($last['came_back_at'])) {
 				$t = strtotime($last['came_back_at'] . ' UTC');
 				if ($t !== false) { $last_back = max((int)$last_back, $t); }
