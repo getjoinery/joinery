@@ -37,6 +37,7 @@
 # Cron (user1 on dev, no sudo needed):
 #   * * * * * /var/www/html/joinerytest/maintenance_scripts/dev_tools/follow_main.sh >> /var/www/html/joinerytest/logs/follow_main.log 2>&1
 #
+# @version 1.8 - postgres over the socket, not -h localhost: the developer's account signs in by the joinery_admin map (specs/postgres_superuser_peer_auth.md); ~/.pgpass answers the socket too until then
 # @version 1.7 - update_database is owed by where the checkout is, not by what this run pulled: the commit
 #               it last ran at is kept, and every run compares. A publish caught up with a commit pushed
 #               mid-publish (c5d95d22d, 11-23) by pulling it itself, so no run here ever saw it arrive
@@ -91,7 +92,7 @@ flock -n 9 || exit 0   # the previous minute's run is still going
 # A publish reads both checkouts; while one is building neither moves.
 publish_building() {
     local building
-    building="$(psql -w -h localhost -U postgres -d joinerytest -Atc "SELECT count(*) FROM mjb_management_jobs
+    building="$(psql -w -U postgres -d joinerytest -Atc "SELECT count(*) FROM mjb_management_jobs
         WHERE mjb_job_type = 'publish_upgrade' AND mjb_status IN ('queued', 'pending', 'running')
         AND mjb_create_time > now() - interval '3 hours'" 2>/dev/null)"
     [ "${building:-0}" != "0" ] || pgrep -f 'publish_upgrade\.php' >/dev/null 2>&1
@@ -189,7 +190,7 @@ schema_owed() {
 # for a pass already under way to finish; the hold ends when this script exits
 # and the session's input closes. Not getting it only means running unheld.
 hold_task_passes() {
-    coproc TASK_HOLD { psql -w -h localhost -U postgres -d "${FOLLOW_MAIN_DB:-joinerytest}" -Atq 2>/dev/null; }
+    coproc TASK_HOLD { psql -w -U postgres -d "${FOLLOW_MAIN_DB:-joinerytest}" -Atq 2>/dev/null; }
     printf '%s\n' "SELECT pg_advisory_lock_shared(hashtext('scheduled_tasks'), hashtext('test_hold'));" \
         "SET lock_timeout = '90s';" \
         "SELECT pg_advisory_lock(hashtext('scheduled_tasks'), hashtext('pass'));" \

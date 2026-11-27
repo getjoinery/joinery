@@ -397,8 +397,11 @@ $metal_cmd = jcb_ssh_steps(JobCommandBuilder::build_install_node($metal_target, 
 	'mode' => 'fresh', 'sitename' => 'metalsite', 'domain' => 'metal.example.com',
 	'docker_mode' => 'bare-metal')))[0]['cmd'];
 check(strpos($metal_cmd, './install.sh -y -q server --keep-root-login') !== false, 'bare metal runs install.sh server when prerequisites are missing, keeping root login', $metal_cmd);
-check(strpos($metal_cmd, "install.sh -y -q site --bare-metal 'metalsite' --password-file=/root/.joinery_postgres_password 'metal.example.com' --enable-agent") !== false,
-	'then the site, with the postgres role password the server setup recorded', $metal_cmd);
+check(strpos($metal_cmd, "install.sh -y -q site --bare-metal 'metalsite' \$PWF 'metal.example.com' --enable-agent") !== false,
+	'then the site, handed the postgres password file only when its installer needs one ($PWF)', $metal_cmd);
+check(strpos($metal_cmd, 'grep -q "peer map=joinery_admin" install.sh') !== false
+	&& preg_match('/if \[ "\$PEER" = 0 \]; then POSTGRES_PASSWORD=/', $metal_cmd) === 1,
+	'a password is made only for an install.sh that does not sign root in by peer', $metal_cmd);
 check(strpos($metal_cmd, 'install.sh -y -q docker') === false, 'and no Docker');
 check(preg_match("#--management-node=('https://[^']+') --upgrade-server=\\1#", $metal_cmd) === 1,
 	'bare metal too installs and upgrades from this plane', $metal_cmd);

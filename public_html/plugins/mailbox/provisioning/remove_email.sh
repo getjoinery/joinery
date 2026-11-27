@@ -3,6 +3,8 @@
 # remove_email.sh - the Mailbox plugin's host remover: takes off a machine what
 # install_email.sh put on it for this site, and nothing else.
 #
+# Version: 1.3 - the lookup roles are dropped as postgres with root signing in by peer (_pg_admin.sh,
+#                specs/postgres_superuser_peer_auth.md); db_admin.php is not read
 # Version: 1.2 - joinery-dkim-add is one of the relay helpers it takes off.
 # Version: 1.1 - a postconf that fails counts as left, and the map files stay while any Postfix setting
 #                still names them in any spelling; the postgres probe is made with no pair in hand too
@@ -226,22 +228,22 @@ if (( POSTFIX_CHANGED )) && command -v postfix >/dev/null 2>&1; then
 fi
 
 # --- 2. the lookup roles go ---------------------------------------------------
-# As postgres, with the pair from the root-only config/db_admin.php (or PGPASSWORD,
-# or a config that still connects as postgres), the way the installer creates
-# the role: the site's own role may not manage roles.
+# As postgres, the way the installer creates the role: the site's own role may
+# not manage roles.
+# root signs in as postgres by peer, or on a machine not switched over yet with
+# the password it had (_pg_admin.sh; remove_account.sh hands its own down as
+# PGPASSWORD). Over the local socket always: the superuser is this machine's.
 ADMIN_PASS="${PGPASSWORD:-}"
-if [[ -z "${ADMIN_PASS}" && -r "${SITE_ROOT}/config/db_admin.php" ]]; then
-    ADMIN_PASS="$("${PHP_BIN}" "${SITE_ROOT}/maintenance_scripts/install_tools/_config_value.php" "${SITE_ROOT}/config/db_admin.php" dbadminpassword 2>/dev/null || true)"
-fi
-if [[ -z "${ADMIN_PASS}" && "${DBUSER}" == "postgres" ]]; then
-    ADMIN_PASS="${DBPASS}"
+ADMIN_SIGNED_IN=0
+if [[ -f "${SITE_ROOT}/maintenance_scripts/install_tools/_pg_admin.sh" ]] && command -v psql >/dev/null 2>&1; then
+    # shellcheck source=/dev/null
+    . "${SITE_ROOT}/maintenance_scripts/install_tools/_pg_admin.sh"
+    if pg_admin_auth >/dev/null 2>&1; then
+        ADMIN_PASS="${PGPASSWORD:-}"
+        ADMIN_SIGNED_IN=1
+    fi
 fi
 ADMIN_PSQL_ARGS=(-w -U postgres -v ON_ERROR_STOP=1 -tAXq)
-if [[ -n "${DBHOST}" && "${DBHOST}" != "localhost" ]]; then
-    ADMIN_PSQL_ARGS+=(-h "${DBHOST}")
-fi
-# DATABASE, then psql arguments; the statement on stdin, so a name reaches
-# PostgreSQL through a psql variable and never through a shell word.
 admin_psql() {
     local db="$1"; shift
     PGPASSWORD="${ADMIN_PASS}" psql "${ADMIN_PSQL_ARGS[@]}" -d "${db}" "$@"
@@ -258,7 +260,6 @@ elif ! probe="$(admin_psql postgres <<<'SELECT 1;' 2>&1)"; then
     # The pair itself never reaches the transcript: a test on the variable,
     # never an expansion of it (reviewer2, second pass).
     why="$(printf '%s' "${probe}" | head -n 1)"
-    [[ -n "${ADMIN_PASS}" ]] || why="${why}; no postgres pair was found (config/db_admin.php, or PGPASSWORD)"
     left "PostgreSQL could not be reached as postgres to drop the lookup roles: ${why}"
 else
     # Which of the site's databases are still here.
@@ -335,7 +336,7 @@ write_signing_map() {
 }
 DOMAINS=""
 DOMAINS_READ=0
-if [[ -n "${DBNAME}" && -n "${ADMIN_PASS}" ]] && command -v psql >/dev/null 2>&1 \
+if [[ -n "${DBNAME}" ]] && { (( ADMIN_SIGNED_IN )) || [[ -n "${ADMIN_PASS}" ]]; } && command -v psql >/dev/null 2>&1 \
    && [[ "$(admin_psql postgres -v d="${DBNAME}" <<<"SELECT 1 FROM pg_database WHERE datname = :'d';" 2>/dev/null)" == "1" ]] \
    && [[ "$(admin_psql "${DBNAME}" <<<"SELECT to_regclass('public.ied_inbound_email_domains') IS NOT NULL;" 2>/dev/null)" == "t" ]]; then
     if DOMAINS="$(admin_psql "${DBNAME}" <<<"SELECT ied_domain FROM ied_inbound_email_domains ORDER BY 1;" 2>&1)"; then

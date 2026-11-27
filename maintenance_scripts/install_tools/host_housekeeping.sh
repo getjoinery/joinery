@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.47 - root signs in to PostgreSQL by peer (section 10d2, _pg_admin.sh, specs/postgres_superuser_peer_auth.md):
+#                the joinery_admin map, the local postgres line switched once no site still signs in as postgres,
+#                then the role's password cleared and db_admin.php and the root password record removed
 # Version: 1.46 - joinery-http2.conf sets H2WindowSize 1048576. Under Apache's 64 KB default an upload over HTTP/2
 #                moved one window per round trip: 20 MB took 5.2 s over a 9 ms link against 0.6 s over HTTP/1.1
 # Version: 1.45 - The Apache visitors reach answers HTTP/2 over TLS (section 1a): conf-available/joinery-http2.conf,
@@ -1489,6 +1492,60 @@ elif [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
     else
         warn "the hourly security check: $(printf '%s' "${SCK_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
+    fi
+fi
+
+# --- 10d2. root signs in to PostgreSQL by who it is ----------------------------
+# The postgres role has no password: root signs in over the local socket by its
+# Linux user (peer, through the joinery_admin map in pg_ident.conf), and
+# nothing else can sign in as postgres at all (specs/postgres_superuser_peer_auth.md).
+# A machine an older installer set up is switched over here (_pg_admin.sh):
+#
+#   1. the map is written (harmless until a pg_hba line names it), with the
+#      account a developer's box records as its tree's owner;
+#   2. when no site here still signs in as postgres with a password (its
+#      scheduled backup, as www-data, would be refused), the local postgres
+#      line becomes peer, and root's sign-in is proved; a refusal puts the old
+#      line back;
+#   3. once peer answers, the role's password is cleared (every run: a
+#      container's rebase restores its roles with the old one), each
+#      config/db_admin.php goes, and so does /root/.joinery_postgres_password on
+#      a machine with a site (one whose site step failed keeps it for a retry).
+#
+# A site still on postgres is named on every run until site_db_role.sh gives it
+# its own role (upgrade.php runs it on every upgrade).
+PG_PEER_HELPER="${SCRIPT_DIR}/_pg_admin.sh"
+if [[ -f "${PG_PEER_HELPER}" ]] && compgen -G "${FS_ROOT}/etc/postgresql/*/main/pg_hba.conf" >/dev/null; then
+    # shellcheck source=_pg_admin.sh
+    . "${PG_PEER_HELPER}"
+    pg_map_account=""
+    # A developer's box: the account its tree belongs to signs in as postgres
+    # too, as it already may through sudo. Never root, the web server's user or
+    # a system account, and never inside a container.
+    if [[ "${IN_CONTAINER}" == 0 ]] && { sck_developer_tree; }; then
+        pg_owner="$(joinery_tree_owner_record "${SITE_ROOT}" 2>/dev/null || true)"
+        pg_map_account_ok "${pg_owner}" && pg_map_account="${pg_owner}"
+    fi
+    pg_held="$(pg_peer_gate_holds "${FS_ROOT}" || true)"
+    pg_rc=0
+    pg_out="$(pg_peer_converge "${FS_ROOT}" "${RUN_SYSTEM}" "${pg_map_account}")" || pg_rc=$?
+    [[ -n "${pg_out}" ]] && printf '%s\n' "${pg_out}" | sed 's/^/housekeeping: /'
+    while IFS= read -r pg_cfg; do
+        [[ -n "${pg_cfg}" ]] && say "${pg_cfg} still signs in to PostgreSQL as postgres (or its database user could not be read), so root's sign-in stays on a password here: run site_db_role.sh for that site"
+    done <<< "${pg_held}"
+    # The peer line already in force with such a site here (a server installed
+    # again, a container started on an image that carries the line): that
+    # site's www-data backup is refused until it has its own role.
+    if [[ "${pg_rc}" == 0 && "${RUN_SYSTEM}" == 1 && -n "${pg_held}" ]]; then
+        pg_out="$(pg_roles_for_held_sites "${FS_ROOT}")" || FAILED=1
+        [[ -n "${pg_out}" ]] && printf '%s\n' "${pg_out}" | sed 's/^/housekeeping: /'
+    fi
+    if [[ "${pg_rc}" == 2 ]]; then
+        warn "PostgreSQL refused root's peer sign-in; the earlier line is back"
+        FAILED=1
+    elif [[ "${pg_rc}" == 0 && "${RUN_SYSTEM}" == 1 && -z "${pg_held}" ]]; then
+        pg_out="$(pg_peer_settle "${FS_ROOT}")" || FAILED=1
+        [[ -n "${pg_out}" ]] && printf '%s\n' "${pg_out}" | sed 's/^/housekeeping: /'
     fi
 fi
 

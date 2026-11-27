@@ -2093,15 +2093,15 @@ in backup storage, the database included), then
 `BACKUP_WARNING` when there is one. A management node stores the level and
 size on the job result, so a run's size is a field and never prose to parse.
 
-Four `config/` files are readable by root only and are in no archive, whoever
-runs the backup: `db_admin.php` (the database's postgres pair),
-`admin_credentials.txt` (the first-login password the installer leaves), and on
-a publishing box the release signing keys, `agent_signing_key` and
-`release_statement_key` (`_backup_root_only_files.sh`). Every archive is sealed
+The `config/` files readable by root only are in no archive, whoever runs the
+backup: `admin_credentials.txt` (the first-login password the installer leaves),
+on a publishing box the release signing keys, `agent_signing_key` and
+`release_statement_key`, and any `db_admin.php` on a machine held on a postgres
+password (`_backup_root_only_files.sh`). Every archive is sealed
 to the site's own backup key, which the web user can read, so a root-only file
 inside one would be readable by the web user. A restore keeps the machine's own
 copy of each (`MACHINE_CONFIG_FILES`, `_restore_guard.sh`), and a fresh install
-makes its own `db_admin.php` and `admin_credentials.txt`; a publishing box's two
+makes its own `admin_credentials.txt`; a publishing box's two
 signing keys are kept offline by their owner and put back by hand. Any other unreadable file fails the
 run rather than being skipped.
 

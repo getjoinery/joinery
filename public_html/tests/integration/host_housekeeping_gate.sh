@@ -578,7 +578,7 @@ mkpg() {  # $1 root, $2 listen_addresses, $3 pg_hba body
     printf "data_directory = '/var/lib/postgresql/16/main'\nlisten_addresses = '%s'\ninclude_dir = 'conf.d'\n" "$2" > "$1/etc/postgresql/16/main/postgresql.conf"
     printf '%b' "$3" > "$1/etc/postgresql/16/main/pg_hba.conf"
 }
-LOCAL_HBA='local   all             postgres                                scram-sha-256\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             ::1/128                 md5\nlocal   replication     all                                     peer\nhost    replication     all             127.0.0.1/32            md5\n'
+LOCAL_HBA='local   all             postgres                                peer map=joinery_admin\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             ::1/128                 md5\nlocal   replication     all                                     peer\nhost    replication     all             127.0.0.1/32            md5\n'
 PG="$T/pg-local"; mkpg "$PG" localhost "$LOCAL_HBA"; cp "$PG/etc/postgresql/16/main/pg_hba.conf" "$T/pg-local.hba"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-local-site" 2>&1)"
 chk "a standalone server already local keeps its rules byte for byte" "$(cmp -s "$T/pg-local.hba" "$PG/etc/postgresql/16/main/pg_hba.conf" && echo same)" "same"
@@ -588,9 +588,37 @@ chk "without a restart, since it was already listening on localhost" "$(printf '
 PG="$T/pg-open"; mkpg "$PG" '*' 'local   all             postgres                                md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::/0                    md5\ninclude_dir extra.d\n'
 out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-open-site" 2>&1)"
 chk "an open standalone server loses every network rule and include" "$(grep -cE '0\.0\.0\.0/0|::/0|include_dir' "$PG/etc/postgresql/16/main/pg_hba.conf")" "0"
+
 chk "and keeps its local and loopback rules" "$(grep -cE '^(local|host +all +all +127\.0\.0\.1/32)' "$PG/etc/postgresql/16/main/pg_hba.conf")" "2"
 chk "the original is kept beside it" "$(grep -c '0\.0\.0\.0/0' "$PG/etc/postgresql/16/main/pg_hba.conf.pre-local-only")" "1"
 chk "and PostgreSQL is restarted onto localhost" "$(printf '%s\n' "$out" | grep -c "was listening on '\*': restarting it on localhost only")" "1"
+
+echo "=== root signs in to PostgreSQL by peer (10d2) ==="
+SCRAM_HBA='local   all             postgres                                scram-sha-256\nlocal   all             all                                     scram-sha-256\nhost    all             all             127.0.0.1/32            scram-sha-256\n'
+mkcfg() {  # $1 root, $2 site, $3 dbusername, $4 dbpassword, $5 dbusername_test, $6 dbpassword_test
+    mkdir -p "$1/var/www/html/$2/config"
+    printf "<?php\n\$this->settings['dbusername'] = '%s';\n\$this->settings['dbpassword'] = '%s';\n\$this->settings['dbusername_test'] = '%s';\n\$this->settings['dbpassword_test'] = '%s';\n" "$3" "$4" "$5" "$6" > "$1/var/www/html/$2/config/Globalvars_site.php"
+}
+PG="$T/pg-peer"; mkpg "$PG" localhost "$SCRAM_HBA"; mkcfg "$PG" s1 joinery_s1 pw joinery_s1 pw
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-peer-site" 2>&1)"
+chk "every site on its own role: the local postgres line becomes peer through the map" \
+    "$(awk '$1=="local" && $3=="postgres" {print $4, $5}' "$PG/etc/postgresql/16/main/pg_hba.conf")" "peer map=joinery_admin"
+chk "the map lets root and the postgres user act as postgres, nobody else" \
+    "$(grep -v '^#' "$PG/etc/postgresql/16/main/pg_ident.conf" | awk 'NF {print $1, $2, $3}' | sort | tr '\n' ',')" "joinery_admin postgres postgres,joinery_admin root postgres,"
+chk "and the other local line is left alone" "$(grep -c '^local   all             all                                     scram-sha-256' "$PG/etc/postgresql/16/main/pg_hba.conf")" "1"
+cp "$PG/etc/postgresql/16/main/pg_hba.conf" "$T/pg-peer.hba"; cp "$PG/etc/postgresql/16/main/pg_ident.conf" "$T/pg-peer.ident"
+JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-peer-site" >/dev/null 2>&1
+chk "a second run changes nothing" "$(cmp -s "$T/pg-peer.hba" "$PG/etc/postgresql/16/main/pg_hba.conf" && cmp -s "$T/pg-peer.ident" "$PG/etc/postgresql/16/main/pg_ident.conf" && echo same)" "same"
+PG="$T/pg-held"; mkpg "$PG" localhost "$SCRAM_HBA"; mkcfg "$PG" s1 joinery_s1 pw postgres secret
+out="$(JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-held-site" 2>&1)"
+chk "a site whose test pair still signs in as postgres with a password keeps the line" \
+    "$(awk '$1=="local" && $3=="postgres" {print $4}' "$PG/etc/postgresql/16/main/pg_hba.conf")" "scram-sha-256"
+chk "and is named, with the way out" "$(printf '%s\n' "$out" | grep -c 's1/config/Globalvars_site.php still signs in to PostgreSQL as postgres.*site_db_role.sh')" "1"
+chk "the map is written anyway: it does nothing until a line names it" "$(grep -c 'joinery-admin-map' "$PG/etc/postgresql/16/main/pg_ident.conf")" "2"
+PG="$T/pg-empty"; mkpg "$PG" localhost "$SCRAM_HBA"; mkcfg "$PG" s1 postgres '' postgres ''
+JOINERY_HOUSEKEEPING_ROOT="$PG" bash "$SCRIPT" x "$T/pg-empty-site" >/dev/null 2>&1
+chk "a config naming postgres with no password holds nothing back" \
+    "$(awk '$1=="local" && $3=="postgres" {print $4}' "$PG/etc/postgresql/16/main/pg_hba.conf")" "peer"
 
 PG="$T/pg-ctr"; mkpg "$PG" '*' 'local   all             postgres                                md5\nlocal   all             all                                     md5\nhost    all             all             127.0.0.1/32            md5\nhost    all             all             0.0.0.0/0               md5\nhost    all             all             ::1/128                 md5\n# joinery-local-only: declared in config/postgres_access.conf\nhost    scrolldaddy     scrolldaddy_reader 192.168.206.21/32       md5\n'
 touch "$PG/.dockerenv"; mkdir -p "$PG/proc/net" "$T/pg-ctr-site/config"

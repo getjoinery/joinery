@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.26 - root signs in as postgres by peer (_pg_admin.sh, specs/postgres_superuser_peer_auth.md); the
+#               db_admin.php, config and /root/.joinery_postgres_password lookups go
 #VERSION 2.25 - a site container's state volume (SITE_state) is one of the site's volumes and goes with it
 #VERSION 2.24 - Root's records for the site under /var/lib/joinery/sites/SITE and its converger log under
 #               /var/log/joinery go with the site (shell_command_audit D1)
@@ -371,11 +373,16 @@ if [ "$HOST_PROXY" = false ] && ! another_site "${SITE_NAME}_test"; then
     fi
 fi
 
-# The postgres pair when no site config can give it: the environment's
-# PGPASSWORD, or install.sh's record of it. A removal run again after one that
-# stopped part way finds the config folder gone and only the databases left.
+# How root signs in as postgres: by peer, or on a machine not switched over yet
+# with the password it had (_pg_admin.sh), read now, before the site's config
+# goes. A fixture root (REMOVE_ACCOUNT_ROOT) uses the PGPASSWORD it is given.
 ADMIN_PW_FALLBACK="${PGPASSWORD:-}"
-[ -n "$ADMIN_PW_FALLBACK" ] || ADMIN_PW_FALLBACK="$(head -n 1 "$FS/root/.joinery_postgres_password" 2>/dev/null || true)"
+PG_ADMIN_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_pg_admin.sh"
+if [ -z "$FS" ] && [ -f "$PG_ADMIN_HELPER" ] && command -v psql >/dev/null 2>&1; then
+    # shellcheck source=../install_tools/_pg_admin.sh
+    . "$PG_ADMIN_HELPER"
+    pg_admin_auth >/dev/null 2>&1 && ADMIN_PW_FALLBACK="${PGPASSWORD:-}"
+fi
 # A database named after the site on this machine's PostgreSQL, asked with that pair.
 site_database_here() {
     [ "$IS_DOCKER" = false ] || return 1
@@ -412,27 +419,14 @@ if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ]; then
         db_config="$WEB_DIR/$db_site/config/Globalvars_site.php"
         SITE_DATABASES="$SITE_DATABASES $db_site"
         [ "$(config_value "$db_config" dbname_test)" = "test_${db_site}" ] && SITE_DATABASES="$SITE_DATABASES test_${db_site}"
-        # The role's password, read now: the config goes with the site's folder.
-        # Local connections need it (install.sh's pg_hba), and without it
-        # dropdb asks on a terminal nobody is at.
-        # The postgres pair lives in the root-only config/db_admin.php once the
-        # site has its own role (site_db_role.sh); a config still on postgres
-        # carries the password itself. The role goes with the databases.
-        [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$WEB_DIR/$db_site/config/db_admin.php" dbadminpassword)"
-        case "$(config_value "$db_config" dbusername)" in
-            joinery_*) ;;   # the role's password, not postgres's
-            *) [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$db_config" dbpassword)" ;;
-        esac
+        # The role goes with the databases.
         # The role is the name site_db_role.sh gives it, composed here like the
         # database names, so a site whose config is already gone (a removal
         # that stopped part way) still loses its role; IF EXISTS covers a site
         # that never had one.
         SITE_DB_ROLES="${SITE_DB_ROLES:-} joinery_${db_site}"
     done
-    # A site whose config folder is already gone (a removal that stopped part
-    # way, run again) has no file to read the postgres pair from: the
-    # environment's PGPASSWORD, or install.sh's record of it, serves instead.
-    [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$ADMIN_PW_FALLBACK"
+    DB_PASSWORD="$ADMIN_PW_FALLBACK"
 fi
 
 # The machine's host converger unit, when it runs for this site: its service
@@ -759,10 +753,9 @@ if [ "$IS_BAREMETAL" = true ]; then
             echo "Running the plugins' host removers..."
             REMOVERS_LOG="$(mktemp)"
             # Through tee, so the transcript shows each remover as it runs; the
-            # mode's exit is the pipeline's first. The postgres pair this script
-            # resolved (db_admin.php, the config, PGPASSWORD or root's record)
-            # goes down as PGPASSWORD, so a remover that drops a role on a site
-            # with no db_admin.php does not have to find it again (reviewer2 F3).
+            # mode's exit is the pipeline's first. A password this script
+            # signed in with (a machine not switched over to peer yet) goes down
+            # as PGPASSWORD, so a remover does not have to find it again.
             PGPASSWORD="${DB_PASSWORD:-$ADMIN_PW_FALLBACK}" bash "$PLUGIN_REMOVERS_TOOL" --remove-site "$SITE_NAME" "$SITE_ROOT" 2>&1 | tee "$REMOVERS_LOG"
             REMOVERS_RC="${PIPESTATUS[0]}"
             case "$REMOVERS_RC" in

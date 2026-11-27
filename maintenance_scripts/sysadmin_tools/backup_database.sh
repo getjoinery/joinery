@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#Version 4.0 - A database not on its site's own role is dumped as postgres, root signing in by peer
+#              (_pg_admin.sh, specs/postgres_superuser_peer_auth.md); the .pgpass advice and the password prompt go
 #Version 3.9 - A database whose site is on its own role (site_db_role.sh) is dumped as that role with the pair its
 #              config holds, so the scheduled backup (www-data) needs no postgres password; any other database as
 #              postgres, with the password read from the root-only config/db_admin.php before a config still on
@@ -36,9 +38,6 @@ REPORT_FILE=""
 DUMP_RC=0
 ENC_RC=0
 
-# Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt.
-# Called after the arguments are parsed, so DATABASE_NAME is known and the
-# named database's own site config is tried before any other.
 # The role a database is dumped as. A site on its own database role
 # (site_db_role.sh) is dumped as that role, with the pair its config holds: an
 # owner can dump its database, nothing in a dump needs a superuser, and the
@@ -88,78 +87,15 @@ load_db_password() {
             return 0
         fi
     fi
-    # Check for .pgpass file first
-    if [[ -f ~/.pgpass ]]; then
-        echo "✓ Found .pgpass file - using passwordless authentication."
-    elif [[ -n "$PGPASSWORD" ]]; then
-        echo "✓ Found PGPASSWORD environment variable - using passwordless authentication."
+    # Everything else is dumped as postgres: root signs in by peer, or on a
+    # machine not switched over yet with the password it had (_pg_admin.sh).
+    # shellcheck source=../install_tools/_pg_admin.sh
+    . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_pg_admin.sh"
+    if pg_admin_auth; then
+        echo "✓ Signed in to PostgreSQL as postgres (${PG_ADMIN_AUTH})."
     else
-        # Try to find and load password from config file
-        CONFIG_FILE=""
-        CONFIG_PASSWORD=""
-    
-        # Strategy 1: Try database names with _test suffix removed
-        # Note: For backup script, we might only have one database name, so check if it's available
-        if [[ -n "$DATABASE_NAME" ]]; then
-            # Single database backup - try the specified database name
-            for DB_NAME in "$DATABASE_NAME"; do
-                # Remove _test suffix if present
-                SITENAME="${DB_NAME%_test}"
-                if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
-                    CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
-                    break
-                fi
-            done
-        
-            # Strategy 2: Try original database name as-is
-            if [[ -z "$CONFIG_FILE" ]] && [[ -f "/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php" ]]; then
-                CONFIG_FILE="/var/www/html/${DATABASE_NAME}/config/Globalvars_site.php"
-            fi
-        fi
-    
-        # Strategy 3: Look for any config file in /var/www/html/*/config/
-        if [[ -z "$CONFIG_FILE" ]]; then
-            CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
-        fi
-    
-        if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-            echo "✓ Found config file: $CONFIG_FILE"
-            # Extract password from config file
-            # The postgres pair lives in the root-only config/db_admin.php once
-            # the site has its own role (site_db_role.sh); a config still on
-            # postgres carries the password itself.
-            ADMIN_FILE="$(dirname "$CONFIG_FILE")/db_admin.php"
-            CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
-            CONFIG_PASSWORD=""
-            if [[ -r "$ADMIN_FILE" ]]; then
-                CONFIG_PASSWORD="$(php "$CONFIG_READER" "$ADMIN_FILE" dbadminpassword 2>/dev/null)"
-            fi
-            if [[ -z "$CONFIG_PASSWORD" && "$(php "$CONFIG_READER" "$CONFIG_FILE" dbusername 2>/dev/null)" == "postgres" ]]; then
-                CONFIG_PASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
-            fi
-            if [[ -n "$CONFIG_PASSWORD" ]]; then
-                export PGPASSWORD="$CONFIG_PASSWORD"
-                echo "✓ Using database password from config file."
-            fi
-        fi
-    
-        # If still no password, fall back to interactive prompt (unless non-interactive)
-        if [[ -z "$PGPASSWORD" ]]; then
-            echo "⚠️  No .pgpass file found, no config file found, and PGPASSWORD not set."
-            echo "You will be prompted for the postgres password multiple times."
-            echo ""
-            echo "To avoid this in the future, either:"
-            echo "  1) Create a .pgpass file: echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass && chmod 600 ~/.pgpass"
-            echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
-            echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
-            echo ""
-            # Note: NON_INTERACTIVE not set yet during initial config loading
-            # This prompt will be skipped if running via automated scripts that set PGPASSWORD
-            if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
-                read -p "Press Enter to continue with password prompts..."
-                echo ""
-            fi
-        fi
+        echo "✗ Cannot sign in to PostgreSQL as postgres. Run this as root (it signs in by peer)."
+        exit 1
     fi
 }
 

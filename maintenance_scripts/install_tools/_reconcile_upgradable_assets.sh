@@ -25,12 +25,22 @@
 #
 # Always exits 0 — a failed sync is non-fatal; Apache starts regardless.
 #
-# Requires env vars: SITENAME, POSTGRES_PASSWORD (set in Dockerfile.template)
+# Requires env var: SITENAME (set in Dockerfile.template).
+#
+# root signs in as postgres by peer. The peer line is put in place first
+# (_pg_admin.sh): a container recreated from an image older than it starts with
+# that image's line, and this runs before housekeeping does. A container whose
+# site still signs in as postgres keeps its line and signs in with the env
+# file's POSTGRES_PASSWORD.
 
 PUBLIC_HTML="/var/www/html/${SITENAME}/public_html"
+# shellcheck source=_pg_admin.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_pg_admin.sh"
+pg_peer_converge "" 1 || true
+pg_admin_auth || true
 
 # Read upgrade_source from the site database
-UPGRADE_SOURCE=$(PGPASSWORD="${POSTGRES_PASSWORD}" psql -U postgres -d "${SITENAME}" -t -A \
+UPGRADE_SOURCE=$(psql -U postgres -d "${SITENAME}" -t -A \
     -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'upgrade_source'" 2>/dev/null \
     | tr -d '[:space:]')
 
@@ -50,7 +60,7 @@ sync_items() {
     local url_suffix="$4"
 
     local names
-    names=$(PGPASSWORD="${POSTGRES_PASSWORD}" psql -U postgres -d "${SITENAME}" -t -A \
+    names=$(psql -U postgres -d "${SITENAME}" -t -A \
         -c "$sql_query" 2>/dev/null)
 
     if [ -z "$names" ]; then

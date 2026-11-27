@@ -55,8 +55,15 @@ if [ -z "${PGPASSWORD:-}" ] && [ -f "$ROOT/config/Globalvars_site.php" ]; then
     # psql with no -d opens the database named after the user; the role has none.
     [ -n "$PGUSER" ] && export PGDATABASE=postgres
 fi
-if ! psql -U "${PGUSER:-postgres}" -h localhost -c 'select 1' >/dev/null 2>&1; then
-    echo "  SKIP: no postgres connection available"
+if ! psql -U "${PGUSER:-postgres}" -c 'select 1' >/dev/null 2>&1; then
+    # A machine with no PostgreSQL has nothing to test. One whose server answers
+    # but refuses the sign-in has lost this gate's coverage: that is a failure.
+    if pg_isready -q >/dev/null 2>&1; then
+        echo "  FAIL: PostgreSQL is running but refuses ${PGUSER:-postgres} over the socket: $(psql -U "${PGUSER:-postgres}" -c 'select 1' 2>&1 | head -1)"
+        echo "RESULT: FAIL 0 1"
+        exit 1
+    fi
+    echo "  SKIP: no PostgreSQL on this machine"
     echo "RESULT: PASS 0 0"
     exit 0
 fi
@@ -64,7 +71,7 @@ fi
 PROJ="jyps_$$"
 W=$(mktemp -d /tmp/jy_project_stream_gate_XXXXXX)
 cleanup() {
-    psql -U "${PGUSER:-postgres}" -h localhost -c "DROP DATABASE IF EXISTS \"$PROJ\"" >/dev/null 2>&1
+    psql -U "${PGUSER:-postgres}" -c "DROP DATABASE IF EXISTS \"$PROJ\"" >/dev/null 2>&1
     chmod -R u+rwX "$W" 2>/dev/null; rm -rf "${W:?}"
 }
 trap cleanup EXIT
@@ -85,9 +92,9 @@ ln -s public_html/index.php "$W/site/link_to_index"
 ln -s ./public_html "$W/site/link_to_dir"
 ln "$W/site/public_html/index.php" "$W/site/public_html/index_hardlink.php"
 
-psql -U "${PGUSER:-postgres}" -h localhost -c "CREATE DATABASE \"$PROJ\" TEMPLATE template0" >/dev/null 2>&1
-psql -U "${PGUSER:-postgres}" -h localhost -d "$PROJ" -c "CREATE TABLE t (id int, name text); INSERT INTO t VALUES (1,'one'),(2,'two')" >/dev/null 2>&1
-chk "throwaway database exists" "$(psql -U "${PGUSER:-postgres}" -h localhost -tAc "select count(*) from t" "$PROJ")" "2"
+psql -U "${PGUSER:-postgres}" -c "CREATE DATABASE \"$PROJ\" TEMPLATE template0" >/dev/null 2>&1
+psql -U "${PGUSER:-postgres}" -d "$PROJ" -c "CREATE TABLE t (id int, name text); INSERT INTO t VALUES (1,'one'),(2,'two')" >/dev/null 2>&1
+chk "throwaway database exists" "$(psql -U "${PGUSER:-postgres}" -tAc "select count(*) from t" "$PROJ")" "2"
 
 head -c 32 /dev/urandom | base64 > "$W/key"; chmod 600 "$W/key"
 

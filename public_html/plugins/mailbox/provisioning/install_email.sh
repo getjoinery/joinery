@@ -2,6 +2,8 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.33 - the Postfix role is managed as postgres with root signing in by peer (_pg_admin.sh,
+#                specs/postgres_superuser_peer_auth.md); db_admin.php is not read
 # Version: 2.32 - the relay helper converge names joinery-dkim-add too (comment only).
 # Version: 2.31 - The Postfix role is created and its attributes and password set as postgres (the pair
 #                from the root-only config/db_admin.php), since the site's own database role may not
@@ -469,26 +471,23 @@ db_psql() {
 
 # The Postfix role itself (CREATE ROLE, ALTER ROLE ... attributes and password)
 # is role management, which the site's own database role may not do
-# (NOCREATEROLE, mail_access_hardening WP4): that runs as postgres with the pair
-# from the root-only config/db_admin.php, or from PGPASSWORD, or from a config
-# that still connects as postgres. The grants stay with db_psql: the site's
-# role owns the tables and may grant on them.
+# (NOCREATEROLE, mail_access_hardening WP4): that runs as postgres. The grants
+# stay with db_psql: the site's role owns the tables and may grant on them.
+# root signs in as postgres by peer, or on a machine not switched over yet with
+# the password it had (_pg_admin.sh; remove_account.sh hands its own down as
+# PGPASSWORD). Over the local socket always: the superuser is this machine's.
 ADMIN_PASS="${PGPASSWORD:-}"
-if [[ -z "${ADMIN_PASS}" && -r "${SITE_ROOT}/config/db_admin.php" ]]; then
-    ADMIN_PASS="$("${PHP_BIN}" "${SITE_ROOT}/maintenance_scripts/install_tools/_config_value.php" "${SITE_ROOT}/config/db_admin.php" dbadminpassword 2>/dev/null)"
-fi
-if [[ -z "${ADMIN_PASS}" && "${DBUSER}" == "postgres" ]]; then
-    ADMIN_PASS="${DBPASS}"
+if [[ -f "${SITE_ROOT}/maintenance_scripts/install_tools/_pg_admin.sh" ]]; then
+    # shellcheck source=/dev/null
+    . "${SITE_ROOT}/maintenance_scripts/install_tools/_pg_admin.sh"
+    pg_admin_auth >/dev/null 2>&1 && ADMIN_PASS="${PGPASSWORD:-}"
 fi
 ADMIN_PSQL_ARGS=(-U postgres -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
-if [[ -n "${DBHOST}" && "${DBHOST}" != "localhost" ]]; then
-    ADMIN_PSQL_ARGS+=(-h "${DBHOST}")
-fi
 admin_psql() {
     PGPASSWORD="${ADMIN_PASS}" psql "${ADMIN_PSQL_ARGS[@]}" "$@"
 }
 if ! admin_psql -c "SELECT 1" >/dev/null 2>&1; then
-    echo "ERROR: cannot connect to PostgreSQL as postgres to manage the ${DBNAME} mail role: set PGPASSWORD, or keep the pair in ${SITE_ROOT}/config/db_admin.php (site_db_role.sh writes it)" >&2
+    echo "ERROR: cannot connect to PostgreSQL as postgres to manage the ${DBNAME} mail role: root signs in by peer: check the 'local all postgres' line in pg_hba.conf and the joinery_admin map in pg_ident.conf" >&2
     exit 1
 fi
 

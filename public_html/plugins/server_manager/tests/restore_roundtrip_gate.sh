@@ -46,11 +46,10 @@ chk() {
     fi
 }
 
-# Database password: prefer an already-set PGPASSWORD, else postgres's password
-# from the local site config, but only while that config still connects as
-# postgres: this gate creates and drops roles (the RESTORE_ROLE_MISSING checks),
-# which the site's own role may not, so it runs as postgres or skips. With the
-# config on its own role, PGPASSWORD or ~/.pgpass must hold the postgres pair.
+# This gate creates and drops roles (the RESTORE_ROLE_MISSING checks), which the
+# site's own role may not, so it runs as postgres over the socket: root, or a
+# developer's account the converger mapped, signs in by peer; a machine not
+# switched over yet uses PGPASSWORD, ~/.pgpass, or a config still on postgres.
 if [ -z "${PGPASSWORD:-}" ]; then
     CFG="$ROOT/config/Globalvars_site.php"
     READER="$ROOT/maintenance_scripts/install_tools/_config_value.php"
@@ -61,7 +60,14 @@ if [ -z "${PGPASSWORD:-}" ]; then
 fi
 
 if ! psql -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
-    echo "  SKIP: no postgres connection available"
+    # A machine with no PostgreSQL has nothing to test. One whose server answers
+    # but refuses the sign-in has lost this gate's coverage: that is a failure.
+    if pg_isready -q >/dev/null 2>&1; then
+        echo "  FAIL: PostgreSQL is running but refuses postgres over the socket: $(psql -U postgres -c 'SELECT 1;' 2>&1 | head -1)"
+        echo "RESULT: FAIL 0 1"
+        exit 1
+    fi
+    echo "  SKIP: no PostgreSQL on this machine"
     echo "RESULT: PASS 0 0"
     exit 0
 fi

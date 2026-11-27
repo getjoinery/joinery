@@ -8,7 +8,7 @@ Deploy Joinery on a fresh Ubuntu 26.04 LTS (or later) server, either in a Docker
 
 1. [Quick Start](#quick-start)
 2. [Prerequisites](#prerequisites)
-3. [Password Security](#password-security)
+3. [Database Access](#database-access)
 4. [The Data Root](#the-data-root)
 5. [Docker Deployment](#docker-deployment)
 6. [Bare-Metal Deployment](#bare-metal-deployment)
@@ -114,48 +114,13 @@ The `joinery-X-Y.tar.gz` archive contains:
 - `maintenance_scripts/install_tools/` — installer, Dockerfile, defaults
 - `maintenance_scripts/sysadmin_tools/` — backup, restore, maintenance utilities
 
-## Password Security
+## Database Access
 
-**Never use weak or example passwords in production.** Auto-generation is the recommended path.
+Nothing asks for, generates or keeps a password for PostgreSQL's superuser account (`postgres`), because it has none. Root signs in to it over the local socket by who it is: `pg_hba.conf` names `peer map=joinery_admin` on the `local all postgres` line, and `pg_ident.conf`'s `joinery_admin` map lets the `root` and `postgres` Linux users act as `postgres`. No other account, and no connection over the network or loopback, can sign in as `postgres` at all. On a developer's box the account its tree belongs to (the root-written `config/tree_owner`) is in the map too.
 
-### Auto-generated (recommended)
+Each site connects as its own role, `joinery_SITENAME`, whose password is generated at install and kept in the site's `Globalvars_site.php` (see [Deploy and Upgrade](deploy_and_upgrade.md), *The site's own database role*).
 
-Omit the password and the installer generates a 24-character secure password, then displays it once at the end of installation:
-
-```bash
-sudo ./install.sh site mysite mysite.com 8080
-# Output: "Auto-generated secure password: xK9mN2pQ7rT4vW8yB3cF6hJ1"
-```
-
-Save the password immediately — it's also written to the site's `Globalvars_site.php`.
-
-### Bring your own password
-
-Hand it over in a file so it never appears on a command line:
-
-```bash
-echo 'YourStr0ng&Secure#Pass@9' > /tmp/dbpass.txt
-sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
-rm /tmp/dbpass.txt
-```
-
-### Any character works
-
-Quotes, backslashes, dollar signs, backticks, exclamation marks, spaces: all fine. The one value the password cannot hold is a line break, because it travels through single-line files.
-
-The password is never pasted into a command. It reaches PostgreSQL as a quoted SQL literal on psql's standard input, reaches `Globalvars_site.php` through a PHP writer that emits a correct string literal, and reaches the database driver as a connection argument rather than part of a connection string.
-
-What can still alter it is your own shell, before the installer runs: `!` triggers history expansion in an interactive bash session, and `$` and backticks expand inside double quotes. A file, or a single-quoted environment value, sidesteps that:
-
-```bash
-sudo POSTGRES_PASSWORD='It'"'"'s $12.50 & a "quote"!' ./install.sh site mysite mysite.com 8080
-```
-
-### Requirements
-
-- Minimum 16 characters (24+ recommended)
-- Mix of upper, lower, digits, symbols
-- No dictionary words, personal info, sequential patterns, or example passwords
+`install.sh` accepts `--password-file` and `POSTGRES_PASSWORD=` and ignores them.
 
 ### Non-interactive deployment
 
@@ -166,7 +131,7 @@ sudo ./install.sh -y -q site mysite mysite.com 8080
 
 `-y` accepts all prompts; `-q` suppresses progress output. Both flags work before or after the subcommand — write them first, as above, so every example reads the same way. An unknown flag stops the install with a message.
 
-Without `-y`, a run with no terminal on stdin (cloud-init, CI, piped ssh) still completes: every prompt takes its default. Defaults are conservative — proposals (install Docker, use a suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes, downgrade code) refuse, and only their explicit flags (`--wipe-data`, `--allow-downgrade`) can say otherwise. The one hard requirement is the bare-metal server setup's database password, which must arrive via `POSTGRES_PASSWORD` in the environment when nobody can type it.
+Without `-y`, a run with no terminal on stdin (cloud-init, CI, piped ssh) still completes: every prompt takes its default. Defaults are conservative — proposals (install Docker, use a suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes, downgrade code) refuse, and only their explicit flags (`--wipe-data`, `--allow-downgrade`) can say otherwise.
 
 ## The Data Root
 
@@ -849,11 +814,11 @@ A site's database answers only on its own machine. On a standalone server Postgr
 There is no exception. A machine that needs a site's data reads it through the site's API, over HTTPS, with a scoped machine key — as ScrollDaddy's DNS resolvers do (`plugins/dns_filtering/docs/overview.md`). A `config/postgres_access.conf` left on a config volume is not read; housekeeping names it in its output until it is removed.
 
 ```bash
-# Docker (the password is read inside the container, never on the host's command line)
-docker exec -it mysite bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -U postgres -d mysite'
+# Docker
+docker exec -it mysite psql -U postgres -d mysite
 
-# Bare-metal
-psql -U postgres -d mysite
+# Bare-metal (as root)
+sudo psql -U postgres -d mysite
 ```
 
 ## Maintenance Operations
@@ -952,11 +917,10 @@ sudo ./fix_permissions.sh mysite --production
 
 ### Database load failure during install
 
-Almost always a syntax error, or a password the shell altered on its way in.
+Almost always a syntax error.
 
-1. If the password was typed on a command line, pass it with `--password-file` or `POSTGRES_PASSWORD=` instead. See [Any character works](#any-character-works).
-2. Verify any locally-modified `joinery-install.sql.gz` for SQL syntax.
-3. Confirm UTF-8 encoding on the SQL file.
+1. Verify any locally-modified `joinery-install.sql.gz` for SQL syntax.
+2. Confirm UTF-8 encoding on the SQL file.
 
 `pg_hba.conf` settings, authentication method, and database user permissions are not the cause — the installer handles all of those.
 
@@ -1012,7 +976,6 @@ Global flags:
 ```
 install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT] [OPTIONS]
 
-  --password-file=FILE   Read database password from file (recommended)
   --activate THEME       Activate this theme after install
   --with-test-site       Create a companion test site (bare-metal only)
   --themes               Download stock themes/plugins from upgrade server
@@ -1021,8 +984,6 @@ install.sh [-y] [-q] site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT] [OPTI
                          The target of a site copy: bare metal, alone on the machine,
                          no certificate attempt, quiet once installed (see below)
 ```
-
-If no password is given (and no `--password-file`), the installer auto-generates a 24-character password.
 
 `--dormant --copy-of=ID --copy-of-key=KEY` installs the target of a site copy (`specs/site_copy.md`): the site that will be replaced whole by node `ID`'s backups. `KEY` is node `ID`'s agent public key (base64), by which the copy checks every export its source signs. It installs as any bare-metal site does, makes no certificate attempt (the source's certificate travels with the copy), and ends in the quiet state `quiet copy` ([Deploy and Upgrade](deploy_and_upgrade.md), *The quiet state*), with the source's node id and key recorded beside it. The three flags go together. A copy is installed from the source's own release (`utils/latest_release?version=X.Y.Z`), because `vendor/` never travels in a backup; the source's **Copy** tab on its management node shows the whole command. It refuses on a machine that hosts any other site or runs Docker containers, because the quiet state quiets the whole machine, and with `--with-test-site`, `--docker` or a port.
 

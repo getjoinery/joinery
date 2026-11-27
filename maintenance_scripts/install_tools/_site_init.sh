@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.28 - No postgres password: root signs in as postgres by peer (_pg_admin.sh,
+#                 specs/postgres_superuser_peer_auth.md). The PASSWORD positional and JOINERY_DB_PASSWORD
+#                 are accepted and not used; a machine not yet switched over signs in with the password it had.
 # VERSION: 3.27 - The site config is never given the postgres superuser password: it is written with an empty one
 #                 and site_db_role.sh points it at the site's own role. A run that stopped between the two left the
 #                 superuser password readable by the web server. A kept config is no longer given this run's
@@ -120,13 +123,11 @@
 # Do not call directly - use install.sh site instead
 #
 # Usage (internal):
-#   ./_site_init.sh SITENAME PASSWORD DOMAIN [OPTIONS]
-#   JOINERY_DB_PASSWORD=... ./_site_init.sh SITENAME "" DOMAIN [OPTIONS]
+#   ./_site_init.sh SITENAME "" DOMAIN [OPTIONS]
 #
-# Prefer the second form. argv is readable by every account on the box through
-# ps for as long as this runs; the environment is not. The positional stays
-# supported for the Dockerfile CMD and any existing caller. Either way the third
-# positional must be present, since three are consumed before the option loop.
+# The second positional is where a database password once went. It is not used
+# (root signs in as postgres by peer) but its slot stays, since three
+# positionals are consumed before the option loop.
 #
 # Options:
 #   --activate THEME       Set active theme
@@ -135,7 +136,6 @@
 #   -q, --quiet            Suppress most output
 #
 # Environment (all optional; secrets travel here, never on argv):
-#   JOINERY_DB_PASSWORD      the site's database password (see above)
 #   JOINERY_ADMIN_EMAIL      the admin account's address
 #   JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)
 #   JOINERY_INSTALL_BUNDLE   plugin bundle, default personal; none skips it
@@ -170,21 +170,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # =============================================================================
 
 SITENAME="$1"
-PASSWORD="$2"
 DOMAIN="$3"
 shift 3 || true
-
-# The password may arrive in the environment instead of argv, and that is the
-# preferred way in: argv is world-readable through ps for the life of the
-# process, and this script runs for minutes. The positional is still accepted so
-# the Dockerfile CMD and any existing caller keep working — inside a container
-# the only accounts that can read its ps are already root there.
-#
-# The slot still has to be occupied when the env var is used, because the three
-# leading positionals are consumed by `shift 3`; callers pass an empty string.
-if [ -z "$PASSWORD" ] && [ -n "${JOINERY_DB_PASSWORD:-}" ]; then
-    PASSWORD="$JOINERY_DB_PASSWORD"
-fi
 
 # Defaults
 DOCKER_MODE=false
@@ -285,8 +272,8 @@ log_error() {
 # VALIDATION
 # =============================================================================
 
-if [ -z "$SITENAME" ] || [ -z "$PASSWORD" ] || [ -z "$DOMAIN" ]; then
-    log_error "Usage: _site_init.sh SITENAME PASSWORD DOMAIN [OPTIONS]"
+if [ -z "$SITENAME" ] || [ -z "$DOMAIN" ]; then
+    log_error "Usage: _site_init.sh SITENAME \"\" DOMAIN [OPTIONS]"
     log_error "This script is for internal use only. Use install.sh site instead."
     exit 1
 fi
@@ -413,8 +400,14 @@ create_config_file
 
 log "Setting up database..."
 
-# Export password for PostgreSQL commands
-export PGPASSWORD="$PASSWORD"
+# Every psql below is `-U postgres` over the socket: root signs in by peer, or,
+# on a machine not switched over yet, with the password it had (exported).
+# shellcheck source=_pg_admin.sh
+. "${SCRIPT_DIR}/_pg_admin.sh"
+if ! pg_admin_auth; then
+    log_error "root cannot sign in to PostgreSQL as postgres (peer, or the password this machine had)"
+    exit 1
+fi
 
 # Check if database already exists (handles container restarts with persistent volumes)
 DB_EXISTS=false
@@ -462,13 +455,12 @@ fi
 # THE SITE'S OWN DATABASE ROLE
 # =============================================================================
 # The website connects as joinery_{site}, which owns the site's database and
-# nothing else (mail_access_hardening WP4); the postgres pair goes to the
-# root-only config/db_admin.php for the shell tools. Idempotent: a re-run
-# re-asserts the role and keeps the config's password.
+# nothing else (mail_access_hardening WP4). Idempotent: a re-run re-asserts
+# the role and keeps the config's password.
 log "Giving the site its own database role..."
 # Captured, not piped: a pipeline's status is its last command's, and this
 # step is fatal on purpose, so the script's own exit decides it.
-if ROLE_OUT="$(PGPASSWORD="${PASSWORD:-${PGPASSWORD:-}}" "${SCRIPT_DIR}/site_db_role.sh" "$SITENAME" --db-name "$SITENAME" 2>&1)"; then
+if ROLE_OUT="$("${SCRIPT_DIR}/site_db_role.sh" "$SITENAME" --db-name "$SITENAME" 2>&1)"; then
     printf '%s\n' "$ROLE_OUT" | sed 's/^/  /'
 else
     printf '%s\n' "$ROLE_OUT" | sed 's/^/  /'

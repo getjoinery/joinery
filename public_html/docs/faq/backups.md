@@ -76,7 +76,7 @@ Install a fresh site on the new server, then restore onto it:
 
 ```bash
 sudo ./install.sh -y server
-sudo ./install.sh -y site --bare-metal <site> --password-file=/root/.joinery_postgres_password <domain>
+sudo ./install.sh -y site --bare-metal <site> <domain>
 bash maintenance_scripts/sysadmin_tools/restore_chain.sh <site> \
      --artifacts <chain dir> --key-file /tmp/k --domain <domain> --adopt-secret-key --force
 ```

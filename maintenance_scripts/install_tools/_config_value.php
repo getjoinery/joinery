@@ -10,7 +10,8 @@
  * A config literal is written by var_export(), so a password with a quote or a
  * backslash is stored as \' or \\. A sed over the file reads those back wrong;
  * the tokenizer reads them right. Used by site_db_role.sh for the four
- * database literals and the postgres pair in db_admin.php. Prints nothing and
+ * database literals, and by _pg_admin.sh for a password a machine not yet
+ * switched to peer sign-in still holds. Prints nothing and
  * exits 0 when the file or the setting is absent, so a caller can test for an
  * empty answer.
  *

@@ -1,84 +1,18 @@
 #!/usr/bin/env bash
+#Version 1.05 - root signs in as postgres by peer (_pg_admin.sh, specs/postgres_superuser_peer_auth.md); the .pgpass,
+#              db_admin.php and config-password lookups and the prompt go
 #Version 1.04 - The postgres password is read from the root-only config/db_admin.php before a config still on
 #              postgres (mail_access_hardening WP4); the copy keeps the source's owner (createdb -T) until
 #              site_db_role.sh TARGET hands it to the target site's role, which build_dev_from_source.sh runs
 #Version 1.03
-# For passwordless operation, create ~/.pgpass file with:
-# hostname:port:database:username:password
-# Example: localhost:5432:*:postgres:your_password
-# Then run: chmod 600 ~/.pgpass
 
-# Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
-
-# Check for .pgpass file first
-if [[ -f ~/.pgpass ]]; then
-    echo "Found .pgpass file - using passwordless authentication."
-elif [[ -n "$PGPASSWORD" ]]; then
-    echo "Found PGPASSWORD environment variable - using passwordless authentication."
-else
-    # Try to find and load password from config file
-    CONFIG_FILE=""
-    CONFIG_PASSWORD=""
-    
-    # Strategy 1: Try database names with _test suffix removed
-    for DB_NAME in "$SOURCE_DB" "$TARGET_DB"; do
-        # Remove _test suffix if present
-        SITENAME="${DB_NAME%_test}"
-        if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
-            CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
-            break
-        fi
-    done
-    
-    # Strategy 2: Try original database names as-is
-    if [[ -z "$CONFIG_FILE" ]]; then
-        for DB_NAME in "$SOURCE_DB" "$TARGET_DB"; do
-            if [[ -f "/var/www/html/${DB_NAME}/config/Globalvars_site.php" ]]; then
-                CONFIG_FILE="/var/www/html/${DB_NAME}/config/Globalvars_site.php"
-                break
-            fi
-        done
-    fi
-    
-    # Strategy 3: Look for any config file in /var/www/html/*/config/
-    if [[ -z "$CONFIG_FILE" ]]; then
-        CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
-    fi
-    
-    if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-        echo "Found config file: $CONFIG_FILE"
-        # Extract password from config file
-        # The postgres pair lives in the root-only config/db_admin.php once the
-        # site has its own role (site_db_role.sh); a config still on postgres
-        # carries the password itself.
-        ADMIN_FILE="$(dirname "$CONFIG_FILE")/db_admin.php"
-        CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
-        CONFIG_PASSWORD=""
-        if [[ -r "$ADMIN_FILE" ]]; then
-            CONFIG_PASSWORD="$(php "$CONFIG_READER" "$ADMIN_FILE" dbadminpassword 2>/dev/null)"
-        fi
-        if [[ -z "$CONFIG_PASSWORD" && "$(php "$CONFIG_READER" "$CONFIG_FILE" dbusername 2>/dev/null)" == "postgres" ]]; then
-            CONFIG_PASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
-        fi
-        if [[ -n "$CONFIG_PASSWORD" ]]; then
-            export PGPASSWORD="$CONFIG_PASSWORD"
-            echo "Using database password from config file."
-        fi
-    fi
-    
-    # If still no password, fall back to interactive prompt
-    if [[ -z "$PGPASSWORD" ]]; then
-        echo "No .pgpass file found, no config file found, and PGPASSWORD not set."
-        echo "You will be prompted for the postgres password multiple times."
-        echo ""
-        echo "To avoid this in the future, either:"
-        echo "  1) Create a .pgpass file: echo 'localhost:5432:*:postgres:YOUR_PASSWORD' > ~/.pgpass && chmod 600 ~/.pgpass"
-        echo "  2) Set PGPASSWORD: export PGPASSWORD='your_password'"
-        echo "  3) Ensure config file exists at /var/www/html/SITENAME/config/Globalvars_site.php"
-        echo ""
-        read -p "Press Enter to continue with password prompts..."
-        echo ""
-    fi
+# Root signs in to PostgreSQL as postgres by peer, or on a machine not switched
+# over yet with the password it had (_pg_admin.sh). Run as root.
+# shellcheck source=../install_tools/_pg_admin.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_pg_admin.sh"
+if ! pg_admin_auth; then
+    echo "Cannot sign in to PostgreSQL as postgres. Run this as root (it signs in by peer)."
+    exit 1
 fi
 
 if [ "$1" == "" ]

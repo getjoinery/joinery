@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.178 - a bare-metal install whose install.sh signs root in to PostgreSQL by peer is handed no postgres password
+ *                 and needs no /root/.joinery_postgres_password (specs/postgres_superuser_peer_auth.md)
  * @version 1.177 - build_hosted_ai_settings: a site's AI credit key, one value, to an agent of 1.135.0 or later (specs/hosted_ai_credit.md)
  * @version 1.176 - build_quiet_check: whether anyone is busy on the machine, before a reboot when it is quiet
  *                (specs/automatic_reboot_when_quiet.md WP1)
@@ -6815,12 +6817,14 @@ class JobCommandBuilder {
 			// are admitted. retry_install is refused only after that (B37). A
 			// copy at an older release gets no such option (keep_root_login_flag).
 			//
-			// _site_init.sh uses the site's DB password as PGPASSWORD for the
-			// postgres role when it runs createdb, so the site's password MUST
-			// match the role password install.sh server set; it is kept in
-			// /root/.joinery_postgres_password. A machine this plane creates
-			// is bare, so the prerequisites branch only ever runs the server
-			// setup; the other arm is a refusal, not a harvest.
+			// An install.sh that signs root in to PostgreSQL by peer (it writes
+			// 'peer map=joinery_admin') needs no postgres password. An older one
+			// is handed a generated one in /root/.joinery_postgres_password, as
+			// it expects, and its site reads it from there. Asked of the
+			// install.sh this step runs, so a copy at any release gets what its
+			// installer takes. A machine this plane creates is bare, so the
+			// prerequisites branch only ever runs the server setup; the other
+			// arm is a refusal, not a harvest.
 			// A bare-metal site with no mail server of its own (a Managed site,
 			// which receives through the relay fleet): the server step installs
 			// no Postfix, and the site records it so nothing installs one later.
@@ -6836,17 +6840,21 @@ class JobCommandBuilder {
 			$mail_hostname = strtolower(trim((string)($params['mail_hostname'] ?? '')));
 			$mail_host_flag = (empty($params['no_mail_server']) && preg_match('/^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/', $mail_hostname))
 				? ' --mail-hostname=' . escapeshellarg($mail_hostname) : '';
+			$server_cmd = ' ./install.sh -y -q server' . self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . $no_mail_flag . ';';
+			$lines[] = 'PWF=""; if grep -q "peer map=joinery_admin" install.sh; then PEER=1; else PEER=0; PWF=--password-file=/root/.joinery_postgres_password; fi';
 			$lines[] = 'if command -v apache2 >/dev/null && command -v psql >/dev/null && command -v php >/dev/null; then'
 			         . " echo 'PREREQS_ALREADY_INSTALLED — skipping install.sh server';"
-			         . " test -s /root/.joinery_postgres_password || { echo 'FATAL: prerequisites are installed but /root/.joinery_postgres_password is missing — a machine this plane creates is bare; create the file with the postgres role password.'; exit 1; };"
+			         . " [ \"\$PEER\" = 1 ] || test -s /root/.joinery_postgres_password || { echo 'FATAL: prerequisites are installed but /root/.joinery_postgres_password is missing — a machine this plane creates is bare; create the file with the postgres role password.'; exit 1; };"
 			         . ' else'
+			         . ' if [ "$PEER" = 0 ]; then'
 			         . " POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24);"
 			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
 			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
 			         . ' export POSTGRES_PASSWORD;'
-			         . ' ./install.sh -y -q server' . self::keep_root_login_flag($copy_release) . self::outbound_install_flags() . $encrypted_flags . $no_mail_flag . ';'
+			         . ' fi;'
+			         . $server_cmd
 			         . ' fi';
-			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
+			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} \$PWF {$domain_esc}"
 			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}{$beta_flags}{$no_mail_flag}{$no_backups_flag}{$services_flag}{$mail_host_flag}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';

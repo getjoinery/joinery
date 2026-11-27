@@ -3,6 +3,8 @@
 # of the site's database and everything in it, and point the site at it
 # (mail_access_hardening WP4).
 #
+# VERSION: 1.4 - root signs in as postgres by peer (_pg_admin.sh, specs/postgres_superuser_peer_auth.md);
+#                db_admin.php is no longer written (host_housekeeping.sh deletes one an earlier run left)
 # VERSION: 1.3 - the password generator reads a bounded slice of /dev/urandom: the unbounded pipe failed under
 #                pipefail and the script left without a word (found on the owner's first run)
 # VERSION: 1.2 - the connect proof runs before the config is rewritten, so a role that cannot connect leaves
@@ -27,20 +29,14 @@
 # _db_ownership_sql.sh, deliberately not REASSIGN OWNED BY (which would move
 # every database on the server).
 #
-# Two files under the site's config/:
-#   Globalvars_site.php  dbusername/dbpassword (and the _test pair) become the
-#                        role's; everything else, the secret_box_key included,
-#                        is left byte for byte (_set_site_db_role.php). A config
-#                        that already names the role keeps its password.
-#   db_admin.php         the postgres pair, mode 0600, owned by root, which no
-#                        PHP process can read: the shell tools run as root
-#                        (backup, restore, copy, removal) read it. Written only
-#                        when this run knows the postgres password as text
-#                        (PGPASSWORD, /root/.joinery_postgres_password, an
-#                        existing db_admin.php, or a config still on postgres).
+# The site's config/Globalvars_site.php: dbusername/dbpassword (and the _test
+# pair) become the role's; everything else, the secret_box_key included, is left
+# byte for byte (_set_site_db_role.php). A config that already names the role
+# keeps its password.
 #
-# The postgres connection: PGPASSWORD, else ~/.pgpass, else the password files
-# above. Passwords go to psql over stdin, never argv.
+# The postgres connection is root's own, by peer (_pg_admin.sh), or on a machine
+# not switched over yet the password it had. The role's password goes to psql
+# over stdin, never argv.
 #
 # --print-sql prints the statements and connects to nothing (the test reads it).
 
@@ -48,7 +44,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WEB_DIR="/var/www/html"
-POSTGRES_PASSWORD_RECORD="/root/.joinery_postgres_password"
 
 usage() {
     echo "usage: site_db_role.sh SITENAME [--db-name NAME] [--test-db NAME] [--no-config] [--print-sql]" >&2
@@ -79,7 +74,6 @@ done
 
 SITE_ROOT="$WEB_DIR/$SITENAME"
 CONFIG="$SITE_ROOT/config/Globalvars_site.php"
-ADMIN_CONFIG="$SITE_ROOT/config/db_admin.php"
 ROLE="joinery_${SITENAME}"
 
 log() { echo "site_db_role: $*"; }
@@ -150,26 +144,12 @@ fi
 [[ "$(id -u)" -eq 0 ]] || fail "run as root: it writes the site's config files"
 
 # ---- the postgres connection ------------------------------------------------
-ADMIN_PW_TEXT=""
-if [[ -n "${PGPASSWORD:-}" ]]; then
-    ADMIN_PW_TEXT="$PGPASSWORD"
-else
-    ADMIN_PW_TEXT="$(config_value "$ADMIN_CONFIG" dbadminpassword)"
-    if [[ -z "$ADMIN_PW_TEXT" && -r "$POSTGRES_PASSWORD_RECORD" ]]; then
-        ADMIN_PW_TEXT="$(tr -d '\n' < "$POSTGRES_PASSWORD_RECORD")"
-    fi
-    if [[ -z "$ADMIN_PW_TEXT" && "$CURRENT_USER" == "postgres" ]]; then
-        ADMIN_PW_TEXT="$(config_value "$CONFIG" dbpassword)"
-    fi
-    if [[ -n "$ADMIN_PW_TEXT" ]]; then
-        export PGPASSWORD="$ADMIN_PW_TEXT"
-    fi
-    # Otherwise ~/.pgpass, if there is one, answers for psql; db_admin.php is
-    # then not written (the text is not in hand), and the run says so.
-fi
+# shellcheck source=_pg_admin.sh
+. "$SCRIPT_DIR/_pg_admin.sh"
+pg_admin_auth || true
 admin_psql() { psql -U postgres -X -q -v ON_ERROR_STOP=1 "$@"; }
 admin_psql -d postgres -tAc 'SELECT 1' >/dev/null 2>&1 \
-    || fail "cannot connect to PostgreSQL as postgres (set PGPASSWORD, or keep the password in $POSTGRES_PASSWORD_RECORD or ~/.pgpass)"
+    || fail "cannot connect to PostgreSQL as postgres (root signs in by peer: check the 'local all postgres' line in pg_hba.conf and the joinery_admin map in pg_ident.conf)"
 
 db_exists() { [[ "$(admin_psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$1'")" == "1" ]]; }
 db_exists "$DB_NAME" || fail "database '$DB_NAME' does not exist"
@@ -218,28 +198,6 @@ if $WRITE_CONFIG; then
     chmod 640 "$CONFIG"
     chown root:www-data "$CONFIG" 2>/dev/null || true
     log "Globalvars_site.php: dbusername ${ROLE} (${result})"
-
-    if [[ -n "$ADMIN_PW_TEXT" ]]; then
-        # Written closed from the first byte: no PHP process may read it.
-        ( umask 077
-          pw_php="${ADMIN_PW_TEXT//\\/\\\\}"
-          pw_php="${pw_php//\'/\\\'}"
-          cat > "${ADMIN_CONFIG}.tmp.$$" <<PHP
-<?php
-// The database superuser pair, for the shell tools run as root (backup, restore,
-// copy, removal). Mode 0600, owned by root: no PHP process reads it, and
-// DbConnector never looks here (mail_access_hardening WP4). Written by
-// site_db_role.sh; carried by backups as a root-only config file.
-\$this->settings['dbadminusername'] = 'postgres';
-\$this->settings['dbadminpassword'] = '${pw_php}';
-PHP
-          mv "${ADMIN_CONFIG}.tmp.$$" "$ADMIN_CONFIG" )
-        chmod 600 "$ADMIN_CONFIG"
-        chown root:root "$ADMIN_CONFIG" 2>/dev/null || true
-        log "db_admin.php: the postgres pair, root-only"
-    else
-        log "db_admin.php not written: the postgres password is not in hand as text (psql used ~/.pgpass); the shell tools keep using ~/.pgpass"
-    fi
 fi
 
 echo "SITE_DB_ROLE_OK ${ROLE}"

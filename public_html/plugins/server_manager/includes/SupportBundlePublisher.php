@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.44 - carries _pg_admin.sh, which host_housekeeping.sh sources (specs/postgres_superuser_peer_auth.md)
  * @version 1.43 - carries quiet_check.sh, the machine word of agent 1.133.0 (specs/automatic_reboot_when_quiet.md)
  * @version 1.42 - carries unban_address.sh, the machine word of agent 1.131.0 that lifts one fail2ban ban
  * @version 1.41 - carries install_package_fixes.sh and fixes/ACTIVE, so a container host fetches the package
@@ -351,6 +352,9 @@ class SupportBundlePublisher {
 		// before it treats a tree that is not root's as a developer's box. A
 		// machine with no restrictions record answers off, quietly.
 		'maintenance_scripts/install_tools/_host_restrictions.sh',
+		// host_housekeeping.sh sources it for root's peer sign-in to PostgreSQL;
+		// a machine with no PostgreSQL never calls it.
+		'maintenance_scripts/install_tools/_pg_admin.sh',
 		// The kernel and network settings every machine pins, one list:
 		// host_housekeeping.sh writes them and host_report.sh reports
 		// whether the kernel holds them (hardening). Sources nothing.

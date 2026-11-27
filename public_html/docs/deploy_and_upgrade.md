@@ -1304,14 +1304,14 @@ A node guarantees this to an owner who flips Cloudflare to Full (Strict), with n
 
 ## Rebuilding a site on new hardware
 
-A backup carries the whole site tree, `config/` included, but a restore keeps the target machine's own `config/Globalvars_site.php` and `config/backup_site_key` over the copies inside the backup: the first holds the machine's database password and its `secret_box_key`, the second its identity as a recipient of its own backups, and all of that belongs to the machine. So a rebuild is **install, then restore onto the installed site**.
+A backup carries the whole site tree, `config/` included, but a restore keeps the target machine's own `config/Globalvars_site.php` and `config/backup_site_key` over the copies inside the backup: the first holds the site role's database password and its `secret_box_key`, the second its identity as a recipient of its own backups, and all of that belongs to the machine. So a rebuild is **install, then restore onto the installed site**.
 
 **Sealed values survive a chain rebuild only with `--adopt-secret-key`.** By default the new machine keeps its own `secret_box_key`, so every value sealed on the old one is dead there: stored credentials (the backup target, OAuth client secrets, IMAP passwords, cloud accounts) are entered again, and regenerable secrets are minted again, which changes the Joinery Direct signing key. `restore_chain.sh --adopt-secret-key` keeps the new machine's config and takes only the old machine's `secret_box_key` into it, so everything sealed there opens here. `restore_project.sh` has no such flag. See [Sealed Secrets](sealed_secrets.md#prevention--scrub-on-copy).
 
 ```bash
 # 1. On the new box: server prerequisites, then the site
 sudo ./install.sh -y server
-sudo ./install.sh -y site --bare-metal <site> --password-file=/root/.joinery_postgres_password <domain>
+sudo ./install.sh -y site --bare-metal <site> <domain>
 
 # 2. Bring the backup down and restore onto it
 bash maintenance_scripts/sysadmin_tools/restore_project.sh <site> <archive> --domain <domain> --force
@@ -1360,12 +1360,29 @@ test runner (the test database) and the backup verifier (its rehearsal
 database) need; neither is a superuser right. `dbusername` / `dbpassword` and
 the `_test` pair in `config/Globalvars_site.php` name that role.
 
-The `postgres` pair lives in `config/db_admin.php`, mode 0600, owned by root.
-No PHP process can read it and `DbConnector` never looks there; the shell tools
-run as root read it (`backup_database.sh`, `restore_database.sh`,
-`copy_database.sh`, `backup_project.sh`, `remove_account.sh`), after
-`PGPASSWORD` and `~/.pgpass` and before a config still on `postgres`. It rides
-in the root-only config files a backup carries.
+The `postgres` role has no password. The shell tools run as root
+(`backup_database.sh`, `restore_database.sh`, `copy_database.sh`,
+`backup_project.sh`, `remove_account.sh`, `site_db_role.sh`, `_site_init.sh`,
+the Mailbox installer and remover) sign in as `postgres` over the local socket
+by peer, through `_pg_admin.sh`: `pg_hba.conf`'s `local all postgres` line
+names `peer map=joinery_admin`, and the `joinery_admin` map in `pg_ident.conf`
+lets `root` and the `postgres` Linux user act as `postgres`. Nothing else can
+sign in as `postgres`, over the socket or TCP.
+
+`host_housekeeping.sh` (section 10d2) keeps the map and the line on every
+converge. It changes the line only when every site config on the machine can
+be read and none names `postgres` with a password, in either pair, since such
+a site's scheduled backup signs in that way as `www-data`. A machine held that
+way names the config on every run, and `_pg_admin.sh` signs root in with the
+password the machine holds (`config/db_admin.php`,
+`/root/.joinery_postgres_password`, a container's `POSTGRES_PASSWORD`, or that
+config). Where the peer line is in force with such a site present (`install.sh
+server` run over it, a container started on an image that carries the line),
+`site_db_role.sh` gives the site its role: the server step, the container's
+start and housekeeping each run it. Once root's peer sign-in is proved and
+nothing holds the machine, housekeeping clears the role's password, removes
+each `config/db_admin.php`, and removes `/root/.joinery_postgres_password` on
+a machine with a site. A proof PostgreSQL refuses puts the earlier line back.
 
 `maintenance_scripts/install_tools/site_db_role.sh SITENAME` (as root) does
 all of it, idempotently: creates the role once, re-asserts its attributes and
@@ -1373,17 +1390,18 @@ password every run, hands the database and its objects to the role
 (`_db_ownership_sql.sh`, one `DO` block over tables, sequences, views,
 functions and types in `public`; never `REASSIGN OWNED BY`, which would move
 every database on the server), rewrites the four config literals
-(`_set_site_db_role.php`, leaving every other byte) and writes `db_admin.php`.
+(`_set_site_db_role.php`, leaving every other byte).
 `_site_init.sh` runs it for a new site after the schema loads; `upgrade.php`
 runs it as root on every upgrade, after the last step that touches the schema,
 because the upgrade keeps the connection it opened as whatever role the config
 named when it started, and what that connection created is owned by that role.
 A site still connecting as `postgres` gets its role at that step. `fix_permissions.sh`
-pins `db_admin.php` to 0600 root:root on every run and leaves it out of the
-`config/*.php` sweep. A restore takes the dump's `OWNER TO` statements
+holds any `db_admin.php` still on a machine at 0600 root:root and leaves it out
+of the `config/*.php` sweep. A restore takes the dump's `OWNER TO` statements
 out before the load and hands the restored database to the site's role after
 it, so a dump from before the role existed, or from another site, comes back
-owned right. The Postfix role (`iemap_*`) and its grants are untouched: grants,
+owned right; a restored config still naming `postgres`, or a role the server
+lacks, is given its role in the same run when the restore runs as root. The Postfix role (`iemap_*`) and its grants are untouched: grants,
 not ownership.
 
 ### PostgreSQL and PHP memory

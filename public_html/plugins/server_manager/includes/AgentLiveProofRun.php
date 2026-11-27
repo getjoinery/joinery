@@ -295,11 +295,12 @@ class AgentLiveProofRun {
 			'D=/opt/joinery-install/live-proof; rm -rf "$D"; mkdir -p "$D"',
 			'curl -sfL ' . escapeshellarg($plane . '/utils/latest_release?version=' . $version) . ' | tar xz -C "$D"',
 			'cd "$D/maintenance_scripts/install_tools" && chmod +x *.sh',
-			"POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)",
-			'echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password && export POSTGRES_PASSWORD',
+			// A release that signs root in to PostgreSQL by peer keeps no postgres
+			// password; an older one is handed one, as it expects.
+			'PWF=""; grep -q "peer map=joinery_admin" install.sh || { POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d \'/+=\' | head -c 24); echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password && export POSTGRES_PASSWORD && PWF=--password-file=/root/.joinery_postgres_password; }',
 			// --keep-root-login: the run logs in as root again after this.
 			'./install.sh -y -q server --keep-root-login',
-			'./install.sh -y -q site --bare-metal ' . escapeshellarg($site) . ' --password-file=/root/.joinery_postgres_password '
+			'./install.sh -y -q site --bare-metal ' . escapeshellarg($site) . ' $PWF '
 				. escapeshellarg($domain) . ' --no-ssl --enable-agent --management-node=' . escapeshellarg($plane)
 				. ' --upgrade-server=' . escapeshellarg($plane),
 			'echo INSTALL_SUCCESS',
@@ -376,8 +377,9 @@ class AgentLiveProofRun {
 			'echo ' . escapeshellarg($key_b64) . ' >> ' . escapeshellarg($cfg . '/release_verify_keys'),
 			'touch ' . escapeshellarg($cfg . '/release_log_optional') . ' && chown root:root ' . escapeshellarg($cfg . '/release_log_optional')
 				. ' && chmod 644 ' . escapeshellarg($cfg . '/release_log_optional'),
-			// The postgres role's password is the one install.sh server set.
-			'PGPASSWORD="$(cat /root/.joinery_postgres_password)" psql -q -U postgres -h 127.0.0.1 -d ' . escapeshellarg($site)
+			// Over the socket: root signs in by peer, or at an older release with
+			// the password install.sh server was given.
+			'PGPASSWORD="$(cat /root/.joinery_postgres_password 2>/dev/null)" psql -q -U postgres -d ' . escapeshellarg($site)
 				. ' -c ' . escapeshellarg("UPDATE stg_settings SET stg_value = '" . $url . "' WHERE stg_name = 'upgrade_source'"),
 		)), 120), 'serve the candidate to the site');
 		$say('the candidate ' . $version . ' is offered to the site from its own server');

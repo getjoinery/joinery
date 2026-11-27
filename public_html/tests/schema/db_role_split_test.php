@@ -5,7 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
- * covers: [maintenance_scripts/install_tools/site_db_role.sh, maintenance_scripts/install_tools/_db_ownership_sql.sh, maintenance_scripts/install_tools/_set_site_db_role.php, maintenance_scripts/install_tools/_site_init.sh, maintenance_scripts/install_tools/fix_permissions.sh, maintenance_scripts/install_tools/build_dev_from_source.sh, maintenance_scripts/install_tools/default_Globalvars_site.php, maintenance_scripts/sysadmin_tools/_dump_without_owners.sh, maintenance_scripts/sysadmin_tools/_backup_root_only_files.sh, maintenance_scripts/sysadmin_tools/restore_database.sh, maintenance_scripts/sysadmin_tools/restore_chain.sh, maintenance_scripts/sysadmin_tools/backup_database.sh, maintenance_scripts/sysadmin_tools/copy_database.sh, maintenance_scripts/sysadmin_tools/backup_project.sh, maintenance_scripts/sysadmin_tools/remove_account.sh, utils/upgrade.php]
+ * covers: [maintenance_scripts/install_tools/site_db_role.sh, maintenance_scripts/install_tools/_pg_admin.sh, maintenance_scripts/install_tools/_db_ownership_sql.sh, maintenance_scripts/install_tools/_set_site_db_role.php, maintenance_scripts/install_tools/_site_init.sh, maintenance_scripts/install_tools/fix_permissions.sh, maintenance_scripts/install_tools/build_dev_from_source.sh, maintenance_scripts/install_tools/default_Globalvars_site.php, maintenance_scripts/sysadmin_tools/_dump_without_owners.sh, maintenance_scripts/sysadmin_tools/_backup_root_only_files.sh, maintenance_scripts/sysadmin_tools/restore_database.sh, maintenance_scripts/sysadmin_tools/restore_chain.sh, maintenance_scripts/sysadmin_tools/backup_database.sh, maintenance_scripts/sysadmin_tools/copy_database.sh, maintenance_scripts/sysadmin_tools/backup_project.sh, maintenance_scripts/sysadmin_tools/remove_account.sh, utils/upgrade.php]
  */
 /**
  * The site's own database role, as the tools build it (mail_access_hardening WP4).
@@ -16,11 +16,12 @@
  * functions and types and leaves what the role already owns; _set_site_db_role.php
  * rewrites the four config literals and nothing else; _dump_without_owners.sh
  * takes the OWNER TO statements out of a dump and leaves a COPY block's rows
- * alone; the shell tools read the postgres pair from db_admin.php first; the
- * root-only backup list carries db_admin.php.
+ * alone; the shell tools sign root in as postgres by peer (_pg_admin.sh) and
+ * read no db_admin.php; the root-only backup list still names it.
  *
  * Run: php tests/run.php --filter=db_role_split
  *
+ * @version 1.1 - the tools sign root in by peer (specs/postgres_superuser_peer_auth.md)
  * @version 1.0
  */
 
@@ -109,11 +110,17 @@ check(strpos($kept, "ALTER TABLE public.t OWNER") === false && strpos($kept, "OW
 check(strpos($kept, "COPY public.t (a) FROM stdin;\nALTER TABLE x OWNER TO postgres;\n\\.") !== false, 'a row inside a COPY block that reads like one stays');
 check(strpos($kept, 'GRANT SELECT ON t TO iemap_x;') !== false, 'grants stay (the Postfix role keeps its reads)');
 
-section('the shell tools and the backup know about db_admin.php');
+section('the shell tools sign root in by peer, and the backup knows about db_admin.php');
 foreach (array('restore_database.sh', 'backup_database.sh', 'copy_database.sh', 'backup_project.sh', 'remove_account.sh') as $tool) {
 	$src = file_get_contents($sysadmin . '/' . $tool);
-	check(strpos($src, 'dbadminpassword') !== false && strpos($src, 'db_admin.php') !== false, $tool . ' reads the postgres pair from db_admin.php');
+	check(strpos($src, '_pg_admin.sh') !== false && strpos($src, 'pg_admin_auth') !== false && strpos($src, 'dbadminpassword') === false,
+		$tool . ' signs in as postgres through _pg_admin.sh and reads no password from db_admin.php');
 }
+check(strpos(file_get_contents($install . '/site_db_role.sh'), 'dbadminpassword') === false, 'site_db_role.sh writes no db_admin.php');
+$restore_src = file_get_contents($sysadmin . '/restore_database.sh');
+check(strpos($restore_src, 'ROLE_REPAIR_SITE') !== false
+		&& strpos($restore_src, 'put_back_database') < strpos($restore_src, 'bash "$TOOLS_DIR/../install_tools/site_db_role.sh" "$ROLE_REPAIR_SITE"'),
+	'a restored site that is not on its own role is given one, once the database is back under its name');
 check(preg_match('/ROOT_ONLY_FILES=\([^)]*db_admin\.php[^)]*\)/', file_get_contents($sysadmin . '/_backup_root_only_files.sh')) === 1,
 	'db_admin.php rides in the root-only config files a backup carries');
 check(strpos(file_get_contents($sysadmin . '/restore_database.sh'), '_dump_without_owners.sh') !== false

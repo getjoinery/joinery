@@ -2,6 +2,10 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.20 - The rebuilt container signs root in as postgres by peer (specs/postgres_superuser_peer_auth.md):
+#                no password is handed to install.sh or set in it. The old container is still read with the
+#                password its environment carries, when it has one. A postgres password the roles restore
+#                brings back is cleared by the container's housekeeping
 # Version: 1.19 - the rollback keeps the state volume (SITE_state, root's record of the site) when the
 #                rebuilt container made one, as it keeps the agent's (_site_run_spec.sh 1.19)
 # Version: 1.18 - a site recreate_site.sh is replacing (its lock held, or its mark under an hour old) is refused
@@ -440,33 +444,6 @@ stop_site_writes() {
     fi
 }
 
-# Set the postgres role's password to the one the site's config uses. A fresh
-# cluster under an existing config has the image's own password; the start
-# command sets it only when there is no config yet. Same trust swap as
-# Dockerfile.template: the local postgres line goes to trust for one command
-# and back, and the password travels on stdin.
-set_postgres_password() {
-    site_engine exec -i "$SITE" bash -s <<'EOS'
-set -e
-PG_CONF="$(ls -1d /etc/postgresql/*/main/pg_hba.conf | sort -V | tail -1)"
-METHOD="$(awk '$1=="local" && $2=="all" && $3=="postgres" {print $4; exit}' "$PG_CONF")"
-if [ -z "$METHOD" ] || [ "$METHOD" = "trust" ]; then
-    echo "no method to restore on the local postgres line in $PG_CONF" >&2; exit 1
-fi
-sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' "$PG_CONF"
-service postgresql reload > /dev/null
-PW_SQL="${POSTGRES_PASSWORD//"'"/"''"}"
-rc=0
-printf "ALTER USER postgres PASSWORD '%s';\n" "$PW_SQL" | su -c "psql -q -v ON_ERROR_STOP=1" postgres || rc=$?
-sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${METHOD}/" "$PG_CONF"
-service postgresql reload > /dev/null
-if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' "$PG_CONF"; then
-    echo "local postgres left on trust in $PG_CONF" >&2; exit 1
-fi
-exit $rc
-EOS
-}
-
 # The front page's status once the container has finished starting: it runs
 # its installers before Apache serves PHP, which takes a minute or two, and
 # answers 000, 502 or 503 until then. Prints the last code seen.
@@ -724,13 +701,9 @@ if [ "$STAGE" = "swap" ]; then
     site_engine volume rm "${SITE}_postgres" > /dev/null
 
     say "Rebuilding ${SITE} with install.sh on $(state_get base)"
-    PWFILE="$(mktemp "${WORK}/.pw.XXXXXX")"; chmod 600 "$PWFILE"
-    sed -n 's/^POSTGRES_PASSWORD=//p' "${WORK}/env" | head -1 > "$PWFILE"
-    [ -s "$PWFILE" ] || die "no POSTGRES_PASSWORD in the old container's environment. Roll back with: $0 ${SITE} rollback"
-    ( cd "$(dirname "$INSTALL_SH")" && bash "$INSTALL_SH" -y site --docker --password-file="$PWFILE" \
+    ( cd "$(dirname "$INSTALL_SH")" && bash "$INSTALL_SH" -y site --docker \
         ${INSTALL_FLAGS[@]+"${INSTALL_FLAGS[@]}"} "$SITE" "$(state_get domain)" "$(state_get port)" ) \
-        || { rm -f "$PWFILE"; die "install.sh could not rebuild ${SITE}. Roll back with: $0 ${SITE} rollback"; }
-    rm -f "$PWFILE"
+        || die "install.sh could not rebuild ${SITE}. Roll back with: $0 ${SITE} rollback"
 
     wait_for_postgres || die "PostgreSQL did not start in the rebuilt container. Roll back with: $0 ${SITE} rollback"
     [ "$(db_major)" = "$TO" ] || die "the rebuilt container runs PostgreSQL $(db_major), not ${TO}. Roll back with: $0 ${SITE} rollback"
@@ -745,8 +718,6 @@ if [ "$STAGE" = "swap" ]; then
     fi
     stop_site_writes || die "the rebuilt site's writes could not be stopped. Roll back with: $0 ${SITE} rollback"
 
-    say "Setting the postgres password from the site's environment"
-    set_postgres_password || die "could not set the postgres password. Roll back with: $0 ${SITE} rollback"
     say "Restoring roles, then ${DB}"
     psql_in postgres < "${WORK}/roles.sql" > /dev/null \
         || die "the roles did not restore. Roll back with: $0 ${SITE} rollback"

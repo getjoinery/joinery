@@ -445,7 +445,8 @@ check($copy->status() === SiteCopy::STATUS_WAITING && $copy->get('scp_release') 
 	'the copy waits for its server, pinned to the source\'s release');
 $cmd = SiteCopyRunner::owner_command($copy);
 check(strpos($cmd, "/utils/latest_release?version=0.8.580'") !== false
-	&& strpos($cmd, "site --bare-metal 'scpsite' --password-file=/root/.joinery_postgres_password 'scp.example.org'") !== false
+	&& strpos($cmd, "site --bare-metal 'scpsite' \$PWF 'scp.example.org'") !== false
+	&& strpos($cmd, 'grep -q "peer map=joinery_admin" install.sh') !== false
 	&& strpos($cmd, '--dormant --copy-of=' . (int)$src->key . " --copy-of-key='" . $source_key . "'") !== false,
 	'the owner\'s command installs the source\'s release, site name and domain, dormant, recording the source', $cmd);
 check(strpos($cmd, '--keep-root-login') === false,

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 3.58 - No postgres password (specs/postgres_superuser_peer_auth.md): root signs in as postgres over the
+#               socket by peer through the joinery_admin map in pg_ident.conf, and server leaves the role with no
+#               password. Neither server nor site asks for, generates, records or passes one; --password-file,
+#               POSTGRES_PASSWORD and a password positional are accepted and not used. A container's env file
+#               carries none
 #VERSION 3.57 - site at a keyboard requires the admin password (asked again on a wrong answer) and asks for an optional
 #               admin email: sign-in then takes the address or admin. Keys typed ahead are discarded first, so an
 #               Enter left by a one-key yes/no question (the server step's root-login one) answers neither
@@ -742,7 +747,6 @@
 #   -q, --quiet   Suppress most output, show only errors and final status
 #
 # Site Options:
-#   --password-file=FILE   Read database password from file (recommended for special chars)
 #   --admin-email=EMAIL    Address for the site's admin account (default none: it signs in as admin)
 #   --activate THEME       Set active theme after installation
 #   --with-test-site       Create companion test site (bare-metal only)
@@ -752,18 +756,11 @@
 #   --themes               Download themes/plugins from distribution server
 #   --upgrade-server=URL   Override default distribution server
 #
-# Password Handling:
-#   If no password is provided, a secure 24-character password is auto-generated.
-#   That is the recommended form: nothing has to be typed, so nothing is exposed.
-#
-#   To choose the password yourself, pass it in a file (--password-file) or in
-#   the environment (POSTGRES_PASSWORD=...). A password given as a positional
-#   argument is readable by every account on this machine through ps for as long
-#   as the install runs, and stays in the shell history of whoever ran it; the
-#   script warns when that happens. It is still accepted, so existing automation
-#   keeps working.
-#
-#   --password-file also avoids shell escaping issues with characters like !.
+# Database access:
+#   No database password is asked for or kept. root signs in to PostgreSQL as
+#   postgres over the local socket by who it is (peer), and each site connects
+#   as its own role, whose password is in its Globalvars_site.php.
+#   --password-file and POSTGRES_PASSWORD= are accepted and not used.
 #
 # SSL Behavior:
 #   SSL is automatically configured when a domain name is provided (not localhost/IP).
@@ -771,13 +768,7 @@
 #   Use --no-ssl to skip SSL setup.
 #
 # Examples:
-#   # Auto-generate secure password (recommended)
 #   sudo ./install.sh site mysite mysite.com 8080
-#
-#   # Choose the password yourself, without putting it in ps or shell history
-#   (umask 077; echo 'MyP@ss!word' > /tmp/dbpass.txt)
-#   sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
-#   rm -f /tmp/dbpass.txt
 #
 #   # Skip SSL setup
 #   sudo ./install.sh site mysite mysite.com --no-ssl
@@ -846,19 +837,10 @@ site_engine_build_flags() {
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
 BASE_IMAGE_VERSION="2.3"
 
-# Where `install.sh server` records the postgres role password it generated, and
-# where `install.sh site` looks for it on bare metal. One constant, because the
-# two commands have to agree on the path or a default install cannot reach its
-# own database.
+# What an older `install.sh server` left: the postgres role's password, root-only.
+# Nothing reads it for a new install (the role has no password; root signs in by
+# peer). host_housekeeping.sh deletes it once the machine is switched over.
 POSTGRES_PASSWORD_RECORD="/root/.joinery_postgres_password"
-
-# Whether this run generated the postgres password, and whether it managed to
-# record it. Together they decide what the closing summary may say: a password
-# the operator supplied is theirs already and is never echoed, a recorded one is
-# named by its path, and only a generated password with nowhere to live is
-# printed — because then the alternative is losing it.
-POSTGRES_PASSWORD_GENERATED=0
-POSTGRES_PASSWORD_RECORDED=0
 
 # Everything _site_init.sh reads from the environment. On bare metal these are
 # simply inherited; on Docker they are copied into the container's env file
@@ -2706,8 +2688,7 @@ download_single_item() {
 # Create a test site (copy from main site)
 create_test_site() {
     local main_site="$1"
-    local password="$2"
-    local domain="$3"
+    local domain="$2"
 
     local test_site="${main_site}_test"
     local test_domain="test.${domain}"
@@ -2730,9 +2711,8 @@ create_test_site() {
                   "$site_root/maintenance_scripts/" > /dev/null
     fi
 
-    # Run initialization (creates separate database). Password by environment,
-    # not argv — ps is readable by every account on the box.
-    JOINERY_DB_PASSWORD="$password" "$SCRIPT_DIR/_site_init.sh" "$test_site" "" "$test_domain"
+    # Run initialization (creates separate database)
+    "$SCRIPT_DIR/_site_init.sh" "$test_site" "" "$test_domain"
 
     print_success "Test site created: $test_site"
 }
@@ -3894,61 +3874,13 @@ do_server_setup() {
         fi
     fi
 
-    # Get PostgreSQL password (skipped when building the shared base image).
-    #
-    # Sources, in priority order: --password-file, POSTGRES_PASSWORD in the
-    # environment, then auto-generation. The prompt is reached only when a human
-    # is at the keyboard, which is what the header has always documented and what
-    # `site` has always done. Prompting unconditionally meant `install.sh -y
-    # server` under nohup, cron, or a job agent read EOF, called that an empty
-    # password, and exited 1 before installing anything — the one form of the
-    # command an unattended install can use.
-    POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
-
-    if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ] && [ -n "$PASSWORD_FILE" ]; then
-        if [ ! -f "$PASSWORD_FILE" ]; then
-            print_error "Password file not found: $PASSWORD_FILE"
-            exit 1
-        fi
-        POSTGRES_PASSWORD=$(tr -d '\n' < "$PASSWORD_FILE")
-        if [ -z "$POSTGRES_PASSWORD" ]; then
-            print_error "Password file is empty: $PASSWORD_FILE"
-            exit 1
-        fi
-        print_info "Password read from file: $PASSWORD_FILE"
+    # The postgres role has no password: root signs in over the local socket by
+    # who it is (peer, through the joinery_admin map below). A password handed in
+    # the way older callers did is not needed and is not used.
+    if [ -n "$PASSWORD_FILE" ] || [ -n "${POSTGRES_PASSWORD:-}" ]; then
+        print_info "No postgres password is needed (root signs in by peer); the one given is not used."
     fi
-
-    if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ] && [[ -z "$POSTGRES_PASSWORD" ]]; then
-        if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
-            # Nobody to ask. Generate one and record it where the rest of the
-            # platform already looks for a bare-metal node's postgres password
-            # (`site --password-file`, and the server_manager install job).
-            POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
-            POSTGRES_PASSWORD_GENERATED=1
-            print_info "Auto-generated the postgres password; it is recorded once PostgreSQL holds it."
-        else
-            print_info "PostgreSQL password not set."
-            echo -n "Please enter a password for PostgreSQL postgres user: "
-            read -rs POSTGRES_PASSWORD || true
-            echo ""
-
-            if [[ -z "$POSTGRES_PASSWORD" ]]; then
-                print_error "PostgreSQL password cannot be empty."
-                exit 1
-            fi
-
-            echo -n "Confirm password: "
-            read -rs POSTGRES_PASSWORD_CONFIRM || true
-            echo ""
-
-            if [[ "$POSTGRES_PASSWORD" != "$POSTGRES_PASSWORD_CONFIRM" ]]; then
-                print_error "Passwords do not match. Please run the script again."
-                exit 1
-            fi
-
-            print_success "PostgreSQL password set successfully."
-        fi
-    fi
+    unset POSTGRES_PASSWORD
 
     # Update system packages
     print_step "Updating system packages..."
@@ -4288,7 +4220,7 @@ EOF
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
 
 # "local" is for Unix domain socket connections only
-local   all             postgres                                ${PG_AUTH_METHOD}
+local   all             postgres                                peer map=joinery_admin
 local   all             all                                     ${PG_AUTH_METHOD}
 
 # IPv4 connections:
@@ -4314,6 +4246,19 @@ EOF
     # policy.
     chown postgres:postgres ${PG_CONFIG_DIR}/pg_hba.conf 2>/dev/null || true
     chmod 640 ${PG_CONFIG_DIR}/pg_hba.conf
+
+    # Who may act as postgres over the socket: root, and the postgres Linux user
+    # itself (su postgres -c psql). The marked lines are the ones
+    # host_housekeeping.sh keeps (_pg_admin.sh); written inline here because the
+    # base image build has install.sh alone.
+    tee ${PG_CONFIG_DIR}/pg_ident.conf > /dev/null << 'EOF'
+# PostgreSQL User Name Maps
+# MAPNAME       SYSTEM-USERNAME PG-USERNAME
+joinery_admin   root            postgres   # joinery-admin-map
+joinery_admin   postgres        postgres   # joinery-admin-map
+EOF
+    chown postgres:postgres ${PG_CONFIG_DIR}/pg_ident.conf 2>/dev/null || true
+    chmod 640 ${PG_CONFIG_DIR}/pg_ident.conf
 
     # Configure PostgreSQL listening
     print_info "Configuring PostgreSQL to listen on port 5432 (${PG_LISTEN})..."
@@ -4405,81 +4350,42 @@ EOF
     # Restart PostgreSQL to apply configuration
     service_restart postgresql
 
-    # Set PostgreSQL postgres user password automatically.
-    # Skipped when --skip-postgres-password is set (shared base image build);
-    # in that case the Dockerfile CMD runs the same trust/ALTER/restore dance at
-    # first container run per-site.
-    #
-    # Both seds match the method as a field rather than as a literal line, so
-    # neither depends on the exact column spacing above, and neither has to know
-    # which method is in force.
+    # The proof, root signing in by peer, then the role left with no password,
+    # so nothing signs in as it over TCP and nothing has one to leak. Skipped
+    # for the shared base image (--skip-postgres-password): its role was never
+    # given a password, and each container proves peer when it starts. Any
+    # /root/.joinery_postgres_password an older plane wrote stays: a plane that
+    # retries a failed site step reads it, and housekeeping removes it once a
+    # site exists.
     if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ]; then
-        print_info "Setting PostgreSQL postgres user password..."
-
-        # Temporarily allow trust authentication for postgres user to set password
-        sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' ${PG_CONFIG_DIR}/pg_hba.conf
-
-        # Reload PostgreSQL configuration
-        service_reload postgresql
-
-        # Set the postgres user password. The statement goes to psql on
-        # stdin with the password as a SQL literal — single quotes doubled,
-        # nothing else needs escaping in a standard-conforming string — so
-        # neither this shell nor the one su starts ever sees the password as
-        # code. Any character the operator chose is fine here.
-        local sql_pw=${POSTGRES_PASSWORD//"'"/"''"}
-        if ! printf "ALTER USER postgres PASSWORD '%s';\n" "$sql_pw" | su -c "psql -q -v ON_ERROR_STOP=1" postgres; then
-            print_error "Could not set the postgres role password."
+        # The proof: root by peer alone, never a password or a ~/.pgpass.
+        print_info "Checking that root signs in to PostgreSQL by peer..."
+        if ! env -u PGPASSWORD PGPASSFILE=/nonexistent/pgpass psql -w -X -q -v ON_ERROR_STOP=1 -U postgres -d postgres -c 'SELECT 1' >/dev/null; then
+            print_error "root could not sign in to PostgreSQL as postgres by peer."
+            echo "Check ${PG_CONFIG_DIR}/pg_hba.conf (the 'local all postgres' line names peer map=joinery_admin)"
+            echo "and ${PG_CONFIG_DIR}/pg_ident.conf (joinery_admin root postgres)."
             exit 1
         fi
-
-        # Restore authenticated access
-        sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_AUTH_METHOD}/" ${PG_CONFIG_DIR}/pg_hba.conf
-
-        # The restore is the dangerous half of the dance. sed exits 0 when it
-        # matches nothing, so a pattern that no longer fits the file leaves the
-        # local postgres role on trust - superuser for anyone with a shell on
-        # this box - and every later step still succeeds. Checked, not assumed.
-        if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' ${PG_CONFIG_DIR}/pg_hba.conf; then
-            print_error "Could not restore authenticated access for the local postgres role"
-            echo ""
-            echo "pg_hba.conf still grants trust on the Unix socket, which makes anyone"
-            echo "with a shell on this server a PostgreSQL superuser."
-            echo ""
-            echo "Set the method on the 'local all postgres' line in"
-            echo "${PG_CONFIG_DIR}/pg_hba.conf to ${PG_AUTH_METHOD} and reload PostgreSQL"
-            echo "before using this server."
-            exit 1
-        fi
-
-        # Reload PostgreSQL configuration again
-        service_reload postgresql
-
-        print_success "PostgreSQL postgres user password set successfully"
-
-        # Record the password the role now holds, whatever its source: typed at
-        # the prompt, read from --password-file, POSTGRES_PASSWORD, or generated.
-        # A bare-metal `install.sh site` with no password of its own adopts this
-        # record; without it, site generates a fresh one the role has never held
-        # and createdb fails on authentication — the documented
-        # `install.sh server && install.sh site` run at a keyboard did exactly
-        # that, because only a generated password used to be recorded.
-        if (umask 077 && printf '%s\n' "$POSTGRES_PASSWORD" > "$POSTGRES_PASSWORD_RECORD") 2>/dev/null; then
-            chmod 600 "$POSTGRES_PASSWORD_RECORD" 2>/dev/null || true
-            POSTGRES_PASSWORD_RECORDED=1
-            print_info "Recorded the postgres password at $POSTGRES_PASSWORD_RECORD (mode 600) for 'install.sh site'."
-        else
-            # Recording it is how an unattended caller gets it back, so a
-            # failure to write is worth saying out loud rather than leaving
-            # the operator to discover the file is absent later.
-            print_warning "Could not write $POSTGRES_PASSWORD_RECORD."
-            print_warning "Pass the postgres password to 'install.sh site' with --password-file."
-            if [ "$POSTGRES_PASSWORD_GENERATED" -eq 1 ]; then
-                print_warning "It was generated, so it is printed in this run's summary and nowhere else — save it now."
+        # A server run again over a site still signing in as postgres: the peer
+        # line written above would refuse that site's www-data backup, so the
+        # site is given its own role first. The role keeps its password while
+        # any site is left on it.
+        local keep_password=0
+        if [ -f "${SCRIPT_DIR}/_pg_admin.sh" ]; then
+            # shellcheck source=_pg_admin.sh
+            . "${SCRIPT_DIR}/_pg_admin.sh"
+            if ! pg_peer_gate_holds "" >/dev/null; then
+                pg_roles_for_held_sites "" || keep_password=1
             fi
         fi
-    else
-        print_info "Skipping postgres user password (--skip-postgres-password)"
+        if [ "$keep_password" -eq 1 ]; then
+            print_warning "A site here still signs in as postgres (above), so the postgres role keeps its password until site_db_role.sh succeeds for it."
+        elif printf 'ALTER ROLE postgres PASSWORD NULL;\n' | env -u PGPASSWORD PGPASSFILE=/nonexistent/pgpass psql -w -X -q -v ON_ERROR_STOP=1 -U postgres -d postgres; then
+            print_success "root signs in to PostgreSQL as postgres by peer; the role has no password"
+        else
+            print_error "Could not clear the postgres role's password."
+            exit 1
+        fi
     fi
 
     # Start and enable services
@@ -4618,24 +4524,6 @@ EOF
     echo ""
     print_warning "=== NEXT STEPS ==="
     print_info "1. Create sites using: ./install.sh site SITENAME DOMAIN"
-    print_info "   (on this box it uses the recorded postgres password; --password-file to give another)"
-    # Say where the password is, not what it is. This summary is the last thing
-    # an unattended install writes to its log, and installer logs get tailed,
-    # shipped and pasted — a password printed here outlives the terminal it was
-    # printed to. The one exception is a password that could not be recorded
-    # anywhere: then this line is the only copy, and withholding it would lose
-    # the credential outright.
-    if [ "$POSTGRES_PASSWORD_RECORDED" -eq 1 ]; then
-        print_info "3. The postgres password was written to ${POSTGRES_PASSWORD_RECORD} (mode 600)."
-    elif [ "$POSTGRES_PASSWORD_GENERATED" -eq 0 ]; then
-        print_info "3. The postgres password is the one you supplied."
-    elif [ -n "${POSTGRES_PASSWORD}" ]; then
-        print_warning "3. The postgres password could not be recorded to ${POSTGRES_PASSWORD_RECORD}."
-        print_warning "   It appears once, below, and nowhere else. Save it now, then clear this log."
-        # printf, not print_info: that goes through echo -e, which would turn
-        # a backslash sequence in the password into something else.
-        printf '   %s\n' "$POSTGRES_PASSWORD"
-    fi
     echo ""
     print_success "Server is ready for site deployment!"
 }
@@ -4869,8 +4757,7 @@ do_site_create() {
                 ;;
             -h|--help)
                 echo "Usage: $0 site [OPTIONS] SITENAME [DOMAIN] [PORT]"
-                echo "       password: generated by default; --password-file=FILE or POSTGRES_PASSWORD= to choose"
-                echo ""
+                        echo ""
                 echo "Mode Options:"
                 echo "  --docker      Force Docker mode (requires Docker installed)"
                 echo "  --bare-metal  Force bare-metal mode (requires Apache/PHP/PostgreSQL)"
@@ -5149,7 +5036,6 @@ do_site_create() {
     if [ -z "$SITENAME" ]; then
         print_error "SITENAME is required"
         echo "Usage: $0 site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT]"
-        echo "       password: generated by default; --password-file=FILE or POSTGRES_PASSWORD= to choose"
         exit 1
     fi
     # The name is the container's, the database's, the site directory's and the
@@ -5166,42 +5052,16 @@ do_site_create() {
         exit 1
     fi
 
-    # Handle password: --password-file takes priority, then command line, then auto-generate
-    PASSWORD_WAS_GENERATED=0
-
-    if [ -n "$PASSWORD_FILE" ]; then
-        # Read password from file
-        if [ ! -f "$PASSWORD_FILE" ]; then
-            print_error "Password file not found: $PASSWORD_FILE"
-            exit 1
-        fi
-        POSTGRES_PASSWORD=$(cat "$PASSWORD_FILE" | tr -d '\n')
-        if [ -z "$POSTGRES_PASSWORD" ]; then
-            print_error "Password file is empty: $PASSWORD_FILE"
-            exit 1
-        fi
-        print_info "Password read from file: $PASSWORD_FILE"
-    elif [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "-" ]; then
-        # Nothing was supplied. Resolving it is deferred until the mode is known:
-        # a bare-metal site talks to a PostgreSQL the `server` command already
-        # gave a password, so minting a second one here would produce a
-        # credential the running server has never heard of. See the resolution
-        # immediately after MODE is decided.
-        POSTGRES_PASSWORD=""
+    # No database password exists to give: root signs in as postgres by peer and
+    # each site gets its own role (site_db_role.sh). A password handed in the way
+    # older callers did is accepted and not used.
+    if [ -n "$PASSWORD_FILE" ] || { [ -n "$POSTGRES_PASSWORD" ] && [ "$POSTGRES_PASSWORD" != "-" ]; }; then
+        print_info "No database password is needed (root signs in by peer); the one given is not used."
     fi
-
-    # A password given on the command line was readable by every account on this
-    # machine, via ps, from the moment the command started — and it is in the
-    # shell history of whoever ran it. Nothing here can undo that, so say so
-    # while the operator is still at the keyboard and can rotate it.
     if [ "$PASSWORD_FROM_ARGV" -eq 1 ]; then
-        print_warning "The database password was passed as a command-line argument."
-        echo "  Anything in argv is visible to every user on this box (ps) while the"
-        echo "  install runs, and it is now in your shell history. Prefer either:"
-        echo "    ./install.sh site --password-file=/path/to/file SITENAME DOMAIN"
-        echo "    POSTGRES_PASSWORD=... ./install.sh site SITENAME DOMAIN"
-        echo "  Treat this one as exposed and rotate it if the box is shared."
+        print_warning "A password was passed on the command line, where every user on this box can read it (ps); it is not used, and it is in your shell history."
     fi
+    POSTGRES_PASSWORD=""
 
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
@@ -5255,50 +5115,6 @@ do_site_create() {
     if [ "$MODE" = "bare-metal" ] && [ "${#OUTBOUND_FIGURE_ARGS[@]}" -gt 0 ]; then
         print_error "--outbound-* figures on a site are a container site's own; a bare-metal site shares the machine's. Set those with install.sh server --outbound-..., or sudo joinery-limits ceiling MBIT. Nothing was changed"
         exit 1
-    fi
-
-    # Resolve a password nobody supplied, now that the mode is known.
-    #
-    # Bare metal and Docker need opposite things here, which is why this cannot
-    # sit with the argument parsing:
-    #
-    # - Bare metal shares one PostgreSQL with the box. `install.sh server`
-    #   already set the postgres role's password and recorded it. Adopt that
-    #   one. Generating a fresh password instead leaves _site_init.sh
-    #   authenticating with a credential the running server has never held, and
-    #   the install dies at "Failed to load database schema" — which is what
-    #   `install.sh server` followed by `install.sh site`, both on defaults, did
-    #   before this. A site may still override it with --password-file or
-    #   POSTGRES_PASSWORD; those are read above and never reach here.
-    # - Docker gives each container its own PostgreSQL, built with
-    #   --skip-postgres-password and no role password at all, so a per-site
-    #   generated password is correct there and must stay per-site.
-    if [ -z "$POSTGRES_PASSWORD" ]; then
-        if [ "$MODE" = "bare-metal" ] && [ -r "$POSTGRES_PASSWORD_RECORD" ]; then
-            POSTGRES_PASSWORD=$(tr -d '\n' < "$POSTGRES_PASSWORD_RECORD")
-            if [ -n "$POSTGRES_PASSWORD" ]; then
-                print_info "Using the postgres password recorded by 'install.sh server' ($POSTGRES_PASSWORD_RECORD)"
-            fi
-        fi
-
-        if [ -z "$POSTGRES_PASSWORD" ]; then
-            POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
-            PASSWORD_WAS_GENERATED=1
-            if [ "$MODE" = "bare-metal" ]; then
-                # No record to adopt: this box's PostgreSQL was set up by
-                # something other than `install.sh server`. Say so, because the
-                # generated password only works if the postgres role already
-                # holds it.
-                print_warning "No postgres password recorded at $POSTGRES_PASSWORD_RECORD — generating one."
-                print_warning "If this box's postgres role has a different password, pass it with --password-file."
-            fi
-            # Named by where it lands, not by its value: this runs unattended
-            # far more often than it runs at a keyboard, and its output is a log
-            # file. The site's own config is the durable copy.
-            print_info "Auto-generated a database password for this site."
-            print_info "The site connects as its own role (joinery_${SITENAME}, Globalvars_site.php); the postgres"
-            print_info "password is kept root-only at /var/www/html/${SITENAME}/config/db_admin.php."
-        fi
     fi
 
     # --new-site-only: what a host agent passes for a new site (site_create).
@@ -5460,9 +5276,9 @@ do_site_create() {
     export UPGRADE_SERVER
 
     if [ "$MODE" = "docker" ]; then
-        do_site_docker "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME" "$NO_SSL"
+        do_site_docker "$SITENAME" "$DOMAIN_NAME" "$PORT" "$ACTIVATE_THEME" "$NO_SSL"
     else
-        do_site_baremetal "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE" "$NO_SSL"
+        do_site_baremetal "$SITENAME" "$DOMAIN_NAME" "$ACTIVATE_THEME" "$WITH_TEST_SITE" "$NO_SSL"
     fi
 }
 
@@ -5881,11 +5697,10 @@ site_displaces_default_site() {
 
 do_site_docker() {
     local SITENAME="$1"
-    local POSTGRES_PASSWORD="$2"
-    local DOMAIN_NAME="${3:-localhost}"
-    local PORT="${4:-8080}"
-    local ACTIVATE_THEME="${5:-}"
-    local NO_SSL="${6:-false}"
+    local DOMAIN_NAME="${2:-localhost}"
+    local PORT="${3:-8080}"
+    local ACTIVATE_THEME="${4:-}"
+    local NO_SSL="${5:-false}"
     local DB_PORT=$((PORT + 1000))
 
     if [ -f /etc/apache2/sites-available/000-joinery-no-site.conf ] && site_displaces_default_site "$SITENAME"; then
@@ -6367,21 +6182,19 @@ EOF
     [ -z "$CONTAINER_CPUS" ] || print_info "Container CPU ceiling: ${CONTAINER_CPUS} cores"
     [ -z "$CONTAINER_PIDS" ] || print_info "Container process ceiling: ${CONTAINER_PIDS}"
 
-    # The database password reaches the container here, at run time, and only
-    # here — not through --build-arg, which would bake it into the image where
-    # `docker inspect` and `docker history` keep it after the container is gone.
-    # A file rather than -e: anything in argv is readable by every account on
-    # this box through ps. Docker copies the values into the container's own
-    # config at create time, so restarts keep working and the file is needed
-    # only for the length of this command.
+    # What the container's first boot reads reaches it here, at run time — not
+    # through --build-arg, which would bake it into the image. A file rather
+    # than -e: anything in argv is readable by every account on this box
+    # through ps. Docker copies the values into the container's own config at
+    # create time, so the file is needed only for the length of this command.
     local ENV_FILE
     ENV_FILE="$(mktemp /tmp/joinery-env-XXXXXX)"
     chmod 600 "$ENV_FILE"
-    printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD" > "$ENV_FILE"
-    # Everything _site_init.sh reads from the environment has to cross here
-    # too: on Docker it runs inside the container on first boot, so a host-side
-    # export never reaches it. Same visibility trade as POSTGRES_PASSWORD
-    # above; the file is mode 600 and removed once the container has read it.
+    : > "$ENV_FILE"
+    # Everything _site_init.sh reads from the environment has to cross here:
+    # on Docker it runs inside the container on first boot, so a host-side
+    # export never reaches it. The file is mode 600 and removed once the
+    # container has read it.
     # One list, so a new _site_init.sh input is added here once and cannot be
     # forgotten on the Docker path (JOINERY_INSTALL_BUNDLE once was).
     local env_name
@@ -6597,9 +6410,6 @@ EOF
         echo ""
         echo -e "${GREEN}Installation Complete!${NC}"
         echo -e "Site: ${GREEN}$SITENAME${NC} | URL: ${GREEN}$SITE_URL${NC}"
-        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-            echo -e "Database Password: in ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
-        fi
     else
         print_header "Installation Complete!"
 
@@ -6608,13 +6418,6 @@ EOF
         echo -e "Web Port:         ${GREEN}$PORT${NC}${WEB_PUBLISH:+ (on 127.0.0.1, behind the host proxy)}"
         echo -e "Database Port:    ${GREEN}$DB_PORT${NC} (on 127.0.0.1)"
         echo ""
-        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-            echo -e "${YELLOW}  A database password was generated for this site.${NC}"
-            echo -e "${YELLOW}  It is stored in: ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
-            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-            echo ""
-        fi
         echo -e "Access your site: ${GREEN}$SITE_URL${NC}"
         echo ""
         # Commands the operator types name the engine itself: site_engine is
@@ -6718,11 +6521,10 @@ start_dormant_container() {
 
 do_site_baremetal() {
     local SITENAME="$1"
-    local POSTGRES_PASSWORD="$2"
-    local DOMAIN_NAME="${3:-localhost}"
-    local ACTIVATE_THEME="${4:-}"
-    local WITH_TEST_SITE="${5:-false}"
-    local NO_SSL="${6:-false}"
+    local DOMAIN_NAME="${2:-localhost}"
+    local ACTIVATE_THEME="${3:-}"
+    local WITH_TEST_SITE="${4:-false}"
+    local NO_SSL="${5:-false}"
 
     # Auto-detect server IP if domain is localhost
     if [ "$DOMAIN_NAME" = "localhost" ]; then
@@ -6818,10 +6620,9 @@ do_site_baremetal() {
     # characters in a password would have been pathname-expanded for the same
     # reason.
     #
-    # The password slot is deliberately empty. It travels in the environment
-    # instead (JOINERY_DB_PASSWORD), because argv is readable by every account on
-    # this machine through ps for as long as site init runs. The slot still has
-    # to exist: _site_init.sh consumes three leading positionals.
+    # The second slot is empty: there is no database password to pass (root
+    # signs in by peer). It still has to exist: _site_init.sh consumes three
+    # leading positionals.
     local INIT_ARGS=("$SITENAME" "" "$DOMAIN_NAME")
     if [ -n "$ACTIVATE_THEME" ]; then
         INIT_ARGS+=(--activate "$ACTIVATE_THEME")
@@ -6833,11 +6634,8 @@ do_site_baremetal() {
     # Call _site_init.sh for shared setup
     print_step "Initializing site via _site_init.sh..."
 
-    # Export PGPASSWORD for non-interactive database operations
-    export PGPASSWORD="$POSTGRES_PASSWORD"
-
-    # Run the initialization script
-    if ! JOINERY_DB_PASSWORD="$POSTGRES_PASSWORD" "$SCRIPT_DIR/_site_init.sh" "${INIT_ARGS[@]}"; then
+    # Run the initialization script (root signs in to PostgreSQL by peer)
+    if ! "$SCRIPT_DIR/_site_init.sh" "${INIT_ARGS[@]}"; then
         print_error "_site_init.sh failed"
         exit 1
     fi
@@ -6864,7 +6662,7 @@ do_site_baremetal() {
 
     # Create test site if requested
     if [ "$WITH_TEST_SITE" = true ]; then
-        create_test_site "$SITENAME" "$POSTGRES_PASSWORD" "$DOMAIN_NAME"
+        create_test_site "$SITENAME" "$DOMAIN_NAME"
     fi
 
     # Verify site is responding
@@ -6924,9 +6722,6 @@ do_site_baremetal() {
         echo ""
         echo -e "${GREEN}Installation Complete!${NC}"
         echo -e "Site: ${GREEN}$SITENAME${NC} | URL: ${GREEN}http://$DOMAIN_NAME/${NC}"
-        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-            echo -e "Database Password: in ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
-        fi
     else
         print_header "Installation Complete!"
 
@@ -6940,13 +6735,6 @@ do_site_baremetal() {
             echo -e "Test Site:        ${GREEN}/var/www/html/${SITENAME}_test/${NC}"
         fi
         echo ""
-        if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-            echo -e "${YELLOW}  A database password was generated for this site.${NC}"
-            echo -e "${YELLOW}  It is stored in: ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
-            echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-            echo ""
-        fi
         echo -e "Access your site: ${GREEN}$(site_scheme "$DOMAIN_NAME")://$DOMAIN_NAME/${NC}"
         if [ "$WITH_TEST_SITE" = true ]; then
             echo -e "Test site:        ${GREEN}http://test.$DOMAIN_NAME/${NC}"
@@ -7074,9 +6862,6 @@ show_help() {
     echo ""
     echo "Server Command Options:"
     echo "  --allow-unsupported-os Proceed on an OS other than Ubuntu 26.04 LTS or later"
-    echo "  --password-file=FILE   Read the postgres role password from FILE"
-    echo "                         (else POSTGRES_PASSWORD=, else auto-generated"
-    echo "                         into /root/.joinery_postgres_password)"
     echo ""
     echo "Docker and Server Command Options:"
     echo "  --keep-root-login      Keep root SSH login. Without it root SSH login is"

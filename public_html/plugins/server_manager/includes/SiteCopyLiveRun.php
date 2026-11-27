@@ -243,13 +243,14 @@ class SiteCopyLiveRun {
 			'D=/opt/joinery-install/copy-live; rm -rf "$D"; mkdir -p "$D"',
 			'curl -sfL ' . escapeshellarg($plane . '/utils/latest_release?version=' . $version) . ' | tar xz -C "$D"',
 			'cd "$D/maintenance_scripts/install_tools" && chmod +x *.sh',
-			"POSTGRES_PASSWORD=\$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)",
-			'echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password && export POSTGRES_PASSWORD',
+			// A release that signs root in to PostgreSQL by peer keeps no postgres
+			// password; an older one is handed one, as it expects.
+			'PWF=""; grep -q "peer map=joinery_admin" install.sh || { POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d \'/+=\' | head -c 24); echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password && export POSTGRES_PASSWORD && PWF=--password-file=/root/.joinery_postgres_password; }',
 			// The run logs in as root again after this: a release that can turn
 			// root login off is told to keep it (older ones never turn it off).
 			'KEEP=""; grep -q -- --keep-root-login install.sh && KEEP=--keep-root-login',
 			'./install.sh -y -q server $KEEP',
-			'./install.sh -y -q site --bare-metal ' . escapeshellarg($site) . ' --password-file=/root/.joinery_postgres_password '
+			'./install.sh -y -q site --bare-metal ' . escapeshellarg($site) . ' $PWF '
 				. escapeshellarg($domain) . ' --enable-agent --management-node=' . escapeshellarg($plane)
 				. ' --upgrade-server=' . escapeshellarg($plane),
 			'echo INSTALL_SUCCESS',

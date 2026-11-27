@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.18 - As postgres, root signs in by peer (_pg_admin.sh, specs/postgres_superuser_peer_auth.md); the .pgpass,
+#              db_admin.php and config-password lookups go. A restored site still on postgres, or on a role this
+#              server lacks, is given its role in the same run (site_db_role.sh) when the restore runs as root
 #Version 3.17 - The dump's OWNER TO statements come out before the load (stage 1b, _dump_without_owners.sh), so the
 #              site's own non-superuser role can restore; after the load the site's role is given the database
 #              and everything in it (_db_ownership_sql.sh): the site is the one whose config names this database,
@@ -180,55 +183,20 @@ LOAD_DB=""; WORK_DB=""
 put_back_database() { :; }
 trap cleanup EXIT
 
-# --- Database authentication (standalone convenience) --------------------------
-# The dashboard always exports PGPASSWORD in a creds preamble before invoking us,
-# so this block is a no-op there. For manual/standalone use it loads the site
-# password from the local config when PGPASSWORD/.pgpass are absent.
-if [[ -f ~/.pgpass ]]; then
-    info "✓ Using .pgpass authentication."
-elif [[ -n "$PGPASSWORD" ]]; then
-    info "✓ Using PGPASSWORD from environment."
-else
-    CONFIG_FILE=""
-    SITENAME="${DB_NAME%_test}"
-    if [[ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]]; then
-        CONFIG_FILE="/var/www/html/${SITENAME}/config/Globalvars_site.php"
-    elif [[ -f "/var/www/html/${DB_NAME}/config/Globalvars_site.php" ]]; then
-        CONFIG_FILE="/var/www/html/${DB_NAME}/config/Globalvars_site.php"
-    else
-        CONFIG_FILE=$(find /var/www/html/*/config/Globalvars_site.php 2>/dev/null | head -1)
-    fi
-    if [[ -n "$CONFIG_FILE" ]] && [[ -f "$CONFIG_FILE" ]]; then
-        # The postgres pair lives in the root-only config/db_admin.php once the
-        # site has its own role (site_db_role.sh); a config still on postgres
-        # carries the password itself.
-        ADMIN_FILE="$(dirname "$CONFIG_FILE")/db_admin.php"
-        CONFIG_READER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_config_value.php"
-        # The reader where this engine has it beside it; sed where it does not
-        # (an engine run from a copy of sysadmin_tools alone), as the hand-over
-        # after the load does. A generated password is alphanumeric, so the sed
-        # reads it right; one with a quote in it needs the reader or PGPASSWORD.
-        cfg_read() {  # FILE NAME
-            if [[ -f "$CONFIG_READER" ]]; then
-                php "$CONFIG_READER" "$1" "$2" 2>/dev/null
-            else
-                sed -n "s/^[[:space:]]*\$this->settings\['$2'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1
-            fi
-        }
-        CONFIG_PASSWORD=""
-        if [[ -r "$ADMIN_FILE" ]]; then
-            CONFIG_PASSWORD="$(cfg_read "$ADMIN_FILE" dbadminpassword)"
-        fi
-        if [[ -z "$CONFIG_PASSWORD" && "$(cfg_read "$CONFIG_FILE" dbusername)" == "postgres" ]]; then
-            CONFIG_PASSWORD="$(cfg_read "$CONFIG_FILE" dbpassword)"
-        fi
-        if [[ -n "$CONFIG_PASSWORD" ]]; then
-            export PGPASSWORD="$CONFIG_PASSWORD"
-            info "✓ Loaded database password from $CONFIG_FILE"
-        fi
-    fi
-    if [[ -z "$PGPASSWORD" ]] && [ "$NON_INTERACTIVE" = true ]; then
-        info "✗ Error: no PGPASSWORD, .pgpass, or config password found (non-interactive)."
+# --- Database authentication ----------------------------------------------------
+# As postgres (the default): root signs in by peer, or on a machine not switched
+# over yet with the password it had (_pg_admin.sh). As a site's own role
+# (--db-user joinery_*, the backup verifier), the caller hands its password in
+# PGPASSWORD. An engine run from a copy of sysadmin_tools alone has no helper
+# beside it and signs in as psql does.
+PG_ADMIN_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_pg_admin.sh"
+if [ "$DB_USER" = "postgres" ] && [ -f "$PG_ADMIN_HELPER" ]; then
+    # shellcheck source=../install_tools/_pg_admin.sh
+    . "$PG_ADMIN_HELPER"
+    if pg_admin_auth; then
+        info "✓ Signed in to PostgreSQL as postgres (${PG_ADMIN_AUTH})."
+    elif [ "$NON_INTERACTIVE" = true ]; then
+        info "✗ Error: cannot sign in to PostgreSQL as postgres (run as root: it signs in by peer)."
         echo "DB_UNREACHABLE"
         exit 7
     fi
@@ -785,6 +753,7 @@ check_secret_key() {
 # failure here is said and does not undo the restore: the data is whole, and
 # site_db_role.sh re-asserts ownership on its next run.
 REOWN_FAILED=false
+ROLE_REPAIR_SITE=""
 reown_to_site_role() {
     # The restoring role already owns everything it just created: a site's own
     # role restoring its own database (the backup verifier's rehearsal copy,
@@ -827,13 +796,20 @@ reown_to_site_role() {
         info "ℹ No site names '$DB_NAME' as its database: it stays owned by '$DB_USER'."
         return 0
     fi
-    if [[ ! "$role" =~ ^joinery_[a-z0-9_]+$ ]]; then
-        info "ℹ The site ($site_cfg) still connects as '$role': the database stays owned by '$DB_USER'."
-        return 0
-    fi
-    if [ "$(psql -U "$DB_USER" -d postgres -XtAc "SELECT 1 FROM pg_roles WHERE rolname = '$role'" 2>/dev/null)" != "1" ]; then
-        info "✗ The site connects as '$role', which this server lacks: the data is loaded but the site cannot read it."
-        info "  Run site_db_role.sh $(basename "$(dirname "$(dirname "$site_cfg")")") as root to create the role and hand the database over."
+    # A site still on postgres, or on a role this server lacks, is given its role
+    # when this runs as root: site_db_role.sh creates it, hands the database over
+    # and points the config at it.
+    local site_name role_tool="$TOOLS_DIR/../install_tools/site_db_role.sh"
+    site_name="$(basename "$(dirname "$(dirname "$site_cfg")")")"
+    if [[ ! "$role" =~ ^joinery_[a-z0-9_]+$ ]] \
+        || [ "$(psql -U "$DB_USER" -d postgres -XtAc "SELECT 1 FROM pg_roles WHERE rolname = '$role'" 2>/dev/null)" != "1" ]; then
+        # Run once the database is back under its name (below).
+        if [ "$(id -u)" -eq 0 ] && [ -f "$role_tool" ]; then
+            ROLE_REPAIR_SITE="$site_name"
+        else
+            info "✗ The site ($site_cfg) connects as '$role', which is not its own role on this server: the data is loaded but the site may not read it."
+            info "  Run site_db_role.sh $site_name as root to create the role and hand the database over."
+        fi
         REOWN_FAILED=true
         return 0
     fi
@@ -856,6 +832,14 @@ if psql -U "$DB_USER" -d "$LOAD_DB" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     if [ "$LOAD_DB" != "$DB_NAME" ]; then
         echo "RESTORE_LOAD_FAILED"
         exit 6
+    fi
+    if [ -n "$ROLE_REPAIR_SITE" ]; then
+        if bash "$TOOLS_DIR/../install_tools/site_db_role.sh" "$ROLE_REPAIR_SITE" 1>&2; then
+            info "✓ '$ROLE_REPAIR_SITE' was given its own database role (site_db_role.sh)."
+            REOWN_FAILED=false
+        else
+            info "✗ site_db_role.sh $ROLE_REPAIR_SITE failed: the data is loaded but the site may not read it."
+        fi
     fi
     if [ "$REOWN_FAILED" = true ]; then
         # The data is whole and back under its name, but owned by a role the

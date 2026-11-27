@@ -2,6 +2,12 @@
 #
 # _site_start.sh - a site container's start command (specs/site_container_engine.md D6).
 #
+# Version: 1.3 - root signs in to PostgreSQL by peer (specs/postgres_superuser_peer_auth.md): no
+#               POSTGRES_PASSWORD is needed, and the first-boot trust dance that gave the role one is gone.
+#               Right after PostgreSQL starts, _pg_admin.sh (scripts volume) puts the peer line in place,
+#               which a base image built before it lacks, and signs root in: by peer, or with the env
+#               file's password on a container whose site still signs in as postgres; such a site is given its
+#               own role there (site_db_role.sh). A scripts volume older than the helper is started as before.
 # Version: 1.2 - PostgreSQL is started by pg_ctl -w as postgres, with pg_ctlcluster's options and the
 #               cluster's environment file, and the fixed three-second sleep after it goes (specs/
 #               multi_tenant_host_hardening.md D9): pg_ctlcluster probes readiness with psql, which a
@@ -29,7 +35,6 @@
 set +H && \
     echo "Container starting: SITENAME=${SITENAME}, DOMAIN=${DOMAIN_NAME}" && \
     if [ -z "${SITENAME}" ]; then echo "FATAL: SITENAME is empty"; exit 1; fi && \
-    if [ -z "${POSTGRES_PASSWORD}" ]; then echo "FATAL: POSTGRES_PASSWORD is empty"; exit 1; fi && \
     if [ ! -f "/var/www/html/${SITENAME}/public_html/VERSION" ]; then \
         echo "FATAL: no site code at /var/www/html/${SITENAME}/public_html"; \
         echo "       The code volume is mounted but empty. Seed it from a release"; \
@@ -69,27 +74,19 @@ set +H && \
             [ $((PG_WAITED % 30)) -ne 0 ] || echo "PostgreSQL is still recovering (${PG_WAITED} s past pg_ctl's wait); waiting"; \
             sleep 5; PG_WAITED=$((PG_WAITED + 5)); \
         done; }; } && \
-    export PGPASSWORD="${POSTGRES_PASSWORD}" && \
-    PG_CONF="$(ls -1d /etc/postgresql/*/main/pg_hba.conf 2>/dev/null | sort -V | tail -1)" && \
-    if [ -z "${PG_CONF}" ]; then echo "FATAL: no pg_hba.conf under /etc/postgresql"; exit 1; fi && \
-    if [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then \
-        PG_LOCAL_METHOD="$(awk '$1=="local" && $2=="all" && $3=="postgres" {print $4; exit}' "$PG_CONF")" && \
-        if [ -z "${PG_LOCAL_METHOD}" ] || [ "${PG_LOCAL_METHOD}" = "trust" ]; then \
-            echo "FATAL: no method to restore on the local postgres line in ${PG_CONF}"; exit 1; \
-        fi && \
-        sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' "$PG_CONF" && \
-        service postgresql reload && \
-        PW_SQL="${POSTGRES_PASSWORD//"'"/"''"}" && \
-        printf "ALTER USER postgres PASSWORD '%s';\n" "$PW_SQL" | su -c "psql -q -v ON_ERROR_STOP=1" postgres && \
-        sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_LOCAL_METHOD}/" "$PG_CONF" && \
-        if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' "$PG_CONF"; then \
-            echo "FATAL: local postgres left on trust in ${PG_CONF}"; exit 1; \
-        fi && \
-        service postgresql reload; \
+    PG_ADMIN_HELPER="/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_pg_admin.sh" && \
+    if [ -f "${PG_ADMIN_HELPER}" ]; then \
+        . "${PG_ADMIN_HELPER}" && \
+        { pg_peer_converge "" 1 || true; } && \
+        if ! pg_admin_auth; then echo "FATAL: root cannot sign in to PostgreSQL as postgres"; exit 1; fi && \
+        { pg_peer_gate_holds "" > /dev/null || pg_roles_for_held_sites "" || true; }; \
+    else \
+        echo "The scripts volume predates _pg_admin.sh; root signs in through this image's own peer line"; \
+        export PGPASSWORD="${POSTGRES_PASSWORD:-}"; \
     fi && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
-        JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode)) && \
+        ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode)) && \
     chown -R root:root "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
     ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R root:root "/var/www/html/${SITENAME}/vendor" || true) && \
     chown root:root "/var/www/html/${SITENAME}" && chmod 755 "/var/www/html/${SITENAME}" && \

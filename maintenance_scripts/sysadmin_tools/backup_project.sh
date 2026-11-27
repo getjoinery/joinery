@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.14.0 - a database not on its site's own role is dumped as postgres, root signing in by peer
+#   (_pg_admin.sh, specs/postgres_superuser_peer_auth.md); db_admin.php is not read
 # Version: 2.13.1 - colours only on a terminal: captured output carries no escape codes
 # Version: 2.13.0 - the root-only config files are left out of every archive, a root run's too
 #   (_backup_root_only_files.sh 1.1.0)
@@ -514,20 +516,18 @@ if [ -z "${PGPASSWORD:-}" ]; then
     # A site on its own database role (site_db_role.sh) is dumped as that role
     # with the pair its config holds, and the pair is handed down to
     # backup_database.sh as PGUSER/PGPASSWORD; the scheduled backup runs as
-    # www-data, which can read the site's config and not the root-only
-    # db_admin.php. Otherwise the postgres pair: db_admin.php when readable, a
-    # config still on postgres when not. The literals are read as PHP reads them.
+    # www-data, which can read the site's config. Otherwise postgres: root
+    # signs in by peer, or on a machine not switched over yet with the password
+    # it had (_pg_admin.sh). The literals are read as PHP reads them.
     CONFIG_DB_USER="$( [ -f "$CONFIG_FILE" ] && php "$CONFIG_READER" "$CONFIG_FILE" dbusername 2>/dev/null )"
     if [[ "$CONFIG_DB_USER" =~ ^joinery_[a-z0-9_]+$ ]]; then
         PGUSER="$CONFIG_DB_USER"
         PGPASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
         export PGUSER PGPASSWORD
-    elif [ -r "${PROJECT_DIR}/config/db_admin.php" ]; then
-        PGPASSWORD="$(php "$CONFIG_READER" "${PROJECT_DIR}/config/db_admin.php" dbadminpassword 2>/dev/null)"
-        export PGPASSWORD
-    elif [ "$CONFIG_DB_USER" = "postgres" ]; then
-        PGPASSWORD="$(php "$CONFIG_READER" "$CONFIG_FILE" dbpassword 2>/dev/null)"
-        export PGPASSWORD
+    else
+        # shellcheck source=../install_tools/_pg_admin.sh
+        . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_pg_admin.sh"
+        pg_admin_auth || print_warning "Cannot sign in to PostgreSQL as postgres (run as root: it signs in by peer)"
     fi
 fi
 

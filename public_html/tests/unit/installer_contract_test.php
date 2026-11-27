@@ -2222,10 +2222,11 @@ check(preg_match('/^\s*ENV\s+POSTGRES_PASSWORD/m', $df_code) === 0,
 // password appearing at all.
 check(preg_match('/psql[^\n|]*-c[^\n]*POSTGRES_PASSWORD/', $df_code) === 0,
     'the first-run ALTER USER does not put it in a psql command line');
-check(preg_match('/printf\s+"ALTER USER postgres PASSWORD[^\n]*\|\s*su -c "psql/', $df_code) === 1,
-    'it is piped to psql on stdin instead');
-check(strpos($df_code, 'JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh') !== false,
-    'and site init receives it in the environment, not as a positional');
+check(strpos($df_code, 'ALTER USER postgres PASSWORD') === false && strpos($df_code, 'POSTGRES_PASSWORD is empty') === false,
+    'the container sets no postgres password and needs none (root signs in by peer)');
+check(strpos($df_code, 'pg_peer_converge "" 1') !== false && strpos($df_code, 'pg_admin_auth') !== false
+    && strpos($df_code, './_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode') !== false,
+    'it puts the peer line in place, signs root in, and runs site init with no password');
 
 check(strpos($install_nocomment, '--build-arg POSTGRES_PASSWORD') === false,
     'install.sh passes no password build argument');
@@ -2234,8 +2235,8 @@ check(substr_count($install_nocomment, '--env-file "$ENV_FILE"') >= 2,
     'found: ' . substr_count($install_nocomment, '--env-file "$ENV_FILE"'));
 check(preg_match('/chmod 600 "\$ENV_FILE"/', $install_nocomment) === 1,
     'that file is owner-only');
-check(strpos($install_nocomment, 'JOINERY_DB_PASSWORD="$POSTGRES_PASSWORD" "$SCRIPT_DIR/_site_init.sh"') !== false,
-    'the bare-metal path passes it in the environment too');
+check(strpos($install_nocomment, 'JOINERY_DB_PASSWORD') === false && strpos($install_nocomment, 'POSTGRES_PASSWORD=%s') === false,
+    'no database password reaches site init or a container env file');
 
 // The array matters beyond secrecy: the old string was word-split, so a password
 // containing a space shifted every argument after it and the domain landed in
@@ -2245,8 +2246,8 @@ check(preg_match('/local INIT_ARGS=\(/', $install_nocomment) === 1,
 
 $init_sh  = $site_root . '/maintenance_scripts/install_tools/_site_init.sh';
 $init_src = is_file($init_sh) ? file_get_contents($init_sh) : '';
-check(strpos($init_src, 'JOINERY_DB_PASSWORD') !== false,
-    '_site_init.sh reads the password from the environment when given one');
+check(strpos($init_src, 'pg_admin_auth') !== false && strpos($init_src, 'export PGPASSWORD="$PASSWORD"') === false,
+    '_site_init.sh signs root in through _pg_admin.sh, holding no password of its own');
 
 
 section('A site with no certificate is still reachable');
@@ -2388,7 +2389,7 @@ check(preg_match('#/etc/postgresql/\d+/#', $dockerfile_exec) === 0,
 check(preg_match('/php\d+\.\d+-fpm/', $dockerfile_exec) === 0,
     'and no PHP version in the fpm service it starts');
 foreach ([
-    'FATAL: no pg_hba.conf under /etc/postgresql' => 'an unresolvable pg_hba.conf',
+    'FATAL: root cannot sign in to PostgreSQL as postgres' => 'a database root cannot sign in to',
     'FATAL: no php-fpm init script under /etc/init.d' => 'a missing fpm service',
 ] as $needle => $label) {
     check(strpos($dockerfile_src, $needle) !== false,
@@ -2453,43 +2454,40 @@ check(strpos($email_exec, '${PHP_BIN}" -r') !== false,
     'it reads the version from the interpreter it already resolved');
 
 
-section('Nothing is left granting trust on the postgres socket');
+section('root signs in to PostgreSQL by peer, and the role has no password');
 
-// Setting the postgres password needs trust on the local socket for the length
-// of one ALTER USER, so both installers flip it and flip it back. The flip back
-// is the whole risk: sed exits 0 when it matches nothing, so a pattern that no
-// longer fits the file leaves trust in place — superuser for anyone with a
-// shell — and every later step still reports success.
-// Twice: the flip to trust and the flip back. Either one written as a literal
-// line is a silent no-op the moment the generated spacing changes.
-check(substr_count($install_exec, 'sed -i -E') >= 2
-    && substr_count($install_exec, 'local[[:space:]]+all[[:space:]]+postgres[[:space:]]+') >= 3,
-    'install.sh matches the postgres rule by field, not as a whitespace-exact line');
-check(preg_match('/grep -qE .\^local\[\[:space:\]\]\+all\[\[:space:\]\]\+postgres\[\[:space:\]\]\+trust/', $install_exec) === 1,
-    'and confirms the restore took rather than assuming it');
-check(preg_match('/Could not restore authenticated access.*?exit 1/s', $install_exec) === 1,
-    'a restore that did not take stops the install');
+// The postgres role has no password (specs/postgres_superuser_peer_auth.md):
+// root signs in over the socket by its Linux user, through one map. No trust
+// line is ever written, so none can be left behind.
+check(strpos($install_exec, 'local   all             postgres                                peer map=joinery_admin') !== false,
+    'install.sh writes the local postgres line as peer through the joinery_admin map');
+check(preg_match('/^joinery_admin\s+root\s+postgres/m', $install_exec) === 1
+    && preg_match('/^joinery_admin\s+postgres\s+postgres/m', $install_exec) === 1
+    && preg_match('/^joinery_admin\s+(?!root|postgres)\S+/m', $install_exec) === 0,
+    'and its map lets root and the postgres user act as postgres, nobody else');
+check(strpos($install_exec, '\\1trust') === false
+    && strpos((string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_pg_admin.sh'), 'trust') === false,
+    'nothing flips the postgres line to trust');
+check(strpos($install_exec, "ALTER ROLE postgres PASSWORD NULL;") !== false,
+    'install.sh server leaves the postgres role with no password');
+check(preg_match('/root could not sign in to PostgreSQL as postgres by peer\..*?exit 1/s', $install_exec) === 1,
+    'and an install where root cannot sign in by peer stops');
+check(strpos($install_exec, 'read -rs POSTGRES_PASSWORD') === false && strpos($install_exec, 'Please enter a password for PostgreSQL') === false,
+    'nobody is asked for a postgres password');
+$pg_admin_sh = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_pg_admin.sh');
+check(strpos($pg_admin_sh, 'pg_peer_gate_holds') !== false && strpos($pg_admin_sh, 'dbpassword${sfx}') !== false,
+    'a machine is switched over only when no site config still signs in as postgres with a password, either pair');
+check(strpos($pg_admin_sh, '_pg_set_postgres_line "$hba" "$old"') !== false,
+    'a refused proof puts the earlier line back');
 
-// One variable feeds the generated rules and the restore, so they cannot name
-// different methods. md5 is what that variable replaced: password_encryption
-// has defaulted to scram-sha-256 since PG 14 and an md5 line accepts a SCRAM
+// One variable feeds the generated rules, so they cannot name different
+// methods. md5 is what that variable replaced: password_encryption has
+// defaulted to scram-sha-256 since PG 14 and an md5 line accepts a SCRAM
 // verifier, so the word was doing nothing — and PG 18 deprecates it.
 check(strpos($install_exec, 'PG_AUTH_METHOD="scram-sha-256"') !== false,
     'the auth method is declared once');
 check(preg_match('/^\s*(local|host)\s+\S+\s+\S+.*\bmd5\s*$/m', $install_exec) === 0,
     'and no generated pg_hba rule names md5');
-
-// The container repeats the dance at first run against a file install.sh wrote,
-// so it reads the method out of that file instead of carrying its own copy of
-// the answer. Two scripts that each name a method can disagree; one that asks
-// cannot.
-check(strpos($dockerfile_exec, 'PG_LOCAL_METHOD=') !== false
-    && strpos($dockerfile_exec, '$3=="postgres"') !== false,
-    'the container reads the method out of pg_hba rather than naming one');
-check(preg_match('/local postgres left on trust.*?exit 1/s', $dockerfile_exec) === 1,
-    'and a container whose restore did not take stops instead of running that way');
-check(preg_match('/no method to restore.*?exit 1/s', $dockerfile_exec) === 1,
-    'as does one with no method to put back');
 
 
 section('A connection attempt can be attributed to a source');
@@ -3016,22 +3014,6 @@ check(!preg_match('/sed[^\n]*PASSWORD/', $site_init_now),
 check(strpos($site_init_now, 'JOINERY_CFG_PASSWORD') === false,
 	'_site_init.sh hands no database password to the config writer');
 
-// The ALTER USER statement: on stdin, as a SQL literal with quotes doubled,
-// never inside a shell string that su -c would parse a second time.
-foreach (array('install.sh' => $install_now, 'Dockerfile.template' => $df_now) as $label => $src) {
-	check(!preg_match('/su -c "psql[^\n]*ALTER USER postgres PASSWORD/', $src),
-		$label . ' does not put the password inside the su -c command string',
-		'a double-quoted shell string re-parses $ ` " \\ and the SQL literal breaks on a quote');
-	check(strpos($src, "POSTGRES_PASSWORD//\"'\"/\"''\"") !== false,
-		$label . ' doubles single quotes to make the password a SQL literal');
-	check(strpos($src, 'printf "ALTER USER postgres PASSWORD \'%s\';\n"') !== false,
-		$label . ' hands the statement to psql with printf, not echo');
-	check(strpos($src, 'psql -q -v ON_ERROR_STOP=1') !== false,
-		$label . ' fails the install when the password cannot be set');
-}
-check(preg_match('/\bread -s POSTGRES_PASSWORD/', $install_now) !== 1
-	&& preg_match('/\bread -rs POSTGRES_PASSWORD\b/', $install_now) === 1,
-	'the interactive password prompt reads raw (backslashes kept)');
 check(!preg_match('/print_info "[^\n]*\$\{?POSTGRES_PASSWORD(?![A-Z_])/', $install_now),
 	'install.sh never prints the password through echo -e');
 
@@ -4401,7 +4383,7 @@ $inst_b1 = (string)file_get_contents($tools_dir . '/install.sh');
 $name_check = strpos($inst_b1, 'if ! [[ "$SITENAME" =~ ^[a-z0-9][a-z0-9_-]{1,49}$ ]]; then');
 $companion_refusal = strpos($inst_b1, 'if [[ "$SITENAME" == *_test && -f "/var/www/html/${SITENAME%_test}/config/Globalvars_site.php" ]]; then');
 check($name_check !== false && $companion_refusal !== false && $companion_refusal > $name_check
-    && $companion_refusal < strpos($inst_b1, 'PASSWORD_WAS_GENERATED=0', $name_check),
+    && $companion_refusal < strpos($inst_b1, 'No database password is needed', $name_check),
     'install.sh site refuses <name>_test beside a site <name>, before anything is made: the rule would read it as a test site (reviewer2 D5)');
 
 // Executed: the helper over the shipped template.
