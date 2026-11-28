@@ -16,6 +16,8 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
+ * @version 1.8 - on a site with hosted AI credit, the Finish later list says the privacy level is not chosen,
+ *   not that no AI assistant is configured: the assistant already works there
  * @version 1.7 - the AI assistant step stays drawn once done (render_when_done), so its Test button and Saved
  *   line show after a save and a hosted site can change its privacy level there
  * @version 1.6 - ai_pipeline runs in the long lane (VaultDeferredWork § Two lanes)
@@ -145,7 +147,13 @@ SetupSteps::register('ai_provider', array(
     // Drawn when done too: its Test button is most use once something is set
     // up, and a hosted site's privacy level stays changeable here.
     'render_when_done' => true,
-    'dismiss_line' => 'No AI assistant is configured (optional).',
+    // A site with hosted AI credit has a working assistant from its first day;
+    // what is left there is only the privacy choice.
+    'dismiss_line' => function (?User $viewer): string {
+        return (string)Globalvars::get_instance()->get_setting('joinery_ai_hosted_api_key') !== ''
+            ? 'The AI assistant works, using the AI credit your hosting includes; its privacy level is not chosen yet, so zero retention applies.'
+            : 'No AI assistant is configured (optional).';
+    },
     'decision' => 'site',
     // The wizard writes these through the generic step_settings_save handler;
     // declaring them here keeps the allow-list with the plugin that owns them.

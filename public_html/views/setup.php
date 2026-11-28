@@ -35,7 +35,7 @@
 	$outstanding = array();
 	foreach ($steps as $s) {
 		if ($statuses[$s['key']] !== SetupSteps::STATUS_GREEN || !empty($declined[$s['key']])) {
-			$outstanding[] = $s['dismiss_line'] ?? ($s['title'] . ' is not set up.');
+			$outstanding[] = SetupSteps::dismissLineFor($s, $viewer);
 		}
 	}
 

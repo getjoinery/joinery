@@ -17,6 +17,9 @@
  *                 a string, or callable(?User $viewer): string for a step
  *                 whose framing depends on live state (read via copyFor())
  *   'status'      callable(?User $viewer): 'green'|'amber'|'none'
+ *   'dismiss_line' optional — the line the Finish later dialog lists while the
+ *                 step is not done: a string, or callable(?User $viewer): string
+ *                 (read via dismissLineFor()); default '{title} is not set up.'
  *   'render_file' include-path of the step's form partial (non-routable dir)
  *   'active'      optional callable(?User $viewer): bool — hidden when false
  *   'decision'    optional 'user'|'site' — the step accepts a "not now" answer,
@@ -36,6 +39,8 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.36 - 'dismiss_line' may be a callable, read through dismissLineFor(), for a step whose unfinished
+ *   state reads differently on different sites; get() loads plugin steps first, as steps() does
  * @version 1.35 - the Sign-in security step copy no longer offers an authenticator app: the wizard is passkey only
  * @version 1.34 - /admin/admin_management_node, where a management node sends the admin to connect this site, is left alone too
  * @version 1.33 - /services_connected, the return from the wizard's Connect button, is left alone by the login interrupt
@@ -212,6 +217,7 @@ class SetupSteps {
 
 	/** A single registered step, or null. */
 	public static function get(string $key): ?array {
+		self::ensurePluginSteps(); // a plugin's step is found even before anything read the whole list
 		return self::$steps[$key] ?? null;
 	}
 
@@ -250,6 +256,25 @@ class SetupSteps {
 		} catch (Throwable $e) {
 			error_log('SetupSteps: copy callable for "' . ($step['key'] ?? '?') . '" threw: ' . $e->getMessage());
 			return '';
+		}
+	}
+
+	/**
+	 * The line the Finish later dialog lists for a step not yet done. A
+	 * callable that throws falls back to the generic line, never a fatal.
+	 */
+	public static function dismissLineFor(array $step, ?User $viewer): string {
+		$generic = ($step['title'] ?? 'This step') . ' is not set up.';
+		$line = $step['dismiss_line'] ?? $generic;
+		if (!is_callable($line)) {
+			return (string)$line;
+		}
+		try {
+			$text = (string)call_user_func($line, $viewer);
+			return $text !== '' ? $text : $generic;
+		} catch (Throwable $e) {
+			error_log('SetupSteps: dismiss_line callable for "' . ($step['key'] ?? '?') . '" threw: ' . $e->getMessage());
+			return $generic;
 		}
 	}
 
