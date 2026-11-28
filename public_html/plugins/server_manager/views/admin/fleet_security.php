@@ -16,6 +16,8 @@
  * (FleetSecurityRunner). The AdvanceFleetSecurityRuns task moves a run;
  * loading this page moves it too.
  *
+ * @version 1.15 - Install security updates now: with nothing waiting on any machine, it says so in place of the button
+ *                 and the left-out list, and the run below is named as the last time someone pressed it
  * @version 1.14 - the answer: one line per fact; security fixes counted as installed, not 'fully up to date' (a restart
  *                owed or a minor update tonight is not a missing fix); why each restart waits folded
  * @version 1.13 - a machine owing a reboot is listed as rebooting by itself (RebootWhenQuietRunner: why it waits), or
@@ -374,9 +376,12 @@ $word = array('now' => 'Needs you', 'look' => 'Cannot be judged', 'reboot' => 'R
 <?php
 // --- Install security updates everywhere: the button, and the last run folded ---
 echo '<h3 class="mt-4 mb-1" style="font-size:1.05rem;">Install security updates now</h3>';
+$waiting_on = count(array_filter($rows, function ($r) { return !empty($r['packages']); }));
 echo '<p class="small text-muted mb-2">Every machine installs critical fixes within the hour and the rest each night by itself. '
 	. 'This installs everything waiting now, one machine at a time.</p>';
-if (!$latest || !$latest->is_running()) {
+if ((!$latest || !$latest->is_running()) && $waiting_on === 0) {
+	echo '<p class="small mb-2">Nothing is waiting to install on any machine, so there is nothing to start.</p>';
+} elseif (!$latest || !$latest->is_running()) {
 	$plan = FleetSecurityRunner::plan();
 	$ask = 'Install the security updates each machine and site container would take at its next nightly run, now, one at a time ('
 		. count($plan['nodes']) . ' in all)? A service whose package is updated restarts for a few seconds, and PHP is reloaded without dropping a request.'
@@ -399,8 +404,10 @@ if ($latest) {
 	$st = (string)$latest->get('fsr_status');
 	$st_words = array('running' => 'under way', 'completed' => 'finished', 'halted' => 'stopped at a failure', 'stopped' => 'stopped by hand');
 	$open = $latest->is_running() || $st === 'halted';
-	echo '<details class="mb-2"' . ($open ? ' open' : '') . '><summary class="small">Last run: ' . $h($st_words[$st] ?? $st)
-		. ', started ' . $h(LibraryFunctions::time_ago((string)$latest->get('fsr_create_time'), $tz)) . '</summary>';
+	echo '<details class="mb-2"' . ($open ? ' open' : '') . '><summary class="small">'
+		. ($latest->is_running() ? 'Run under way' : 'Last pressed') . ': ' . $h($st_words[$st] ?? $st)
+		. ', started ' . $h(LibraryFunctions::time_ago((string)$latest->get('fsr_create_time'), $tz))
+		. ($latest->is_running() ? '' : ' (the nightly updates are not counted here)') . '</summary>';
 	if ((string)$latest->get('fsr_halt_reason') !== '' && $st === 'halted') {
 		echo '<div class="text-danger small mt-1">' . $h($latest->get('fsr_halt_reason')) . '</div>';
 	}
