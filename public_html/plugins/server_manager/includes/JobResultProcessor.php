@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.154 - sanitise_mail_log_summary: a blocklist refusal's matched word and client_domain, and blocklist_matched counts
  * @version 1.153 - sanitise_mailbox_status: each nameserver's reason, ms, tcp_53 and skipped_after, and each domain's arrival counts;
  *                sanitise_mail_log_summary (specs/mailbox_diagnosis_words.md)
  * @version 1.152 - an apply_update is judged against the release served when the node started it, not one
@@ -4800,6 +4801,7 @@ HTML;
 	/** The words a mail_log_summary carries, as the node compiles them. */
 	const MAIL_LOG_OUTCOMES = array('delivered', 'deferred', 'handler_refused', 'expired', 'refused');
 	const MAIL_LOG_REFUSALS = array('blocklist', 'relay_denied', 'unknown_recipient', 'lookup_failure', 'tls', 'other');
+	const MAIL_LOG_BLOCKLIST_MATCHED = array('client', 'helo', 'sender', 'other');
 
 	/**
 	 * A mail_log_summary job's result: every field held to its compiled set as
@@ -4828,6 +4830,11 @@ HTML;
 		foreach (self::MAIL_LOG_REFUSALS as $k) {
 			$refused[$k] = $count($r[$k] ?? null);
 		}
+		$m = is_array($c['blocklist_matched'] ?? null) ? $c['blocklist_matched'] : array();
+		$matched = array();
+		foreach (self::MAIL_LOG_BLOCKLIST_MATCHED as $k) {
+			$matched[$k] = $count($m[$k] ?? null);
+		}
 		$recent = array();
 		foreach (array_slice(is_array($d['recent'] ?? null) ? $d['recent'] : array(), 0, 20) as $row) {
 			if (!is_array($row) || !in_array($row['outcome'] ?? null, self::MAIL_LOG_OUTCOMES, true) || $time($row['time'] ?? null) === null) {
@@ -4837,6 +4844,10 @@ HTML;
 			if ($row['outcome'] === 'refused') {
 				$out['reason'] = in_array($row['reason'] ?? null, self::MAIL_LOG_REFUSALS, true) ? $row['reason'] : 'other';
 				$out['code'] = in_array($row['code'] ?? null, array('4xx', '5xx'), true) ? $row['code'] : null;
+				if ($out['reason'] === 'blocklist') {
+					$out['matched'] = in_array($row['matched'] ?? null, self::MAIL_LOG_BLOCKLIST_MATCHED, true) ? $row['matched'] : 'other';
+					$out['client_domain'] = $domain($row['client_domain'] ?? null);
+				}
 			}
 			$out['from_domain'] = $domain($row['from_domain'] ?? null);
 			$out['to_domain'] = $domain($row['to_domain'] ?? null);
@@ -4855,6 +4866,7 @@ HTML;
 				'handler_refused' => $count($c['handler_refused'] ?? null),
 				'expired'         => $count($c['expired'] ?? null),
 				'refused'         => $refused,
+				'blocklist_matched' => $matched,
 			),
 			'recent'              => $recent,
 			'truncated'           => ($d['truncated'] ?? null) === true,

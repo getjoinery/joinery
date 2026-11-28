@@ -2639,10 +2639,13 @@ check(strpos(JobResultProcessor::mailbox_arrival_words($dcr), 'catch-all, whose 
 // mail_log_summary (WP3): every field from its compiled set.
 $mls = JobResultProcessor::sanitise_mail_log_summary(array('hours' => 24, 'covers_from' => '2026-11-27T11:30Z', 'connections' => 41,
 	'covers_window' => true, 'dropped_connections' => 18, 'counts' => array('delivered' => 1, 'deferred' => -2, 'handler_refused' => '3', 'expired' => 2,
-		'refused' => array('blocklist' => 12, 'relay_denied' => 6, 'spam' => 99)),
+		'refused' => array('blocklist' => 12, 'relay_denied' => 6, 'spam' => 99), 'blocklist_matched' => array('client' => 7, 'helo' => '2', 'rdns' => 3)),
 	'recent' => array(
 		array('time' => '2026-11-28T11:02Z', 'outcome' => 'delivered', 'from_domain' => 'gmail.com', 'to_domain' => 'home.example.org', 'ip' => '209.85.0.1'),
-		array('time' => '2026-11-28T10:40Z', 'outcome' => 'refused', 'reason' => 'blocklist', 'code' => '5xx', 'from_domain' => 'bob@evil.example', 'to_domain' => '[192.0.2.1]'),
+		array('time' => '2026-11-28T10:40Z', 'outcome' => 'refused', 'reason' => 'blocklist', 'code' => '5xx', 'from_domain' => 'bob@evil.example', 'to_domain' => '[192.0.2.1]',
+			'matched' => 'helo=<x>', 'client_domain' => 'mail.example[203.0.113.4]', 'helo' => 'evil-greeting.example'),
+		array('time' => '2026-11-28T10:35Z', 'outcome' => 'refused', 'reason' => 'blocklist', 'code' => '5xx', 'matched' => 'client', 'client_domain' => 'smtp2go.com'),
+		array('time' => '2026-11-28T10:34Z', 'outcome' => 'refused', 'reason' => 'relay_denied', 'code' => '4xx', 'matched' => 'client', 'client_domain' => 'smtp2go.com'),
 		array('time' => '2026-11-28T10:30Z', 'outcome' => 'refused', 'reason' => 'spam', 'code' => '550', 'from_domain' => "b\xc3\xbcro.example", 'to_domain' => '203.0.113.9'),
 		array('time' => 'yesterday', 'outcome' => 'delivered'),
 		array('time' => '2026-11-28T10:20Z', 'outcome' => 'bounced')),
@@ -2653,12 +2656,18 @@ check($mls['read'] === true && $mls['hours'] === 24 && $mls['covers_from'] === '
 check($mls['counts']['deferred'] === 0 && $mls['counts']['handler_refused'] === 0 && !isset($mls['counts']['refused']['spam'])
 	&& $mls['counts']['refused']['blocklist'] === 12 && $mls['counts']['refused']['other'] === 0,
 	'counts: non-negative ints only, the refusal reasons from the compiled list', var_export($mls['counts'], true));
-check(count($mls['recent']) === 3 && !isset($mls['recent'][0]['ip']), 'a row with a bad time or outcome is dropped; an unknown field is not kept');
+check(count($mls['recent']) === 5 && !isset($mls['recent'][0]['ip']), 'a row with a bad time or outcome is dropped; an unknown field is not kept');
+check($mls['recent'][1]['matched'] === 'other' && $mls['recent'][1]['client_domain'] === null && !isset($mls['recent'][1]['helo'])
+	&& $mls['recent'][2]['matched'] === 'client' && $mls['recent'][2]['client_domain'] === 'smtp2go.com'
+	&& !array_key_exists('matched', $mls['recent'][3]) && !array_key_exists('client_domain', $mls['recent'][3]),
+	'a blocklist row: matched from its closed set, client_domain only as a plain domain, no greeting; other reasons carry neither', var_export(array_slice($mls['recent'], 1, 3), true));
+check($mls['counts']['blocklist_matched'] === array('client' => 7, 'helo' => 0, 'sender' => 0, 'other' => 0),
+	'blocklist_matched: non-negative ints of the four words', var_export($mls['counts']['blocklist_matched'], true));
 check($mls['recent'][1]['from_domain'] === null && $mls['recent'][1]['to_domain'] === null,
 	'a from_domain with an @ and a bracketed literal are dropped');
-check($mls['recent'][2]['from_domain'] === null && $mls['recent'][2]['to_domain'] === null && $mls['recent'][2]['reason'] === 'other' && $mls['recent'][2]['code'] === null,
-	'a non-ASCII domain, an IP-shaped domain, an unknown reason and a bare code are dropped', var_export($mls['recent'][2], true));
-check(strpos(json_encode($mls), 'AAA111') === false && strpos(json_encode($mls), '209.85') === false, 'no queue id and no IP anywhere');
+check($mls['recent'][4]['from_domain'] === null && $mls['recent'][4]['to_domain'] === null && $mls['recent'][4]['reason'] === 'other' && $mls['recent'][4]['code'] === null,
+	'a non-ASCII domain, an IP-shaped domain, an unknown reason and a bare code are dropped', var_export($mls['recent'][4], true));
+check(strpos(json_encode($mls), 'AAA111') === false && strpos(json_encode($mls), '209.85') === false && strpos(json_encode($mls), '203.0.113') === false && strpos(json_encode($mls), 'evil-greeting') === false, 'no queue id, no IP and no greeting anywhere');
 check(JobResultProcessor::sanitise_mail_log_summary(array('hours' => 24, 'refused' => 'no_postfix')) === array('read' => true, 'hours' => 24, 'refused' => 'no_postfix')
 	&& JobResultProcessor::sanitise_mail_log_summary(array('refused' => '<b>x</b>'))['refused'] === 'refused'
 	&& JobResultProcessor::sanitise_mail_log_summary('x') === array('read' => false),

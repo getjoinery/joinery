@@ -13,6 +13,8 @@
  * counting rule, and that nothing a remote server or Postfix wrote — no IP,
  * hostname, local part, Message-ID or queue id — reaches the answer.
  *
+ * @version 1.3 - a blocklist refusal's matched word and client_domain; a hostile greeting
+ * @version 1.2 - a mailbox pulled over IMAP is not one of the site's domains
  * @version 1.1 - covers_from from the journal's first entry; expired; a forwarding subdomain is the site's
  * @version 1.0
  */
@@ -139,6 +141,10 @@ $by_reason = array();
 foreach ($out['recent'] as $r) { if ($r['outcome'] === 'refused') { $by_reason[$r['reason']][] = $r; } }
 $bl = $by_reason['blocklist'][0];
 check($bl['code'] === '5xx' && $bl['from_domain'] === 'bad.example' && $bl['to_domain'] === 'home.example.org', 'the blocklist row', json_encode($bl));
+check($bl['matched'] === 'client' && $bl['client_domain'] === null, 'listed on its address; a sending server Postfix could not name has no client_domain', json_encode($bl));
+check(!array_key_exists('matched', $by_reason['relay_denied'][0]) && !array_key_exists('client_domain', $by_reason['relay_denied'][0]),
+	'only a blocklist row carries matched and client_domain');
+check($out['counts']['blocklist_matched'] === array('client' => 1, 'helo' => 0, 'sender' => 0, 'other' => 0), 'blocklist_matched counts', json_encode($out['counts']['blocklist_matched']));
 check($by_reason['relay_denied'][0]['to_domain'] === null && $by_reason['relay_denied'][0]['code'] === '4xx',
 	'a relay probe for someone else\'s domain shows a null to_domain');
 check($by_reason['lookup_failure'][0]['from_domain'] === null, 'an address-literal sender is null');
@@ -161,7 +167,7 @@ foreach (array('209.85.0.10', '198.51.100.7', '2001:db8::25', '203.0.113.9', '19
 		'evil-helo', 'scanner1', 'secret', 'msgid', 'AAA111', 'BBB222', 'CCC333', 'DDD444', '4321', 'spamhaus', 'leak', 'injected', 'srs0', '198.51.100.2', '@', 'Command died') as $needle) {
 	check(strpos($json, $needle) === false, 'not in the answer: ' . $needle);
 }
-$allowed = array_merge(array('delivered', 'deferred', 'handler_refused', 'expired', 'refused', '4xx', '5xx'), MLS_REFUSAL_REASONS, $hosted);
+$allowed = array_merge(array('delivered', 'deferred', 'handler_refused', 'expired', 'refused', '4xx', '5xx'), MLS_REFUSAL_REASONS, MLS_BLOCKLIST_MATCHED, $hosted);
 $bad = array();
 array_walk_recursive($out, function ($v, $k) use (&$bad, $allowed) {
 	if (!is_string($v)) { return; }
@@ -179,6 +185,73 @@ check($short['counts']['delivered'] === 1 && $short['counts']['expired'] === 1 &
 $empty = mls_summarize(array(), 24, $now, $hosted, false, $now - 7 * 86400);
 check($empty['covers_window'] === true && $empty['connections'] === 0 && $empty['counts']['delivered'] === 0,
 	'no Postfix lines but a journal reaching back a week: the whole window is covered and nothing came');
+
+// ---------------------------------------------------------------------------
+section('Which blocklist check fired, and the sending server\'s domain');
+
+check(mls_registrable('mail1234.smtp2go.com') === 'smtp2go.com' && mls_registrable('Out.Mail.Example.CO.UK.') === 'example.co.uk'
+	&& mls_registrable('203-0-113-9.dsl.isp.example.net') === 'example.net' && mls_registrable('unknown') === null
+	&& mls_registrable('') === null && mls_registrable('host_name.example') === null && mls_registrable('xn--bcher-kva.example') === 'xn--bcher-kva.example'
+	&& mls_registrable('localhost') === null && mls_registrable(null) === null,
+	'a verified name is cut to its registrable domain; unknown, bare or non-ASCII names are null');
+
+$bl_entries = array();
+$b = function (int $ago, string $msg) use (&$bl_entries, $t) {
+	$bl_entries[] = array('__REALTIME_TIMESTAMP' => $t($ago), 'SYSLOG_IDENTIFIER' => 'postfix/smtpd', '_PID' => '700', 'MESSAGE' => $msg);
+};
+// zen on the client's address, from a server Postfix verified
+$b(50, 'NOQUEUE: reject: RCPT from mail1234.smtp2go.com[203.0.113.50]: 554 5.7.1 Service unavailable; Client host [203.0.113.50] blocked using zen.spamhaus.org; https://www.spamhaus.org/query/ip/203.0.113.50; from=<news@sender.example> to=<ian@home.example.org> proto=ESMTP helo=<mail1234.smtp2go.com>');
+// dbl on the greeting name
+$b(40, 'NOQUEUE: reject: RCPT from out.mail.example.co.uk[198.51.100.30]: 554 5.7.1 <greet-listed.example>: Helo command rejected: Service unavailable; Helo command [greet-listed.example] blocked using dbl.spamhaus.org; from=<a@sender.example> to=<b@home.example.org> proto=ESMTP helo=<greet-listed.example>');
+// dbl on the sender's domain, from a server with no verified name
+$b(30, 'NOQUEUE: reject: RCPT from unknown[198.51.100.31]: 554 5.7.1 <x@listed-sender.example>: Sender address rejected: Service unavailable; Sender address [listed-sender.example] blocked using dbl.spamhaus.org; from=<x@listed-sender.example> to=<c@home.example.org> proto=ESMTP helo=<h>');
+// a class Postfix has that is not one of the three
+$b(25, 'NOQUEUE: reject: RCPT from unknown[198.51.100.32]: 554 5.7.1 Service unavailable; Reverse client host [rev.example] blocked using dbl.spamhaus.org; from=<y@sender.example> to=<d@home.example.org> proto=ESMTP helo=<h>');
+// hostile greeting: claims to be smtp2go and carries a fake tail; Postfix could not name the server
+$b(20, 'NOQUEUE: reject: RCPT from unknown[198.51.100.33]: 554 5.7.1 <forged-smtp2go.com>: Helo command rejected: Service unavailable; Helo command [forged-smtp2go.com] blocked using dbl.spamhaus.org; from=<z@sender.example> to=<e@home.example.org> proto=ESMTP helo=<forged-smtp2go.com; from=<q@injected-tail.example> to=<w@home.example.org> proto=ESMTP helo=<k>');
+$hostile_helo = 'NOQUEUE: reject: RCPT from unknown[198.51.100.34]: 554 5.7.1 <spoof.example; from=<q@injected-tail.example> to=<w@home.example.org> proto=ESMTP helo=<k>: Helo command rejected: Service unavailable; Helo command [spoof.example] blocked using dbl.spamhaus.org; from=<v@sender.example> to=<f@home.example.org> proto=ESMTP helo=<spoof.example; from=<q@injected-tail.example> to=<w@home.example.org> proto=ESMTP helo=<k>';
+$b(10, $hostile_helo);
+$blo = mls_summarize($bl_entries, 24, $now, $hosted);
+$rows = array();
+foreach ($blo['recent'] as $r) { $rows[$r['time']] = $r; }
+$at = function (int $ago) use ($rows, $now) { return $rows[gmdate('Y-m-d\TH:i\Z', $now - $ago * 60)] ?? array(); };
+check(($at(50)['matched'] ?? null) === 'client' && ($at(50)['client_domain'] ?? null) === 'smtp2go.com', 'zen on the address: client, from smtp2go.com', json_encode($at(50)));
+check(($at(40)['matched'] ?? null) === 'helo' && ($at(40)['client_domain'] ?? null) === 'example.co.uk', 'dbl on the greeting: helo, the verified server under a two-label suffix', json_encode($at(40)));
+check(($at(30)['matched'] ?? null) === 'sender' && array_key_exists('client_domain', $at(30)) && $at(30)['client_domain'] === null, 'dbl on the sender: sender, no verified name', json_encode($at(30)));
+check(($at(25)['matched'] ?? null) === 'other', 'another class counts as other', json_encode($at(25)));
+check(($at(20)['reason'] ?? null) === 'other' && !array_key_exists('client_domain', $at(20)), 'a greeting that claims smtp2go and carries a fake tail: other, no client domain', json_encode($at(20)));
+check(($at(10)['reason'] ?? null) === 'other' && array_key_exists('from_domain', $at(10)) && $at(10)['from_domain'] === null && $at(10)['to_domain'] === null,
+	'a fake tail at the start of a greeting refusal: no fields read at all', json_encode($at(10)));
+check($blo['counts']['refused']['blocklist'] === 4 && $blo['counts']['blocklist_matched'] === array('client' => 1, 'helo' => 1, 'sender' => 1, 'other' => 1)
+	&& array_sum($blo['counts']['blocklist_matched']) === $blo['counts']['refused']['blocklist'], 'blocklist_matched adds up to the blocklist count', json_encode($blo['counts']));
+$bjson = json_encode($blo);
+foreach (array('greet-listed', 'forged', 'spoof', 'injected', 'rev.example', 'mail1234', 'out.mail', '203.0.113', '198.51.100', 'spamhaus', '@') as $needle) {
+	check(strpos($bjson, $needle) === false, 'not in the answer: ' . $needle);
+}
+
+// ---------------------------------------------------------------------------
+section('The site\'s own domains');
+
+$row = function (string $domain, string $fwd, bool $imap) {
+	return new class($domain, $fwd, $imap) {
+		private $v;
+		public function __construct($d, $f, $i) { $this->v = array('ied_domain' => $d, 'fwd' => $f, 'ied_is_imap_source' => $i); }
+		public function get($k) { return $this->v[$k] ?? null; }
+		public function forwarding_subdomain() { return $this->v['fwd']; }
+	};
+};
+$own = mls_hosted_domains(array(
+	$row('Home.Example.org', 'fwd.home.example.org', false),
+	$row('gmail.com', 'gmail.com', true),
+	$row('home.example.org', 'home.example.org', false),
+));
+sort($own);
+check($own === array('fwd.home.example.org', 'home.example.org'),
+	'a domain and its forwarding subdomain are the site\'s, once each; a mailbox pulled over IMAP is not', json_encode($own));
+$relay = array(array('__REALTIME_TIMESTAMP' => $t(10), 'SYSLOG_IDENTIFIER' => 'postfix/smtpd', '_PID' => '900',
+	'MESSAGE' => 'NOQUEUE: reject: RCPT from unknown[198.51.100.9]: 454 4.7.1 <someone@gmail.com>: Relay access denied; from=<x@home.example.org> to=<someone@gmail.com> proto=ESMTP helo=<h>'));
+$r = mls_summarize($relay, 24, $now, $own);
+check(isset($r['recent'][0]) && array_key_exists('to_domain', $r['recent'][0]) && $r['recent'][0]['to_domain'] === null, 'so a relay try to gmail.com names no recipient domain', json_encode($r['recent']));
 
 // ---------------------------------------------------------------------------
 section('Usage');

@@ -30,6 +30,8 @@
  *     deferred = waiting for a retry at the end of the window;
  *   - a refusal before a queue id is one outcome per rejected recipient line.
  *
+ * @version 1.2.0 - a blocklist refusal says which check fired (matched) and the verified sender server's registrable domain (client_domain); a line with a second '; from=<' tail has no fields
+ * @version 1.1.1 - a mailbox pulled over IMAP is not one of the site's domains
  * @version 1.1.0 - covers_from from the journal's own first entry (covers_window); expired; forwarding subdomains are the site's
  * @version 1.0.0 - the mail_log_summary word (specs/mailbox_diagnosis_words.md WP3)
  */
@@ -52,6 +54,17 @@ const MLS_LOOKBACK_HOURS = 6;
 const MLS_REFUSAL_REASONS = array('blocklist', 'relay_denied', 'unknown_recipient', 'lookup_failure', 'tls', 'other');
 
 const MLS_DOMAIN_PATTERN = '/^[a-z0-9.-]+\.[a-z]{2,}$/';
+
+/** A blocklist reply's class words (Postfix's rbl_class) and the word each answers as. */
+const MLS_BLOCKLIST_CLASSES = array('Client host' => 'client', 'Helo command' => 'helo', 'Sender address' => 'sender');
+
+const MLS_BLOCKLIST_MATCHED = array('client', 'helo', 'sender', 'other');
+
+/** Two-label public suffixes a registrable domain sits under with three labels. */
+const MLS_TWO_LABEL_SUFFIXES = array('co.uk', 'org.uk', 'me.uk', 'net.uk', 'ltd.uk', 'plc.uk', 'ac.uk', 'gov.uk',
+	'com.au', 'net.au', 'org.au', 'edu.au', 'co.nz', 'net.nz', 'org.nz', 'co.jp', 'or.jp', 'ne.jp', 'ac.jp',
+	'com.br', 'net.br', 'org.br', 'co.za', 'org.za', 'com.mx', 'com.ar', 'com.tr', 'com.cn', 'net.cn', 'org.cn',
+	'co.in', 'net.in', 'org.in', 'co.kr', 'or.kr', 'com.sg', 'com.hk', 'com.tw', 'co.il', 'com.my', 'co.id');
 
 // A test loads the functions without running the word.
 if (defined('MLS_FUNCTIONS_ONLY')) {
@@ -90,6 +103,54 @@ function mls_domain(?string $address): ?string {
 	return $d;
 }
 
+/**
+ * The registrable domain of a name Postfix verified for the connecting server
+ * (forward-confirmed reverse DNS): its last two labels, or three under a
+ * two-label public suffix. A host part can carry the server's address
+ * (203-0-113-9.dsl.example.net), so only the registrable domain is kept. A
+ * name Postfix could not verify ('unknown') or one that is not a plain ASCII
+ * domain is null. A cut that goes wrong only ever says less.
+ */
+function mls_registrable(?string $name): ?string {
+	if ($name === null) {
+		return null;
+	}
+	$name = strtolower(rtrim($name, '.'));
+	if ($name === '' || $name === 'unknown' || strlen($name) > 253 || !preg_match(MLS_DOMAIN_PATTERN, $name) || strpos($name, '..') !== false) {
+		return null;
+	}
+	$labels = explode('.', $name);
+	$n = count($labels);
+	$keep = (in_array($labels[$n - 2] . '.' . $labels[$n - 1], MLS_TWO_LABEL_SUFFIXES, true) && $n >= 3) ? 3 : 2;
+	$d = implode('.', array_slice($labels, -$keep));
+	return ($d === '' || $d[0] === '-' || $d[0] === '.') ? null : $d;
+}
+
+/**
+ * The site's own mail domains: each domain row and its forwarding subdomain
+ * (where forwarded mail's bounces return). A row that is a mailbox the site
+ * pulls over IMAP (a Gmail account, say) names someone else's domain, not one
+ * this Postfix receives for, so it is left out, as mailbox_status leaves it out.
+ *
+ * @param iterable $domains InboundEmailDomain rows
+ * @return string[] lowercased, unique
+ */
+function mls_hosted_domains(iterable $domains): array {
+	$hosted = array();
+	foreach ($domains as $d) {
+		if ($d->get('ied_is_imap_source')) {
+			continue;
+		}
+		foreach (array((string)$d->get('ied_domain'), (string)$d->forwarding_subdomain()) as $name) {
+			$name = strtolower(trim($name));
+			if ($name !== '' && strlen($name) <= 253 && preg_match(MLS_DOMAIN_PATTERN, $name)) {
+				$hosted[$name] = true;
+			}
+		}
+	}
+	return array_keys($hosted);
+}
+
 /** Is a client/connect line's "host[ip]" loopback? Anything that does not read as an address is not. */
 function mls_loopback(string $bracketed): bool {
 	$ip = $bracketed;
@@ -124,10 +185,14 @@ function mls_client_ip(string $msg, string $marker): ?string {
  * never the remote reply quoted inside it. $addresses are the line's own
  * from/to/helo values: a reject text that starts with one of them in <...>
  * has it removed before the phrase is read.
+ *
+ * @return array [reason, code, matched]: matched is which blocklist check
+ *               fired (MLS_BLOCKLIST_CLASSES' words, else 'other') for a
+ *               blocklist refusal, null for every other reason
  */
 function mls_reject_reason(string $text, array $addresses): array {
 	if (!preg_match('/^([45])\d\d [45]\.\d{1,3}\.\d{1,3} (.*)$/s', $text, $m)) {
-		return array('other', null);
+		return array('other', null, null);
 	}
 	$code = $m[1] . 'xx';
 	$rest = $m[2];
@@ -140,38 +205,53 @@ function mls_reject_reason(string $text, array $addresses): array {
 			}
 		}
 		if ($stripped === null) {
-			return array('other', $code);
+			return array('other', $code, null);
 		}
 		$rest = $stripped;
 	}
 	foreach (array('Service unavailable; ', 'Helo command rejected: Service unavailable; ', 'Sender address rejected: Service unavailable; ',
 			'Client host rejected: Service unavailable; ') as $prefix) {
 		if (strpos($rest, $prefix) === 0 && strpos($rest, ' blocked using ') !== false) {
-			return array('blocklist', $code);
+			// Which check fired is the class word Postfix writes before the
+			// bracketed name it looked up; the name itself is never read.
+			$after = substr($rest, strlen($prefix));
+			$matched = 'other';
+			foreach (MLS_BLOCKLIST_CLASSES as $class => $word) {
+				if (strpos($after, $class . ' [') === 0) {
+					$matched = $word;
+					break;
+				}
+			}
+			return array('blocklist', $code, $matched);
 		}
 	}
 	if (strpos($rest, 'Relay access denied') === 0) {
-		return array('relay_denied', $code);
+		return array('relay_denied', $code, null);
 	}
 	if (strpos($rest, 'Temporary lookup failure') === 0) {
-		return array($code === '4xx' ? 'lookup_failure' : 'other', $code);
+		return array($code === '4xx' ? 'lookup_failure' : 'other', $code, null);
 	}
 	if (strpos($rest, 'Recipient address rejected: ') === 0) {
-		return array($code === '5xx' ? 'unknown_recipient' : 'lookup_failure', $code);
+		return array($code === '5xx' ? 'unknown_recipient' : 'lookup_failure', $code, null);
 	}
-	return array('other', $code);
+	return array('other', $code, null);
 }
 
 /**
  * A reject line's from=, to= and helo= fields: [from, to, helo], each null
  * when absent. Read at the first "; from=<" only, the fixed tail Postfix
  * writes after its reject text, and nowhere else: the greeting name comes last
- * and is the remote's own text, so a fake tail inside it is never reached. A
- * sender holding < or > does not read, and the line then has no fields.
+ * and is the remote's own text, so a fake tail inside it is never reached.
+ * The greeting name is also written first on a greeting refusal, so a line
+ * holding a second tail has no fields at all. A sender holding < or > does
+ * not read, and the line then has no fields.
  */
 function mls_reject_fields(string $msg): array {
 	$pos = strpos($msg, '; from=<');
-	if ($pos === false) {
+	// A greeting name is also written at the start of a greeting refusal
+	// ("<name>: Helo command rejected"), so a fake tail in it can come first:
+	// a line with more than one tail has no fields.
+	if ($pos === false || substr_count($msg, '; from=<') !== 1) {
 		return array(null, null, null);
 	}
 	$tail = substr($msg, $pos);
@@ -213,10 +293,10 @@ function mls_summarize(iterable $entries, int $hours, int $now, array $hosted, b
 	};
 
 	$counts = array('delivered' => 0, 'deferred' => 0, 'handler_refused' => 0, 'expired' => 0,
-		'refused' => array_fill_keys(MLS_REFUSAL_REASONS, 0));
+		'refused' => array_fill_keys(MLS_REFUSAL_REASONS, 0), 'blocklist_matched' => array_fill_keys(MLS_BLOCKLIST_MATCHED, 0));
 	$connections = 0;
 	$dropped = 0;
-	$outcomes = array();     // each: [ts, outcome, reason, code, from_domain, to_domain]
+	$outcomes = array();     // each: [ts, outcome, reason, code, from_domain, to_domain, matched, client_domain]
 	$messages = array();     // qid => {inbound, from_domain, rcpts: [to => [status, ts]]}
 	$conns = array();        // smtpd pid => {counted, queued, tls}
 
@@ -231,7 +311,7 @@ function mls_summarize(iterable $entries, int $hours, int $now, array $hosted, b
 			if ($ts < $window_start) {
 				continue;
 			}
-			$outcomes[] = array($ts, $status, null, null, $msg['from_domain'], $to_domain($to));
+			$outcomes[] = array($ts, $status, null, null, $msg['from_domain'], $to_domain($to), null, null);
 		}
 	};
 
@@ -273,7 +353,7 @@ function mls_summarize(iterable $entries, int $hours, int $now, array $hosted, b
 				$c = $conns[$pid] ?? null;
 				if ($c !== null && $c['counted'] && !$c['tls']) {
 					$conns[$pid]['tls'] = true;
-					$outcomes[] = array($ts, 'refused', 'tls', null, null, null);
+					$outcomes[] = array($ts, 'refused', 'tls', null, null, null, null, null);
 				}
 				continue;
 			}
@@ -286,21 +366,25 @@ function mls_summarize(iterable $entries, int $hours, int $now, array $hosted, b
 				}
 				continue;
 			}
-			if (preg_match('/^(NOQUEUE|[0-9A-Za-z]+): reject: (\S+) from [^\s\[\]]*\[([0-9A-Fa-f:.Iv]+)\](?::\d+)?: (.*)$/s', $msg, $m)) {
-				if (!$in_window || mls_loopback($m[3])) {
+			if (preg_match('/^(NOQUEUE|[0-9A-Za-z]+): reject: (\S+) from ([^\s\[\]]*)\[([0-9A-Fa-f:.Iv]+)\](?::\d+)?: (.*)$/s', $msg, $m)) {
+				if (!$in_window || mls_loopback($m[4])) {
 					continue;
 				}
 				list($from, $to, $helo) = mls_reject_fields($msg);
-				$text = $m[4];
+				$text = $m[5];
 				$semi = strpos($text, '; from=<');
 				$text = $semi === false ? $text : substr($text, 0, $semi);
+				$matched = null;
 				if ($m[2] === 'RCPT') {
-					list($reason, $code) = mls_reject_reason($text, array($to, $from, $helo));
+					list($reason, $code, $matched) = mls_reject_reason($text, array($to, $from, $helo));
 				} else {
 					$reason = 'other';
 					$code = preg_match('/^([45])\d\d /', $text, $c) ? $c[1] . 'xx' : null;
 				}
-				$outcomes[] = array($ts, 'refused', $reason, $code, mls_domain($from), $to_domain($to));
+				// The connecting server's verified name sits before the [address]
+				// Postfix wrote; it is kept only for a blocklist refusal.
+				$client = $reason === 'blocklist' ? mls_registrable($m[3]) : null;
+				$outcomes[] = array($ts, 'refused', $reason, $code, mls_domain($from), $to_domain($to), $matched, $client);
 				continue;
 			}
 			continue;
@@ -358,6 +442,9 @@ function mls_summarize(iterable $entries, int $hours, int $now, array $hosted, b
 	foreach ($outcomes as $o) {
 		if ($o[1] === 'refused') {
 			$counts['refused'][$o[2]]++;
+			if ($o[2] === 'blocklist') {
+				$counts['blocklist_matched'][$o[6]]++;
+			}
 		} else {
 			$counts[$o[1]]++;
 		}
@@ -369,6 +456,10 @@ function mls_summarize(iterable $entries, int $hours, int $now, array $hosted, b
 		if ($o[1] === 'refused') {
 			$row['reason'] = $o[2];
 			$row['code'] = $o[3];
+			if ($o[2] === 'blocklist') {
+				$row['matched'] = $o[6];
+				$row['client_domain'] = $o[7];
+			}
 		}
 		$row['from_domain'] = $o[4];
 		$row['to_domain'] = $o[5];
@@ -453,16 +544,7 @@ try {
 		exit(0);
 	}
 
-	$hosted = array();
-	foreach (new MultiInboundEmailDomain(array('deleted' => false)) as $d) {
-		// A domain and its forwarding subdomain (where forwarded mail's bounces return) are both the site's.
-		foreach (array((string)$d->get('ied_domain'), (string)$d->forwarding_subdomain()) as $name) {
-			$name = strtolower(trim($name));
-			if ($name !== '' && strlen($name) <= 253 && preg_match(MLS_DOMAIN_PATTERN, $name)) {
-				$hosted[] = $name;
-			}
-		}
-	}
+	$hosted = mls_hosted_domains(new MultiInboundEmailDomain(array('deleted' => false)));
 
 	$truncated = false;
 	$entries = mls_read_journal($hours, $truncated);
@@ -470,7 +552,7 @@ try {
 		echo json_encode(array('hours' => $hours, 'refused' => 'journal_unreadable')) . "\n";
 		exit(0);
 	}
-	echo json_encode(mls_summarize($entries, $hours, time(), array_values(array_unique($hosted)), (bool)$truncated, mls_journal_first())) . "\n";
+	echo json_encode(mls_summarize($entries, $hours, time(), $hosted, (bool)$truncated, mls_journal_first())) . "\n";
 } catch (\Throwable $e) {
 	echo 'ERROR: the mail log could not be summarised: ' . get_class($e) . "\n";
 	exit(1);

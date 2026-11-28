@@ -6,6 +6,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.50 - mail_log_summary: a blocklist refusal says which check listed it and the sending server's domain
  * @version 1.49 - mail_log_summary: what the site's Postfix did with its mail, counts and the newest 20 outcomes
  * @version 1.48 - mailbox_status: why each nameserver gave no clean answer (with ms and TCP 53), and each domain's arrival counts
  * @version 1.47 - saved messages are shown once, by the admin header (they were shown twice)
@@ -1073,6 +1074,15 @@ if ($result) {
 			if ($parts) {
 				echo '<div class="small mt-1">Refused: ' . implode('; ', $parts) . '.</div>';
 			}
+			$matched_words = array('client' => 'the sending server\'s address', 'helo' => 'the name the sending server greeted with',
+				'sender' => 'the sender\'s domain', 'other' => 'another check');
+			$bl_parts = array();
+			foreach (($c['blocklist_matched'] ?? array()) as $k => $n) {
+				if ($n > 0) { $bl_parts[] = htmlspecialchars($matched_words[$k] ?? $k) . ': ' . number_format($n); }
+			}
+			if ($bl_parts) {
+				echo '<div class="small mt-1">On a blocklist because of ' . implode('; ', $bl_parts) . '.</div>';
+			}
 			echo '<div class="small text-muted mt-1">' . number_format($result_data['connections']) . ' connections from other servers, '
 				. number_format($result_data['dropped_connections']) . ' of which hung up before sending anything (scanners; not refusals).</div>';
 			if ($result_data['recent']) {
@@ -1081,6 +1091,10 @@ if ($result) {
 					$what = $outcome_words[$row['outcome']] ?? $row['outcome'];
 					if ($row['outcome'] === 'refused') {
 						$what .= ': ' . ($reason_words[$row['reason']] ?? $row['reason']) . ($row['code'] ? ' (' . $row['code'] . ')' : '');
+						if ($row['reason'] === 'blocklist') {
+							$what .= ', listed: ' . ($matched_words[$row['matched'] ?? 'other'] ?? 'another check')
+								. (!empty($row['client_domain']) ? ', sending server at ' . $row['client_domain'] : '');
+						}
 					}
 					echo '<tr><td class="small">' . htmlspecialchars(str_replace(array('T', 'Z'), array(' ', ''), $row['time'])) . '</td><td>' . htmlspecialchars($what)
 						. '</td><td>' . htmlspecialchars($row['from_domain'] ?? '—') . '</td><td>' . htmlspecialchars($row['to_domain'] ?? '—') . '</td></tr>';
