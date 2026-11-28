@@ -1509,8 +1509,8 @@ fi
 #      scheduled backup, as www-data, would be refused), the local postgres
 #      line becomes peer, and root's sign-in is proved; a refusal puts the old
 #      line back;
-#   3. once peer answers, the role's password is cleared (every run: a
-#      container's rebase restores its roles with the old one), each
+#   3. once peer answers, the role's password is cleared (every run, so one
+#      set again by hand or by an older tool is cleared again), each
 #      config/db_admin.php goes, and so does /root/.joinery_postgres_password on
 #      a machine with a site (one whose site step failed keeps it for a retry).
 #

@@ -2,10 +2,11 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.21 - comments only: the roles restore never carries the postgres role (its lines are left out of
+#                roles.sql), so the rebuilt container's postgres role has no password from the start
 # Version: 1.20 - The rebuilt container signs root in as postgres by peer (specs/postgres_superuser_peer_auth.md):
 #                no password is handed to install.sh or set in it. The old container is still read with the
-#                password its environment carries, when it has one. A postgres password the roles restore
-#                brings back is cleared by the container's housekeeping
+#                password its environment carries, when it has one
 # Version: 1.19 - the rollback keeps the state volume (SITE_state, root's record of the site) when the
 #                rebuilt container made one, as it keeps the agent's (_site_run_spec.sh 1.19)
 # Version: 1.18 - a site recreate_site.sh is replacing (its lock held, or its mark under an hour old) is refused
@@ -139,8 +140,9 @@
 #
 # swap stops the site's writes, dumps the database, keeps a copy of the old
 # database volume and the old image, rebuilds the container with install.sh
-# on a fresh database volume, sets the postgres password from the site's own
-# environment, restores roles and database, and restarts the site
+# on a fresh database volume (root signs in as postgres by peer, the role has
+# no password), restores the site's roles (never postgres itself) and database,
+# and restarts the site
 # with its data in place. It then compares every table's row count with the
 # count taken after writes stopped, and prints the rollback command on any
 # difference.

@@ -17,7 +17,7 @@
 #   - the proof's three outcomes (F4): signed in keeps the peer line; refused
 #     puts the earlier line back; no answer leaves the line and changes nothing;
 #   - the settle step (F5): a password on the role is cleared, again on a later
-#     run when a roles restore brought it back; db_admin.php goes; the root
+#     run when one was set again; db_admin.php goes; the root
 #     record goes only on a machine with a site (F9).
 
 set -u
@@ -138,7 +138,7 @@ out="$(STUB_PSQL=ok pg_peer_settle "$F")"
 chk "a second run says nothing" "$out" ""
 touch "$T/state/haspw"
 out="$(STUB_PSQL=ok pg_peer_settle "$F")"
-chk "a password a roles restore brought back is cleared on the next run" "$([ -f "$T/state/haspw" ] && echo kept || echo cleared)|$(printf '%s\n' "$out" | grep -c 'password is cleared')" "cleared|1"
+chk "a password set again is cleared on the next run" "$([ -f "$T/state/haspw" ] && echo kept || echo cleared)|$(printf '%s\n' "$out" | grep -c 'password is cleared')" "cleared|1"
 F="$T/settle-nosite"; mkfs "$F" "peer map=joinery_admin"; mkdir -p "$F/root"; echo old > "$F/root/.joinery_postgres_password"
 STUB_PSQL=ok pg_peer_settle "$F" >/dev/null
 chk "a machine with no site keeps the root record for a retry" "$([ -f "$F/root/.joinery_postgres_password" ] && echo kept || echo gone)" "kept"
