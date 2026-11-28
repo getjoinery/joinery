@@ -40,6 +40,8 @@
  *
  * Run: php tests/deploy/syntax_sweep_test.php
  *
+ * @version 1.0.1 - the compiling child runs with display_errors off and opcache.file_cache empty, and only
+ *                  lines naming a listed file are suspects (reviewer2 B3)
  * @version 1.0.0
  */
 
@@ -111,9 +113,14 @@ $compile_output = array();
 $compile_exit = 0;
 exec('JY_SWEEP_LIST=' . escapeshellarg($list_file) . ' '
 	. escapeshellarg(PHP_BINARY) . ' -d opcache.enable=1 -d opcache.enable_cli=1 '
+	. '-d opcache.file_cache= -d display_errors=0 -d log_errors=0 '
 	. '-r ' . escapeshellarg($compiler) . ' 2>/dev/null', $compile_output, $compile_exit);
 
-$compile_output = array_values(array_filter(array_map('trim', $compile_output)));
+// Only a line naming a listed file is a suspect; anything else the child
+// printed is not a path. display_errors and file_cache are overruled above for
+// the same reasons: a compile message on stdout read as a broken file, and a
+// cached compile of an earlier file at the same path answered for this one.
+$compile_output = array_values(array_intersect(array_filter(array_map('trim', $compile_output)), array_merge($files, array('UNAVAILABLE'))));
 $can_compile = ($compile_exit === 0)
 	&& !in_array('UNAVAILABLE', $compile_output, true);
 

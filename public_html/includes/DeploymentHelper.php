@@ -5,6 +5,11 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.19 - validatePHPSyntax() compiles the whole tree in one opcache child process and re-checks
+ *                with php -l only the files that refused, as the deploy-tier syntax sweep does: seconds for a
+ *                release, where a php -l process per file took over a minute.
+ *                The child runs with display_errors off and opcache.file_cache empty, and only lines naming a
+ *                listed file count as suspects (reviewer2 B1, B2).
  * @version 1.18 - fetchReleaseManifest(): the upgrade source's ?serve-upgrade manifest, asked again after a
  *                network error, a 5xx, a 429 or an answer that is not JSON (3 retries, 5/15/30 s apart), and
  *                naming the HTTP status or the network error when it gives up (install_bundle.php, B7 11-27)
@@ -292,12 +297,53 @@ class DeploymentHelper {
             new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS)
         );
 
+        $paths = [];
         foreach ($files as $file) {
             if ($file->getExtension() !== 'php') continue;
+            $paths[] = $file->getPathname();
+        }
+        $result['files_checked'] = count($paths);
 
-            $result['files_checked']++;
-            $filepath = $file->getPathname();
+        // Two passes, as tests/deploy/syntax_sweep_test.php does. Pass 1 compiles
+        // every file in one child process with opcache forced on: a couple of
+        // seconds for the whole release, against about a minute and a half for a
+        // php -l process per file on a small node. Compiling is not running — no
+        // statement executes. Pass 2 re-checks each file pass 1 refused with
+        // php -l on its own, because one process shares one symbol table and two
+        // files that declare the same function (a plugin's profile_logic.php and
+        // core's, never loaded together) collide there without being broken.
+        // When pass 1 cannot run (no opcache, or the child died), every file
+        // takes pass 2. The child's own php.ini is overruled where it would
+        // change the answer: display_errors off, so a compile message is not
+        // printed among the paths; opcache.file_cache empty, so a cached compile
+        // of an earlier file at the same staging path is never the answer.
+        $suspect = $paths;
+        $list_file = tempnam(sys_get_temp_dir(), 'jy_syntax_');
+        if ($list_file !== false && file_put_contents($list_file, implode("\n", $paths)) !== false) {
+            $compiler = '$list = file(getenv("JY_SYNTAX_LIST"), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);'
+                . 'if (!function_exists("opcache_compile_file") || !ini_get("opcache.enable_cli")) { echo "UNAVAILABLE\n"; exit(0); }'
+                . 'set_error_handler(function () { return true; });'
+                . 'foreach ($list as $p) { try { if (@opcache_compile_file($p) === false) echo $p, "\n"; } catch (\Throwable $e) { echo $p, "\n"; } }'
+                . 'echo "DONE\n"; exit(0);';
+            $compile_out = [];
+            $compile_exit = 0;
+            exec('JY_SYNTAX_LIST=' . escapeshellarg($list_file) . ' ' . escapeshellarg(PHP_BINARY)
+                . ' -d opcache.enable=1 -d opcache.enable_cli=1 -d opcache.file_cache= -d display_errors=0 -d log_errors=0'
+                . ' -r ' . escapeshellarg($compiler) . ' 2>/dev/null',
+                $compile_out, $compile_exit);
+            @unlink($list_file);
+            $compile_out = array_values(array_filter(array_map('trim', $compile_out), 'strlen'));
+            // DONE as the last line is the proof the child walked the whole list;
+            // without it pass 1 proves nothing and every file is re-checked.
+            // Only a line that names a file on the list is a suspect: whatever
+            // else the child printed (a message a php.ini sent to stdout) is not
+            // a path, and php -l on it would read as a syntax error.
+            if ($compile_exit === 0 && end($compile_out) === 'DONE' && !in_array('UNAVAILABLE', $compile_out, true)) {
+                $suspect = array_values(array_intersect($compile_out, $paths));
+            }
+        }
 
+        foreach ($suspect as $filepath) {
             $output = [];
             $return_var = 0;
             exec("php -l " . escapeshellarg($filepath) . " 2>&1", $output, $return_var);

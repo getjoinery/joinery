@@ -34,6 +34,10 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.43 - every step heading carries the step clock (t+N.Ns since the run began), and a self-update
+	 *                re-run carries its parent's start (JOINERY_UPGRADE_STARTED), so duration_seconds counts the
+	 *                whole upgrade rather than the time since the restart; a carried start more than a day old
+	 *                is not adopted (reviewer2 B4)
 	 * @version 1.42 - after the last rollback point, an upgrade run as root removes installed composer packages
 	 *               the shipped code no longer needs (utils/composer_prune.php), then reloads web PHP again;
 	 *               the reload is one function, upgrade_reload_web_php() (specs/email_provider_sdk_removal.md WP8)
@@ -271,7 +275,7 @@
 		}
 		$r = $GLOBALS['APPLY_RESULT'];
 		$r['version_after'] = upgrade_read_version(__DIR__ . '/../VERSION');
-		$r['duration_seconds'] = max(0, time() - (int)$GLOBALS['APPLY_RESULT_STARTED']);
+		$r['duration_seconds'] = max(0, (int)round(microtime(true) - (float)$GLOBALS['APPLY_RESULT_STARTED']));
 		// Under 24 KiB, so the line survives the agent's 48 KiB output tail
 		// whatever the transcript around it (review B19): the long lists are
 		// cut from the end, their full counts kept, and the cut is said.
@@ -363,7 +367,14 @@
 		'rolled_back'      => array('rolled_back' => false, 'step' => null, 'schema_ahead_of_code' => false),
 		'duration_seconds' => 0,
 	);
-	$GLOBALS['APPLY_RESULT_STARTED'] = time();
+	// A self-update re-run is the same upgrade: it carries the parent's start
+	// (JOINERY_UPGRADE_STARTED), so the step clock and duration_seconds count
+	// from when the run began, not from the restart. Only a start in the last
+	// day is adopted: no real upgrade runs longer.
+	$carried_start = getenv('JOINERY_UPGRADE_STARTED');
+	$GLOBALS['APPLY_RESULT_STARTED'] = (getenv('JOINERY_UPGRADE_RERUN') === '1' && is_numeric($carried_start)
+		&& (float)$carried_start <= microtime(true) && (float)$carried_start > microtime(true) - 86400)
+		? (float)$carried_start : microtime(true);
 	$GLOBALS['APPLY_RESULT_SUPPRESS'] = false;
 
 	if ($is_cli) {
@@ -404,7 +415,9 @@
 		if ($deployed_mark !== '') {
 			@unlink($deployed_mark);
 		}
-		$cmd = 'JOINERY_UPGRADE_RERUN=1 JOINERY_UPGRADE_DEPLOYED_MARK=' . escapeshellarg($deployed_mark) . ' ' . escapeshellarg(PHP_BINARY);
+		$cmd = 'JOINERY_UPGRADE_RERUN=1 JOINERY_UPGRADE_DEPLOYED_MARK=' . escapeshellarg($deployed_mark)
+			. ' JOINERY_UPGRADE_STARTED=' . escapeshellarg(sprintf('%.3F', (float)$GLOBALS['APPLY_RESULT_STARTED']))
+			. ' ' . escapeshellarg(PHP_BINARY);
 		foreach ($argv as $arg) {
 			$cmd .= ' ' . escapeshellarg($arg);
 		}
@@ -461,13 +474,20 @@
 		}
 	}
 
-	// Section header: emits as plain heading on CLI, as <h3> for web.
+	// Seconds since the upgrade began, as the step clock prints it ("t+42.1s").
+	// The gap between two headings is how long the step between them took.
+	function upgrade_elapsed() {
+		return sprintf('t+%.1fs', max(0, microtime(true) - (float)($GLOBALS['APPLY_RESULT_STARTED'] ?? microtime(true))));
+	}
+
+	// Section header: emits as plain heading on CLI, as <h3> for web, with the
+	// step clock beside it.
 	function out_step($title) {
 		global $is_cli;
 		if ($is_cli) {
-			echo "\n=== " . strtoupper($title) . " ===\n";
+			echo "\n=== " . strtoupper($title) . " === [" . upgrade_elapsed() . "]\n";
 		} else {
-			echo '<br><h3>' . htmlspecialchars($title) . '</h3>';
+			echo '<br><h3>' . htmlspecialchars($title) . ' <small>[' . upgrade_elapsed() . ']</small></h3>';
 		}
 	}
 
@@ -2769,7 +2789,7 @@
 			upgrade_echo('Reinstalled version ' . $decode_response['system_version'] . ', the version already running: '
 				. 'the upgrade source offers nothing newer.<br>');
 		} else {
-			upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
+			upgrade_echo('<br><h2>✓ Upgrade Complete! [' . upgrade_elapsed() . ']</h2>');
 			upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 		}
 	}
