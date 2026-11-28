@@ -13,6 +13,31 @@
 
 	$settings = Globalvars::get_instance();
 
+	/**
+	 * Print what Stripe says about this site's webhook endpoint for one mode,
+	 * from StripeHelper::webhook_endpoint_report().
+	 */
+	function stripe_webhook_endpoint_status($stripe_helper, $mode_label) {
+		try {
+			$report = $stripe_helper->webhook_endpoint_report();
+		} catch (Exception $e) {
+			echo '<p style="color: red;"><strong>✗ ' . $mode_label . ' webhook endpoint:</strong> could not be checked: ' . htmlspecialchars($e->getMessage()) . '</p>';
+			return;
+		}
+		if ($report['ok']) {
+			echo '<p style="color: green;"><strong>✓ ' . $mode_label . ' webhook endpoint:</strong> ' . htmlspecialchars($report['url']) . ' is set up with every event this site needs.</p>';
+		} else {
+			echo '<p style="color: red;"><strong>✗ ' . $mode_label . ' webhook endpoint:</strong></p><ul style="color: red;">';
+			foreach ($report['problems'] as $problem) {
+				echo '<li>' . htmlspecialchars($problem) . '</li>';
+			}
+			echo '</ul>';
+		}
+		foreach ($report['notes'] as $note) {
+			echo '<p style="color: #666; font-size: 11px;">' . htmlspecialchars($note) . '</p>';
+		}
+	}
+
 	// Check if validation should run (performance optimization)
 	$run_validation = isset($_GET['run_validation']) && $_GET['run_validation'] == '1';
 
@@ -117,6 +142,7 @@
 							echo '<p><strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '</p>';
 							echo '<p><strong>Account Type:</strong> ' . htmlspecialchars($account->type) . '</p>';
 							echo '<p><strong>Country:</strong> ' . htmlspecialchars($account->country) . '</p>';
+							stripe_webhook_endpoint_status($stripe_helper, 'Live');
 						} catch (Exception $e) {
 							echo '<p style="color: red;"><strong>✗ Live API Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
 						}
@@ -203,6 +229,7 @@
 							echo '<p><strong>Account ID:</strong> ' . htmlspecialchars($account->id) . '</p>';
 							echo '<p><strong>Account Type:</strong> ' . htmlspecialchars($account->type) . '</p>';
 							echo '<p><strong>Country:</strong> ' . htmlspecialchars($account->country) . '</p>';
+							stripe_webhook_endpoint_status($stripe_helper_test, 'Test');
 						} catch (Exception $e) {
 							echo '<p style="color: red;"><strong>✗ Test API Error:</strong> ' . htmlspecialchars($e->getMessage()) . '</p>';
 						}
@@ -263,42 +290,33 @@
 		echo '<h5>Webhook Configuration</h5>';
 		echo '<div style="min-height: 150px; padding: 20px; background-color: #f5f5f5; border: 1px solid #ddd; border-radius: 5px; overflow-y: auto;">';
 		
-		$stripe_endpoint_secret = $settings->get_setting('stripe_endpoint_secret');
-		
-		if (!empty($stripe_endpoint_secret)) {
-			// Basic validation of webhook secret format
-			if (strpos($stripe_endpoint_secret, 'whsec_') === 0) {
-				echo '<div style="color: #28a745; margin-bottom: 10px;"><strong>✓ Webhook Secret Configured</strong></div>';
-				echo '<strong>Format:</strong> Valid (whsec_*****)<br>';
-				echo '<strong>Length:</strong> ' . strlen($stripe_endpoint_secret) . ' characters<br>';
-				
-				echo '<div style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 3px; font-size: 11px;">';
-				echo '<strong>Purpose:</strong> This secret validates that webhook requests are actually from Stripe using HMAC-SHA256 signatures.<br><br>';
-				echo '<strong>Used for:</strong> Payment confirmations, subscription updates, failed payments, etc.<br><br>';
-				echo '<strong>Security:</strong> Prevents malicious webhook spoofing attacks.';
-				echo '</div>';
-				
-				echo '<div style="color: #17a2b8; font-size: 11px; margin-top: 10px;">ℹ️ This secret can only be tested by receiving actual webhooks from Stripe</div>';
-				
+		// Each mode has its own endpoint in Stripe, and its own signing secret
+		// here; a site whose Stripe is all test mode has one endpoint, whose
+		// secret is in the first field.
+		$live_secret_saved = (string)$settings->get_setting('stripe_endpoint_secret') !== '';
+		$test_secret_saved = (string)$settings->get_setting('store_stripe_endpoint_secret_test') !== '';
+		if (TestMode::site_wide()) {
+			if ($live_secret_saved || $test_secret_saved) {
+				echo '<p style="color: green;"><strong>✓ Signing secret saved</strong> (this site\'s Stripe is all test mode: one endpoint, its secret in either field)</p>';
 			} else {
-				echo '<div style="color: #dc3545; margin-bottom: 10px;"><strong>✗ Invalid Format</strong></div>';
-				echo '<div style="color: #666; font-size: 10px; margin-top: 5px;">Stripe webhook secrets should start with "whsec_"</div>';
-				echo '<strong>Length:</strong> ' . strlen($stripe_endpoint_secret) . ' characters<br>';
+				echo '<p style="color: #856404;"><strong>⚠ No signing secret:</strong> every Stripe event is refused.</p>';
 			}
 		} else {
-			echo '<div style="color: #ffc107; margin-bottom: 10px;"><strong>⚠ No Webhook Secret</strong></div>';
-			echo '<div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 3px; font-size: 11px; color: #856404;">';
-			echo '<strong>Without a webhook secret:</strong><br>';
-			echo '• Webhook requests cannot be verified<br>';
-			echo '• Your application is vulnerable to webhook spoofing<br>';
-			echo '• Payment confirmations may not be secure<br><br>';
-			echo '<strong>To get this secret:</strong><br>';
-			echo '1. Go to your Stripe Dashboard<br>';
-			echo '2. Navigate to Developers → Webhooks<br>';
-			echo '3. Create or edit your webhook endpoint<br>';
-			echo '4. Copy the "Signing secret"';
-			echo '</div>';
+			echo $live_secret_saved
+				? '<p style="color: green;"><strong>✓ Live signing secret saved</strong></p>'
+				: '<p style="color: #856404;"><strong>⚠ No live signing secret:</strong> live payment events are refused.</p>';
+			echo $test_secret_saved
+				? '<p style="color: green;"><strong>✓ Test signing secret saved</strong></p>'
+				: '<p style="color: #856404;"><strong>⚠ No test signing secret:</strong> events from superadmin test purchases are refused.</p>';
 		}
+		echo '<div style="margin-top: 10px; font-size: 11px; color: #666;">';
+		echo 'In the Stripe dashboard (Developers → Webhooks), make an endpoint for ' . htmlspecialchars(LibraryFunctions::get_absolute_url('/ajax/stripe_webhook'));
+		echo TestMode::site_wide()
+			? ' in test mode on API version 2020-08-27 with snapshot payloads, and paste its signing secret here. '
+			: ' in live mode and another in test mode, each on API version 2020-08-27 with snapshot payloads, and paste each one\'s signing secret here. ';
+		echo 'Events: ' . htmlspecialchars(implode(', ', StripeHelper::WEBHOOK_EVENTS)) . ' (checkout.session.completed only for the hosted checkout page). ';
+		echo 'Run All Validations checks each endpoint under its key\'s status.';
+		echo '</div>';
 		
 		echo '</div>';
 		echo '</div>';

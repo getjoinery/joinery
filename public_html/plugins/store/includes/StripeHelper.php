@@ -17,6 +17,31 @@ class StripeHelper {
 	public $test_mode;
 	private $stripe_checkout_session;
 
+	/** The events ajax/stripe_webhook acts on; a Stripe endpoint for this site subscribes to them. */
+	const WEBHOOK_EVENTS = array(
+		'checkout.session.completed',
+		'customer.subscription.updated',
+		'customer.subscription.deleted',
+		'invoice.paid',
+		'invoice.payment_succeeded',
+		'invoice.payment_failed',
+		'charge.refunded',
+		'charge.dispute.created',
+		'charge.dispute.closed',
+	);
+
+	/** Events only one checkout style makes: a site on another style may leave them out. */
+	const WEBHOOK_EVENTS_FOR_CHECKOUT_TYPE = array(
+		'checkout.session.completed' => 'stripe_checkout',
+	);
+
+	/**
+	 * The first Stripe API version whose webhook payloads lack fields the
+	 * webhook reads (invoice.subscription, invoice.charge,
+	 * subscription.current_period_end). An endpoint must be older.
+	 */
+	const WEBHOOK_API_VERSION_TOO_NEW = '2025-03-31';
+
 	/**
 	 * Whether to use Stripe's (and PayPal's) test accounts: the site-wide
 	 * TestMode, which the debug setting or a superadmin's session turns on.
@@ -206,6 +231,111 @@ class StripeHelper {
 			throw new StripeHelperException("Stripe webhook endpoint secret is not configured");
 		}
 		return $secrets;
+	}
+
+	/**
+	 * Ask Stripe, with this helper's key (live or test), for the account's
+	 * webhook endpoints and check them against what this site needs.
+	 * @return array See assess_webhook_endpoints(); a key that may not read
+	 *               endpoints gives one problem saying so.
+	 */
+	public function webhook_endpoint_report() {
+		$url = LibraryFunctions::get_absolute_url('/ajax/stripe_webhook');
+		$checkout_type = (string)Globalvars::get_instance()->get_setting('checkout_type');
+		try {
+			$endpoints = array();
+			foreach ($this->get_stripe_client()->webhookEndpoints->all(array('limit' => 100))->autoPagingIterator() as $endpoint) {
+				$endpoints[] = array(
+					'url'            => (string)$endpoint->url,
+					'status'         => (string)$endpoint->status,
+					'api_version'    => $endpoint->api_version ? (string)$endpoint->api_version : null,
+					'enabled_events' => (array)$endpoint->enabled_events,
+				);
+			}
+		} catch (\Stripe\Exception\PermissionException $e) {
+			return array('ok' => false, 'url' => $url, 'problems' => array(
+				'This key may not read webhook endpoints (a restricted key needs Webhook Endpoints: Read), so they could not be checked.'
+			), 'notes' => array());
+		}
+		return self::assess_webhook_endpoints($endpoints, $url, $checkout_type);
+	}
+
+	/**
+	 * Judge an account's webhook endpoints for one site.
+	 * @param array  $endpoints     Each: url, status, api_version (null = account default), enabled_events
+	 * @param string $url           This site's webhook URL
+	 * @param string $checkout_type The checkout_type setting
+	 * @return array ok (bool), url, problems (string[]), notes (string[])
+	 */
+	public static function assess_webhook_endpoints(array $endpoints, $url, $checkout_type) {
+		$want = self::normalize_webhook_url($url);
+		$problems = array();
+		$notes = array();
+
+		$mine = null;
+		$others = array();
+		foreach ($endpoints as $endpoint) {
+			if (self::normalize_webhook_url($endpoint['url']) === $want) {
+				// An enabled one wins over a disabled duplicate.
+				if ($mine === null || ($mine['status'] !== 'enabled' && $endpoint['status'] === 'enabled')) {
+					$mine = $endpoint;
+				}
+			} else {
+				$others[] = $endpoint['url'];
+			}
+		}
+
+		if ($mine === null) {
+			$problems[] = 'No endpoint for ' . $url . ' on this account.';
+			$notes[] = $others
+				? 'The account has endpoints for: ' . implode(', ', $others) . '.'
+				: 'The account has no webhook endpoints.';
+			return array('ok' => false, 'url' => $url, 'problems' => $problems, 'notes' => $notes);
+		}
+
+		if ($mine['status'] !== 'enabled') {
+			$problems[] = 'The endpoint is ' . $mine['status'] . ' in Stripe, so no events are sent to it.';
+		}
+
+		$events = $mine['enabled_events'];
+		if (!in_array('*', $events, true)) {
+			$missing = array();
+			foreach (self::WEBHOOK_EVENTS as $event) {
+				$only_for = self::WEBHOOK_EVENTS_FOR_CHECKOUT_TYPE[$event] ?? null;
+				if ($only_for !== null && $only_for !== $checkout_type) {
+					continue;
+				}
+				if (!in_array($event, $events, true)) {
+					$missing[] = $event;
+				}
+			}
+			if ($missing) {
+				$problems[] = 'The endpoint is missing ' . (count($missing) === 1 ? 'this event' : 'these events') . ': ' . implode(', ', $missing) . '.';
+			}
+		}
+
+		if ($mine['api_version'] === null) {
+			$notes[] = 'The endpoint uses the account\'s default API version; it must be older than ' . self::WEBHOOK_API_VERSION_TOO_NEW . '.';
+		} elseif (strcmp(substr($mine['api_version'], 0, 10), self::WEBHOOK_API_VERSION_TOO_NEW) >= 0) {
+			$problems[] = 'The endpoint uses API version ' . $mine['api_version'] . ', whose events lack fields the site reads. Make an endpoint on a version older than ' . self::WEBHOOK_API_VERSION_TOO_NEW . ' (2020-08-27 works).';
+		} else {
+			$notes[] = 'API version ' . $mine['api_version'] . '.';
+		}
+
+		$notes[] = 'Stripe never shows a signing secret again, so only a delivered event proves the saved secret is this endpoint\'s.';
+		return array('ok' => !$problems, 'url' => $url, 'problems' => $problems, 'notes' => $notes);
+	}
+
+	/** A webhook URL as compared: lower-case host, no trailing slash. */
+	private static function normalize_webhook_url($url) {
+		$url = rtrim(trim((string)$url), '/');
+		$parts = parse_url($url);
+		if (empty($parts['host'])) {
+			return strtolower($url);
+		}
+		return strtolower(($parts['scheme'] ?? 'https') . '://' . $parts['host'])
+			. (isset($parts['port']) ? ':' . $parts['port'] : '')
+			. ($parts['path'] ?? '');
 	}
 
 	/**
