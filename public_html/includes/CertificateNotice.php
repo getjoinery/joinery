@@ -8,7 +8,8 @@
  * Full mode never, and in Full (Strict) the moment the certificate expires.
  * certbot records everything needed to say so earlier, under /etc/letsencrypt,
  * which the web user cannot read on a root-owned tree. So the host converger
- * writes a small world-readable summary of it on every run, and this reads
+ * writes a small world-readable summary of it on every converge and every
+ * quarter hour between (sooner when a certificate changes), and this reads
  * that. Information, never a gate; never a probe.
  *
  * The summary, cache/certificates.json, written by _plugin_installers_start.sh:
@@ -47,6 +48,7 @@
  *             would take the www address dark while the apex looks healthy
  *   met     — renewing on schedule; the expiry date is stated
  *
+ * @version 1.3 - (comment) the summary is refreshed every quarter hour, not only on a converge
  * @version 1.2 - the summary is read from RootState::certificatesFile() (specs/shell_command_audit.md D1)
  * @version 1.1 - the edge advice names the placeholder Strict refuses (WP12)
  * @version 1.0

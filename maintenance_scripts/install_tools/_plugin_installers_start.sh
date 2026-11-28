@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.64 - a quiet tick refreshes the certificate summary once it is 15 minutes old, and at once when a
+#                 certificate is issued or renewed: a new site's notice said no certificate for up to a day
 # Version: 2.63 - the --when-changed hash covers each site config's database user lines: a site given its own
 #                 role (site_db_role.sh) converges within the minute, so root's peer sign-in follows at once
 #                 rather than at the daily run (specs/postgres_superuser_peer_auth.md)
@@ -1130,6 +1132,117 @@ code_check_due() {
     (( $(date -u +%s) - at >= CODE_CHECK_MAX_AGE ))
 }
 
+# The certificate summary's own cadence. A converge runs on a release or once a
+# day, but a new site's name starts resolving and its certificate arrives in its
+# first hour: a summary written only at install told its owner for up to a day
+# that there was no certificate and the name did not resolve. A quiet tick
+# rewrites it once it is CERT_SUMMARY_MAX_AGE old (two DNS lookups and an
+# openssl read per lineage, every quarter hour), and at once when certbot's
+# live/ directory changed after it was written (an issue or a renewal).
+CERT_SUMMARY_MAX_AGE=900
+cert_summary_due() {
+    # Root is write_certificate_summary's own check; this only says when.
+    [[ "${MACHINE}" == "0" && -n "${CERT_SUMMARY_FILE}" ]] || return 1
+    local f="${CERT_SUMMARY_FILE}" at live="${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}/live"
+    [[ -f "${f}" ]] || return 0
+    at="$(stat -c %Y "${f}" 2>/dev/null)" || return 0
+    (( $(date -u +%s) - at >= CERT_SUMMARY_MAX_AGE )) && return 0
+    [[ -d "${live}" && "${live}" -nt "${f}" ]]
+}
+
+# --- The certificate summary (root only) -------------------------------------
+# certbot records everything needed to say whether renewal is on schedule, in
+# a directory the web user cannot read. Written on every converge, and on a
+# quiet tick whenever cert_summary_due says so, so the admin notice
+# (includes/CertificateNotice.php) and the health panel read a stored fact and
+# never probe. The shape is documented in that class.
+#
+# JOINERY_LETSENCRYPT_DIR and JOINERY_APACHE_SITES_DIR let a test point this
+# at a fixture tree; the gate does, with a self-signed certificate.
+json_string() {
+    # One plain string (a DNS name, an address, a word) as a JSON string.
+    local v="${1:-}"
+    v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
+    printf '"%s"' "${v}"
+}
+json_string_list() {
+    # $@ = plain strings; echoes a JSON array of them.
+    local out="" v
+    for v in "$@"; do
+        [[ -n "${v}" ]] || continue
+        out="${out:+${out},}$(json_string "${v}")"
+    done
+    printf '[%s]' "${out}"
+}
+resolve_v4() {
+    # A records for a name (through CNAMEs), one per line; nothing when it
+    # does not resolve. getent rather than dig: present on every box.
+    [[ -n "${1:-}" ]] || return 0
+    getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u
+}
+write_certificate_summary() {
+    [[ "$(id -u)" == "0" ]] || return 0
+    [[ "${MACHINE}" == "0" ]] || return 0            # host_report describes a machine
+    local le="${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}"
+    local sites="${JOINERY_APACHE_SITES_DIR:-/etc/apache2/sites-available}"
+    local out="${CERT_SUMMARY_FILE}"
+    [[ -n "${out}" ]] || return 0
+    local in_container=false letsencrypt=false timer_active=false
+    local site_name=""
+    local -a own_a=() apex_a=() www_a=()
+
+    if [[ -f /.dockerenv || -f /run/.containerenv ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+        in_container=true
+    fi
+    [[ -d "${le}" ]] && letsencrypt=true
+    if systemctl is-active --quiet certbot.timer 2>/dev/null || [[ -f /etc/cron.d/certbot ]]; then
+        timer_active=true
+    fi
+
+    if [[ -f "${sites}/${SITENAME}.conf" ]]; then
+        site_name="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${sites}/${SITENAME}.conf" | awk '{print $2}')"
+    fi
+    mapfile -t own_a < <(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort -u)
+    if [[ -n "${site_name}" ]]; then
+        mapfile -t apex_a < <(resolve_v4 "${site_name}")
+        mapfile -t www_a < <(resolve_v4 "www.${site_name}")
+    fi
+
+    local lineages="" count=0 dir name cert names nb na installer
+    for cert in "${le}"/live/*/cert.pem; do
+        [[ -f "${cert}" ]] || continue
+        dir="$(dirname "${cert}")"; name="$(basename "${dir}")"
+        names="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null \
+            | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
+        [[ -n "${names}" ]] || names="$(openssl x509 -in "${cert}" -noout -subject 2>/dev/null | sed -n 's/.*CN[[:space:]]*=[[:space:]]*//p')"
+        nb="$(date -u -d "$(openssl x509 -in "${cert}" -noout -startdate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
+        na="$(date -u -d "$(openssl x509 -in "${cert}" -noout -enddate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
+        installer="$(sed -n 's/^[[:space:]]*installer[[:space:]]*=[[:space:]]*//p' "${le}/renewal/${name}.conf" 2>/dev/null | head -1)"
+        local -a names_a=()
+        mapfile -t names_a <<< "${names}"
+        lineages="${lineages:+${lineages},}$(printf '{"name":%s,"names":%s,"not_before":%s,"not_after":%s,"renewal_installer":%s}' \
+            "$(json_string "${name}")" "$(json_string_list "${names_a[@]}")" "${nb:-0}" "${na:-0}" "$(json_string "${installer:-}")")"
+        count=$((count + 1))
+    done
+
+    mkdir -p "$(dirname "${out}")" 2>/dev/null || true
+    printf '{"written":%s,"in_container":%s,"letsencrypt":%s,"timer_active":%s,"site":{"name":%s,"own_addresses":%s,"apex_addresses":%s,"www_addresses":%s},"lineages":[%s]}\n' \
+        "$(date -u +%s)" "${in_container}" "${letsencrypt}" "${timer_active}" \
+        "$(json_string "${site_name}")" "$(json_string_list "${own_a[@]}")" \
+        "$(json_string_list "${apex_a[@]}")" "$(json_string_list "${www_a[@]}")" "${lineages}" \
+        > "${out}.tmp" 2>/dev/null || { rm -f "${out}.tmp"; return 0; }
+    # Root's file, readable by the PHP pool, which is what reads it. In a
+    # fixture the pool owns the directory and the file is its.
+    if [[ -n "${SITE_STATE_DIR}" ]]; then
+        chmod 644 "${out}.tmp" 2>/dev/null || true
+    else
+        chown www-data:www-data "${out}.tmp" 2>/dev/null || true
+        chmod 640 "${out}.tmp" 2>/dev/null || true
+    fi
+    mv -f "${out}.tmp" "${out}" 2>/dev/null || true
+    echo "certificates: summary written to ${out} (${count} lineage(s))"
+}
+
 # The pinned kernel and network settings, held every tick (multi_tenant_host_hardening
 # D1, B37). Host housekeeping writes them to /etc/sysctl.d and applies them, but
 # it runs on a change or once a day; a setting something else loosens between
@@ -1934,9 +2047,12 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
        && [[ "${last_hash}" == "${CONVERGE_NOW_HASH}" ]] \
        && (( now - ${last_time:-0} < CONVERGE_MAX_AGE )); then
         # Nothing changed, nothing queued, the last run is fresh: this tick
-        # costs a hash, one directory read and the kernel settings read, and
-        # the code check once an hour.
+        # costs a hash, one directory read and the kernel settings read, the
+        # certificate summary when it is due, and the code check once an hour.
         kernel_settings_hold
+        if cert_summary_due; then
+            write_certificate_summary >/dev/null
+        fi
         if code_check_due; then
             echo "host converger: $(date -u '+%Y-%m-%d %H:%M:%S') checking ${SITENAME}'s code (hourly)"
             run_core_installer site_housekeeping.sh
@@ -2048,97 +2164,8 @@ done
 
 run_plugin_installers
 
-# --- The certificate summary (root only) -------------------------------------
-# certbot records everything needed to say whether renewal is on schedule, in
-# a directory the web user cannot read. Written here on every run so the
-# admin notice (includes/CertificateNotice.php) and the health panel read a
-# stored fact and never probe. The shape is documented in that class.
-#
-# JOINERY_LETSENCRYPT_DIR and JOINERY_APACHE_SITES_DIR let a test point this
-# at a fixture tree; the gate does, with a self-signed certificate.
-json_string() {
-    # One plain string (a DNS name, an address, a word) as a JSON string.
-    local v="${1:-}"
-    v="${v//\\/\\\\}"; v="${v//\"/\\\"}"
-    printf '"%s"' "${v}"
-}
-json_string_list() {
-    # $@ = plain strings; echoes a JSON array of them.
-    local out="" v
-    for v in "$@"; do
-        [[ -n "${v}" ]] || continue
-        out="${out:+${out},}$(json_string "${v}")"
-    done
-    printf '[%s]' "${out}"
-}
-resolve_v4() {
-    # A records for a name (through CNAMEs), one per line; nothing when it
-    # does not resolve. getent rather than dig: present on every box.
-    [[ -n "${1:-}" ]] || return 0
-    getent ahostsv4 "$1" 2>/dev/null | awk '{print $1}' | sort -u
-}
-write_certificate_summary() {
-    [[ "$(id -u)" == "0" ]] || return 0
-    [[ "${MACHINE}" == "0" ]] || return 0            # host_report describes a machine
-    local le="${JOINERY_LETSENCRYPT_DIR:-/etc/letsencrypt}"
-    local sites="${JOINERY_APACHE_SITES_DIR:-/etc/apache2/sites-available}"
-    local out="${CERT_SUMMARY_FILE}"
-    [[ -n "${out}" ]] || return 0
-    local in_container=false letsencrypt=false timer_active=false
-    local site_name=""
-    local -a own_a=() apex_a=() www_a=()
-
-    if [[ -f /.dockerenv || -f /run/.containerenv ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
-        in_container=true
-    fi
-    [[ -d "${le}" ]] && letsencrypt=true
-    if systemctl is-active --quiet certbot.timer 2>/dev/null || [[ -f /etc/cron.d/certbot ]]; then
-        timer_active=true
-    fi
-
-    if [[ -f "${sites}/${SITENAME}.conf" ]]; then
-        site_name="$(grep -m1 -oE '^[[:space:]]*ServerName[[:space:]]+\S+' "${sites}/${SITENAME}.conf" | awk '{print $2}')"
-    fi
-    mapfile -t own_a < <(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' | sort -u)
-    if [[ -n "${site_name}" ]]; then
-        mapfile -t apex_a < <(resolve_v4 "${site_name}")
-        mapfile -t www_a < <(resolve_v4 "www.${site_name}")
-    fi
-
-    local lineages="" count=0 dir name cert names nb na installer
-    for cert in "${le}"/live/*/cert.pem; do
-        [[ -f "${cert}" ]] || continue
-        dir="$(dirname "${cert}")"; name="$(basename "${dir}")"
-        names="$(openssl x509 -in "${cert}" -noout -ext subjectAltName 2>/dev/null \
-            | tr ',' '\n' | sed -n 's/.*DNS:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
-        [[ -n "${names}" ]] || names="$(openssl x509 -in "${cert}" -noout -subject 2>/dev/null | sed -n 's/.*CN[[:space:]]*=[[:space:]]*//p')"
-        nb="$(date -u -d "$(openssl x509 -in "${cert}" -noout -startdate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
-        na="$(date -u -d "$(openssl x509 -in "${cert}" -noout -enddate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
-        installer="$(sed -n 's/^[[:space:]]*installer[[:space:]]*=[[:space:]]*//p' "${le}/renewal/${name}.conf" 2>/dev/null | head -1)"
-        local -a names_a=()
-        mapfile -t names_a <<< "${names}"
-        lineages="${lineages:+${lineages},}$(printf '{"name":%s,"names":%s,"not_before":%s,"not_after":%s,"renewal_installer":%s}' \
-            "$(json_string "${name}")" "$(json_string_list "${names_a[@]}")" "${nb:-0}" "${na:-0}" "$(json_string "${installer:-}")")"
-        count=$((count + 1))
-    done
-
-    mkdir -p "$(dirname "${out}")" 2>/dev/null || true
-    printf '{"written":%s,"in_container":%s,"letsencrypt":%s,"timer_active":%s,"site":{"name":%s,"own_addresses":%s,"apex_addresses":%s,"www_addresses":%s},"lineages":[%s]}\n' \
-        "$(date -u +%s)" "${in_container}" "${letsencrypt}" "${timer_active}" \
-        "$(json_string "${site_name}")" "$(json_string_list "${own_a[@]}")" \
-        "$(json_string_list "${apex_a[@]}")" "$(json_string_list "${www_a[@]}")" "${lineages}" \
-        > "${out}.tmp" 2>/dev/null || { rm -f "${out}.tmp"; return 0; }
-    # Root's file, readable by the PHP pool, which is what reads it. In a
-    # fixture the pool owns the directory and the file is its.
-    if [[ -n "${SITE_STATE_DIR}" ]]; then
-        chmod 644 "${out}.tmp" 2>/dev/null || true
-    else
-        chown www-data:www-data "${out}.tmp" 2>/dev/null || true
-        chmod 640 "${out}.tmp" 2>/dev/null || true
-    fi
-    mv -f "${out}.tmp" "${out}" 2>/dev/null || true
-    echo "certificates: summary written to ${out} (${count} lineage(s))"
-}
+# --- The certificate summary, on a converge --------------------------------
+# (defined above, beside the quiet tick that also refreshes it)
 write_certificate_summary
 
 # --- Carry out queued root requests ------------------------------------------

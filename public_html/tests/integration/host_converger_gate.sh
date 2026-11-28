@@ -226,8 +226,11 @@ chk "a stale copy is brought up to date" \
 # as the stale copy itself (the timer runs the copy), with an install that
 # can place it unprivileged.
 mkdir -p "$T/instbin"
+# Like install(1), the stand-in replaces the file rather than writing into it:
+# bash reads a running script as it goes, so a copy written in place under it
+# would be read on from the old offset in the new text.
 printf '#!/bin/bash
-src="${@: -2:1}"; dst="${@: -1}"; cp "$src" "$dst" && chmod 755 "$dst"
+src="${@: -2:1}"; dst="${@: -1}"; cp "$src" "$dst.new.$$" && chmod 755 "$dst.new.$$" && mv -f "$dst.new.$$" "$dst"
 ' > "$T/instbin/install"
 chmod 755 "$T/instbin/install"
 SELF="$T/entry_self.sh"
@@ -325,6 +328,38 @@ chk "and says letsencrypt is absent" "$(read_summary 'd["letsencrypt"]')" "False
 rm -f "$SUMMARY"
 bash "$RUNNER" --site-root="$T" >/dev/null 2>&1
 chk "a run without root writes no summary" "$(test -f "$SUMMARY" && echo written || echo none)" "none"
+
+echo "== a quiet tick refreshes the certificate summary when it is due =="
+# A converge runs on a release or once a day; a new site's certificate and DNS
+# arrive in its first hour. A quiet tick rewrites the summary once it is a
+# quarter hour old, or at once when certbot's live/ changed after it.
+qtick() {
+    # A named plugin list stands in for the database the fixture has not got;
+    # without one every run drops the stamp and no tick is ever quiet.
+    JOINERY_CONVERGER_ENTRY=/dev/null JOINERY_ACTIVE_PLUGINS="gate_no_such_plugin" \
+        JOINERY_LETSENCRYPT_DIR="$LE" JOINERY_APACHE_SITES_DIR="$T/sites" \
+        bash "$T/nogate.sh" --when-changed --site-root="$T" 2>&1
+}
+mark_summary() {   # $1 = mtime offset for touch -d; the written field set to 1
+    python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["written"]=1; json.dump(d, open(p, "w"))' "$SUMMARY"
+    touch -d "$1" "$SUMMARY"
+}
+rm -f "$T/cache/host_converger.stamp"
+qtick >/dev/null                      # a converge: stamp and summary written
+out=$(qtick)
+chk "the second tick is quiet" "$(echo "$out" | grep -c 'converging')" "0"
+touch -d '-1 hour' "$LE/live"
+mark_summary 'now'
+qtick >/dev/null
+chk "a fresh summary is left alone on a quiet tick" "$(read_summary 'd["written"]')" "1"
+mark_summary '-20 minutes'
+qtick >/dev/null
+chk "a summary a quarter hour old is rewritten on a quiet tick" "$(read_summary 'd["written"]>1')" "True"
+mark_summary '-5 minutes'
+touch "$LE/live"
+qtick >/dev/null
+chk "a certificate change rewrites it at once" "$(read_summary 'd["written"]>1')" "True"
+chk "and the quiet tick says nothing about it" "$(qtick | grep -c 'certificates:')" "0"
 
 echo "== a run writes config/release_verify_keys from the agent bundle (specs/package_signing.md WP1) =="
 # Root verifies every package against this file before it goes into the tree.
