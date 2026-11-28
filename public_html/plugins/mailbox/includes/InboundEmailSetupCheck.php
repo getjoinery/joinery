@@ -31,6 +31,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.79 - the relay's security fixes row (relaySecurityFixesResult): its hourly check, critical fixes waiting,
+ *                 and a newer early-fix list it refused (specs/security_fixes_on_relay_and_dns.md RQ1)
  * @version 1.78 - the SRS row shows only when something forwards mail (or SRS is on), and names what forwards
  * @version 1.77 - the hostname and verification rows' fix is Run mail setup again (a root request) where the
  *                 root actor runs, instead of a root command (B11)
@@ -471,6 +473,11 @@ class InboundEmailSetupCheck {
 		$relay_spamhaus = $this->checkRelaySpamhaus();
 		if ($relay_spamhaus !== null) {
 			$results[] = $relay_spamhaus;
+		}
+		// The relay's own security fixes: its hourly check and our early fixes.
+		$relay_fixes = $this->checkRelaySecurityFixes();
+		if ($relay_fixes !== null) {
+			$results[] = $relay_fixes;
 		}
 
 		if ($address) {
@@ -1822,6 +1829,66 @@ class InboundEmailSetupCheck {
 		}
 		$name = trim((string)$relay->get('mrl_name')) ?: ($topo['mx_hostname'] !== '' ? $topo['mx_hostname'] : 'the relay');
 		return self::relaySpamhausResult((string)($health['ping']['spamhaus'] ?? ''), $name, self::healthAge($health));
+	}
+
+	/**
+	 * Does the relay take its security fixes? Read from the relay's last status
+	 * answer. No row when nothing fronts this deployment, when the relay has not
+	 * been asked yet, or when it is a relay born before it ran the hourly check.
+	 */
+	private function checkRelaySecurityFixes() {
+		if (!$this->fronted()) {
+			return null;
+		}
+		$topo = $this->topology();
+		$relay = $topo['relay'];
+		$health = ($relay === null) ? null : $relay->lastHealth();
+		if ($health === null) {
+			return null;
+		}
+		$name = trim((string)$relay->get('mrl_name')) ?: ($topo['mx_hostname'] !== '' ? $topo['mx_hostname'] : 'the relay');
+		$fixes = $health['ping']['security_fixes'] ?? null;
+		return self::relaySecurityFixesResult(is_array($fixes) ? $fixes : null, $name, self::healthAge($health));
+	}
+
+	/**
+	 * The relay's security fixes as a check row; null for a relay that does not
+	 * report them. The relay's code changes only with a relay update
+	 * (specs/security_fixes_on_relay_and_dns.md RQ1), so a newer list of our
+	 * early fixes it refused is renewed by one. Public and static so the
+	 * answers can be tested without a relay.
+	 */
+	public static function relaySecurityFixesResult(?array $fixes, string $name, string $age_note = '', ?int $now = null): ?array {
+		if ($fixes === null) {
+			return null;
+		}
+		$row = function ($status, $summary, $detail) {
+			return array(
+				'id' => 'host.relay_security_fixes', 'scope' => '', 'layer' => 'host',
+				'label' => 'Relay security fixes', 'severity' => self::RECOMMENDED,
+				'status' => $status, 'summary' => $summary, 'detail' => $detail,
+				'fix' => null, 'recheckable' => true,
+			);
+		};
+		if ((int)($fixes['channel_refused'] ?? 0) > 0) {
+			return $row(self::WARN, $name . ' refused the newest list of early security fixes.',
+				'Its software is older than the keys that list is signed with, so it takes no new early fix until it is '
+				. 'replaced. Update the relay from the Relay section on the Server tab; Ubuntu\'s own fixes still install '
+				. 'every night.' . $age_note);
+		}
+		$checked = strtotime((string)($fixes['checked_at'] ?? '')) ?: 0;
+		$now = $now ?? time();
+		if ($checked === 0 || $now - $checked > 3 * 3600) {
+			return $row(self::WARN, $name . ' has not looked for security fixes in the last three hours.',
+				'It looks every hour; a gap this long means its hourly check is not running.' . $age_note);
+		}
+		if ((int)($fixes['critical'] ?? 0) > 0) {
+			return $row(self::WARN, $name . ' is waiting to install ' . (int)$fixes['critical'] . ' critical security fix(es).',
+				'Critical fixes install within the hour; one still waiting at the next look did not install.' . $age_note);
+		}
+		$installed = (int)($fixes['fixes_installed'] ?? 0);
+		return $row(self::PASS, $name . ' looks for security fixes every hour and takes them.',
+			($installed > 0 ? $installed . ' early fix(es) built ahead of Ubuntu installed. ' : '') . trim($age_note));
 	}
 
 	/**

@@ -60,6 +60,7 @@ $allowed = array(
 	'utils/upgrade.php'                                  => 'our own signed release archive',
 	'includes/ReleaseVerifier.php'                       => 'utils/verify_release.php only, a CLI never in a request: the agent binaries of a release it is checking against that release\'s statement',
 	'plugins/server_manager/includes/publish_upgrade.php' => 'the archive we are building',
+	'plugins/mailbox/data/relay_cloud_provisions_class.php' => 'copyAgentKit() packs our own release\'s agent_dist into the archive we are building; it never opens one',
 	'includes/EmailTemplateRenderer.php'                         => 'the deployment\'s own email templates',
 	'includes/dns/drivers/NamecheapDnsDriver.php'        => 'the DNS provider\'s API response under our own credentials',
 	'includes/dns/drivers/Route53DnsDriver.php'          => 'the DNS provider\'s API response under our own credentials',

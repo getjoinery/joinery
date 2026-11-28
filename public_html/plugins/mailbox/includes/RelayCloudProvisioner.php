@@ -23,6 +23,8 @@
  *
  * Test seam: $driver_factory.
  *
+ * @version 2.10 - a run carries the agent kit's hash (agent_sha256): the relay installs its unjoined agent from it
+ *                  (specs/security_fixes_on_relay_and_dns.md WP4)
  * @version 2.9 - a run saves the identity its birth produced (registerBornRelay) and its done time
  *                (specs/relay_update_trust_step.md R6)
  * @version 2.8 - node notes name the mailbox Server tab for Update and Delete
@@ -239,6 +241,7 @@ class RelayCloudProvisioner {
 			throw new RuntimeException('this deployment has no https URL for the relay to fetch its bundle from and report to');
 		}
 		$sha = $run->copyBundle();
+		$agent_sha = $run->copyAgentKit();
 		$token = $run->issueRunToken(self::RUN_TOKEN_TTL_SECONDS);
 		$run->save();
 		$mail_hostname = strtolower(trim((string)$run->get('rcl_mail_hostname')));
@@ -247,6 +250,7 @@ class RelayCloudProvisioner {
 			'run_id'            => (string)$run->key,
 			'run_token'         => $token,
 			'bundle_sha256'     => $sha,
+			'agent_sha256'      => $agent_sha,
 			'mail_hostname'     => $mail_hostname,
 			'authserv_id'       => $mail_hostname,
 			'skeleton_only'     => '0',
@@ -955,6 +959,7 @@ class RelayCloudProvisioner {
  * account holder through the provider; it holds no secret that outlives the
  * boot.
  *
+ * @version 1.1 - AGENT_SHA256: the agent kit the relay installs its unjoined agent from (optional)
  * @version 1.0
  */
 
@@ -963,7 +968,7 @@ class RelayFirstBoot {
 	/** Every placeholder the template declares, in the order the header lists them. */
 	const FIELDS = array(
 		'PLANE', 'RUN_ID', 'RUN_TOKEN', 'BUNDLE_SHA256', 'MAIL_HOSTNAME', 'AUTHSERV_ID',
-		'CLIENT_PUBLIC_KEY', 'OPERATOR_PUBLIC_KEY', 'SKELETON_ONLY',
+		'CLIENT_PUBLIC_KEY', 'OPERATOR_PUBLIC_KEY', 'SKELETON_ONLY', 'AGENT_SHA256',
 	);
 
 	/** The fields a run must supply; the rest may be empty. */
@@ -1006,7 +1011,7 @@ class RelayFirstBoot {
 			'PLANE' => 'Plane URL', 'RUN_ID' => 'Provisioning run id', 'RUN_TOKEN' => 'One-time run token',
 			'BUNDLE_SHA256' => 'Bundle sha256', 'MAIL_HOSTNAME' => 'Mail hostname', 'AUTHSERV_ID' => 'Authserv-id',
 			'CLIENT_PUBLIC_KEY' => 'Tenant public key', 'OPERATOR_PUBLIC_KEY' => 'Operator public key',
-			'SKELETON_ONLY' => 'Skeleton only (0|1)',
+			'SKELETON_ONLY' => 'Skeleton only (0|1)', 'AGENT_SHA256' => 'Agent kit sha256',
 		);
 		foreach (self::FIELDS as $name) {
 			$default = in_array($name, self::REQUIRED, true) ? '' : ' default=""';

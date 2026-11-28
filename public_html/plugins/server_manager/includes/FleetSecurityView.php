@@ -37,6 +37,8 @@
  * person (KINDS), and a few plain words for the page; summary() gathers them
  * into the page's one answer: is everything patched, and is anything mine to do.
  *
+ * @version 1.9 - a machine on an Ubuntu our early fixes are not built for says it takes none (package_fixes.other_release);
+ *               one that refused a newer early-fix list is red (channel_refused)
  * @version 1.8 - issues: each reason's kind (now, reboot, wait, look) and short words; summary() (the page's answer)
  * @version 1.7 - a package fix whose archive could not be downloaded says so, apart from apt refusing it (reviewer2 B9)
  * @version 1.6 - a machine's package fixes ahead of Ubuntu (host report package_fixes): each said in words, and one
@@ -271,6 +273,14 @@ class FleetSecurityView {
 			// origin critical); one apt refused is not on any list, so it is
 			// red here, naming the source.
 			$pf = $hr['package_fixes'] ?? null;
+			if (is_array($pf) && !empty($pf['other_release'])) {
+				$add('amber', 'look', 'this machine runs Ubuntu ' . $pf['other_release'] . ', and our early fixes are built only for 26.04, so it takes none',
+					'takes none of our early fixes (Ubuntu ' . $pf['other_release'] . ')');
+			}
+			if (is_array($pf) && !empty($pf['channel_refused'])) {
+				$add('red', 'now', 'a newer list of our early fixes (serial ' . (int)$pf['channel_refused'] . ') did not verify here, so no new early fix is taken; its agent is likely older than the release keys',
+					'refused our newest early-fix list');
+			}
 			if (is_array($pf)) {
 				foreach ($pf['fixes'] as $f) {
 					$row['package_fixes'][] = self::package_fix_words($f);

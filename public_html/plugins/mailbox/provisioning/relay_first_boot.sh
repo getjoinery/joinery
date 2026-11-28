@@ -6,9 +6,10 @@
 # double-underscore placeholders below) into the provider's first-boot user-data; the provider
 # runs it once, as root, on a fresh image. It fetches the release's support
 # bundle from the plane over the plane's own TLS, refuses a sha256 mismatch,
-# runs provision_relay.sh out of it, removes sshd, and posts the signed birth
-# report with the one-time run token. It logs to the provider console and
-# nowhere else.
+# runs provision_relay.sh out of it, removes sshd, installs the unjoined agent
+# and the bundle's host converger (the hourly security check and the package
+# fixes we build ahead of Ubuntu), and posts the signed birth report with the
+# one-time run token. It logs to the provider console and nowhere else.
 #
 # The user-data carries only public keys, the bundle's hash, the plane's URL
 # and a run token that is single-use, bound to the run, expires with the boot
@@ -23,6 +24,11 @@
 #   sed -e 's#__PLANE__#https://dev.example#' -e 's#__RUN_ID__#17#' ... relay_first_boot.sh > /root/first_boot.sh
 #   bash /root/first_boot.sh --keep-sshd
 #
+# Version: 1.3 - after sshd is gone, the unjoined Joinery agent from the agent kit the plane pins by hash
+#                (AGENT_SHA256), then the support bundle through it, which installs the host converger: the
+#                hourly security check and our early package fixes (specs/security_fixes_on_relay_and_dns.md
+#                WP4). Its code changes only with a relay update (RQ1). No kit, or a failure: a warning, and a
+#                relay with no agent, as before
 # Version: 1.2 - the bootstrap cleanup refuses an empty path (${BOOTSTRAP:?}).
 # Version: 1.1 - placeholders fall back to UDF environment variables, so one template
 #                serves both rendered user-data and the StackScript fallback
@@ -40,6 +46,7 @@ AUTHSERV_ID="${AUTHSERV_ID:-__AUTHSERV_ID__}"
 CLIENT_PUBLIC_KEY="${CLIENT_PUBLIC_KEY:-__CLIENT_PUBLIC_KEY__}"
 OPERATOR_PUBLIC_KEY="${OPERATOR_PUBLIC_KEY:-__OPERATOR_PUBLIC_KEY__}"
 SKELETON_ONLY="${SKELETON_ONLY:-__SKELETON_ONLY__}"
+AGENT_SHA256="${AGENT_SHA256:-__AGENT_SHA256__}"
 
 RELAY_HOME="/opt/joinery-relay"
 BOOTSTRAP="${RELAY_HOME}/bootstrap"
@@ -73,6 +80,7 @@ done
 [[ "${CLIENT_PUBLIC_KEY}" == __*__ ]] && CLIENT_PUBLIC_KEY=""
 [[ "${OPERATOR_PUBLIC_KEY}" == __*__ ]] && OPERATOR_PUBLIC_KEY=""
 [[ "${SKELETON_ONLY}" == "1" ]] || SKELETON_ONLY=0
+[[ "${AGENT_SHA256}" =~ ^[0-9a-f]{64}$ ]] || AGENT_SHA256=""
 if [[ ! "${BUNDLE_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
     say "ERROR: bundle_sha256 is not a sha256"; exit 1
 fi
@@ -140,6 +148,38 @@ else
     rm -rf /root/.ssh /etc/ssh/sshd_config /etc/ssh/sshd_config.d
     # The provider's own account keys, if the image planted any, go with it.
     find /home -maxdepth 3 -name authorized_keys -exec rm -f {} + 2>/dev/null || true
+fi
+
+# --- 4a. the unjoined agent ---------------------------------------------------------
+# After sshd is gone, so the host converger finds nothing for fail2ban to watch.
+# The kit is the plane's own release's agent artifact, pinned by the hash in
+# this user-data; the agent then checks the bundle's signature and its place in
+# the public log before installing it, and the bundle's host converger runs
+# every minute from then on. Nothing here is fatal: a relay with no agent is a
+# relay as it was before.
+if [[ -n "${AGENT_SHA256}" ]]; then
+    KIT="${BOOTSTRAP}/agent_kit.tar.gz"
+    say "fetching the agent kit (${AGENT_SHA256})"
+    if curl -fsS --retry 8 --retry-delay 10 --retry-all-errors --max-time 300 \
+            -H "X-Joinery-Relay-Run-Token: $(cat "${TOKEN_FILE}")" -o "${KIT}" \
+            "${PLANE%/}/api/v1/relay/agent?run=${RUN_ID}&sha256=${AGENT_SHA256}" \
+            && [[ "$(sha256sum "${KIT}" | cut -d' ' -f1)" == "${AGENT_SHA256}" ]]; then
+        mkdir -p "${BOOTSTRAP}/agent_dist"
+        tar -xzf "${KIT}" -C "${BOOTSTRAP}/agent_dist" --no-same-owner || say "WARN: the agent kit could not be unpacked"
+        INSTALL_AGENT="${BOOTSTRAP}/bundle/maintenance_scripts/install_tools/install_agent.sh"
+        if [[ ! -f "${INSTALL_AGENT}" ]]; then
+            say "WARN: the bundle carries no install_agent.sh; the relay has no agent"
+        elif ! bash "${INSTALL_AGENT}" --siteless --dist-dir="${BOOTSTRAP}/agent_dist"; then
+            say "WARN: the agent did not install; the relay has no agent"
+        elif joinery-agent bundle install "${BUNDLE}" --statement="${BOOTSTRAP}/agent_dist/RELEASE_STATEMENT" \
+                && systemctl is-active --quiet joinery-host-converger.timer; then
+            say "agent and support bundle installed; the hourly security check runs here"
+        else
+            say "WARN: the support bundle or its host converger did not install; see above"
+        fi
+    else
+        say "WARN: the agent kit could not be fetched or did not match its hash; the relay has no agent"
+    fi
 fi
 
 # --- 5. tell the plane -------------------------------------------------------------

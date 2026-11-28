@@ -816,6 +816,11 @@ chk "ours installed, Ubuntu's newer build lacking two CVEs, for the base, a chan
 chk "handed back, ahead of our build, refused by apt" "$(jv "$T/pf.json" fixes.1.handed_back)|$(jv "$T/pf.json" fixes.2.ahead_of_build)|$(jv "$T/pf.json" fixes.3.source_refused)" \
     "3.10.6-4ubuntu2.3|3.5.5-1ubuntu3.8|true"
 chk "a hostile name or version is reduced to the characters Debian allows" "$(jv "$T/pf.json" fixes.4.source)|$(jv "$T/pf.json" fixes.4.version)" "evilx|1b"
+chk "on the Ubuntu the fixes are built for: other_release null" "$(jv "$T/pf.json" other_release)" "null"
+mkdir -p "$T/pf/other"; printf 'updated=2026-11-28T10:00:00Z\nother_release=noble\n' > "$T/pf/other/state"
+chk "another Ubuntu: other_release names it, no fixes (install_package_fixes.sh 1.6)" "$(pf "$T/pf/other")" '{"updated":"2026-11-28T10:00:00Z","channel":null,"channel_refused":null,"other_release":"noble","fixes":[]}'
+printf 'updated=2026-11-28T10:00:00Z\nchannel=4\nchannel_refused=7\n' > "$T/pf/other/state"
+chk "a newer channel refused: channel_refused names its serial" "$(pf "$T/pf/other")" '{"updated":"2026-11-28T10:00:00Z","channel":4,"channel_refused":7,"other_release":null,"fixes":[]}'
 ln -s "$T/pf/state/state" "$T/pf/linked" 2>/dev/null; mkdir -p "$T/pf/l"; ln -s "$T/pf/state/state" "$T/pf/l/state"
 chk "a state file that is a link is not read: none" "$(pf "$T/pf/l")" '"none"'
 

@@ -40,6 +40,8 @@
  * the provider access token and the per-run root SSH private key, both
  * SecretBox-sealed and erased at terminal state.
  *
+ * @version 1.9 - the run's agent kit (copyAgentKit, rcl_agent_sha256): the relay's unjoined agent, pinned by hash
+ *                (specs/security_fixes_on_relay_and_dns.md WP4)
  * @version 1.8 - who started a run (rcl_usr_user_id_started), when it finished (rcl_done_time) and the relay identity
  *                it produced (rcl_identity_public_key), for the owner's relay-change popup
  *                (specs/relay_update_trust_step.md R6)
@@ -97,6 +99,10 @@ class RelayCloudProvision extends SystemBase {
 		'rcl_run_token_expires'=> array('type'=>'timestamp(6)'),
 		'rcl_run_token_spent'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'rcl_bundle_sha256'    => array('type'=>'varchar(64)'),
+		// The agent kit the relay installs its unjoined agent from
+		// (specs/security_fixes_on_relay_and_dns.md WP4); empty when the
+		// deployment's release carries no agent artifact.
+		'rcl_agent_sha256'     => array('type'=>'varchar(64)'),
 		// A fleet SHARD is born the same way, skeleton only: no tenant main, the
 		// operator's public key in its registry, and its birth lands on the
 		// MailboxFleetShard row this names instead of a MailboxRelay row.
@@ -215,10 +221,62 @@ class RelayCloudProvision extends SystemBase {
 		return $sha;
 	}
 
-	/** Remove the run's bundle copy and its directory (a terminal state). */
+	/** The run's agent kit, beside its bundle copy. */
+	public function agentKitPath(): string {
+		return dirname($this->bundlePath()) . '/agent_kit.tar.gz';
+	}
+
+	/** What the agent kit carries, from the deployment's agent_dist. */
+	const AGENT_KIT_FILES = array('manifest.json', 'joinery-agent-linux-amd64.gz', 'joinery-agent-linux-arm64.gz', 'RELEASE_STATEMENT');
+
+	/**
+	 * Pack the deployment's agent artifact onto the run and record its sha256:
+	 * the relay installs its unjoined agent from it, which checks the package
+	 * fixes the relay takes ahead of Ubuntu and installs the support bundle's
+	 * host converger (specs/security_fixes_on_relay_and_dns.md WP4). Pinned by
+	 * hash in the user-data, as the bundle is. Returns the hash, or '' when the
+	 * release carries no agent artifact: that relay is born without an agent.
+	 */
+	public function copyAgentKit(): string {
+		$dist = PathHelper::getIncludePath('agent_dist');
+		$present = array();
+		foreach (self::AGENT_KIT_FILES as $f) {
+			if (is_file($dist . '/' . $f)) {
+				$present[] = $f;
+			}
+		}
+		if (!in_array('manifest.json', $present, true) || !in_array('RELEASE_STATEMENT', $present, true)
+				|| !array_intersect(array('joinery-agent-linux-amd64.gz', 'joinery-agent-linux-arm64.gz'), $present)) {
+			$this->set('rcl_agent_sha256', null);
+			return '';
+		}
+		$dest = $this->agentKitPath();
+		if (!is_dir(dirname($dest)) && !mkdir(dirname($dest), 0750, true)) {
+			throw new RuntimeException('Cannot create the run directory ' . dirname($dest));
+		}
+		$tar = dirname($dest) . '/agent_kit.tar';
+		@unlink($tar);
+		@unlink($dest);
+		$archive = new PharData($tar);
+		foreach ($present as $f) {
+			$archive->addFile($dist . '/' . $f, $f);
+		}
+		$archive->compress(Phar::GZ);
+		unset($archive);
+		@unlink($tar);
+		if (!is_file($dest)) {
+			throw new RuntimeException('Cannot pack the agent kit onto run ' . $this->key);
+		}
+		$sha = hash_file('sha256', $dest);
+		$this->set('rcl_agent_sha256', $sha);
+		return $sha;
+	}
+
+	/** Remove the run's bundle copy, its agent kit and its directory (a terminal state). */
 	public function eraseBundle(): void {
 		$dest = $this->bundlePath();
 		@unlink($dest);
+		@unlink($this->agentKitPath());
 		@rmdir(dirname($dest));
 	}
 

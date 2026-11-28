@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.155 - host_report_package_fixes: other_release, the Ubuntu a machine runs when our fixes are not built for it;
+ *                 channel_refused, a newer fix channel that did not verify
  * @version 1.154 - sanitise_mail_log_summary: a blocklist refusal's matched word and client_domain, and blocklist_matched counts
  * @version 1.153 - sanitise_mailbox_status: each nameserver's reason, ms, tcp_53 and skipped_after, and each domain's arrival counts;
  *                sanitise_mail_log_summary (specs/mailbox_diagnosis_words.md)
@@ -6341,6 +6343,11 @@ HTML;
 			'updated' => (is_string($updated) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $updated)) ? $updated : '',
 			// The package fix channel serial the machine took (host_report 1.43); null before it took one.
 			'channel' => (is_int($channel) && $channel > 0) ? $channel : null,
+			// The Ubuntu this machine runs when it is not the one our fixes are
+			// built for, so it takes none (host_report 1.45); null otherwise.
+			'other_release' => (is_string($in['other_release'] ?? null) && preg_match('/^[a-z]{1,20}$/', $in['other_release'])) ? $in['other_release'] : null,
+			// A newer fix channel was offered and did not verify here (host_report 1.45): fixes have stopped.
+			'channel_refused' => (is_int($in['channel_refused'] ?? null) && $in['channel_refused'] > 0) ? $in['channel_refused'] : null,
 			'fixes'   => $fixes,
 		);
 	}

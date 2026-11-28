@@ -8,6 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.45 - package_fixes carries other_release: the Ubuntu this machine runs when it is not the one the
+#                fixes are built for, so it takes none (install_package_fixes.sh 1.6), null otherwise; and
+#                channel_refused: a newer fix channel offered that did not verify, null otherwise
 # Version: 1.44 - package_fixes: fetch_failed, a fix whose archive could not be downloaded (source_refused 2),
 #                told apart from apt refusing its source (reviewer2 B9)
 # Version: 1.43 - package_fixes carries channel: the serial of the package fix channel this machine took
@@ -1507,7 +1510,10 @@ emit_package_fixes() {
     done < <(head -n 60 "$f" 2>/dev/null)
     local ch
     ch="$(sed -n 's/^channel=\([0-9]\{1,12\}\)$/\1/p' "$f" | head -n 1)"
-    printf '{"updated":%s,"channel":%s,"fixes":[%s]}' "$(json_text "$(sed -n 's/^updated=//p' "$f" | head -n 1 | tr -cd '0-9TZ:-')")" "${ch:-null}" "$list"
+    local other refused
+    other="$(sed -n 's/^other_release=\([a-z]\{1,20\}\)$/\1/p' "$f" | head -n 1)"
+    refused="$(sed -n 's/^channel_refused=\([0-9]\{1,12\}\)$/\1/p' "$f" | head -n 1)"
+    printf '{"updated":%s,"channel":%s,"channel_refused":%s,"other_release":%s,"fixes":[%s]}' "$(json_text "$(sed -n 's/^updated=//p' "$f" | head -n 1 | tr -cd '0-9TZ:-')")" "${ch:-null}" "${refused:-null}" "$([[ -n "$other" ]] && json_text "$other" || echo null)" "$list"
 }
 
 # The services still running code an upgrade replaced on disk (WP1): needrestart's

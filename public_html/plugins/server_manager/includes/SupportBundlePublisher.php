@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.45 - carries unjoined_refresh.sh and install_agent.sh (specs/security_fixes_on_relay_and_dns.md WP4, WP5)
  * @version 1.44 - carries _pg_admin.sh, which host_housekeeping.sh sources (specs/postgres_superuser_peer_auth.md)
  * @version 1.43 - carries quiet_check.sh, the machine word of agent 1.133.0 (specs/automatic_reboot_when_quiet.md)
  * @version 1.42 - carries unban_address.sh, the machine word of agent 1.131.0 that lifts one fail2ban ban
@@ -256,6 +257,14 @@ class SupportBundlePublisher {
 		// host_housekeeping.sh installs its timer on every machine, a Docker
 		// host included; it runs site_refresh.sh check there (listed below).
 		'maintenance_scripts/sysadmin_tools/security_check.sh',
+		// An unjoined machine's daily look for a newer release
+		// (specs/security_fixes_on_relay_and_dns.md WP5): host_housekeeping.sh
+		// installs its timer where the agent never joined. Sources nothing.
+		'maintenance_scripts/sysadmin_tools/unjoined_refresh.sh',
+		// The agent's installer, which the relay's first boot runs out of the
+		// bundle on the agent artifact the plane hands it by pinned hash
+		// (WP4). Sources nothing.
+		'maintenance_scripts/install_tools/install_agent.sh',
 		// restart_unit and restart_container: the repairs of service_health
 		// and container_health. A Docker host runs its site containers and its
 		// own fail2ban and cron; both scripts source nothing.

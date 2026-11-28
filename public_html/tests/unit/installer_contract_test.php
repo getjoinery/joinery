@@ -3659,12 +3659,20 @@ foreach ([
     check(strpos($bundle_src, "'" . $bundled . "',") !== false,
         "the support bundle carries $bundled");
 }
-foreach (['install_agent.sh', 'install_parser_jail.sh', 'render_vhost.sh', 'fix_permissions.sh', '_config_secrets.sh'] as $site_only) {
+foreach (['install_parser_jail.sh', 'render_vhost.sh', 'fix_permissions.sh', '_config_secrets.sh'] as $site_only) {
     check(strpos($bundle_src, "'maintenance_scripts/install_tools/$site_only'") === false,
         "and not the site installer $site_only (a site installer in the bundle would run on a machine with no site)");
 }
+// The agent's installer is carried, run only by name: the relay's first boot
+// installs its unjoined agent with it (specs/security_fixes_on_relay_and_dns.md
+// WP4). What keeps it from running on its own is the runner's host installer
+// set, pinned below, which does not name it.
+check(strpos($bundle_src, "'maintenance_scripts/install_tools/install_agent.sh'") !== false,
+    'the support bundle carries install_agent.sh, which the relay first boot runs by name (security_fixes_on_relay_and_dns WP4)');
 $runner_machine = (string)file_get_contents(dirname(PathHelper::getRootDir())
     . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+check(preg_match('/^HOST_INSTALLERS="[^"]*install_agent\.sh/m', $runner_machine) === 0,
+    '  and the runner never runs it as a host installer on a machine with no site');
 check(preg_match('/^HOST_INSTALLERS="host_housekeeping\.sh host_swap\.sh install_host_converger\.sh"$/m', $runner_machine) === 1,
     'the runner names the host installer set: housekeeping, the swap and the host timer, nothing else');
 check(strpos($bundle_src, "'maintenance_scripts/install_tools/host_swap.sh'") !== false,

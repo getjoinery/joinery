@@ -50,6 +50,9 @@ export PACKAGE_FIXES_ROOT="$R" STUB
 # the fix servers. A check that wants a fallback names one.
 export UPGRADE_SERVER=file:///nonexistent
 mkdir -p "$T/bin" "$STUB/debs" "$R/etc/apt/sources.list.d" "$R/etc/apt/preferences.d" "$SRV"
+# The fixes are built for 26.04; the fixture machine runs it, unless a check
+# says otherwise.
+printf 'NAME="Ubuntu"\nVERSION_ID="26.04"\nVERSION_CODENAME=resolute\n' > "$R/etc/os-release"
 # apt-get: update records the list it was given and fails when told to;
 # source hands over Ubuntu's source files from $STUB/src/<source>_<version>/;
 # download hands over a real .deb from $STUB/debs.
@@ -228,6 +231,24 @@ chk "only its pin goes" "$(ls "$PREF" | paste -sd ' ')" "joinery-fix-jfa.pref"
 chk "only its list goes" "$(ls "$LISTS" | paste -sd ' ')" "joinery-fix-jfa-1.0-0ubuntu1-joinery1.list"
 chk "its directory goes" "$(ls "$LIB" | grep -c '^jfb$')" "0"
 chk "state no longer names it" "$(grep -c '^fix=jfb|' "$LIB/state")" "0"
+
+echo "Another Ubuntu release takes no fix (specs/security_fixes_on_relay_and_dns.md WP1)"
+printf '%s\n' "$header" "$LA" > "$ACTIVE"
+run converge "$SERVER" > /dev/null
+chk "on 26.04 the fix is pinned" "$(ls "$PREF" | paste -sd ' ')" "joinery-fix-jfa.pref"
+cp "$R/etc/os-release" "$T/os-release.keep"
+printf 'NAME="Ubuntu"\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n' > "$R/etc/os-release"
+chk "converge succeeds on 24.04" "$(run converge "$SERVER")" "0"
+chk "nothing pinned" "$(ls "$PREF" | grep -c joinery-fix)" "0"
+chk "nothing listed" "$(ls "$LISTS" | grep -c joinery-fix)" "0"
+chk "nothing kept" "$(ls "$LIB" | grep -c '^jfa$')" "0"
+chk "the state says why" "$(grep -c '^other_release=noble$' "$LIB/state")|$(grep -c '^fix=' "$LIB/state")" "1|0"
+chk "the run says why" "$(grep -c 'runs Ubuntu noble; every fix is built for resolute' "$T/out")" "1"
+rm -f "$R/etc/os-release"
+chk "no os-release: unknown, nothing taken" "$(run converge "$SERVER" | tr -d "\n"; grep -c '^other_release=unknown$' "$LIB/state")" "01"
+cp "$T/os-release.keep" "$R/etc/os-release"
+run converge "$SERVER" > /dev/null
+chk "back on 26.04 the fix returns and the reason goes" "$(ls "$PREF" | paste -sd ' ')|$(grep -c '^other_release=' "$LIB/state")" "joinery-fix-jfa.pref|0"
 
 echo "A new build at a new path"
 LA2="$(mkfix jfa 1.0-0ubuntu1+joinery2 1.0-0ubuntu1 'CVE-2026-109618 CVE-2026-109619' jfa jfa-extra)"
@@ -441,8 +462,11 @@ printf 'jfa jfa 1.0-0ubuntu1+joinery2\njfw jfw 5.0-1+joinery2\n' > "$STUB/dpkg"
 mkchannel 3 "" "$LA2" "$LW2"
 rm -f "$STUB/verify_ok"
 chk "a channel that does not verify is not taken" "$(run converge "$SERVER")|$(grep -c 'is not ours: verdict: unknown_key' "$T/out")|$([ -d "$LIB/channel" ] && echo taken || echo none)" "0|1|none"
+chk "the refused newer channel is recorded in the state (security_fixes_on_relay_and_dns RQ1)" "$(grep -c '^channel_refused=3$' "$LIB/state")" "1"
+chk "and survives a handback run" "$(run handback)|$(grep -c '^channel_refused=3$' "$LIB/state")" "0|1"
 touch "$STUB/verify_ok"
 chk "one that verifies is taken" "$(run converge "$SERVER")|$(grep -c 'took the package fix channel, serial 3' "$T/out")" "0|1"
+chk "the refusal is cleared once one as new is taken" "$(grep -c '^channel_refused=' "$LIB/state")" "0"
 chk "and its ACTIVE is the set: a fix only it names is placed and pinned" "$(sed -n 's/^Pin: //p' "$PREF/joinery-fix-jfw.pref")" "version 5.0-1+joinery2"
 chk "the state carries the channel serial" "$(grep -c '^channel=3$' "$LIB/state")" "1"
 chk "the channel folder is kept across runs, never removed as a stale fix" "$(run converge "$SERVER")|$(cat "$LIB/channel/CHANNEL" | sed -n 's/^serial=//p')" "0|3"

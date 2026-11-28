@@ -75,6 +75,11 @@ func (s *relayServer) buildPing(tenant string) map[string]any {
 	if priv.Spamhaus != "" {
 		ping["spamhaus"] = priv.Spamhaus
 	}
+	// The relay's own security fixes; absent on a relay that has no hourly
+	// check (born before its agent).
+	if priv.SecurityFixes != nil {
+		ping["security_fixes"] = priv.SecurityFixes
+	}
 	ping["provisioned"] = readTrimmed(filepath.Join(s.paths.home, "version"))
 	ping["slug"] = tenant
 	ping["sole"] = oneTenant

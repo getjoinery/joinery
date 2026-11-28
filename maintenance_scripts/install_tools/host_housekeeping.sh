@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.49 - fail2ban is installed only where it has something to watch (sshd or Apache): the mail relay, whose
+#                first boot removes sshd, gets none (specs/security_fixes_on_relay_and_dns.md B5); section 10d1: an
+#                unjoined machine with no site gets the daily unjoined_refresh.sh timer, removed once it joins (WP5)
 # Version: 1.48 - 10d2 loads _tree_trust.sh itself: on a box holding the release signing key sck_developer_tree
 #                answered before loading it, the owner lookup failed silently and the developer's map line went
 # Version: 1.47 - root signs in to PostgreSQL by peer (section 10d2, _pg_admin.sh, specs/postgres_superuser_peer_auth.md):
@@ -624,7 +627,16 @@ fi
 # does. In override mode the temp copy of /etc/fail2ban decides.
 F2B_APPLICABLE=0
 if [[ "${RUN_SYSTEM}" == 1 ]]; then
-    if [[ "${HAVE_SYSTEMD}" == 1 && "${IN_CONTAINER}" == 0 ]]; then
+    # Its jails watch sshd and Apache. A machine with neither (the mail relay,
+    # whose first boot removes sshd) gets no fail2ban: it would be a root log
+    # reader watching nothing (specs/security_fixes_on_relay_and_dns.md B5).
+    # One already installed is left to its own configuration.
+    F2B_WATCHES=0
+    [[ -x "${FS_ROOT}/usr/sbin/sshd" || -d "${APACHE_DIR}" ]] && F2B_WATCHES=1
+    if [[ "${HAVE_SYSTEMD}" == 1 && "${IN_CONTAINER}" == 0 && "${F2B_WATCHES}" == 0 ]] \
+            && ! command -v fail2ban-server >/dev/null 2>&1; then
+        say "no sshd and no Apache here - nothing for fail2ban to watch, so it is not installed"
+    elif [[ "${HAVE_SYSTEMD}" == 1 && "${IN_CONTAINER}" == 0 ]]; then
         F2B_APPLICABLE=1
         if ! command -v fail2ban-server >/dev/null 2>&1; then
             say "installing fail2ban"
@@ -1494,6 +1506,28 @@ elif [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SCK}" ]]; then
     else
         warn "the hourly security check: $(printf '%s' "${SCK_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
+    fi
+fi
+
+# --- 10d1. An unjoined machine keeps its agent current --------------------------
+# A machine with no site whose agent never joined a management node has nobody
+# to hand it a new agent or bundle, so it takes them from the current release
+# once a day (unjoined_refresh.sh, specs/security_fixes_on_relay_and_dns.md
+# WP5). Once it joins, that is undone: its management node delivers. Never on
+# the mail relay, whose code changes only with a relay update; the script
+# refuses there itself, and nothing is installed.
+UJR="${SCRIPT_DIR}/../sysadmin_tools/unjoined_refresh.sh"
+if [[ "${MACHINE}" == 1 && "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${UJR}" ]]; then
+    if [[ -f "${FS_ROOT}/etc/joinery-agent/node_identity.json" ]]; then
+        UJR_OUT="$(bash "${UJR}" remove 2>&1)" || { warn "the unjoined refresh could not be removed: $(printf '%s' "${UJR_OUT}" | tail -1)"; FAILED=1; }
+        printf '%s\n' "${UJR_OUT}" | sed '/^$/d; s/^/housekeeping: /'
+    elif [[ ! -e "${FS_ROOT}/opt/joinery-relay" ]]; then
+        if UJR_OUT="$(bash "${UJR}" install 2>&1)"; then
+            printf '%s\n' "${UJR_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
+        else
+            warn "the unjoined refresh: $(printf '%s' "${UJR_OUT}" | tail -1)"
+            FAILED=1
+        fi
     fi
 fi
 

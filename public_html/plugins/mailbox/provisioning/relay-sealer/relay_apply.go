@@ -22,6 +22,7 @@ package main
 // measures itself. Root reacts to a timer, never to a request.
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -681,6 +682,26 @@ type privilegedStatus struct {
 	Spamhaus       string                   `json:"spamhaus,omitempty"`
 	Postfix        postfixStatus            `json:"postfix"`
 	TenantCount    int                      `json:"tenant_count"`
+	// The relay's own security fixes, where its unjoined agent's bundle runs
+	// the hourly check and takes our early fixes
+	// (specs/security_fixes_on_relay_and_dns.md). Absent on a relay born
+	// before that, which has neither.
+	SecurityFixes *securityFixesStatus `json:"security_fixes,omitempty"`
+}
+
+// securityFixesStatus is what the hourly check and the early-fix script left
+// on disk. A relay's code changes only with a relay update, so after a release
+// key rotation its agent refuses the new list of early fixes: ChannelRefused
+// says so, and a relay update renews it.
+type securityFixesStatus struct {
+	CheckedAt      string `json:"checked_at,omitempty"`
+	CheckedOKAt    string `json:"checked_ok_at,omitempty"`
+	Pending        int    `json:"pending"`
+	Critical       int    `json:"critical"`
+	Channel        int    `json:"channel,omitempty"`
+	ChannelRefused int    `json:"channel_refused,omitempty"`
+	OtherRelease   string `json:"other_release,omitempty"`
+	FixesInstalled int    `json:"fixes_installed"`
 }
 
 type serviceStatus struct {
@@ -747,6 +768,7 @@ func runCollectStatus() int {
 	st.Timesync = timesync()
 	st.Spamhaus = spamhausAnswer()
 	st.Postfix = postfixCounts(oneTenant, postfixDir)
+	st.SecurityFixes = securityFixes(envOr("JOINERY_RELAY_SECURITY_ROOT", ""))
 
 	// A tenant over its spool quota is refused at RCPT with a 4xx until it
 	// drains, so its mail queues on the sending server rather than in this
@@ -1024,4 +1046,69 @@ func commandOutput(name string, args ...string) string {
 		out = out[len(out)-4<<20:]
 	}
 	return string(out)
+}
+
+// securityFixes reads the hourly security check's state and the early-fix
+// script's state under root ("" is /). Nil when neither has run here.
+func securityFixes(root string) *securityFixesStatus {
+	check := keyValues(filepath.Join(root, "/var/lib/joinery/security-check/state"))
+	fixes := keyValues(filepath.Join(root, "/var/lib/joinery/package-fixes/state"))
+	if check == nil && fixes == nil {
+		return nil
+	}
+	st := &securityFixesStatus{}
+	clean := func(v string) string {
+		return strings.Map(func(r rune) rune {
+			if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || r == 'T' || r == 'Z' || r == ':' || r == '-' {
+				return r
+			}
+			return -1
+		}, v)
+	}
+	if check != nil {
+		st.CheckedAt = clean(check["checked_at"][0])
+		st.CheckedOKAt = clean(check["checked_ok_at"][0])
+		st.Pending, _ = strconv.Atoi(check["pending"][0])
+		st.Critical, _ = strconv.Atoi(check["critical"][0])
+	}
+	if fixes != nil {
+		st.Channel, _ = strconv.Atoi(fixes["channel"][0])
+		st.ChannelRefused, _ = strconv.Atoi(fixes["channel_refused"][0])
+		// A release codename, letters only; anything else is not one.
+		if v := fixes["other_release"][0]; len(v) <= 20 && v != "" && strings.Trim(v, "abcdefghijklmnopqrstuvwxyz") == "" {
+			st.OtherRelease = v
+		}
+		for _, line := range fixes["fix"] {
+			// fix=<source>|<version>|<installed>|...
+			parts := strings.Split(line, "|")
+			if len(parts) > 2 && parts[2] == "1" {
+				st.FixesInstalled++
+			}
+		}
+	}
+	return st
+}
+
+// keyValues reads a key=value file: every value of each key, in order, with
+// one empty value for a key that is absent. Nil when the file cannot be read.
+func keyValues(path string) map[string][]string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	out := map[string][]string{}
+	sc := bufio.NewScanner(f)
+	for n := 0; sc.Scan() && n < 500; n++ {
+		k, v, ok := strings.Cut(sc.Text(), "=")
+		if ok && k != "" {
+			out[k] = append(out[k], strings.TrimSpace(v))
+		}
+	}
+	for _, k := range []string{"checked_at", "checked_ok_at", "pending", "critical", "channel", "channel_refused", "other_release"} {
+		if len(out[k]) == 0 {
+			out[k] = []string{""}
+		}
+	}
+	return out
 }

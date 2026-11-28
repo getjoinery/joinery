@@ -4,6 +4,10 @@
 # names, and gives each back to Ubuntu once Ubuntu's own build carries the same
 # fixes (specs/package_fixes_ahead_of_ubuntu.md WP3).
 #
+# Version: 1.6 - a fix is taken only on the Ubuntu release it was built for (resolute): any other
+#                release takes none, removes what an earlier run placed, and records other_release in the
+#                state (specs/security_fixes_on_relay_and_dns.md WP1); a newer channel that did not verify is
+#                recorded (channel_refused) until one as new is taken (the relay reports it, RQ1)
 # Version: 1.5 - reviewer2's review: a withdrawn build is only recorded by converge (rollback_due) and
 #                installed back down by `rollback`, which the hourly check and the press-the-button install
 #                run with their own bounds, non-interactive and with no stdin (B7); with no fix and no
@@ -105,7 +109,10 @@
 # its origin for automatic updates: without it unattended-upgrades sets the
 # 1001 pin aside and takes Ubuntu's newer build, even one lacking our fix.
 #
-# State: /var/lib/joinery/package-fixes/state, one line per fix:
+# State: /var/lib/joinery/package-fixes/state: other_release=<codename> where this machine is not on
+# the Ubuntu the fixes are built for (it then takes none); channel_refused=<serial>, a newer channel
+# offered here that did not verify (or nothing here could check), until one as new is taken; and
+# one line per fix:
 #   fix=<source>|<version>|<installed 0/1>|<handed_back version>|<ubuntu_lacks version:CVE,CVE>|<ahead_of_build version>|<source_refused 0/1/2>|<for_base 0/1>|<unreadable version>
 # source_refused: 1 apt refused the fix's package source, 2 its archive could not be downloaded.
 # with "-" where a field does not apply. for_base: a container host taking a
@@ -391,7 +398,7 @@ tree_release() {
 # channel issued before this tree's release is refused (an old one replayed to
 # a machine that never took one).
 take_channel() {  # [SERVER]
-    local have got tmp f src ok why vrc best="" best_serial="" best_src="" rel tree
+    local have got tmp f src ok why vrc best="" best_serial="" best_src="" rel tree refused=""
     have="$(channel_serial "$CHANNEL_DIR")"
     tree="$(tree_release)"
     mkdir -p "${TROOT}/var/tmp"
@@ -430,12 +437,24 @@ take_channel() {  # [SERVER]
         case "$vrc" in
             0) ;;
             2) say "WARNING - nothing on this machine can check the channel from ${src} (no site verifier, no agent that verifies packages); the set in force stays"
+               [[ -z "$refused" ]] || (( got > refused )) && refused="$got"
                rm -rf "$tmp"; continue ;;
-            *) say "WARNING - the channel from ${src} is not ours: ${why}"; rm -rf "$tmp"; continue ;;
+            *) say "WARNING - the channel from ${src} is not ours: ${why}"
+               [[ -z "$refused" ]] || (( got > refused )) && refused="$got"
+               rm -rf "$tmp"; continue ;;
         esac
         [[ -n "$best" ]] && rm -rf "$best"
         best="$tmp"; best_serial="$got"; best_src="$src"
     done < <(channel_sources "${1:-}")
+    # A newer channel this machine could not take is kept on record, so the
+    # state says so until one at least as new is taken: after a release key
+    # rotation an agent that is not renewed refuses every channel, and the
+    # fixes would otherwise stop with nothing but a line in a log.
+    if [[ -n "$refused" ]] && { [[ -z "$best_serial" ]] || (( refused > best_serial )); }; then
+        printf '%s\n' "$refused" > "${LIB}/channel_refused"
+    else
+        rm -f "${LIB}/channel_refused"
+    fi
     [[ -n "$best" ]] || return 0
     chmod 755 "$best"; chmod 644 "$best"/*
     rm -rf "${CHANNEL_DIR}.new"
@@ -674,6 +693,21 @@ fi
 # here, never after fixes it did not name were removed.
 ACTIVE_TEXT="$(active_lines)" || exit 1
 
+# Every fix is built for one Ubuntu release, the one fixes/build.sh builds in
+# (its Release says Suite: resolute-joinery, and the origin line below names
+# it). On any other release a fix is not ours to take, whatever sources the
+# machine has installed: a 24.04 box with OpenSSL would otherwise pin our 26.04
+# OpenSSL over its own. There nothing applies, so whatever an earlier run put
+# in place is removed as for a fix no longer listed, and the state says why.
+FIXES_UBUNTU=resolute
+MACHINE_UBUNTU="$(sed -n 's/^VERSION_CODENAME=["]\{0,1\}\([a-z]*\)["]\{0,1\}$/\1/p' "${TROOT}/etc/os-release" 2>/dev/null | head -n 1 || true)"
+OTHER_RELEASE=""
+if [[ "$MACHINE_UBUNTU" != "$FIXES_UBUNTU" ]]; then
+    OTHER_RELEASE="${MACHINE_UBUNTU:-unknown}"
+    [[ -n "$ACTIVE_TEXT" ]] && say "this machine runs Ubuntu ${OTHER_RELEASE}; every fix is built for ${FIXES_UBUNTU}, so none is taken here"
+    ACTIVE_TEXT=""
+fi
+
 applies() {  # SOURCE
     grep -qx "$1" <<< "$INSTALLED_SOURCES" && return 0
     [[ "$CONTAINER_HOST" == 1 && " ${BASE_SOURCES} " == *" $1 "* ]]
@@ -830,6 +864,8 @@ fi
     echo "updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     cs="$(channel_serial "$CHANNEL_DIR")"
     [[ -n "$cs" ]] && echo "channel=${cs}"
+    [[ -n "$OTHER_RELEASE" ]] && echo "other_release=${OTHER_RELEASE}"
+    [[ -f "${LIB}/channel_refused" ]] && echo "channel_refused=$(head -n 1 "${LIB}/channel_refused" | tr -cd '0-9')"
     [[ -f "${LIB}/rolled_back" ]] && tail -n 20 "${LIB}/rolled_back"
     for s in "${ACTIVE_SOURCES[@]}"; do
         [[ -n "${ROW[$s]:-}" ]] && echo "${ROW[$s]}"

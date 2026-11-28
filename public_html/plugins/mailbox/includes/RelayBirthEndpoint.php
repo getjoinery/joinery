@@ -10,6 +10,10 @@
  *        support bundle, served only to a run in booting|provisioning that
  *        presents its live token and names the hash the plane put in the
  *        user-data. The relay checks the hash again on its side.
+ *   GET  /api/v1/relay/agent?run=<id>&sha256=<hex>    the run's agent kit (the
+ *        release's agent artifact and its statement), under the same rules
+ *        as the bundle: the relay installs its unjoined agent from it
+ *        (specs/security_fixes_on_relay_and_dns.md WP4).
  *   POST /api/v1/relay/born                             the signed birth report.
  *        Believed only when the run token is live and unspent, the report's
  *        public_ip equals the address the provider gave AND the report arrived
@@ -27,6 +31,7 @@
  * by anything on the box during the boot window, so nothing here may teach a
  * holder of the token which check it failed beyond what its own request shows.
  *
+ * @version 1.4 - GET agent: the run's agent kit, pinned by the hash in the user-data
  * @version 1.3 - the channel writes as the server (server_initiated_write): the run token is the authority
  * @version 1.2 - sameAddress() is IpAddress::same()
  * @version 1.1 - a birth report may arrive from the instance's IPv6 as well as its IPv4 (sameAddress)
@@ -65,6 +70,19 @@ class RelayBirthEndpoint {
 		$remote = (string)SessionControl::get_client_ip(true);
 
 		switch ($endpoint) {
+			case 'agent':
+				if ($method !== 'GET') {
+					api_error('The agent kit is fetched with GET.', 'ActionError', 405);
+				}
+				$result = SystemBase::server_initiated_write(function () use ($token) {
+					return self::processAgentKit((string)($_GET['run'] ?? ''), (string)($_GET['sha256'] ?? ''), $token);
+				});
+				if ($result['status'] !== 200) {
+					api_error($result['error'], 'AuthenticationError', $result['status']);
+				}
+				self::streamFile($result['path']);
+				exit;
+
 			case 'bundle':
 				if ($method !== 'GET') {
 					api_error('The bundle is fetched with GET.', 'ActionError', 405);
@@ -136,6 +154,25 @@ class RelayBirthEndpoint {
 		if ($sha256 === '' || $recorded === '' || !hash_equals($recorded, $sha256) || !is_file($path)
 				|| !hash_equals($recorded, (string)hash_file('sha256', $path))) {
 			return array('status' => 409, 'error' => 'The bundle named is not the bundle this run was created against.');
+		}
+		return array('status' => 200, 'path' => $path);
+	}
+
+	/**
+	 * The agent kit fetch, as the bundle's: the hash named must be the run's
+	 * recorded hash and the hash of the copy on disk.
+	 */
+	public static function processAgentKit(string $run_id, string $sha256, string $token): array {
+		$run = self::runForToken($run_id, $token);
+		if ($run === null) {
+			return array('status' => 403, 'error' => 'No live run for this token.');
+		}
+		$sha256 = strtolower(trim($sha256));
+		$recorded = strtolower(trim((string)$run->get('rcl_agent_sha256')));
+		$path = $run->agentKitPath();
+		if ($sha256 === '' || $recorded === '' || !hash_equals($recorded, $sha256) || !is_file($path)
+				|| !hash_equals($recorded, (string)hash_file('sha256', $path))) {
+			return array('status' => 409, 'error' => 'The agent kit named is not the one this run was created against.');
 		}
 		return array('status' => 200, 'path' => $path);
 	}
