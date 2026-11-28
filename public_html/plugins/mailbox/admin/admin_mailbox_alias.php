@@ -3,6 +3,7 @@
 /**
  * Inbound Email - Create/Edit Alias
  *
+ * @version 1.13 - any user can be given access: a user search beside the list of staff and current holders
  * @version 1.12 - store-only where the mailbox's level does not offer forwarding; each
  *   forwarding destination's confirmation state with Resend (specs/relay_receive_only_forwarding.md)
  * @version 1.11 - the protection level shows as its cards, open; another card links to where it is chosen;
@@ -176,12 +177,18 @@ if (!empty($user_options)) {
 	$formwriter->checkboxList('users_with_access', 'Users with access', [
 		'options' => $user_options,
 		'checked' => $granted_user_ids ?? [],
-		'helptext' => 'Staff who can read this mailbox in the Mailbox reader. Read and star '
-			. 'state is shared among everyone granted access. Superadmins always see every mailbox.',
+		'helptext' => 'People who can read this mailbox: staff in the Mailbox reader, members under Email on their profile. '
+			. 'Untick someone to take their access away. Read and star state is shared among everyone given access. '
+			. 'Superadmins always see every mailbox.',
 	]);
-} else {
-	echo '<div class="alert alert-info">No staff users are available to grant mailbox access to yet.</div>';
 }
+$formwriter->dropinput('add_access_user', empty($user_options) ? 'Give a user access' : 'Give another user access', [
+	'options' => [],
+	'validation' => ['required' => false],
+	'ajaxendpoint' => '/api/v1/action/user_search',
+	'empty_option' => '-- Type 3+ characters to search users --',
+	'helptext' => 'Any user of this site, a member or staff. They get access when you save.',
+]);
 
 $formwriter->submitbutton('btn_submit', 'Save Alias');
 

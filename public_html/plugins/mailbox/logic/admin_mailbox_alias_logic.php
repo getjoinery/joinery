@@ -1,5 +1,7 @@
 <?php
 /**
+ * @version 1.2 - any user can be given access: the list shows staff and whoever holds a grant, and
+ *   add_access_user (the site's user search) adds anyone else, a member included
  * @version 1.1 - forwarding is refused where the mailbox's level does not offer it; a saved
  *   forwarding destination is asked to confirm, and the editor can resend the request
  *   (specs/relay_receive_only_forwarding.md)
@@ -14,16 +16,6 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 
 	$session = SessionControl::get_instance();
 	$settings = Globalvars::get_instance();
-
-	// Staff users who can be granted access to this mailbox. The reader is
-	// staff-only in v1, so the access list is scoped to permission >= 5; the
-	// grant model itself is generic and supports non-admin members later.
-	$staff = new MultiUser(
-		array('permission_range' => array(5, 10), 'deleted' => false, 'not_system_users' => true),
-		array('usr_first_name' => 'ASC', 'usr_last_name' => 'ASC')
-	);
-	$staff->load();
-	$user_options = $staff->get_dropdown_array();
 
 	// Load or create alias
 	if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
@@ -83,6 +75,23 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 				$submitted_grant_users[] = intval($uid);
 			}
 		}
+		// One more user picked in the user search (add_access_user), staff or not.
+		$added_user_id = intval($input['add_access_user'] ?? 0);
+		if ($added_user_id > 0 && !in_array($added_user_id, $submitted_grant_users, true)) {
+			$added_user = new User($added_user_id, TRUE);
+			if (!$added_user->key || $added_user->get('usr_delete_time')) {
+				return LogicResult::render(array(
+					'alias' => $alias,
+					'error' => 'The user picked to be given access no longer exists. Pick them again.',
+					'session' => $session,
+					'settings' => $settings,
+					'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
+					'user_options' => _mailbox_alias_user_options($submitted_grant_users),
+					'granted_user_ids' => $submitted_grant_users,
+				));
+			}
+			$submitted_grant_users[] = $added_user_id;
+		}
 
 		// Protected-domain invariants enforce at the mutation point
 		// (specs/mailbox_protection_ceremony.md § 2b): the ceremony guards the
@@ -101,7 +110,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 				'session' => $session,
 				'settings' => $settings,
 				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
-				'user_options' => $user_options,
+				'user_options' => _mailbox_alias_user_options($submitted_grant_users),
 				'granted_user_ids' => $submitted_grant_users,
 			));
 		}
@@ -121,7 +130,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 						'session' => $session,
 						'settings' => $settings,
 						'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
-						'user_options' => $user_options,
+						'user_options' => _mailbox_alias_user_options($submitted_grant_users),
 						'granted_user_ids' => $submitted_grant_users,
 					));
 				}
@@ -140,7 +149,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 				'session' => $session,
 				'settings' => $settings,
 				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
-				'user_options' => $user_options,
+				'user_options' => _mailbox_alias_user_options($submitted_grant_users),
 				'granted_user_ids' => $submitted_grant_users,
 			));
 		}
@@ -176,7 +185,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 				'session' => $session,
 				'settings' => $settings,
 				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
-				'user_options' => $user_options,
+				'user_options' => _mailbox_alias_user_options($submitted_grant_users),
 				'granted_user_ids' => $submitted_grant_users,
 			));
 		} catch (InboundEmailAliasException $e) {
@@ -186,7 +195,7 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 				'session' => $session,
 				'settings' => $settings,
 				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
-				'user_options' => $user_options,
+				'user_options' => _mailbox_alias_user_options($submitted_grant_users),
 				'granted_user_ids' => $submitted_grant_users,
 			));
 		}
@@ -222,9 +231,34 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 		'session' => $session,
 		'settings' => $settings,
 		'domains' => $domains,
-		'user_options' => $user_options,
+		'user_options' => _mailbox_alias_user_options($granted_user_ids),
 		'granted_user_ids' => $granted_user_ids,
 	));
+}
+
+/**
+ * The users the access list shows as checkboxes, id => label: every staff
+ * user (permission 5 and above), and everyone in $granted_ids whatever their
+ * level, so a member given access can be seen and taken off. Anyone else is
+ * added through the page's user search.
+ */
+function _mailbox_alias_user_options(array $granted_ids): array {
+	$staff = new MultiUser(
+		array('permission_range' => array(5, 10), 'deleted' => false, 'not_system_users' => true),
+		array('usr_first_name' => 'ASC', 'usr_last_name' => 'ASC')
+	);
+	$options = $staff->get_dropdown_array();
+	foreach ($granted_ids as $uid) {
+		$uid = intval($uid);
+		if ($uid <= 0 || isset($options[$uid])) {
+			continue;
+		}
+		$user = new User($uid, TRUE);
+		if ($user->key) {
+			$options[$uid] = $user->display_name() . ' - ' . $user->login_label();
+		}
+	}
+	return $options;
 }
 
 /**
