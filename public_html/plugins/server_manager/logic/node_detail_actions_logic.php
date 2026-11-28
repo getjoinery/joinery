@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.102 - mail_log_summary, from the Logs box's Mail received buttons (hours 24 or 168)
  * @version 1.101 - retry_hosted_ai and hosted_ai_add_credit: the node page's AI credit box (specs/hosted_ai_credit.md)
  * @version 1.100 - quiet_check: is anyone busy on the machine, asked from the Diagnostics tab
  * @version 1.99 - auto_reboot: when the Reboot When Quiet task may reboot this machine (specs/automatic_reboot_when_quiet.md WP4)
@@ -233,6 +234,7 @@ class NodeDetailActions {
 		'refresh_site_containers'  => 'overview',
 		'container_inventory'      => 'diagnostics',
 		'mailbox_status'           => 'diagnostics',
+		'mail_log_summary'         => 'diagnostics',
 		'mail_test_send'           => 'diagnostics',
 		'relay_status'             => 'diagnostics',
 		'reboot_machine'           => 'overview',
@@ -709,6 +711,14 @@ class NodeDetailActions {
 				$domain = isset($_POST['domain']) ? (string)$_POST['domain'] : '';
 				$built = JobCommandBuilder::build_mailbox_status($node, $domain);
 				$job = ManagementJob::createFromBuild($node->key, 'mailbox_status', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'mail_log_summary': {
+				// What the site's Postfix did with its mail: compiled counts,
+				// behind the owner's log switch (the builder asks it).
+				$built = JobCommandBuilder::build_mail_log_summary($node, (int)($_POST['hours'] ?? 24));
+				$job = ManagementJob::createFromBuild($node->key, 'mail_log_summary', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

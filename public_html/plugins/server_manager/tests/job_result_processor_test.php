@@ -2582,6 +2582,88 @@ check(count($mbd['send_outcomes']) === 1 && $mbd['send_outcomes'][0]['count'] ==
 	&& !isset($mbd['send_outcomes'][0]['to']),
 	'a send outcome keeps its words and counts, never an address', var_export($mbd['send_outcomes'], true));
 
+// mailbox_status (specs/mailbox_diagnosis_words.md WP1-WP2): each nameserver's
+// reason, ms, tcp_53 and skipped_after kept only in their compiled forms; each
+// domain's arrival counts as ints, unreadable as null counts.
+$mbr = JobResultProcessor::sanitise_mailbox_status(array('mailbox' => 'active', 'domain' => 'example.com',
+	'dns' => array(array('record' => 'spf', 'name' => 'example.com', 'type' => 'TXT', 'node' => array('status' => 'answer', 'answer' => array()),
+		'authoritative' => array(
+			array('nameserver' => '192.0.2.1', 'status' => 'no_clean_answer', 'answer' => array(), 'reason' => 'no_reply', 'ms' => 2003, 'tcp_53' => 'open'),
+			array('nameserver' => '192.0.2.2', 'status' => 'no_clean_answer', 'answer' => array(), 'reason' => 'no_reply', 'ms' => null, 'tcp_53' => 'timeout', 'skipped_after' => 'mx'),
+			array('nameserver' => '192.0.2.3', 'status' => 'no_clean_answer', 'answer' => array(), 'reason' => '10.0.0.1', 'ms' => 99999, 'tcp_53' => 'wide open', 'skipped_after' => 'bob@x.com'),
+			array('nameserver' => '192.0.2.4', 'status' => 'answer', 'answer' => array('v=spf1 -all'), 'reason' => null, 'ms' => 4),
+			array('nameserver' => '2001:db8::5', 'status' => 'no_clean_answer', 'answer' => array(), 'reason' => 'no_reply', 'ms' => 0, 'tcp_53' => 'unreachable')),
+		'verdict' => 'agree', 'setup_reads' => 'authoritative'))));
+$ns = $mbr['dns'][0]['authoritative'];
+check($ns[0]['reason'] === 'no_reply' && $ns[0]['ms'] === 2003 && $ns[0]['tcp_53'] === 'open' && !isset($ns[0]['skipped_after']),
+	'a silent nameserver keeps its reason, ms and TCP 53', var_export($ns[0], true));
+check($ns[1]['ms'] === null && $ns[1]['skipped_after'] === 'mx', 'a skipped row keeps ms null and the record it fell silent on');
+check(!isset($ns[2]['reason']) && $ns[2]['ms'] === null && !isset($ns[2]['tcp_53']) && !isset($ns[2]['skipped_after']),
+	'an unknown reason word, an IP-shaped reason, ms out of range, a TCP word outside the set and a skipped_after with an @ are dropped', var_export($ns[2], true));
+check(!isset($ns[3]['reason']) && $ns[3]['ms'] === 4, 'a clean answer: no reason, its ms');
+check($ns[4]['tcp_53'] === 'unreachable', 'TCP 53 unreachable (no route from this machine) is kept');
+check(JobResultProcessor::mailbox_ns_words($ns[0]) === 'nothing came back in 2003 ms (TCP 53 open)'
+	&& JobResultProcessor::mailbox_ns_words(array('status' => 'no_clean_answer', 'reason' => 'no_reply', 'ms' => 3)) === 'failed at once (3 ms)'
+	&& JobResultProcessor::mailbox_ns_words(array('status' => 'no_clean_answer', 'reason' => 'no_reply', 'ms' => 0, 'tcp_53' => 'unreachable')) === 'this machine has no route to it (0 ms)'
+	&& strpos(JobResultProcessor::mailbox_ns_words($ns[1]), 'not asked again') === 0
+	&& JobResultProcessor::mailbox_ns_words(array('status' => 'no_clean_answer')) === 'no clean answer',
+	'each nameserver reads in words; an older script\'s row reads as before');
+$mba = JobResultProcessor::sanitise_mailbox_status(array('mailbox' => 'active', 'window_days' => 7, 'corrections' => array(), 'corpus' => array(), 'policy' => array(),
+	'domains' => array(
+		array('domain' => 'a.example', 'enabled' => true, 'protected' => false, 'mailboxes' => 1, 'mailboxes_never_received' => 1,
+			'received_7d' => 0, 'last_received_time' => null, 'arrivals' => 'read', 'capped' => false, 'address' => 'admin@a.example'),
+		array('domain' => 'b.example', 'enabled' => true, 'protected' => false, 'mailboxes' => 3, 'mailboxes_never_received' => -1,
+			'received_7d' => '9', 'last_received_time' => '2026-11-28T11:02:33Z', 'arrivals' => 'read', 'capped' => 'yes'),
+		array('domain' => 'c.example', 'enabled' => true, 'protected' => false, 'catch_all' => true, 'mailboxes' => 2, 'mailboxes_never_received' => 0,
+			'received_7d' => 0, 'last_received_time' => '2026-11-28T11:02Z', 'arrivals' => 'unreadable', 'capped' => false),
+		array('domain' => 'd.example', 'enabled' => true, 'protected' => false))));
+list($da, $db, $dc, $dd) = $mba['domains'];
+check($da === array('domain' => 'a.example', 'enabled' => true, 'protected' => false, 'catch_all' => false, 'mailboxes' => 1, 'mailboxes_never_received' => 1,
+	'received_7d' => 0, 'last_received_time' => null, 'arrivals' => 'read', 'capped' => false),
+	'arrival counts kept as ints, nothing else (no address)', var_export($da, true));
+check($db['mailboxes_never_received'] === null && $db['received_7d'] === null && $db['last_received_time'] === null && $db['capped'] === false,
+	'a negative count, a string count, a time not cut to the minute and a non-bool capped are dropped', var_export($db, true));
+check($dc['arrivals'] === 'unreadable' && $dc['mailboxes_never_received'] === null && $dc['last_received_time'] === null,
+	'unreadable: the counts are null, never a zero');
+check(!isset($dd['arrivals']) && JobResultProcessor::mailbox_arrival_words($dd) === '', 'an older script\'s row reads as before');
+check(strpos(JobResultProcessor::mailbox_arrival_words($da), 'no mail has reached 1 of 1') !== false
+	&& strpos(JobResultProcessor::mailbox_arrival_words($dc), 'could not be read') !== false, 'the domain row in words');
+check($dc['catch_all'] === true && $db['catch_all'] === false, 'catch_all kept as a literal bool');
+$dcr = $dc;
+$dcr['arrivals'] = 'read';
+$dcr['received_7d'] = 0;
+check(strpos(JobResultProcessor::mailbox_arrival_words($dcr), 'catch-all, whose mail is not counted') !== false
+	&& strpos(JobResultProcessor::mailbox_arrival_words($da), 'received by its mailboxes') !== false,
+	'a catch-all domain says its catch-all mail is not counted');
+
+// mail_log_summary (WP3): every field from its compiled set.
+$mls = JobResultProcessor::sanitise_mail_log_summary(array('hours' => 24, 'covers_from' => '2026-11-27T11:30Z', 'connections' => 41,
+	'covers_window' => true, 'dropped_connections' => 18, 'counts' => array('delivered' => 1, 'deferred' => -2, 'handler_refused' => '3', 'expired' => 2,
+		'refused' => array('blocklist' => 12, 'relay_denied' => 6, 'spam' => 99)),
+	'recent' => array(
+		array('time' => '2026-11-28T11:02Z', 'outcome' => 'delivered', 'from_domain' => 'gmail.com', 'to_domain' => 'home.example.org', 'ip' => '209.85.0.1'),
+		array('time' => '2026-11-28T10:40Z', 'outcome' => 'refused', 'reason' => 'blocklist', 'code' => '5xx', 'from_domain' => 'bob@evil.example', 'to_domain' => '[192.0.2.1]'),
+		array('time' => '2026-11-28T10:30Z', 'outcome' => 'refused', 'reason' => 'spam', 'code' => '550', 'from_domain' => "b\xc3\xbcro.example", 'to_domain' => '203.0.113.9'),
+		array('time' => 'yesterday', 'outcome' => 'delivered'),
+		array('time' => '2026-11-28T10:20Z', 'outcome' => 'bounced')),
+	'truncated' => 'no', 'queue_ids' => array('AAA111')));
+check($mls['read'] === true && $mls['hours'] === 24 && $mls['covers_from'] === '2026-11-27T11:30Z' && $mls['connections'] === 41 && $mls['truncated'] === false
+	&& $mls['covers_window'] === true && $mls['counts']['expired'] === 2,
+	'the window, connections and truncated held to their shapes');
+check($mls['counts']['deferred'] === 0 && $mls['counts']['handler_refused'] === 0 && !isset($mls['counts']['refused']['spam'])
+	&& $mls['counts']['refused']['blocklist'] === 12 && $mls['counts']['refused']['other'] === 0,
+	'counts: non-negative ints only, the refusal reasons from the compiled list', var_export($mls['counts'], true));
+check(count($mls['recent']) === 3 && !isset($mls['recent'][0]['ip']), 'a row with a bad time or outcome is dropped; an unknown field is not kept');
+check($mls['recent'][1]['from_domain'] === null && $mls['recent'][1]['to_domain'] === null,
+	'a from_domain with an @ and a bracketed literal are dropped');
+check($mls['recent'][2]['from_domain'] === null && $mls['recent'][2]['to_domain'] === null && $mls['recent'][2]['reason'] === 'other' && $mls['recent'][2]['code'] === null,
+	'a non-ASCII domain, an IP-shaped domain, an unknown reason and a bare code are dropped', var_export($mls['recent'][2], true));
+check(strpos(json_encode($mls), 'AAA111') === false && strpos(json_encode($mls), '209.85') === false, 'no queue id and no IP anywhere');
+check(JobResultProcessor::sanitise_mail_log_summary(array('hours' => 24, 'refused' => 'no_postfix')) === array('read' => true, 'hours' => 24, 'refused' => 'no_postfix')
+	&& JobResultProcessor::sanitise_mail_log_summary(array('refused' => '<b>x</b>'))['refused'] === 'refused'
+	&& JobResultProcessor::sanitise_mail_log_summary('x') === array('read' => false),
+	'a refusal from its closed set; anything else is plain refused; not JSON is not read');
+
 // mail_test_send: sent with its token, or a refusal from the closed set.
 $mt = JobResultProcessor::sanitise_mail_test_send(array('domain' => 'example.com', 'sent' => true, 'token' => '0123456789abcdef',
 	'from' => 'joinery-mail-check@example.com', 'to' => 'test@dev.getjoinery.com', 'subject' => "Joinery mail check 0123456789abcdef\r\nBcc: x",

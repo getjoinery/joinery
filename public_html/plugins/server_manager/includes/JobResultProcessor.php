@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.153 - sanitise_mailbox_status: each nameserver's reason, ms, tcp_53 and skipped_after, and each domain's arrival counts;
+ *                sanitise_mail_log_summary (specs/mailbox_diagnosis_words.md)
  * @version 1.152 - an apply_update is judged against the release served when the node started it, not one
  *                 published while it ran (which the node never fetched)
  * @version 1.151 - hosted_ai_settings: the AI credit key is blanked from the job row once the node answers
@@ -4532,6 +4534,94 @@ HTML;
 	 * flags, its DNS side by side and its send outcomes, each held to its shape.
 	 * Anything else the node sent is dropped. Pure; the processor test drives it.
 	 */
+	/** Why one nameserver gave no clean answer (AuthoritativeDns::probe()'s words). */
+	const MAILBOX_NS_REASONS = array('no_reply', 'not_response', 'truncated', 'not_authoritative', 'error_code', 'malformed', 'cname');
+
+	/**
+	 * A mailbox_status domain row's arrival counts: non-negative ints, the
+	 * minute-cut time, read|unreadable and capped. [] from an older script
+	 * that sends none, so the row reads as before.
+	 */
+	private static function mailbox_domain_arrivals(array $row) {
+		if (!array_key_exists('arrivals', $row)) {
+			return array();
+		}
+		$count = function ($v) { return (is_int($v) && $v >= 0) ? $v : null; };
+		$time = $row['last_received_time'] ?? null;
+		$read = ($row['arrivals'] ?? null) === 'read';
+		return array(
+			'catch_all'                => ($row['catch_all'] ?? null) === true,
+			'mailboxes'                => $count($row['mailboxes'] ?? null),
+			'mailboxes_never_received' => $read ? $count($row['mailboxes_never_received'] ?? null) : null,
+			'received_7d'              => $read ? $count($row['received_7d'] ?? null) : null,
+			'last_received_time'       => ($read && is_string($time) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/', $time)) ? $time : null,
+			'arrivals'                 => $read ? 'read' : 'unreadable',
+			'capped'                   => ($row['capped'] ?? null) === true,
+		);
+	}
+
+	/**
+	 * One nameserver row that gave no clean answer, in words: why, how long,
+	 * and what TCP 53 said. "nothing came back in 2000 ms (TCP 53 open)",
+	 * "refused at once (3 ms)". A row from an older script reads "no clean answer".
+	 */
+	public static function mailbox_ns_words(array $a) {
+		if (($a['status'] ?? '') === 'no_answer') {
+			return 'no such record';
+		}
+		$reason = $a['reason'] ?? null;
+		$ms = $a['ms'] ?? null;
+		$tcp_words = array('skipped' => 'not tried: an inside-network address', 'unreachable' => 'unreachable: this machine has no route to it');
+		$tcp = isset($a['tcp_53']) ? ' (TCP 53 ' . ($tcp_words[$a['tcp_53']] ?? $a['tcp_53']) . ')' : '';
+		if (($a['tcp_53'] ?? null) === 'unreachable' && $reason === 'no_reply' && !isset($a['skipped_after'])) {
+			return 'this machine has no route to it' . (is_int($ms) ? ' (' . $ms . ' ms)' : '');
+		}
+		if ($reason === 'no_reply') {
+			if (isset($a['skipped_after'])) {
+				return 'not asked again: it gave no reply for ' . str_replace('_', ' ', $a['skipped_after']) . $tcp;
+			}
+			if (is_int($ms) && $ms < 500) {
+				return 'failed at once (' . $ms . ' ms)' . $tcp;
+			}
+			return 'nothing came back' . (is_int($ms) ? ' in ' . $ms . ' ms' : '') . $tcp;
+		}
+		$words = array(
+			'not_response'      => 'sent something that was not a DNS reply',
+			'truncated'         => 'its reply was cut short',
+			'not_authoritative' => 'answered, but not as the zone\'s own server',
+			'error_code'        => 'answered with an error code',
+			'malformed'         => 'its reply could not be read',
+			'cname'             => 'answered with an alias (CNAME)',
+		);
+		if (isset($words[$reason])) {
+			return $words[$reason] . (is_int($ms) ? ' (' . $ms . ' ms)' : '');
+		}
+		return 'no clean answer';
+	}
+
+	/** A mailbox_status domain row's arrival counts in words, '' from an older script. */
+	public static function mailbox_arrival_words(array $md) {
+		if (!isset($md['arrivals'])) {
+			return '';
+		}
+		if ($md['arrivals'] !== 'read') {
+			return '; whether mail has reached its mailboxes could not be read';
+		}
+		$m = (int)($md['mailboxes'] ?? 0);
+		$out = '; ' . number_format($m) . ' mailbox' . ($m === 1 ? '' : 'es') . (!empty($md['capped']) ? ' (only the first 1,000 asked about)' : '');
+		if ($m > 0 && (int)$md['mailboxes_never_received'] > 0) {
+			$out .= ', no mail has reached ' . number_format((int)$md['mailboxes_never_received']) . ' of ' . number_format($m);
+		}
+		$out .= '; ' . number_format((int)$md['received_7d']) . ' received by its mailboxes in 7 days';
+		$out .= $md['last_received_time'] !== null
+			? ', the newest ' . str_replace(array('T', 'Z'), array(' ', ' UTC'), $md['last_received_time'])
+			: ', none ever';
+		if (!empty($md['catch_all'])) {
+			$out .= ' (it has a catch-all, whose mail is not counted)';
+		}
+		return $out;
+	}
+
 	public static function sanitise_mailbox_status($d) {
 		if (!is_array($d) || !array_key_exists('domain', $d)) {
 			$out = self::sanitise_spam_learning_status($d);
@@ -4541,7 +4631,7 @@ HTML;
 					$name = is_array($row) ? self::mailbox_domain($row['domain'] ?? null) : null;
 					if ($name !== null) {
 						$out['domains'][] = array('domain' => $name, 'enabled' => ($row['enabled'] ?? null) === true,
-							'protected' => ($row['protected'] ?? null) === true);
+							'protected' => ($row['protected'] ?? null) === true) + self::mailbox_domain_arrivals($row);
 					}
 				}
 			}
@@ -4590,9 +4680,23 @@ HTML;
 			$auth = array();
 			foreach (array_slice(is_array($row['authoritative'] ?? null) ? $row['authoritative'] : array(), 0, 6) as $a) {
 				if (!is_array($a) || @inet_pton((string)($a['nameserver'] ?? '')) === false) { continue; }
-				$auth[] = array('nameserver' => (string)$a['nameserver'],
+				$ns = array('nameserver' => (string)$a['nameserver'],
 					'status' => in_array($a['status'] ?? null, array('answer', 'no_answer', 'no_clean_answer'), true) ? $a['status'] : 'no_clean_answer',
 					'answer' => $answers($a['answer'] ?? null));
+				// An older script sends none of these; each is kept only in its compiled form.
+				if (in_array($a['reason'] ?? null, self::MAILBOX_NS_REASONS, true)) {
+					$ns['reason'] = $a['reason'];
+				}
+				if (array_key_exists('ms', $a)) {
+					$ns['ms'] = (is_int($a['ms']) && $a['ms'] >= 0 && $a['ms'] <= 10000) ? $a['ms'] : null;
+				}
+				if (in_array($a['tcp_53'] ?? null, array('open', 'closed', 'unreachable', 'timeout', 'skipped'), true)) {
+					$ns['tcp_53'] = $a['tcp_53'];
+				}
+				if (in_array($a['skipped_after'] ?? null, $records, true)) {
+					$ns['skipped_after'] = $a['skipped_after'];
+				}
+				$auth[] = $ns;
 			}
 			$ttl = $node['ttl_left'] ?? null;
 			$dns[] = array(
@@ -4690,6 +4794,75 @@ HTML;
 
 	private static function process_mail_test_send($job) {
 		$job->set('mjb_result', json_encode(self::sanitise_mail_test_send(self::script_json($job))));
+		$job->save();
+	}
+
+	/** The words a mail_log_summary carries, as the node compiles them. */
+	const MAIL_LOG_OUTCOMES = array('delivered', 'deferred', 'handler_refused', 'expired', 'refused');
+	const MAIL_LOG_REFUSALS = array('blocklist', 'relay_denied', 'unknown_recipient', 'lookup_failure', 'tls', 'other');
+
+	/**
+	 * A mail_log_summary job's result: every field held to its compiled set as
+	 * on the node — counts as non-negative ints, times to the minute, outcome
+	 * and reason words from their lists, and each domain only when it is a
+	 * plain ASCII domain. Anything else the node sent is dropped. Pure; the
+	 * processor test drives it.
+	 */
+	public static function sanitise_mail_log_summary($d) {
+		if (!is_array($d)) {
+			return array('read' => false);
+		}
+		$hours = (is_int($d['hours'] ?? null) && $d['hours'] >= 1 && $d['hours'] <= 168) ? $d['hours'] : null;
+		if (isset($d['refused'])) {
+			return array('read' => true, 'hours' => $hours,
+				'refused' => in_array($d['refused'], array('no_postfix', 'journal_unreadable'), true) ? $d['refused'] : 'refused');
+		}
+		$count = function ($v) { return (is_int($v) && $v >= 0) ? $v : 0; };
+		$time = function ($v) { return (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/', $v)) ? $v : null; };
+		$domain = function ($v) {
+			return (is_string($v) && strlen($v) <= 253 && preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $v)) ? $v : null;
+		};
+		$c = is_array($d['counts'] ?? null) ? $d['counts'] : array();
+		$r = is_array($c['refused'] ?? null) ? $c['refused'] : array();
+		$refused = array();
+		foreach (self::MAIL_LOG_REFUSALS as $k) {
+			$refused[$k] = $count($r[$k] ?? null);
+		}
+		$recent = array();
+		foreach (array_slice(is_array($d['recent'] ?? null) ? $d['recent'] : array(), 0, 20) as $row) {
+			if (!is_array($row) || !in_array($row['outcome'] ?? null, self::MAIL_LOG_OUTCOMES, true) || $time($row['time'] ?? null) === null) {
+				continue;
+			}
+			$out = array('time' => $row['time'], 'outcome' => $row['outcome']);
+			if ($row['outcome'] === 'refused') {
+				$out['reason'] = in_array($row['reason'] ?? null, self::MAIL_LOG_REFUSALS, true) ? $row['reason'] : 'other';
+				$out['code'] = in_array($row['code'] ?? null, array('4xx', '5xx'), true) ? $row['code'] : null;
+			}
+			$out['from_domain'] = $domain($row['from_domain'] ?? null);
+			$out['to_domain'] = $domain($row['to_domain'] ?? null);
+			$recent[] = $out;
+		}
+		return array(
+			'read'                => true,
+			'hours'               => $hours,
+			'covers_from'         => $time($d['covers_from'] ?? null),
+			'covers_window'       => ($d['covers_window'] ?? null) === true,
+			'connections'         => $count($d['connections'] ?? null),
+			'dropped_connections' => $count($d['dropped_connections'] ?? null),
+			'counts'              => array(
+				'delivered'       => $count($c['delivered'] ?? null),
+				'deferred'        => $count($c['deferred'] ?? null),
+				'handler_refused' => $count($c['handler_refused'] ?? null),
+				'expired'         => $count($c['expired'] ?? null),
+				'refused'         => $refused,
+			),
+			'recent'              => $recent,
+			'truncated'           => ($d['truncated'] ?? null) === true,
+		);
+	}
+
+	private static function process_mail_log_summary($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_mail_log_summary(self::script_json($job))));
 		$job->save();
 	}
 

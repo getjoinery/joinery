@@ -28,6 +28,7 @@
  * one of FALLBACK_REASONS. The line names the zone and never a record's value,
  * so the agent's site_log_count can count them (marker authoritative_dns_fallback).
  *
+ * @version 1.3 - probe(): every nameserver's answer with why it was not clean and how long it took; lookupAll() wraps it
  * @version 1.2 - every lookup() fallback logs its reason once per zone and reason per request
  * @version 1.1 - lookupAll(): every nameserver's own answer, for a caller that must know all of them serve a record
  * @version 1.0
@@ -79,6 +80,16 @@ class AuthoritativeDns {
 		'reply error code',
 		'reply malformed',
 		'CNAME answer',
+	);
+
+	/** FALLBACK_REASONS that records() can name, as the word probe() reports for each. */
+	const PROBE_REASONS = array(
+		'reply not a response'    => 'not_response',
+		'reply truncated'         => 'truncated',
+		'reply not authoritative' => 'not_authoritative',
+		'reply error code'        => 'error_code',
+		'reply malformed'         => 'malformed',
+		'CNAME answer'            => 'cname',
 	);
 
 	/** Why records() last returned null: one of FALLBACK_REASONS, or null. */
@@ -148,6 +159,23 @@ class AuthoritativeDns {
 	 * names addresses the caller already knows are silent.
 	 */
 	public static function lookupAll(string $name, int $type, string $zone, array $skip = array()): array {
+		$out = array();
+		foreach (self::probe($name, $type, $zone, $skip) as $ip => $row) {
+			$out[$ip] = $row['records'];
+		}
+		return $out;
+	}
+
+	/**
+	 * Every nameserver's answer for $name with why it was not clean and how long
+	 * it took: ip => {records: ?array, reason: ?string, ms: int}. records as
+	 * lookupAll() gives them; reason null on a clean answer, else no_reply
+	 * (nothing usable came back: timeout, socket error, refusal, short or
+	 * mismatched reply) or one of PROBE_REASONS' words; ms the wall time of
+	 * that one send. Every address not in $skip is asked, in nameserverIps()
+	 * order. [] when the zone's nameservers cannot be found.
+	 */
+	public static function probe(string $name, int $type, string $zone, array $skip = array()): array {
 		$qtype = self::TYPE_NUMBERS[$type] ?? 0;
 		$name = rtrim(strtolower(trim($name)), '.');
 		$zone = rtrim(strtolower(trim($zone)), '.');
@@ -160,8 +188,19 @@ class AuthoritativeDns {
 		}
 		$out = array();
 		foreach (array_diff(self::nameserverIps($zone), $skip) as $ip) {
+			$started = hrtime(true);
 			$reply = self::$sender ? (self::$sender)($ip, $packet) : self::send($ip, $packet);
-			$out[$ip] = $reply === null ? null : self::records($reply, $name, $qtype);
+			$ms = (int)round((hrtime(true) - $started) / 1e6);
+			if ($reply === null) {
+				$out[$ip] = array('records' => null, 'reason' => 'no_reply', 'ms' => $ms);
+				continue;
+			}
+			$records = self::records($reply, $name, $qtype);
+			$reason = null;
+			if ($records === null) {
+				$reason = self::PROBE_REASONS[self::$last_reason ?? 'reply malformed'] ?? 'malformed';
+			}
+			$out[$ip] = array('records' => $records, 'reason' => $reason, 'ms' => $ms);
 		}
 		return $out;
 	}

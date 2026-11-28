@@ -25,6 +25,13 @@
  * The fixture domain is under .invalid, so every DNS lookup it makes fails
  * fast and none reaches a real zone.
  *
+ * WP1-WP2 of specs/mailbox_diagnosis_words.md: per-domain arrival counts
+ * (counts only, never an address; unreadable, never a false zero), and each
+ * nameserver row's reason, ms, skip-after-silence and the TCP probe that never
+ * reports on an inside-network address.
+ *
+ * @version 1.2 - every silent nameserver asked once however many the zone has; catch_all
+ * @version 1.1 - arrival counts, nameserver reasons, TCP 53 probe
  * @version 1.0
  */
 
@@ -126,6 +133,122 @@ $records = array_column($j['dns'] ?? array(), 'record');
 check(array_slice($records, 0, 4) === array('mx', 'spf', 'dmarc', 'dkim_ordinary'),
 	'the DNS names are the fixed list', implode(',', $records));
 check(array_key_exists('send_outcomes', $j ?? array()), 'the send ledger is reported, or null where it does not exist');
+
+// ---------------------------------------------------------------------------
+section('Arrival counts per domain: counts only, never a false zero');
+
+define('MBS_FUNCTIONS_ONLY', true);
+require($script);
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
+
+$db = DbConnector::get_instance()->get_db_link();
+$mk_alias = function (string $local, bool $enabled) use ($db, $d) {
+	$st = $db->prepare('INSERT INTO iea_inbound_email_aliases (iea_ied_inbound_email_domain_id, iea_alias, iea_is_enabled) VALUES (?, ?, ?) RETURNING iea_inbound_email_alias_id');
+	$st->execute(array((int)$d->key, $local, $enabled ? 'true' : 'false'));
+	$id = (int)$st->fetchColumn();
+	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', $id);
+	return $id;
+};
+$mk_alias('got', true);
+$mk_alias('Never', true);
+$mk_alias('off', false);
+
+$st = $db->prepare("INSERT INTO iem_inbound_email_messages (iem_ied_inbound_email_domain_id, iem_recipient, iem_direction, iem_received_time) VALUES (?, ?, 'inbound', now() - interval '1 hour') RETURNING iem_inbound_email_message_id");
+$st->execute(array((int)$d->key, 'Got@' . $name));
+$iem = (int)$st->fetchColumn();
+harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $iem);
+// The same message logged and stored: counted once.
+$st = $db->prepare("INSERT INTO iel_inbound_email_logs (iel_to_address, iel_status, iel_iem_inbound_email_message_id, iel_create_time) VALUES (?, 'stored', ?, now() - interval '1 hour') RETURNING iel_inbound_email_log_id");
+$st->execute(array('got@' . $name, $iem));
+harness_register_row('iel_inbound_email_logs', 'iel_inbound_email_log_id', (int)$st->fetchColumn());
+// A forward logged and not stored, eight days ago: counts toward last received, not the 7 days.
+$st = $db->prepare("INSERT INTO iel_inbound_email_logs (iel_to_address, iel_status, iel_create_time) VALUES (?, 'forwarded', now() - interval '8 days') RETURNING iel_inbound_email_log_id");
+$st->execute(array('got@' . $name));
+harness_register_row('iel_inbound_email_logs', 'iel_inbound_email_log_id', (int)$st->fetchColumn());
+
+list($code, $out, , $j) = mbw_run($script, array());
+$row = null;
+foreach ($j['domains'] ?? array() as $r) { if (($r['domain'] ?? '') === $name) { $row = $r; } }
+check($row !== null && $row['mailboxes'] === 2 && $row['mailboxes_never_received'] === 1 && $row['received_7d'] === 1
+	&& $row['arrivals'] === 'read' && $row['capped'] === false && $row['catch_all'] === false,
+	'two enabled mailboxes, one never reached, one message in 7 days (logged and stored counts once)', json_encode($row));
+check(is_string($row['last_received_time'] ?? null) && preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\dZ$/', $row['last_received_time']),
+	'the newest arrival, cut to the minute', json_encode($row['last_received_time'] ?? null));
+check(strpos($out, '@') === false, 'no @ anywhere in the no-domain answer');
+
+$aliases = new MultiInboundEmailAlias(array('domain_id' => (int)$d->key, 'deleted' => false));
+$badge = array();
+foreach (mailbox_setup_hints(array(array('domain' => $d, 'mailboxes' => array_map(function ($a) { return array('alias' => $a); }, (function ($m) { $o = array(); foreach ($m as $x) { $o[] = $x; } return $o; })($aliases))))) as $h) {
+	$badge[] = $h['text'];
+}
+check($badge === array('no mail yet'), 'the badge counts the same one mailbox as never reached', json_encode($badge));
+
+$fail = function () { return null; };
+$u = mbs_domain_arrivals($d, $fail);
+check($u['arrivals'] === 'unreadable' && $u['mailboxes_never_received'] === null && $u['received_7d'] === null
+	&& $u['last_received_time'] === null, 'a failed lookup reads unreadable with null counts, never a zero', json_encode($u));
+$u = mbs_domain_arrivals($d, null, $fail);
+check($u['arrivals'] === 'unreadable' && $u['mailboxes_never_received'] === null, 'and so does a failed recent count');
+
+// ---------------------------------------------------------------------------
+section('Nameserver rows: reason, ms, asked once after silence, TCP probe never inside');
+
+foreach (array('127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.0.1', '100.64.0.1', '0.0.0.0',
+		'::1', '::', 'fc00::1', 'fd12:3456::1', 'fe80::1', '::ffff:10.0.0.1', '::ffff:127.0.0.1', '::ffff:192.168.0.1', 'not-an-ip') as $ip) {
+	check(mbs_tcp_53($ip) === 'skipped', 'TCP probe skipped for ' . $ip);
+}
+foreach (array('8.8.8.8', '172.32.0.1', '100.128.0.1', '2001:4860:4860::8888', '::ffff:8.8.8.8') as $ip) {
+	check(mbs_inside_address($ip) === false, $ip . ' is not inside');
+}
+
+$sent = array();
+AuthoritativeDns::reset();
+AuthoritativeDns::setNameservers($name, array('10.9.9.1', '10.9.9.2'));
+AuthoritativeDns::$sender = function (string $ip, string $packet) use (&$sent) {
+	$sent[] = $ip;
+	if ($ip === '10.9.9.2') { return null; }
+	$qend = 12;
+	while (ord($packet[$qend]) !== 0) { $qend += 1 + ord($packet[$qend]); }
+	return substr($packet, 0, 2) . pack('nnnnn', 0x8403, 1, 0, 0, 0) . substr($packet, 12, $qend + 5 - 12);   // NXDOMAIN
+};
+$silent = array();
+$first = mbs_authoritative('mx', $name, DNS_MX, $name, $silent);
+$second = mbs_authoritative('spf', $name, DNS_TXT, $name, $silent);
+$by = function (array $rows, string $ip) { foreach ($rows as $r) { if ($r['nameserver'] === $ip) { return $r; } } return null; };
+$f2 = $by($first, '10.9.9.2');
+check($f2 !== null && $f2['status'] === 'no_clean_answer' && $f2['reason'] === 'no_reply' && is_int($f2['ms']) && $f2['tcp_53'] === 'skipped',
+	'the silent server: no_reply, ms, tcp_53 skipped (inside address)', json_encode($f2));
+$f1 = $by($first, '10.9.9.1');
+check($f1 !== null && $f1['status'] === 'no_answer' && $f1['reason'] === null && !isset($f1['tcp_53']),
+	'the answering server: no reason, no TCP probe', json_encode($f1));
+$s2 = $by($second, '10.9.9.2');
+check($s2 !== null && $s2['ms'] === null && $s2['skipped_after'] === 'mx' && $s2['reason'] === 'no_reply' && $s2['status'] === 'no_clean_answer',
+	'under the next name it repeats with ms null and skipped_after mx', json_encode($s2));
+check(count(array_keys($sent, '10.9.9.2', true)) === 1 && count(array_keys($sent, '10.9.9.1', true)) === 2,
+	'the silent server was asked once; the other twice', json_encode($sent));
+check(mbs_verdict(array('status' => 'no_answer', 'answer' => array()), $second) === 'agree', 'the verdict reads as before');
+AuthoritativeDns::reset();
+
+// A zone with more addresses than rows (Cloudflare: 12), all silent: each is
+// asked once for the whole domain, and only the first six get a TCP probe.
+$sent = array();
+$eight = array();
+for ($i = 1; $i <= 8; $i++) { $eight[] = '10.8.8.' . $i; }
+AuthoritativeDns::reset();
+AuthoritativeDns::setNameservers($name, $eight);
+AuthoritativeDns::$sender = function (string $ip, string $packet) use (&$sent) { $sent[] = $ip; return null; };
+$silent = array();
+$r1 = mbs_authoritative('mx', $name, DNS_MX, $name, $silent);
+$r2 = mbs_authoritative('spf', $name, DNS_TXT, $name, $silent);
+$r3 = mbs_authoritative('dmarc', '_dmarc.' . $name, DNS_TXT, $name, $silent);
+check(count($sent) === 8 && count(array_unique($sent)) === 8, 'eight silent servers, three names: eight queries, one each', json_encode($sent));
+check(count($silent) === 8, 'every silent server is remembered, not only the first six');
+check(count(array_filter($silent, function ($w) { return $w['tcp_53'] !== null; })) === 6
+	&& $silent['10.8.8.7']['tcp_53'] === null && $silent['10.8.8.8']['tcp_53'] === null,
+	'only the first six get the TCP probe');
+check(count($r1) === 6 && count($r2) === 6 && count($r3) === 6 && ($r2[0]['skipped_after'] ?? '') === 'mx',
+	'each name still carries six rows, the later ones as skipped');
+AuthoritativeDns::reset();
 
 // ---------------------------------------------------------------------------
 section('MailTestProbe: refusals before anything is sent');

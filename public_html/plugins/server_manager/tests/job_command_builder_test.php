@@ -3252,6 +3252,19 @@ section('The running list\'s words: listening_sockets, container_inventory, mail
 	check(strpos($said, 'for one domain') !== false && strpos($said, 'mailbox_status') !== false,
 		'and is told it needs a newer agent for one domain', $said);
 
+	// mail_log_summary: one hours, 1 to 168, behind the owner's log switch.
+	check(JobCommandBuilder::build_mail_log_summary_primitive($rl_node, 24) === array('primitive' => 'mail_log_summary', 'params' => array('hours' => 24))
+		&& JobCommandBuilder::build_mail_log_summary_primitive($rl_node, '168')['params']['hours'] === 168,
+		'mail_log_summary carries one hours and nothing else');
+	foreach (array(0, 169, -1, 'x', 1.5) as $bad) {
+		$said = '';
+		try { JobCommandBuilder::build_mail_log_summary_primitive($rl_node, $bad); } catch (Exception $e) { $said = $e->getMessage(); }
+		check(strpos($said, 'between 1 and 168') !== false, 'mail_log_summary refuses hours ' . var_export($bad, true), $said);
+	}
+	$said = '';
+	try { JobCommandBuilder::build_mail_log_summary($rl_old, 24); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'mail_log_summary') !== false, 'an agent without the word is told it needs a newer one', $said);
+
 	// mail_test_send: one required domain, an operate word.
 	$mts = JobCommandBuilder::build_mail_test_send($rl_node, 'Example.com');
 	check($mts === array('primitive' => 'mail_test_send', 'params' => array('domain' => 'example.com')),

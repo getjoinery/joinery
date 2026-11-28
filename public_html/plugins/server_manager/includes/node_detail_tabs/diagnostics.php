@@ -12,6 +12,7 @@
  *
  * In scope: $node, $page, $session, $base_url, $may_change.
  *
+ * @version 1.13 - Logs: Mail received (24 h / 7 days), what the site's Postfix did with its mail (mail_log_summary, agent 1.136.0)
  * @version 1.12 - The machine: Anyone busy (quiet_check), what the Reboot When Quiet task asks before a reboot
  * @version 1.11 - Logs: the error table among the log tables, and Script policy refusals (7 days) (agent 1.127.0)
  * @version 1.10 - The machine: Mailbox (mailbox_status), the spam-learning counts and the site's mail domains
@@ -247,6 +248,22 @@ if ($has_site_log || $has_log_table || $has_file_head || $has_log_count) {
 				$fw_vw->end_form();
 				echo '</div>';
 			}
+		}
+		// What the site's own Postfix did with its mail: compiled counts and
+		// the newest outcomes' domains, never an address (mail_log_summary).
+		if ($diag_mailbox && JobCommandBuilder::has_primitive($node, 'mail_log_summary')) {
+			echo '<div>';
+			foreach (array(24 => 'Mail received (24 h)', 168 => 'Mail received (7 days)') as $mls_hours => $mls_label) {
+				$fw_ml = $page->getFormWriter('mail_log_summary_form_' . $mls_hours, ['action' => $base_url . '&tab=diagnostics']);
+				$fw_ml->begin_form();
+				$fw_ml->hiddeninput('action', '', ['id' => 'mail_log_summary_action_' . $mls_hours, 'value' => 'mail_log_summary']);
+				$fw_ml->hiddeninput('hours', '', ['id' => 'mail_log_summary_hours_' . $mls_hours, 'value' => (string)$mls_hours]);
+				$fw_ml->hiddeninput(SmAdminCsrf::FIELD, '', ['id' => 'mail_log_summary_csrf_' . $mls_hours, 'value' => SmAdminCsrf::token()]);
+				$fw_ml->submitbutton('btn_mail_log_summary_' . $mls_hours, $mls_label, ['class' => 'btn btn-sm btn-outline-secondary',
+					'helptext' => $mls_hours === 24 ? 'What this machine\'s mail server did with mail sent to the site: delivered, deferred or refused and why, and the newest 20 with their domains. Counts only, never an address.' : '']);
+				$fw_ml->end_form();
+			}
+			echo '</div>';
 		}
 		// The converger's journal: on a host with a data root it is the only
 		// record of which installer failed a run, and the converger exits 0

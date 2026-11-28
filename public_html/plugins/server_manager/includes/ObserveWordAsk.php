@@ -17,6 +17,7 @@
  * primitive than the word asked for is refused here, so the list cannot be
  * widened to an operate word by a builder's mapping.
  *
+ * @version 1.4.0 - mail_log_summary, hours passed through (specs/mailbox_diagnosis_words.md WP4)
  * @version 1.3.0 - quiet_check (specs/automatic_reboot_when_quiet.md)
  * @version 1.2.0 - log_table_tail takes kind (the error table's kinds, agent 1.127.0)
  * @version 1.1.0 - mailbox_status, sent as spam_learning_status to an older agent
@@ -29,7 +30,7 @@ class ObserveWordAsk {
 		'host_report', 'check_status', 'install_report', 'site_log', 'site_log_count', 'log_table_tail',
 		'unit_journal', 'site_converger', 'file_head', 'disk_usage', 'largest_files', 'schema_probe',
 		'page_probe', 'container_inventory', 'listening_sockets', 'site_state_report', 'net_health',
-		'web_workers', 'mailbox_status', 'relay_status', 'quiet_check',
+		'web_workers', 'mailbox_status', 'relay_status', 'quiet_check', 'mail_log_summary',
 	);
 
 	/** The older observe word a builder may send instead, to an agent that predates the word asked for. */
@@ -109,6 +110,9 @@ class ObserveWordAsk {
 				$built = JobCommandBuilder::build_mailbox_status($node, isset($in['domain']) ? (string)$in['domain'] : null);
 				break;
 			case 'relay_status':        $built = JobCommandBuilder::build_relay_status($node); break;
+			case 'mail_log_summary':
+				$built = JobCommandBuilder::build_mail_log_summary($node, isset($in['hours']) && $in['hours'] !== '' ? $in['hours'] : 24);
+				break;
 			default:
 				throw new Exception("'$word' is not an observe word that can be asked from here.");
 		}

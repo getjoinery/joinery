@@ -1300,6 +1300,17 @@ content. Both tables carry a `LOWER()` expression index for these queries:
 stored addresses are genuinely mixed-case, so a plain index on the raw column
 would not be used.
 
+The addresses asked about come from `mailbox_setup_hint_addresses($domain,
+$aliases)`: a domain's enabled aliases, lowercased, none for an IMAP-source
+domain. The lookup is `mailbox_arrivals_ever($addresses)`, which returns the
+addresses that have ever received mail, or null when the lookup fails; the badge
+reads null as every address having received mail, so a brand-new install is not
+badged all over. The agent's `mailbox_status` word counts the same addresses
+with the same two functions, plus `mailbox_arrivals_recent($addresses)`: messages
+in the last seven days and when the newest arrived, each counted once (every
+stored inbound message, plus every log row that stored none, whatever its
+status). The word asks that per domain, once per ask, never on a page view.
+
 The persisted tier comes from the **Check inbound domain DNS setup** scheduled
 task (`CheckDomainSetup`, daily), which runs the DNS-only check entry point
 against each enabled non-IMAP domain and stores `ied_setup_status` plus

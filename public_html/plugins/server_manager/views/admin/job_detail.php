@@ -6,6 +6,8 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.49 - mail_log_summary: what the site's Postfix did with its mail, counts and the newest 20 outcomes
+ * @version 1.48 - mailbox_status: why each nameserver gave no clean answer (with ms and TCP 53), and each domain's arrival counts
  * @version 1.47 - saved messages are shown once, by the admin header (they were shown twice)
  * @version 1.46 - site_log host_converger: a host that logs the converger to the journal says so and points at unit_journal
  * @version 1.46 - quiet_check: quiet or busy, what said busy, and each signal's count
@@ -1006,7 +1008,7 @@ if ($result) {
 					: ($r['node']['status'] === 'no_answer' ? 'no answer <span class="text-muted small">(time left unknown)</span>' : 'lookup failed');
 				$auth_cell = array();
 				foreach ($r['authoritative'] as $a) {
-					$auth_cell[] = htmlspecialchars($a['nameserver']) . ': ' . ($a['status'] === 'answer' ? htmlspecialchars(implode(' | ', $a['answer'])) : str_replace('_', ' ', $a['status']));
+					$auth_cell[] = htmlspecialchars($a['nameserver']) . ': ' . ($a['status'] === 'answer' ? htmlspecialchars(implode(' | ', $a['answer'])) : htmlspecialchars(JobResultProcessor::mailbox_ns_words($a)));
 				}
 				echo '<tr><td>' . htmlspecialchars($r['type'] . ' ' . $r['name']) . '</td><td class="small svm-break-all">' . $node_cell . '</td><td class="small svm-break-all">'
 					. ($auth_cell ? implode('<br>', $auth_cell) : 'none found') . '</td><td class="small">' . htmlspecialchars($verdicts[$r['verdict']] ?? $r['verdict'])
@@ -1043,6 +1045,55 @@ if ($result) {
 			if (!empty($result_data['checked_at'])) {
 				echo '<div class="small text-muted mt-1">Checked ' . htmlspecialchars(LibraryFunctions::convert_time(str_replace(array('T', 'Z'), array(' ', ''), $result_data['checked_at']), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A')) . '.</div>';
 			}
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'mail_log_summary' && !empty($result_data['read'])) {
+		// What the site's Postfix did with its mail: compiled counts, and the
+		// newest outcomes with their domains (never an address).
+		$mls_h = is_int($result_data['hours'] ?? null) ? $result_data['hours'] : null;
+		echo '<div class="card mb-3"><div class="card-header"><strong>Mail received' . ($mls_h ? ' (last ' . ($mls_h % 24 === 0 && $mls_h > 24 ? ($mls_h / 24) . ' days' : $mls_h . ' h') . ')' : '') . '</strong></div><div class="card-body">';
+		$mls_refusals = array('no_postfix' => 'This site\'s mail is not received by a mail server on this machine (the Mailbox plugin is off, or mail comes through the relay), so there is no mail log to read.',
+			'journal_unreadable' => 'The machine\'s journal could not be read.');
+		if (!empty($result_data['refused'])) {
+			echo '<div class="text-muted">' . htmlspecialchars($mls_refusals[$result_data['refused']] ?? 'The node refused.') . '</div>';
+		} else {
+			$c = $result_data['counts'];
+			$rf = $c['refused'];
+			$reason_words = array('blocklist' => 'on a blocklist', 'relay_denied' => 'for another domain (relay refused)', 'unknown_recipient' => 'no such address',
+				'lookup_failure' => 'the address lookup failed (nothing arrives, nothing bounces)', 'tls' => 'encryption failed', 'other' => 'other');
+			$outcome_words = array('delivered' => 'delivered', 'deferred' => 'deferred', 'handler_refused' => 'refused by the site', 'expired' => 'given up on', 'refused' => 'refused');
+			echo '<div>Delivered <strong>' . number_format($c['delivered']) . '</strong>; waiting for a retry ' . number_format($c['deferred'])
+				. '; given up on at the queue lifetime ' . number_format($c['expired'] ?? 0)
+				. '; refused by the site\'s delivery handler ' . number_format($c['handler_refused']) . '; refused by the mail server ' . number_format(array_sum($rf)) . '.</div>';
+			$parts = array();
+			foreach ($rf as $k => $n) {
+				if ($n > 0) { $parts[] = htmlspecialchars($reason_words[$k] ?? $k) . ': ' . number_format($n); }
+			}
+			if ($parts) {
+				echo '<div class="small mt-1">Refused: ' . implode('; ', $parts) . '.</div>';
+			}
+			echo '<div class="small text-muted mt-1">' . number_format($result_data['connections']) . ' connections from other servers, '
+				. number_format($result_data['dropped_connections']) . ' of which hung up before sending anything (scanners; not refusals).</div>';
+			if ($result_data['recent']) {
+				echo '<table class="table table-sm mt-2 mb-0"><thead><tr><th>Time (UTC)</th><th>Outcome</th><th>From</th><th>To</th></tr></thead><tbody>';
+				foreach ($result_data['recent'] as $row) {
+					$what = $outcome_words[$row['outcome']] ?? $row['outcome'];
+					if ($row['outcome'] === 'refused') {
+						$what .= ': ' . ($reason_words[$row['reason']] ?? $row['reason']) . ($row['code'] ? ' (' . $row['code'] . ')' : '');
+					}
+					echo '<tr><td class="small">' . htmlspecialchars(str_replace(array('T', 'Z'), array(' ', ''), $row['time'])) . '</td><td>' . htmlspecialchars($what)
+						. '</td><td>' . htmlspecialchars($row['from_domain'] ?? '—') . '</td><td>' . htmlspecialchars($row['to_domain'] ?? '—') . '</td></tr>';
+				}
+				echo '</tbody></table>';
+			}
+			echo '<div class="small text-muted mt-2">' . (!empty($result_data['covers_window'])
+				? 'The machine\'s journal covers the whole window.'
+				: ($result_data['covers_from'] !== null
+					? 'The machine\'s journal begins at ' . htmlspecialchars(str_replace(array('T', 'Z'), array(' ', ' UTC'), $result_data['covers_from'])) . '; zeros mean no mail came only from then on.'
+					: 'How far back the machine\'s journal reaches could not be read.'))
+				. (!empty($result_data['truncated']) ? ' Only the newest 50,000 journal entries were read.' : '')
+				. ' A message the site deferred and later dropped counts as delivered here; the drop is in the site\'s error log.</div>';
 		}
 		echo '</div></div>';
 		$result_data = null;
@@ -1099,7 +1150,7 @@ if ($result) {
 				echo '<div class="mt-3"><strong>Mail domains</strong></div><table class="table table-sm mb-0"><tbody>';
 				foreach ($result_data['domains'] as $md) {
 					echo '<tr><td>' . htmlspecialchars($md['domain']) . '</td><td class="small text-muted">' . ($md['enabled'] ? 'enabled' : 'disabled')
-						. ($md['protected'] ? ', send protection on' : '') . '</td><td>'
+						. ($md['protected'] ? ', send protection on' : '') . htmlspecialchars(JobResultProcessor::mailbox_arrival_words($md)) . '</td><td>'
 						. '<form method="post" action="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$job->get('mjb_mgn_managed_node_id') . '" class="jy-inline-form">'
 						. '<input type="hidden" name="action" value="mailbox_status"><input type="hidden" name="domain" value="' . htmlspecialchars($md['domain']) . '">'
 						. SmAdminCsrf::field()

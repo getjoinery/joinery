@@ -23,6 +23,7 @@
  * older than the staleness window is not shown at all — pointing at a domain
  * that was fixed last week wastes the attention this exists to buy.
  *
+ * @version 1.3 - mailbox_setup_hint_addresses(), mailbox_arrivals_ever() and mailbox_arrivals_recent() shared with the mailbox_status agent word
  * @version 1.2 - a mailbox nothing has reached yet is badged 'no mail yet', not 'needs attention'
  * @version 1.1 - the half-finished signal is a requested, unfinished sending lock
  */
@@ -49,14 +50,11 @@ function mailbox_setup_hints(array $tree): array {
 	// deployment has ever received.
 	$addresses = array();
 	foreach ($tree as $node) {
-		if ((bool)$node['domain']->get('ied_is_imap_source')) {
-			continue;
-		}
+		$aliases = array();
 		foreach ($node['mailboxes'] as $mailbox) {
-			if ($mailbox['alias']->get('iea_is_enabled')) {
-				$addresses[] = strtolower((string)$mailbox['alias']->get_full_address());
-			}
+			$aliases[] = $mailbox['alias'];
 		}
+		$addresses = array_merge($addresses, mailbox_setup_hint_addresses($node['domain'], $aliases));
 	}
 	$arrivals = _mailbox_setup_arrivals($addresses);
 
@@ -140,11 +138,52 @@ function _mailbox_setup_verdict_is_fresh(string $checked_time): bool {
 }
 
 /**
- * Which of these addresses have ever received mail.
+ * The addresses the Accounts badge asks "has mail ever arrived" about, for one
+ * domain: its enabled aliases, lowercased, none for an IMAP-source domain (an
+ * IMAP-pull mailbox has no inbound delivery path of its own). The mailbox_status
+ * agent word counts the same list, so the two can never disagree about which
+ * mailboxes a domain has.
  *
- * Two queries, not one per mailbox, and both bounded by the addresses actually
- * on screen — so the cost tracks the size of the listing, not the size of the
- * mail store. Each is an index lookup against the LOWER() expression indexes
+ * @param iterable $aliases InboundEmailAlias rows of $domain (any that are not enabled are left out).
+ * @return string[]
+ */
+function mailbox_setup_hint_addresses(InboundEmailDomain $domain, iterable $aliases): array {
+	if ((bool)$domain->get('ied_is_imap_source')) {
+		return array();
+	}
+	$out = array();
+	foreach ($aliases as $alias) {
+		if ($alias->get('iea_is_enabled')) {
+			$out[] = strtolower((string)$alias->get_full_address());
+		}
+	}
+	return $out;
+}
+
+/**
+ * Which of these addresses have ever received mail, for the badge: an address
+ * the lookup could not answer for counts as received, so a brand-new install
+ * whose tables are absent is not badged all over with false alarms.
+ *
+ * @param string[] $addresses Lowercased addresses to ask about.
+ * @param callable|null $lookup Stands in for mailbox_arrivals_ever(); tests only.
+ * @return array<string,true>
+ */
+function _mailbox_setup_arrivals(array $addresses, ?callable $lookup = null): array {
+	$seen = ($lookup ?? 'mailbox_arrivals_ever')($addresses);
+	if ($seen === null) {
+		return array_fill_keys(array_values(array_unique(array_filter($addresses))), true);
+	}
+	return $seen;
+}
+
+/**
+ * Which of these addresses have ever received mail, or null when the lookup
+ * failed.
+ *
+ * Two queries, not one per mailbox, and both bounded by the addresses asked
+ * about — so the cost tracks the size of the listing, not the size of the mail
+ * store. Each is an index lookup against the LOWER() expression indexes
  * declared on the two tables.
  *
  * Two sources because two ingest paths exist: the colocated path writes a
@@ -153,9 +192,9 @@ function _mailbox_setup_verdict_is_fresh(string $checked_time): bool {
  * deployment's whole estate as never having received anything.
  *
  * @param string[] $addresses Lowercased addresses to ask about.
- * @return array<string,true>
+ * @return array<string,true>|null
  */
-function _mailbox_setup_arrivals(array $addresses): array {
+function mailbox_arrivals_ever(array $addresses): ?array {
 	$addresses = array_values(array_unique(array_filter($addresses)));
 	if (empty($addresses)) {
 		return array();
@@ -182,10 +221,51 @@ function _mailbox_setup_arrivals(array $addresses): array {
 			if ($addr !== null && $addr !== '') { $seen[(string)$addr] = true; }
 		}
 	} catch (\Throwable $e) {
-		// Tables absent on a brand-new install. Treat every address as having
-		// received mail rather than badging the whole listing with false alarms.
 		error_log('mailbox_setup_hints: arrival lookup failed: ' . $e->getMessage());
-		return array_fill_keys($addresses, true);
+		return null;
 	}
 	return $seen;
+}
+
+/**
+ * How much mail reached these addresses in the last $days days, and when the
+ * newest arrived: {received: int, last_time: ?string (UTC, as stored)}, or null
+ * when the lookup failed. Each message counts once: every stored inbound
+ * message, plus every log row that stored none (a colocated delivery logged but
+ * not kept, such as a forward-only alias). A log row counts whatever its
+ * status, as mailbox_arrivals_ever() does: a refused message still reached the
+ * site. For an agent word's single ask, never a page view.
+ *
+ * @param string[] $addresses Lowercased addresses to ask about.
+ */
+function mailbox_arrivals_recent(array $addresses, int $days = 7): ?array {
+	$addresses = array_values(array_unique(array_filter($addresses)));
+	if (empty($addresses)) {
+		return array('received' => 0, 'last_time' => null);
+	}
+	$days = max(1, $days);
+	$placeholders = implode(',', array_fill(0, count($addresses), '?'));
+	$since = gmdate('Y-m-d H:i:s', time() - $days * 86400);
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+
+		$stmt = $db->prepare("SELECT count(*) FILTER (WHERE iem_received_time >= ?) AS recent, max(iem_received_time) AS newest "
+			. "FROM iem_inbound_email_messages WHERE iem_direction = 'inbound' AND lower(iem_recipient) IN (" . $placeholders . ')');
+		$stmt->execute(array_merge(array($since), $addresses));
+		$stored = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+
+		$stmt = $db->prepare('SELECT count(*) FILTER (WHERE iel_create_time >= ?) AS recent, max(iel_create_time) AS newest '
+			. 'FROM iel_inbound_email_logs WHERE iel_iem_inbound_email_message_id IS NULL '
+			. 'AND lower(iel_to_address) IN (' . $placeholders . ')');
+		$stmt->execute(array_merge(array($since), $addresses));
+		$logged = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+	} catch (\Throwable $e) {
+		error_log('mailbox_setup_hints: recent arrival lookup failed: ' . $e->getMessage());
+		return null;
+	}
+	$times = array_filter(array((string)($stored['newest'] ?? ''), (string)($logged['newest'] ?? '')));
+	return array(
+		'received'  => (int)($stored['recent'] ?? 0) + (int)($logged['recent'] ?? 0),
+		'last_time' => $times ? max($times) : null,
+	);
 }

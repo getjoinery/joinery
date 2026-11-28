@@ -23,6 +23,7 @@
  * all green for this mailbox", so ANYTHING the tab paints amber or red counts,
  * severity included. What stays silent there is only the absence of information.
  *
+ * @version 1.4 - the badge's address list (shared with the mailbox_status word) and its failed-lookup rule
  * @version 1.3 - mail-access grading, and the remembered verdict's
  *   remember/recall/forget contract
  */
@@ -201,6 +202,44 @@ check(InboundImapAccount::requiredSendScopes('google') === array('https://mail.g
 check(InboundImapAccount::requiredSendScopes('microsoft')
 		=== array('https://outlook.office365.com/SMTP.Send'),
 	'Microsoft needs its own send scope alongside IMAP');
+
+// ---------------------------------------------------------------------------
+section('The badge and the mailbox_status word ask about the same addresses');
+// ---------------------------------------------------------------------------
+// One list, one function: mailbox_setup_hints() builds its arrival lookup from
+// mailbox_setup_hint_addresses(), and the agent word counts the same call. (A
+// catch-all has no alias row of its own, so neither ever counts one.)
+
+/** An alias row as the two callers see it: enabled or not, and its address. */
+function sv_alias(string $address, bool $enabled, string $mode) {
+	return new class($address, $enabled, $mode) {
+		private $a; private $e; private $m;
+		public function __construct($a, $e, $m) { $this->a = $a; $this->e = $e; $this->m = $m; }
+		public function get($f) { return $f === 'iea_is_enabled' ? $this->e : ($f === 'iea_delivery_mode' ? $this->m : null); }
+		public function get_full_address() { return $this->a; }
+	};
+}
+$sv_domain = new InboundEmailDomain(NULL);
+$sv_domain->set('ied_domain', 'sv.example');
+$sv_domain->set('ied_is_imap_source', false);
+$sv_aliases = array(
+	sv_alias('Stored@SV.example', true, 'store'),
+	sv_alias('fwd@sv.example', true, 'forward'),
+	sv_alias('off@sv.example', false, 'store'),
+);
+check(mailbox_setup_hint_addresses($sv_domain, $sv_aliases) === array('stored@sv.example', 'fwd@sv.example'),
+	'enabled aliases, a forward-only one included, lowercased; a disabled one left out');
+$sv_imap = new InboundEmailDomain(NULL);
+$sv_imap->set('ied_domain', 'imap.example');
+$sv_imap->set('ied_is_imap_source', true);
+check(mailbox_setup_hint_addresses($sv_imap, $sv_aliases) === array(), 'an IMAP-source domain has none to ask about');
+
+$asked_with = null;
+$seen = _mailbox_setup_arrivals(array('stored@sv.example', 'fwd@sv.example'), function ($a) use (&$asked_with) { $asked_with = $a; return null; });
+check($seen === array('stored@sv.example' => true, 'fwd@sv.example' => true),
+	'the badge still treats a failed lookup as every address having received mail');
+$seen = _mailbox_setup_arrivals(array('stored@sv.example'), function ($a) { return array(); });
+check($seen === array(), 'and a lookup that answered "none" is believed');
 
 // ---------------------------------------------------------------------------
 section('The remembered verdict');

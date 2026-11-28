@@ -6,7 +6,10 @@
  *
  * With no domain: the site's spam-learning counts (SpamLearning::status) and
  * the list of the site's own mail domains, so a caller learns which names it
- * may ask about without probing.
+ * may ask about without probing. Each domain carries how many enabled
+ * mailboxes it has, how many no mail has ever reached (the Accounts badge's
+ * question, over the same address list), how many messages reached it in the
+ * last 7 days and when the newest did: counts and one time, never an address.
  *
  * With a domain: one of the site's own mail domains, refused otherwise before
  * any lookup, so the node is never a DNS lookup service for names it does not
@@ -21,6 +24,11 @@
  *   - dns: a fixed list of names, each read twice: through this machine's own
  *     resolver (with the cached copy's time left) and from each of the zone's
  *     authoritative nameservers, plus which of the two the Setup tab reads.
+ *     Each nameserver row says why it gave no clean answer (a compiled word)
+ *     and how long it took; one that gave no reply is not asked again for the
+ *     domain's later names, and gets one empty TCP connection to port 53
+ *     (never to an inside-network address) so a reader can tell UDP dropped
+ *     from all DNS dropped.
  *   - send_outcomes: how the domain's mail left this site (MailSendOutcome),
  *     when that ledger exists.
  *
@@ -28,12 +36,22 @@
  * the Setup tab sees it. Prints one JSON object; exit 0 on an answer
  * (a refusal is an answer), 1 on an error, 2 on bad usage.
  *
+ * @version 1.2.0 - every silent nameserver skipped however many the zone has; tcp_53 unreachable; catch_all
+ * @version 1.1.0 - nameserver reason, ms, tcp_53 and skip-after-silence; per-domain arrival counts (specs/mailbox_diagnosis_words.md WP1-WP2)
  * @version 1.0.0 - the mailbox_status word (specs/agent_recipes_and_vocabulary.md, 2026-11-14)
  */
 
 if (PHP_SAPI !== 'cli') {
 	http_response_code(404);
 	exit(1);
+}
+
+/** The most TCP 53 probes one run makes, each up to 2 seconds. */
+const MBS_MAX_TCP_PROBES = 6;
+
+// A test loads the functions without running the word.
+if (defined('MBS_FUNCTIONS_ONLY')) {
+	return;
 }
 
 if (count($argv) > 2) {
@@ -111,22 +129,154 @@ function mbs_node_answer(string $name, int $type): array {
 	return array('status' => 'answer', 'answer' => mbs_values($records), 'ttl_left' => $ttl);
 }
 
-/** Each authoritative nameserver's answer, at most 6. */
-function mbs_authoritative(string $name, int $type, string $zone): array {
-	$out = array();
-	try {
-		foreach (AuthoritativeDns::lookupAll($name, $type, $zone) as $ip => $records) {
-			$out[] = $records === null
-				? array('nameserver' => (string)$ip, 'status' => 'no_clean_answer', 'answer' => array())
-				: array('nameserver' => (string)$ip, 'status' => $records ? 'answer' : 'no_answer', 'answer' => mbs_values($records));
-			if (count($out) >= 6) {
-				break;
+/**
+ * Is $ip loopback, private, link-local, shared (CGNAT), "this network" or
+ * unique-local, IPv4 or IPv6 (an IPv4-mapped IPv6 address read as its IPv4)?
+ * Anything that does not read as an address counts as inside.
+ */
+function mbs_inside_address(string $ip): bool {
+	$bin = @inet_pton($ip);
+	if ($bin === false) {
+		return true;
+	}
+	if (strlen($bin) === 16 && substr($bin, 0, 12) === str_repeat("\0", 10) . "\xff\xff") {
+		$bin = substr($bin, 12);
+	}
+	if (strlen($bin) === 4) {
+		$n = unpack('N', $bin)[1];
+		foreach (array(
+			array(0x7f000000, 8), array(0x0a000000, 8), array(0xac100000, 12), array(0xc0a80000, 16),
+			array(0xa9fe0000, 16), array(0x64400000, 10), array(0x00000000, 8),
+		) as list($net, $bits)) {
+			$mask = (0xffffffff << (32 - $bits)) & 0xffffffff;
+			if (($n & $mask) === $net) {
+				return true;
 			}
 		}
+		return false;
+	}
+	if ($bin === str_repeat("\0", 15) . "\x01" || $bin === str_repeat("\0", 16)) {
+		return true;   // ::1, ::
+	}
+	$first = ord($bin[0]);
+	$second = ord($bin[1]);
+	return ($first & 0xfe) === 0xfc                          // fc00::/7
+		|| ($first === 0xfe && ($second & 0xc0) === 0x80);     // fe80::/10
+}
+
+/**
+ * One empty TCP connection to $ip port 53, closed at once: open, closed (the
+ * server refused it at once), unreachable (this machine has no route to it:
+ * ENETUNREACH or EHOSTUNREACH, as a machine with no IPv6 gives for every IPv6
+ * address), timeout, or skipped for an inside-network address. Nothing is sent.
+ */
+function mbs_tcp_53(string $ip): string {
+	if (mbs_inside_address($ip)) {
+		return 'skipped';
+	}
+	$host = strpos($ip, ':') !== false ? '[' . $ip . ']' : $ip;
+	$errno = 0;
+	$errstr = '';
+	$started = microtime(true);
+	$sock = @stream_socket_client('tcp://' . $host . ':53', $errno, $errstr, 2);
+	if ($sock !== false) {
+		fclose($sock);
+		return 'open';
+	}
+	if ($errno === 101 || $errno === 113) {
+		return 'unreachable';
+	}
+	return ($errno === 110 || microtime(true) - $started >= 1.9) ? 'timeout' : 'closed';
+}
+
+/**
+ * Each authoritative nameserver's answer, at most 6 rows. $silent carries
+ * every one of the domain's servers that gave no reply, address => {record,
+ * tcp_53}: none is asked again, however many the zone has, and its row
+ * repeats with ms null and skipped_after naming the record it fell silent on.
+ * Only the first MBS_MAX_TCP_PROBES silent servers get the TCP probe; past
+ * that tcp_53 is absent.
+ */
+function mbs_authoritative(string $record, string $name, int $type, string $zone, array &$silent): array {
+	$out = array();
+	try {
+		$asked = AuthoritativeDns::probe($name, $type, $zone, array_keys($silent));
 	} catch (\Throwable $e) {
 		return array();
 	}
-	return $out;
+	foreach ($asked as $ip => $probe) {
+		$ip = (string)$ip;
+		$records = $probe['records'];
+		$row = $records === null
+			? array('nameserver' => $ip, 'status' => 'no_clean_answer', 'answer' => array())
+			: array('nameserver' => $ip, 'status' => $records ? 'answer' : 'no_answer', 'answer' => mbs_values($records));
+		$row['reason'] = $probe['reason'];
+		$row['ms'] = (int)$probe['ms'];
+		if ($probe['reason'] === 'no_reply') {
+			$probed = count(array_filter($silent, function ($w) { return $w['tcp_53'] !== null; }));
+			$silent[$ip] = array('record' => $record, 'tcp_53' => $probed < MBS_MAX_TCP_PROBES ? mbs_tcp_53($ip) : null);
+		}
+		if (isset($silent[$ip]) && $silent[$ip]['tcp_53'] !== null) {
+			$row['tcp_53'] = $silent[$ip]['tcp_53'];
+		}
+		$out[] = $row;
+	}
+	foreach ($silent as $ip => $was) {
+		if ($was['record'] === $record) {
+			continue;   // fell silent on this name: its row is above
+		}
+		$skipped = array('nameserver' => (string)$ip, 'status' => 'no_clean_answer', 'answer' => array(),
+			'reason' => 'no_reply', 'ms' => null, 'skipped_after' => $was['record']);
+		if ($was['tcp_53'] !== null) {
+			$skipped['tcp_53'] = $was['tcp_53'];
+		}
+		$out[] = $skipped;
+	}
+	return array_slice($out, 0, 6);
+}
+
+/**
+ * Whether the domain takes mail for addresses with no mailbox (a catch-all that
+ * stores, or forwards to an address). Such mail is not in the counts below,
+ * which are over the mailboxes only.
+ */
+function mbs_has_catch_all(InboundEmailDomain $d): bool {
+	return (string)$d->get('ied_catch_all_mode') === InboundEmailDomain::CATCHALL_STORE
+		|| trim((string)$d->get('ied_catch_all_address')) !== '';
+}
+
+/**
+ * The domain's arrival counts over the Accounts badge's own address list
+ * (its mailboxes: catch-all mail is not counted; catch_all says it exists).
+ * arrivals: read, or unreadable (and the counts null) when a lookup failed.
+ * The two lookups are parameters only so a test can make them fail.
+ */
+function mbs_domain_arrivals(InboundEmailDomain $d, ?callable $ever_fn = null, ?callable $recent_fn = null): array {
+	$ever_fn = $ever_fn ?? 'mailbox_arrivals_ever';
+	$recent_fn = $recent_fn ?? 'mailbox_arrivals_recent';
+	$aliases = new MultiInboundEmailAlias(array('domain_id' => (int)$d->key, 'deleted' => false), array('iea_alias' => 'ASC'));
+	$addresses = array_values(array_unique(mailbox_setup_hint_addresses($d, $aliases)));
+	$capped = count($addresses) > 1000;
+	$addresses = array_slice($addresses, 0, 1000);
+	$ever = $ever_fn($addresses);
+	$recent = $ever === null ? null : $recent_fn($addresses, 7);
+	if ($ever === null || $recent === null) {
+		return array('catch_all' => mbs_has_catch_all($d), 'mailboxes' => count($addresses), 'mailboxes_never_received' => null, 'received_7d' => null,
+			'last_received_time' => null, 'arrivals' => 'unreadable', 'capped' => $capped);
+	}
+	$last = null;
+	if ($recent['last_time'] !== null && ($ts = strtotime($recent['last_time'] . ' UTC')) !== false) {
+		$last = gmdate('Y-m-d\TH:i\Z', $ts);
+	}
+	return array(
+		'catch_all'                => mbs_has_catch_all($d),
+		'mailboxes'                => count($addresses),
+		'mailboxes_never_received' => count(array_diff($addresses, array_keys($ever))),
+		'received_7d'              => (int)$recent['received'],
+		'last_received_time'       => $last,
+		'arrivals'                 => 'read',
+		'capped'                   => $capped,
+	);
 }
 
 /** How the side by side reads: the node agrees, is stale, or the zone itself disagrees. */
@@ -155,6 +305,7 @@ try {
 		echo json_encode(array('mailbox' => 'inactive')) . "\n";
 		exit(0);
 	}
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
 
 	if ($domain === '') {
 		$domains = array();
@@ -166,7 +317,7 @@ try {
 				'domain'    => (string)$d->get('ied_domain'),
 				'enabled'   => (bool)$d->get('ied_is_enabled'),
 				'protected' => (bool)$d->get('ied_is_protected_identity'),
-			);
+			) + mbs_domain_arrivals($d);
 			if (count($domains) >= 100) {
 				break;
 			}
@@ -213,9 +364,10 @@ try {
 	// (InboundEmailSetupCheck registers them), falling back to this machine's
 	// resolver when they do not answer cleanly.
 	$dns = array();
+	$silent = array();
 	foreach (mbs_dns_names($model) as list($what, $name, $type_label, $type)) {
 		$node = mbs_node_answer($name, $type);
-		$auth = mbs_authoritative($name, $type, $domain);
+		$auth = mbs_authoritative($what, $name, $type, $domain, $silent);
 		$dns[] = array(
 			'record'        => $what,
 			'name'          => $name,

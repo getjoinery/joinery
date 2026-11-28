@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.179 - build_mail_log_summary: what the site's Postfix did with its mail, compiled counts (agent 1.136.0,
+ *                specs/mailbox_diagnosis_words.md WP3)
  * @version 1.178 - a bare-metal install whose install.sh signs root in to PostgreSQL by peer is handed no postgres password
  *                 and needs no /root/.joinery_postgres_password (specs/postgres_superuser_peer_auth.md)
  * @version 1.177 - build_hosted_ai_settings: a site's AI credit key, one value, to an agent of 1.135.0 or later (specs/hosted_ai_credit.md)
@@ -3925,6 +3927,34 @@ class JobCommandBuilder {
 		throw new Exception(
 			"Node '{$node->get('mgn_slug')}' cannot report its mailbox" . ($domain !== '' ? ' for one domain' : '') . '. '
 			. AgentVocabulary::needs_newer_agent_text($node, ['mailbox_status']));
+	}
+
+	/** The hours a mail_log_summary may cover; the node checks the same range. */
+	const MAIL_LOG_SUMMARY_MAX_HOURS = 168;
+
+	/**
+	 * What this machine's own Postfix did with the mail sent to the site over
+	 * the last $hours (1 to 168): connections, deliveries, deferrals, the
+	 * handler's refusals and Postfix's by compiled reason, and the newest 20
+	 * outcomes with their domains. Compiled counts only, never an address, IP
+	 * or remote text. PRIMITIVE ONLY, a site word, behind the owner's
+	 * log-access switch.
+	 */
+	public static function build_mail_log_summary($node, $hours = 24) {
+		if (!self::has_primitive($node, 'mail_log_summary')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot summarise its mail log. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['mail_log_summary']));
+		}
+		self::assert_log_access($node);
+		return self::build_mail_log_summary_primitive($node, $hours);
+	}
+
+	public static function build_mail_log_summary_primitive($node, $hours = 24) {
+		if (!is_numeric($hours) || (int)$hours != $hours || (int)$hours < 1 || (int)$hours > self::MAIL_LOG_SUMMARY_MAX_HOURS) {
+			throw new Exception('Hours must be between 1 and ' . self::MAIL_LOG_SUMMARY_MAX_HOURS . '.');
+		}
+		return ['primitive' => 'mail_log_summary', 'params' => ['hours' => (int)$hours]];
 	}
 
 	public static function build_mailbox_status_primitive($node, $domain = '') {
