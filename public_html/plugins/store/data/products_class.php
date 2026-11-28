@@ -28,6 +28,8 @@ class BasicProductRequirementException extends SystemBaseException {}
  * this site does not register, and an ownership tag on a product with a subscription version. Every
  * writer that calls it keeps those rules: the admin form, the REST create and update, content packs.
  *
+ * @version 1.13 - get_readable_price() shows a user-priced version's range ('$5 to $500'), not the stored
+ *                price the buyer never pays; a product with several versions spans their ranges
  * @version 1.12 - a user-priced version's minimum and maximum: validate_form() and get_price() refuse an
  *                amount outside them; the amount box shows the range, is sized to the maximum, and
  *                appears beside the version dropdown when a product has several versions
@@ -338,31 +340,43 @@ public function get_requirement_info($output='text') {
 				//WE WANT ONLY THE PRICE OF A SPECIFIC PRODUCT VERSION
 				foreach ($versions as $version) {
 					if ($version->key == $product_version_id) {	
-						return $currency_symbol.$version->get('prv_version_price');
+						return $version->readable_price($currency_symbol);
 					} 
 				}				
 			}
 			else if($this->count_product_versions() == 1){
 				$version = $versions->get(0);
-				return $currency_symbol.$version->get('prv_version_price');
+				return $version->readable_price($currency_symbol);
 			}
 			 
 			else{
+				// A user-priced version spans its minimum to its maximum; with no
+				// maximum the top is open, and the range reads 'From' its bottom.
 				$low_price = NULL;
 				$high_price = NULL;
+				$open_top = false;
 				foreach ($versions as $version) {
 					if ($version->get('prv_status')) {
-						
-						if(!$low_price || $version->get('prv_version_price') < $low_price){
-							$low_price = $version->get('prv_version_price');
+						if ($version->get('prv_price_type') === 'user') {
+							$lo = $version->get('prv_min_price');
+							$hi = $version->get('prv_max_price');
+							$lo = ($lo === NULL || $lo === '') ? NULL : $lo;
+							if ($hi === NULL || $hi === '') { $open_top = true; $hi = NULL; }
+						} else {
+							$lo = $hi = $version->get('prv_version_price');
 						}
-						
-						if(!$high_price || $version->get('prv_version_price') > $high_price){
-							$high_price = $version->get('prv_version_price');
+						if($lo !== NULL && (!$low_price || $lo < $low_price)){
+							$low_price = $lo;
+						}
+						if($hi !== NULL && (!$high_price || $hi > $high_price)){
+							$high_price = $hi;
 						}
 					} 
 				}
 				
+				if($low_price && $open_top){
+					return 'From ' . $currency_symbol . $low_price;
+				}
 				if($low_price && $high_price){
 					return $currency_symbol.$low_price . ' - ' . $currency_symbol.$high_price;
 				}

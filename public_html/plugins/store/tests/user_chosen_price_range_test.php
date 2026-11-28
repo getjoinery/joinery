@@ -31,9 +31,12 @@
  *                          clears it for any other.
  *   7. The cart view     — shows the typed amount as "Amount" and keeps
  *                          "Donation Amount" for the donation product.
+ *   8. The shown price   — get_readable_price() shows a user-priced version's
+ *                          range, never its stored price; none with no range.
  *
  * Run: php plugins/store/tests/user_chosen_price_range_test.php
  *
+ * @version 1.2 - section 8, the shown price of a user-priced version
  * @version 1.1 - the admin identity is set again after the forms render (a started session replaces $_SESSION)
  * @version 1.0
  */
@@ -318,5 +321,41 @@ check(strpos($cart_source, "\$meta_rows['Amount'] = \$currency_symbol . htmlspec
 	'the cart shows a typed amount as Amount');
 check(preg_match("/user_price'\\]\\) && \\\$product->is_optional_donation\\(\\)\\) \\{\\s*\\\$meta_rows\\['Donation Amount'\\]/", $cart_source) === 1,
 	'and keeps Donation Amount for the donation product');
+
+section('The shown price');
+// ---------------------------------------------------------------------------
+
+$shown = ucp_product('Shown');
+$shown_v = ucp_version($shown, 'Any amount', 'user', '10.00', '5', '500');
+check($shown->get_readable_price() === '$5 to $500',
+	'a single user-priced version shows its range, not its stored price', var_export($shown->get_readable_price(), true));
+check($shown->get_readable_price($shown_v->key) === '$5 to $500',
+	'and so does the same version asked for by id');
+
+$min_only = ucp_product('MinOnly');
+ucp_version($min_only, 'At least', 'user', '10.00', '5.50', NULL);
+check($min_only->get_readable_price() === '$5.50 or more', 'a minimum alone reads as or more', var_export($min_only->get_readable_price(), true));
+
+$max_only = ucp_product('MaxOnly');
+ucp_version($max_only, 'At most', 'user', '10.00', NULL, '50');
+check($max_only->get_readable_price() === 'Up to $50', 'a maximum alone reads as up to', var_export($max_only->get_readable_price(), true));
+
+$no_range = ucp_product('NoRange');
+ucp_version($no_range, 'Anything', 'user', '10.00');
+check($no_range->get_readable_price() === false, 'no range: no price is shown at all', var_export($no_range->get_readable_price(), true));
+
+$spread = ucp_product('Spread');
+ucp_version($spread, 'Standard', 'single', '30.00');
+ucp_version($spread, 'Your amount', 'user', '10.00', '5', '500');
+check($spread->get_readable_price() === '$5.00 - $500.00',
+	'several versions span the user range and the fixed price', var_export($spread->get_readable_price(), true));
+
+$open_top = ucp_product('OpenTop');
+ucp_version($open_top, 'Standard', 'single', '30.00');
+ucp_version($open_top, 'Your amount', 'user', '10.00', '5', NULL);
+check($open_top->get_readable_price() === 'From $5.00',
+	'a user version with no maximum opens the top of the span', var_export($open_top->get_readable_price(), true));
+
+check($plain->get_readable_price() === '$10.00 - $20.00', 'fixed versions alone read as before', var_export($plain->get_readable_price(), true));
 
 harness_finish();

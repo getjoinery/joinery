@@ -130,6 +130,32 @@ public function is_subscription(){
 	}
 
 	/**
+	 * The price to show for this version: its own price, or for a version
+	 * whose buyer chooses the amount the range they may type ('$5 to $500',
+	 * '$5 or more', 'Up to $500'). False for a buyer-chosen amount with no
+	 * minimum and no maximum: there is no price to show, as with a donation.
+	 */
+	public function readable_price(string $currency_symbol) {
+		if ($this->get('prv_price_type') !== 'user') {
+			return $currency_symbol . $this->get('prv_version_price');
+		}
+		$min = $this->get('prv_min_price');
+		$max = $this->get('prv_max_price');
+		$has_min = $min !== NULL && $min !== '';
+		$has_max = $max !== NULL && $max !== '';
+		if ($has_min && $has_max) {
+			return self::readable_amount($min, $currency_symbol) . ' to ' . self::readable_amount($max, $currency_symbol);
+		}
+		if ($has_min) {
+			return self::readable_amount($min, $currency_symbol) . ' or more';
+		}
+		if ($has_max) {
+			return 'Up to ' . self::readable_amount($max, $currency_symbol);
+		}
+		return false;
+	}
+
+	/**
 	 * The sentence that names the amounts a buyer may type for this version
 	 * ("Enter an amount from $5 to $500"), or '' when it has no minimum and
 	 * no maximum.
