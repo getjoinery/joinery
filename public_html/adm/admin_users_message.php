@@ -63,6 +63,7 @@
 	$formwriter->begin_form();
 
 	echo '<p><strong>To:</strong> ' . htmlspecialchars($page_vars['to_field']) . '</p>';
+	echo '<p class="text-muted">It goes to each person\'s own email address on file, and you get a copy.</p>';
 
 	$placeholder = 'RE: ';
 	if($page_vars['event']){

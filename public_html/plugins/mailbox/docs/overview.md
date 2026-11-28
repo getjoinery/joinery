@@ -1287,7 +1287,7 @@ Three signals feed it, tiered by cost, assembled in
 | Tier | Signal | Cost |
 |---|---|---|
 | Free | domain that asked for the sending lock and never finished the protect ceremony; protected domain with no sealed signing key; domain switched off | Already on the loaded row |
-| One query | No mail has ever arrived at this address | Two lookups bounded by the mailboxes on screen |
+| One query | No mail has ever arrived at this address (badged *no mail yet*, since the Setup tab can be all green while nothing has been sent yet) | Two lookups bounded by the mailboxes on screen |
 | Persisted | A required DNS record was missing when last checked | A column read |
 
 The arrival lookup asks both `iel_inbound_email_logs` and

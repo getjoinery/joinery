@@ -23,6 +23,7 @@
  * older than the staleness window is not shown at all — pointing at a domain
  * that was fixed last week wastes the attention this exists to buy.
  *
+ * @version 1.2 - a mailbox nothing has reached yet is badged 'no mail yet', not 'needs attention'
  * @version 1.1 - the half-finished signal is a requested, unfinished sending lock
  */
 
@@ -70,20 +71,24 @@ function mailbox_setup_hints(array $tree): array {
 				continue;   // already badged as disabled; nothing to add
 			}
 
-			$reason = $domain_reason;
-			if ($reason === '' && !$is_imap) {
-				// An IMAP-pull mailbox has no inbound delivery path of its own,
-				// so "nothing has arrived" says nothing about its setup.
-				$address = strtolower((string)$alias->get_full_address());
-				if (!isset($arrivals[$address])) {
-					$reason = 'No mail has ever arrived at this address.';
-				}
-			}
-
-			if ($reason !== '') {
+			if ($domain_reason !== '') {
 				$hints[(int)$alias->key] = array(
 					'text'  => 'needs attention',
-					'title' => $reason . ' Check this mailbox\'s setup.',
+					'title' => $domain_reason . ' Check this mailbox\'s setup.',
+					'url'   => $setup_base . (int)$alias->key,
+				);
+				continue;
+			}
+
+			// An IMAP-pull mailbox has no inbound delivery path of its own, so
+			// "nothing has arrived" says nothing about its setup. For any other,
+			// it is the one sign a finished Setup tab cannot give, so the badge
+			// names it rather than calling a green mailbox one that needs attention.
+			$address = strtolower((string)$alias->get_full_address());
+			if (!$is_imap && !isset($arrivals[$address])) {
+				$hints[(int)$alias->key] = array(
+					'text'  => 'no mail yet',
+					'title' => 'No mail has arrived at this address yet. Send it a message from another address to check it can receive.',
 					'url'   => $setup_base . (int)$alias->key,
 				);
 			}
