@@ -5,6 +5,9 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.18 - fetchReleaseManifest(): the upgrade source's ?serve-upgrade manifest, asked again after a
+ *                network error, a 5xx, a 429 or an answer that is not JSON (3 retries, 5/15/30 s apart), and
+ *                naming the HTTP status or the network error when it gives up (install_bundle.php, B7 11-27)
  * @version 1.17 - servedVersion() takes a moment: the release served then, which a node that started its
  *                 upgrade then installs even when a newer one is published before it finishes
  * @version 1.16 - isUpgradeServer(): an active Server Manager makes a site an upgrade server only once it has
@@ -1514,6 +1517,72 @@ class DeploymentHelper {
     // ============================================
     // COMPONENT ARCHIVE FETCH
     // ============================================
+
+    /**
+     * The upgrade source's published-archives manifest (?serve-upgrade=1).
+     *
+     * A failure that can pass is asked again: no connection, a timeout, a 5xx
+     * (a site mid-upgrade answers 503 behind its holding script), a 429, or an
+     * answer that is not a JSON object. Any other answer is final. The waits
+     * between tries default to 5, 15 and 30 seconds.
+     *
+     * @param string        $source  The upgrade source, e.g. https://getjoinery.com.
+     * @param int[]         $waits   Seconds before each retry; its length is the retry count.
+     * @param callable|null $get     fn(string $url): array{0: int, 1: string, 2: string}
+     *                               (HTTP status, body, network error) - for tests.
+     * @param callable|null $sleep   fn(int $seconds) - for tests.
+     * @return array{manifest: ?array, error: string, url: string, tries: int}
+     */
+    public static function fetchReleaseManifest($source, array $waits = array(5, 15, 30), $get = null, $sleep = null) {
+        $url = rtrim((string)$source, '/') . '/utils/upgrade?serve-upgrade=1';
+        $get = $get ?: function ($u) {
+            $ch = curl_init($u);
+            curl_setopt_array($ch, array(
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT        => 30,
+            ));
+            $body = curl_exec($ch);
+            $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $err = $body === false ? curl_error($ch) : '';
+            curl_close($ch);
+            return array($status, $body === false ? '' : (string)$body, $err);
+        };
+        $sleep = $sleep ?: function ($s) { sleep($s); };
+
+        $tries = 0;
+        $error = '';
+        while (true) {
+            $tries++;
+            list($status, $body, $net_error) = $get($url);
+            if ($net_error !== '') {
+                $error = 'could not connect: ' . $net_error;
+                $retry = true;
+            } elseif ($status === 200) {
+                $manifest = json_decode($body, true);
+                if (is_array($manifest)) {
+                    return array('manifest' => $manifest, 'error' => '', 'url' => $url, 'tries' => $tries);
+                }
+                $error = 'the answer was not the manifest (not JSON)';
+                $retry = true;
+            } else {
+                $error = 'HTTP ' . $status;
+                $retry = $status >= 500 || $status === 429 || $status === 0;
+            }
+            if (!$retry || $tries > count($waits)) {
+                break;
+            }
+            $sleep((int)$waits[$tries - 1]);
+        }
+        return array(
+            'manifest' => null,
+            'error'    => $error . ($tries > 1 ? " (after {$tries} tries)" : ''),
+            'url'      => $url,
+            'tries'    => $tries,
+        );
+    }
 
     /**
      * Download a .tar.gz and unpack it into a directory.

@@ -530,6 +530,8 @@ sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/install_bun
 sudo php /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/install_bundle.php --bundle=personal
 ```
 
+The bundle's plugins come from the upgrade source's published-archives manifest (`DeploymentHelper::fetchReleaseManifest`). A failure that can pass (no connection, a timeout, a 5xx, a 429, an answer that is not the manifest) is asked again three times, 5, 15 and 30 seconds apart. A bundle that still does not install leaves a working site without those plugins, and is recorded as `plugins=failed:` in `install_services.txt` (below): which plugins, why, and the command that runs it again. The command is safe to re-run.
+
 ### Services set up at install
 
 Three things the setup wizard would otherwise ask for can be handed to `install.sh site` in the environment, on every path (bare metal, Docker, the StackScript). `_site_init.sh` honours them on fresh installs, after the plugin bundle, and none is a condition of the install: a failure is recorded and the wizard asks for that one again.
@@ -546,7 +548,7 @@ JOINERY_BACKUP_BUCKET=joinerybackups JOINERY_BACKUP_KEY_ID=… JOINERY_BACKUP_KE
 sudo -E ./install.sh site mysite mysite.com
 ```
 
-Outcomes land in `{site root}/config/install_services.txt` (`mail=`, `backup=`, `dns_credential=`, each `done:`, `failed:` or `skipped:`; `640 root:www-data`, no secrets), which the closing summary reads and the setup wizard's Welcome step shows (`InstallReport`) — on a Linode StackScript deploy the closing summary is never seen, so the wizard is where the owner learns what the keys they handed over did; the first-task email notice is printed only when email was not set up. On Docker, every `JOINERY_*` input `_site_init.sh` reads crosses into the container from one list in `install.sh` (`SITE_INIT_ENV_INPUTS`). Each tool is CLI-only, reads only the environment, and can be run by hand on an existing site.
+Outcomes land in `{site root}/config/install_services.txt` (`mail=`, `backup=`, `dns_credential=`, and `plugins=` when the bundle did not install; each `done:`, `failed:` or `skipped:`; `640 root:www-data`, no secrets), which the closing summary reads and the setup wizard's Welcome step shows (`InstallReport`) — on a Linode StackScript deploy the closing summary is never seen, so the wizard is where the owner learns what the keys they handed over did; the first-task email notice is printed only when email was not set up. On Docker, every `JOINERY_*` input `_site_init.sh` reads crosses into the container from one list in `install.sh` (`SITE_INIT_ENV_INPUTS`). Each tool is CLI-only, reads only the environment, and can be run by hand on an existing site.
 
 `JOINERY_INSTALL_BUNDLE=none` installs no plugins. Bundles are flat lists and never extend one another — they are alternative products rather than layers, so each names everything it wants.
 

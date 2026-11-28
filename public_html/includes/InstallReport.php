@@ -5,7 +5,7 @@
  *
  * A first-boot install that received a sending key, a backup bucket or a DNS
  * credential records each outcome in config/install_services.txt (one
- * key=value line: mail=, backup=, dns_credential=; values start done:,
+ * key=value line: mail=, backup=, dns_credential=, plugins=; values start done:,
  * failed: or skipped:). The installer prints the same summary at the end of
  * its run — but on the Linode StackScript path nobody sees that output: the
  * deploy form redirects to the instance page and the log stays on the box.
@@ -15,6 +15,7 @@
  * The file carries no secrets (the tools print theirs nowhere), which is what
  * lets it be web-readable.
  *
+ * @version 1.1 - plugins=: the bundle's plugins that did not install, with the command that runs it again
  * @version 1.0
  */
 class InstallReport {
@@ -24,6 +25,7 @@ class InstallReport {
 		'mail'           => 'Email',
 		'backup'         => 'Backups',
 		'dns_credential' => 'DNS credential',
+		'plugins'        => 'Plugins',
 	);
 
 	/** The file the installer writes, relative to the site root. */

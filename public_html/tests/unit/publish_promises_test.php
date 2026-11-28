@@ -71,7 +71,8 @@ check($bundle_tool_src !== '', 'the bundle tool exists', $bundle_tool);
 check(strpos($bundle_tool_src, 'ib_fetch_missing') !== false,
     'the bundle tool fetches plugins that are not on disk',
     'a published core archive ships no plugin files at all');
-check(strpos($bundle_tool_src, 'serve-upgrade=1') !== false,
+check(strpos($bundle_tool_src, 'DeploymentHelper::fetchReleaseManifest(') !== false
+    && strpos((string)file_get_contents($helper), "'/utils/upgrade?serve-upgrade=1'") !== false,
     'and gets them from the published-archives manifest',
     'the same source an upgrade uses, and anonymous like the core fetch');
 check(strpos($bundle_tool_src, 'upgrade_source') !== false,

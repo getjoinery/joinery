@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#VERSION 3.61 - The closing summary names plugins the bundle did not install, with the command that runs it again
 #VERSION 3.60 - The closing summary names the admin address only when the site set it: a refused one is
 #               said as refused (from the credentials file), not printed as the sign-in address
 #VERSION 3.59 - A deferred certificate's lines name http://DOMAIN/https-status and joinery-https-check, and the
@@ -1139,7 +1140,7 @@ print_admin_login() {
 }
 
 # What _site_init.sh did with the optional services it was handed (its
-# config/install_services.txt: mail=, backup=, dns_credential=, each done:,
+# config/install_services.txt: mail=, backup=, dns_credential=, plugins=, each done:,
 # failed: or skipped:), and the email first-task notice when email is not
 # done. A failed service names what the setup wizard will ask for again.
 #
@@ -1148,9 +1149,10 @@ print_admin_login() {
 print_services_outcome() {
     local services_path="$1"
     local reader="${2:-cat}"
-    local mail_outcome="" backup_outcome=""
+    local mail_outcome="" backup_outcome="" plugins_outcome=""
     mail_outcome=$($reader "$services_path" 2>/dev/null | sed -n 's/^mail=//p' | head -1 || true)
     backup_outcome=$($reader "$services_path" 2>/dev/null | sed -n 's/^backup=//p' | head -1 || true)
+    plugins_outcome=$($reader "$services_path" 2>/dev/null | sed -n 's/^plugins=//p' | head -1 || true)
 
     case "$mail_outcome" in
         done:*)
@@ -1172,7 +1174,12 @@ print_services_outcome() {
             echo "         The setup wizard will ask for the bucket again."
             ;;
     esac
-    if [ -n "$mail_outcome$backup_outcome" ]; then
+    case "$plugins_outcome" in
+        failed:*)
+            echo -e "Plugins: ${RED}NOT all installed${NC} — ${plugins_outcome#failed: }"
+            ;;
+    esac
+    if [ -n "$mail_outcome$backup_outcome$plugins_outcome" ]; then
         echo ""
     fi
     case "$mail_outcome" in

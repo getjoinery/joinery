@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.30 - A bundle that did not install is recorded as plugins=failed: in install_services.txt (which plugins,
+#                why, and the command that runs it again), so the install summary and the wizard say it
 # VERSION: 3.29 - With no --mail-hostname, a bare-metal site with its own mail server receives at its own domain
 #                 (mailbox_mail_hostname = DOMAIN), so the MX record has a name to point at (B10)
 # VERSION: 3.28 - No postgres password: root signs in as postgres by peer (_pg_admin.sh,
@@ -839,6 +841,7 @@ fi
 # already been through this.
 # Set JOINERY_INSTALL_BUNDLE=none to skip it.
 BUNDLE_NAME="${JOINERY_INSTALL_BUNDLE:-personal}"
+PLUGINS_OUTCOME=""
 
 if [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none" ]; then
     BUNDLE_TOOL="${SITE_ROOT}/maintenance_scripts/sysadmin_tools/install_bundle.php"
@@ -857,11 +860,18 @@ if [ "$DB_EXISTS" = false ] && [ "$BUNDLE_NAME" != "none" ]; then
         # Non-fatal. A site with no plugins is a working site; the operator can
         # install them from /admin/admin_plugins. Losing the whole install over
         # it would be the wrong trade.
-        if php "$BUNDLE_TOOL" --bundle="$BUNDLE_NAME"; then
+        BUNDLE_OUT=$(php "$BUNDLE_TOOL" --bundle="$BUNDLE_NAME" 2>&1) && BUNDLE_RC=0 || BUNDLE_RC=$?
+        printf '%s\n' "$BUNDLE_OUT"
+        if [ "$BUNDLE_RC" -eq 0 ]; then
             log "Plugin bundle installed"
         else
-            log_error "Warning: the '$BUNDLE_NAME' bundle did not install cleanly."
-            log_error "Install what you need from /admin/admin_plugins."
+            # Recorded with the services below, so the install summary and the
+            # setup wizard's first screen say it, not only this scrolled-past line.
+            BUNDLE_MISSING=$(printf '%s\n' "$BUNDLE_OUT" | sed -n 's/^[0-9]* plugin(s) did not install: //p' | head -1)
+            BUNDLE_WHY=$(printf '%s\n' "$BUNDLE_OUT" | sed -n 's/^  [a-z0-9_]*: \(.*\) — skipped$/\1/p; s/^  [a-z0-9_]*: FAILED — \(.*\)$/\1/p' | head -1)
+            PLUGINS_OUTCOME="failed: ${BUNDLE_MISSING:-the bundle} did not install${BUNDLE_WHY:+ ($BUNDLE_WHY)}. Run again: sudo php $BUNDLE_TOOL --bundle=$BUNDLE_NAME"
+            log_error "Warning: the '$BUNDLE_NAME' bundle did not install cleanly (the reason is above)."
+            log_error "Run it again once the reason has passed (safe to re-run): sudo php $BUNDLE_TOOL --bundle=$BUNDLE_NAME"
         fi
     fi
 fi
@@ -903,7 +913,8 @@ fi
 # because the mail half needs the mailbox plugin the bundle installs.
 #
 # The outcomes land in config/install_services.txt, one key=value line each
-# (mail=, backup=, dns_credential=; values start done:, failed: or skipped:),
+# (mail=, backup=, dns_credential=, and plugins= when the bundle did not
+# install; values start done:, failed: or skipped:),
 # which install.sh and the StackScript read for their closing summaries. The
 # tools print their secrets nowhere, so their output is safe in the log.
 SERVICES_FILE="${SITE_ROOT}/config/install_services.txt"
@@ -975,7 +986,7 @@ if [ "$DB_EXISTS" = false ]; then
     fi
     unset JOINERY_BACKUP_KEY
 
-    if [ -n "$MAIL_OUTCOME$BACKUP_OUTCOME$DNS_CRED_OUTCOME" ]; then
+    if [ -n "$MAIL_OUTCOME$BACKUP_OUTCOME$DNS_CRED_OUTCOME$PLUGINS_OUTCOME" ]; then
         # Readable by the web user: the setup wizard shows these outcomes on
         # its first screen, and the values hold no secrets. Same ownership
         # as Globalvars_site.php.
@@ -986,6 +997,7 @@ if [ "$DB_EXISTS" = false ]; then
             [ -n "$DNS_CRED_OUTCOME" ] && printf 'dns_credential=%s\n' "$DNS_CRED_OUTCOME"
             [ -n "$MAIL_OUTCOME" ]     && printf 'mail=%s\n' "$MAIL_OUTCOME"
             [ -n "$BACKUP_OUTCOME" ]   && printf 'backup=%s\n' "$BACKUP_OUTCOME"
+            [ -n "$PLUGINS_OUTCOME" ]  && printf 'plugins=%s\n' "$PLUGINS_OUTCOME"
             true
         } >> "$SERVICES_FILE"
     fi

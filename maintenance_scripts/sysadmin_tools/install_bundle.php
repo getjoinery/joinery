@@ -37,6 +37,8 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.4 - the manifest is fetched by DeploymentHelper::fetchReleaseManifest: asked again on a failure that
+ *                can pass, and a failure names its HTTP status or network error (B7 11-27)
  * @version 1.3 - the usage names root (as www-data a fetched plugin cannot be unpacked into the root-owned tree);
  *                --help prints the usage, and an option it does not know is refused instead of ignored
  * @version 1.2 - a plugin already switched on (plg_active) is reported active, whatever its status says
@@ -92,12 +94,12 @@ function ib_fetch_missing(array $wanted, $dry_run = false) {
 
     fwrite(STDOUT, "Fetching from {$source}: " . implode(', ', $missing) . "\n");
 
-    $manifest_url = $source . '/utils/upgrade?serve-upgrade=1';
-    $raw = @file_get_contents($manifest_url);
-    $manifest = $raw === false ? null : json_decode((string)$raw, true);
+    // Asked again on a failure that can pass (DeploymentHelper::fetchReleaseManifest).
+    $fetched = DeploymentHelper::fetchReleaseManifest($source);
+    $manifest = $fetched['manifest'];
     if (!is_array($manifest)) {
         return [
-            'errors'  => array_fill_keys($missing, "could not read the published-archives manifest at {$manifest_url}"),
+            'errors'  => array_fill_keys($missing, "could not read the published-archives manifest at {$fetched['url']}: {$fetched['error']}"),
             'planned' => [],
         ];
     }
