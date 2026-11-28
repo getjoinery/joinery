@@ -12,6 +12,7 @@
  * lookupAll() over it unchanged. A fake sender stands in for the nameservers,
  * so nothing here touches the network.
  *
+ * @version 1.1 - needsTcp(): which UDP results are asked again over TCP
  * @version 1.0
  */
 
@@ -104,4 +105,11 @@ check(AuthoritativeDns::probe('', DNS_TXT, $name) === array() && AuthoritativeDn
 	'a bad name or type is []');
 
 AuthoritativeDns::reset();
+section('needsTcp(): a UDP result asked again over TCP');
+$q = AuthoritativeDns::query('home.example.org', 15, 0x4242);
+check(AuthoritativeDns::needsTcp(null, 0), 'no reply at once (a firewall here refused the send) is asked over TCP');
+check(!AuthoritativeDns::needsTcp(null, AuthoritativeDns::TIMEOUT_SECONDS * 1000), 'no reply after the whole timeout (a silent server) is not asked again');
+check(AuthoritativeDns::needsTcp(adp_reply($q, array(), 0x8600), 3), 'a truncated reply is asked over TCP');
+check(!AuthoritativeDns::needsTcp(adp_reply($q, array(), 0x8400), 3), 'a whole reply is kept');
+
 harness_finish();

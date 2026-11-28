@@ -226,7 +226,9 @@ an answer for its TTL, and keeps "no such record" for the zone's negative lifeti
 check does before a publish. Read through it, a domain looks broken for up to half
 an hour after it is finished. So `DnsResolver` asks a zone's own nameservers first
 for any name at or under a zone registered with `DnsResolver::preferAuthoritative()`
-(`AuthoritativeDns`: one UDP query with EDNS0). `diffAgainstPublicDns()` registers
+(`AuthoritativeDns`: one UDP query with EDNS0, asked again over TCP when the UDP send
+fails at once, as it does under the outbound limits that drop the web server's UDP, or
+the reply is truncated; a UDP query that waits out its timeout is not asked again). `diffAgainstPublicDns()` registers
 the plan's domain; the mailbox plugin's setup check registers every hosted domain.
 Only a clean answer is used: the AA bit set, not truncated, NOERROR or NXDOMAIN, and
 no CNAME standing in for the asked type. Anything else, and a zone whose nameservers

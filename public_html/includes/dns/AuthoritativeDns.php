@@ -28,6 +28,8 @@
  * one of FALLBACK_REASONS. The line names the zone and never a record's value,
  * so the agent's site_log_count can count them (marker authoritative_dns_fallback).
  *
+ * @version 1.4 - a query UDP cannot carry is asked over TCP: refused at once (the outbound limits drop the web
+ *               server's UDP) or truncated
  * @version 1.3 - probe(): every nameserver's answer with why it was not clean and how long it took; lookupAll() wraps it
  * @version 1.2 - every lookup() fallback logs its reason once per zone and reason per request
  * @version 1.1 - lookupAll(): every nameserver's own answer, for a caller that must know all of them serve a record
@@ -54,8 +56,8 @@ class AuthoritativeDns {
 
 	/**
 	 * Sends one query: fn(string $ip, string $packet): ?string, the raw reply or
-	 * null. Null sends it over UDP. A variable only so a test can stand in for
-	 * the nameservers; nothing in production sets it.
+	 * null. Null sends it over UDP, then TCP when needsTcp() says so. A variable
+	 * only so a test can stand in for the nameservers; nothing in production sets it.
 	 *
 	 * @var callable|null
 	 */
@@ -427,8 +429,37 @@ class AuthoritativeDns {
 		return self::$zone_ips[$zone];
 	}
 
-	/** One UDP round trip; null on any failure or a reply whose id does not match. */
+	/**
+	 * One query to one nameserver; the raw reply or null. UDP first. TCP is
+	 * asked when UDP failed at once (a firewall on this machine that refuses
+	 * the web server's UDP, as the outbound limits do: the send fails with no
+	 * wait) or the reply was truncated. A UDP send that waited out its timeout
+	 * is not retried, so a silent server still costs one timeout only.
+	 */
 	private static function send(string $ip, string $packet): ?string {
+		$started = hrtime(true);
+		$reply = self::sendUdp($ip, $packet);
+		$ms = (int)round((hrtime(true) - $started) / 1e6);
+		if (!self::needsTcp($reply, $ms)) {
+			return $reply;
+		}
+		return self::sendTcp($ip, $packet) ?? $reply;
+	}
+
+	/**
+	 * Whether a UDP result is worth asking again over TCP: no reply that came
+	 * back in under half the timeout (refused, not silent), or a reply with the
+	 * truncated bit set.
+	 */
+	public static function needsTcp(?string $reply, int $ms): bool {
+		if ($reply === null) {
+			return $ms < self::TIMEOUT_SECONDS * 500;
+		}
+		return strlen($reply) >= 4 && (ord($reply[2]) & 0x02) !== 0;
+	}
+
+	/** One UDP round trip; null on any failure or a reply whose id does not match. */
+	private static function sendUdp(string $ip, string $packet): ?string {
 		$host = strpos($ip, ':') !== false ? '[' . $ip . ']' : $ip;
 		$errno = 0;
 		$errstr = '';
@@ -446,5 +477,47 @@ class AuthoritativeDns {
 		}
 		fclose($sock);
 		return $reply;
+	}
+
+	/**
+	 * One TCP round trip (RFC 1035 4.2.2: each message carries a two-byte
+	 * length first); null on any failure or a reply whose id does not match.
+	 */
+	private static function sendTcp(string $ip, string $packet): ?string {
+		$host = strpos($ip, ':') !== false ? '[' . $ip . ']' : $ip;
+		$errno = 0;
+		$errstr = '';
+		$sock = @stream_socket_client('tcp://' . $host . ':53', $errno, $errstr, self::TIMEOUT_SECONDS);
+		if ($sock === false) {
+			return null;
+		}
+		stream_set_timeout($sock, self::TIMEOUT_SECONDS);
+		$reply = null;
+		$framed = pack('n', strlen($packet)) . $packet;
+		if (@fwrite($sock, $framed) === strlen($framed)) {
+			$head = self::readExactly($sock, 2);
+			if ($head !== null) {
+				$length = unpack('n', $head)[1];
+				$data = $length >= 12 ? self::readExactly($sock, $length) : null;
+				if ($data !== null && substr($data, 0, 2) === substr($packet, 0, 2)) {
+					$reply = $data;
+				}
+			}
+		}
+		fclose($sock);
+		return $reply;
+	}
+
+	/** Exactly $n bytes from $sock, or null on a timeout or a closed stream. */
+	private static function readExactly($sock, int $n): ?string {
+		$buf = '';
+		while (strlen($buf) < $n) {
+			$chunk = @fread($sock, $n - strlen($buf));
+			if (!is_string($chunk) || $chunk === '') {
+				return null;
+			}
+			$buf .= $chunk;
+		}
+		return $buf;
 	}
 }
